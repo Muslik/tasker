@@ -42,7 +42,7 @@ const clickTask = async (page: Page, fixtureId: string) => {
 type LoadedTasks = Awaited<ReturnType<typeof loadTasks>>;
 
 const pickBacklogTask = (tasks: LoadedTasks['tasks']) =>
-  tasks.find((task) => task.status === 'backlog') ?? null;
+  tasks.find((task) => task.status === 'backlog' && task.planning.status === 'available') ?? null;
 
 const requireTask = <T>(value: T | null | undefined, message: string): T => {
   if (value === null || value === undefined) {
@@ -63,17 +63,42 @@ test('the operator console renders the queue and lets me inspect a task', async 
     tasks.tasks[tasks.tasks.length - 1],
     'Expected at least one task in the queue',
   );
-  await clickTask(page, candidate.fixture.id);
+  await clickTask(page, candidate.id);
 
-  await expect(page.getByTestId(`task-item-${candidate.fixture.id}`)).toHaveAttribute(
+  await expect(page.getByTestId(`task-item-${candidate.id}`)).toHaveAttribute(
     'aria-current',
     'true',
   );
-  await expect(page.getByTestId('selected-task')).toContainText(candidate.fixture.title);
+  await expect(page.getByTestId('selected-task')).toContainText(candidate.title);
   await expect(page.getByTestId('selected-task')).toContainText(candidate.currentStage);
   await expect(page.getByTestId('provider-session-banner')).toHaveText(
     'not started · M1 planning only',
   );
+});
+
+test('I can import a Jira issue and inspect its persisted description and evidence', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Import Jira issue' }).click();
+  await page.getByRole('textbox', { name: 'Jira issue key' }).fill('AVIA-13235');
+  await page.getByRole('button', { name: 'Open' }).click();
+
+  await expect(page.getByTestId('task-item-jira:AVIA-13235')).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+  await expect(page.getByTestId('jira-task-details')).toContainText('Jira synced');
+  await expect(page.getByTestId('jira-task-details')).toContainText('Environment');
+  await expect(page.getByTestId('jira-task-details')).toContainText('Open seat selection');
+  await expect(page.getByTestId('jira-task-details')).toContainText('Evidence · 2');
+  await expect(page.getByTestId('jira-task-details')).toContainText('Comments · 1');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Workflow planning paused',
+  );
+  await expect(page.getByRole('button', { name: 'Generate workflow' })).toHaveCount(0);
+  await expect(page.getByText('Jira snapshot ready · repository mapping required')).toBeVisible();
 });
 
 test('generating a backlog task materializes the workflow, timeline, and graph tree', async ({
@@ -86,17 +111,17 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   );
 
   await page.goto('/');
-  await clickTask(page, backlog.fixture.id);
+  await clickTask(page, backlog.id);
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
-  const workflow = await loadWorkflow(page, backlog.fixture.id);
+  const workflow = await loadWorkflow(page, backlog.id);
   expect(workflow.status).toBe('ready');
   expect(workflow.view.workflow.graphHash).not.toBeNull();
 
-  const activity = await loadActivity(page, backlog.fixture.id);
+  const activity = await loadActivity(page, backlog.id);
   expect(activity.entries.length).toBeGreaterThan(0);
 
-  await expect(page.getByTestId('workflow-sidebar')).toContainText(backlog.fixture.title);
+  await expect(page.getByTestId('workflow-sidebar')).toContainText(backlog.title);
   await expect(page.getByTestId('workflow-tree')).toBeVisible();
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
@@ -109,15 +134,15 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
 test('the project profile explains why inline copy adds no translation wait', async ({ page }) => {
   const tasks = await loadTasks(page);
   const inlineCopy = requireTask(
-    tasks.tasks.find((task) => task.fixture.id === 'avia-14002-inline-copy'),
+    tasks.tasks.find((task) => task.id === 'avia-14002-inline-copy'),
     'Expected the inline-copy policy fixture to exist',
   );
 
   await page.goto('/');
-  await clickTask(page, inlineCopy.fixture.id);
+  await clickTask(page, inlineCopy.id);
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
-  const workflow = await loadWorkflow(page, inlineCopy.fixture.id);
+  const workflow = await loadWorkflow(page, inlineCopy.id);
   expect(workflow.view.workflow.waits.map((wait) => wait.waitKind)).not.toContain(
     'translation_complete@1',
   );
@@ -142,15 +167,17 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
 }) => {
   const tasks = await loadTasks(page);
   const invalid = requireTask(
-    tasks.tasks.find((task) => task.fixture.family === 'invalid_workflow'),
+    tasks.tasks.find(
+      (task) => task.origin.kind === 'fixture' && task.origin.family === 'invalid_workflow',
+    ),
     'Expected an invalid workflow fixture to exist',
   );
 
   await page.goto('/');
-  await clickTask(page, invalid.fixture.id);
+  await clickTask(page, invalid.id);
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
-  const workflow = await loadWorkflow(page, invalid.fixture.id);
+  const workflow = await loadWorkflow(page, invalid.id);
   expect(workflow.status).toBe('rejected');
   expect(workflow.view.workflow.tree).toBeNull();
   expect(workflow.view.workflow.validatorReport.issues.length).toBeGreaterThan(0);
@@ -168,16 +195,16 @@ test('reloading restores the persisted workflow for the selected task', async ({
   );
 
   await page.goto('/');
-  await clickTask(page, backlog.fixture.id);
+  await clickTask(page, backlog.id);
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
-  const workflow = await loadWorkflow(page, backlog.fixture.id);
+  const workflow = await loadWorkflow(page, backlog.id);
   const hash = workflow.view.workflow.graphHash;
   expect(hash).not.toBeNull();
 
   await page.reload();
 
-  await expect(page.getByTestId('selected-task')).toContainText(backlog.fixture.title);
+  await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('graph-hash')).toHaveText(hash ?? '');
   await expect(page.getByTestId('workflow-tree')).toBeVisible();
 });
@@ -189,14 +216,17 @@ test('a ledger event from another page refreshes the visible task status', async
   const tasks = await loadTasks(page);
   const backlog = requireTask(
     tasks.tasks.find(
-      (task) => task.status === 'backlog' && task.fixture.family !== 'invalid_workflow',
+      (task) =>
+        task.status === 'backlog' &&
+        task.origin.kind === 'fixture' &&
+        task.origin.family !== 'invalid_workflow',
     ),
     'Expected a backlog task that can generate a ready graph',
   );
 
   await page.goto('/');
-  await clickTask(page, backlog.fixture.id);
-  await expect(page.getByTestId(`task-item-${backlog.fixture.id}`)).toContainText('Backlog');
+  await clickTask(page, backlog.id);
+  await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText('Backlog');
 
   const ledgerEventPromise = page.evaluate(
     (fixtureId: string) =>
@@ -221,23 +251,23 @@ test('a ledger event from another page refreshes the visible task status', async
           source.close();
         });
       }),
-    backlog.fixture.id,
+    backlog.id,
   );
 
   const secondaryPage = await context.newPage();
   await secondaryPage.goto('/');
-  await clickTask(secondaryPage, backlog.fixture.id);
+  await clickTask(secondaryPage, backlog.id);
   await secondaryPage.getByRole('button', { name: 'Generate workflow' }).click();
 
   const rawLedgerEvent = await ledgerEventPromise;
   const parsedLedgerEvent = OperatorStreamEventSchema.parse(JSON.parse(rawLedgerEvent));
-  expect(parsedLedgerEvent.fixtureId).toBe(backlog.fixture.id);
+  expect(parsedLedgerEvent.fixtureId).toBe(backlog.id);
 
-  const generatedWorkflow = await loadWorkflow(page, backlog.fixture.id);
+  const generatedWorkflow = await loadWorkflow(page, backlog.id);
   const expectedStatus = generatedWorkflow.status === 'ready' ? 'Planned' : 'Workflow rejected';
 
-  await expect(page.getByTestId(`task-item-${backlog.fixture.id}`)).toContainText(expectedStatus);
-  await expect(page.getByTestId('selected-task')).toContainText(backlog.fixture.title);
+  await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText(expectedStatus);
+  await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('validation-panel')).toBeVisible();
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
 });

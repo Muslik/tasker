@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
+import { TextEncoder } from 'node:util';
 
 const databasePath = resolve('.tasker/e2e.sqlite');
 mkdirSync(dirname(databasePath), { recursive: true });
@@ -13,5 +14,87 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = '4311';
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const { startM1Server } = await import('../dist/control-plane/m1-server.js');
-await startM1Server();
+const [{ buildM1Api, createM1WorkflowService }, jira, ledgerModule, shared] = await Promise.all([
+  import('../dist/control-plane/index.js'),
+  import('../dist/integrations/index.js'),
+  import('../dist/ledger/index.js'),
+  import('../dist/shared/index.js'),
+]);
+
+const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
+const service = createM1WorkflowService(ledger.repository, shared.systemClock);
+const snapshot = jira.JiraIssueSnapshotSchema.parse({
+  schemaVersion: 1,
+  issueKey: 'AVIA-13235',
+  issueId: '325225',
+  browseUrl: 'https://jira.twiket.com/browse/AVIA-13235',
+  summary: 'Seat map uses the wrong color for the leg-space arrow',
+  description:
+    'h3. Environment\nWeb and mobile\n\nh3. Steps\n# Open seat selection\n# Find an exit-row seat\n\nh3. Expected result\nThe arrow matches the seat back.',
+  issueType: 'Bug',
+  status: 'In Release',
+  priority: 'None',
+  labels: ['bug_verified', 'frontend', 'seats_selection'],
+  assignee: { displayName: 'Dzhabrail Markhiev' },
+  reporter: { displayName: 'Dzhabrail Markhiev' },
+  repositoryHint: 'module:src/features/additionalServices/selectSeats',
+  createdAt: '2026-07-30T09:46:36.136Z',
+  updatedAt: '2026-07-31T10:12:04.077Z',
+  syncedAt: '2026-08-01T19:15:00.000Z',
+  attachments: [
+    {
+      id: '245370',
+      filename: 'seatmap-legspace-arrow.mp4',
+      mimeType: 'video/mp4',
+      size: 543651,
+      createdAt: '2026-07-30T09:46:47.388Z',
+      contentUrl: 'https://jira.twiket.com/secure/attachment/245370/seatmap-legspace-arrow.mp4',
+    },
+    {
+      id: '245379',
+      filename: 'fix-before-after.png',
+      mimeType: 'image/png',
+      size: 19837,
+      createdAt: '2026-07-30T10:04:32.754Z',
+      contentUrl: 'https://jira.twiket.com/secure/attachment/245379/fix-before-after.png',
+    },
+  ],
+  comments: [
+    {
+      id: '1094745',
+      author: { displayName: 'Dzhabrail Markhiev' },
+      body: 'Fixed — video: [^seatmap-legspace-arrow.mp4]\n\nPR: [729|https://bitbucket.twiket.com/pull-requests/729]',
+      createdAt: '2026-07-30T10:14:14.190Z',
+      updatedAt: '2026-07-30T10:30:23.432Z',
+    },
+  ],
+  links: [],
+});
+const jiraIssueService = jira.createJiraIssueService(ledger.repository, shared.systemClock, {
+  fetchIssue: async () => ({ ok: true, value: snapshot }),
+  fetchAttachment: async (contentUrl) =>
+    contentUrl.endsWith('.png')
+      ? {
+          ok: true,
+          value: {
+            bytes: new TextEncoder().encode(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="160"><rect width="320" height="160" fill="#172026"/><rect x="72" y="38" width="176" height="84" rx="12" fill="#2dd4bf" opacity=".2"/><path d="M120 80h80m-20-18 20 18-20 18" stroke="#5eead4" stroke-width="8" fill="none"/><text x="16" y="145" fill="#94a3b8" font-family="sans-serif" font-size="12">before / after</text></svg>',
+            ),
+            contentType: 'image/svg+xml',
+          },
+        }
+      : {
+          ok: true,
+          value: { bytes: new Uint8Array([1, 2, 3]), contentType: 'video/mp4' },
+        },
+});
+const api = buildM1Api({ service, jiraIssueService });
+
+const close = async () => {
+  await api.close();
+  ledger.close();
+};
+process.once('SIGINT', () => void close());
+process.once('SIGTERM', () => void close());
+
+await api.listen({ host: '127.0.0.1', port: 4311 });

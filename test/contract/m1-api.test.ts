@@ -10,21 +10,29 @@ import {
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/index.js';
+import type { JiraIssuePort } from '../../src/integrations/jira/client.js';
+import { JiraIssueStateSchema } from '../../src/integrations/jira/contracts.js';
+import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
+import { ok } from '../../src/shared/outcome.js';
+import { makeJiraSnapshot } from '../helpers/jira.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
-const setup = (useWorkflowGenerator = false) => {
+const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
   const directory = mkdtempSync(join(tmpdir(), 'tasker-m1-api-'));
   const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
   const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
   resources.push({ directory, ledger });
   const service = createM1WorkflowService(ledger.repository, clock);
+  const jiraIssueService =
+    jiraPort === undefined ? undefined : createJiraIssueService(ledger.repository, clock, jiraPort);
   const generate = vi.fn((fixtureId: string) => Promise.resolve(service.generate(fixtureId)));
   return {
     api: buildM1Api({
       service,
+      ...(jiraIssueService === undefined ? {} : { jiraIssueService }),
       ...(useWorkflowGenerator ? { workflowGenerator: { generate } } : {}),
     }),
     generate,
@@ -51,6 +59,50 @@ describe('M1 HTTP API', () => {
 
     expect(response.statusCode).toBe(200);
     expect(generate).toHaveBeenCalledExactlyOnceWith('avia-13236-short-bug');
+
+    await api.close();
+  });
+
+  it('imports a Jira issue, lists it in the queue, and proxies persisted attachment metadata', async () => {
+    const jiraPort: JiraIssuePort = {
+      fetchIssue: vi.fn(() => Promise.resolve(ok(makeJiraSnapshot()))),
+      fetchAttachment: vi.fn(() =>
+        Promise.resolve(ok({ bytes: new Uint8Array([1, 2, 3]), contentType: 'video/mp4' })),
+      ),
+    };
+    const { api } = setup(false, jiraPort);
+
+    const syncResponse = await api.inject({
+      method: 'POST',
+      url: '/api/jira/issues/AVIA-13235/sync',
+    });
+    const readResponse = await api.inject({
+      method: 'GET',
+      url: '/api/jira/issues/AVIA-13235',
+    });
+    const taskResponse = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
+    const tasks = OperatorTaskListResponseSchema.parse(taskResponse.json());
+    const issueState = JiraIssueStateSchema.parse(readResponse.json());
+    const attachmentResponse = await api.inject({
+      method: 'GET',
+      url: '/api/jira/issues/AVIA-13235/attachments/245370',
+    });
+
+    expect(syncResponse.statusCode).toBe(200);
+    expect(syncResponse.json()).toMatchObject({ status: 'current' });
+    expect(issueState.status).toBe('current');
+    if (issueState.status !== 'current') throw new Error('Expected a current Jira snapshot');
+    expect(issueState.issue.issueKey).toBe('AVIA-13235');
+    expect(issueState.issue.attachments[0]?.filename).toBe('seatmap-legspace-arrow.mp4');
+    expect(tasks.tasks[0]).toMatchObject({
+      id: 'jira:AVIA-13235',
+      title: 'Seat map uses the wrong color for the leg-space arrow',
+      origin: { kind: 'jira', syncStatus: 'current' },
+      planning: { status: 'blocked' },
+    });
+    expect(attachmentResponse.statusCode).toBe(200);
+    expect(attachmentResponse.headers['content-type']).toBe('video/mp4');
+    expect(attachmentResponse.rawPayload).toEqual(Buffer.from([1, 2, 3]));
 
     await api.close();
   });

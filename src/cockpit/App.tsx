@@ -5,12 +5,19 @@ import {
   ChevronDown,
   Circle,
   Download,
+  ExternalLink,
+  FileText,
   GitBranch,
+  Image as ImageIcon,
   LoaderCircle,
+  MessageSquare,
+  Plus,
   Radio,
+  RefreshCw,
   Sparkles,
+  Video,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type {
   OperatorActivityResponse,
@@ -18,13 +25,17 @@ import type {
   WorkflowResponse,
   WorkflowView,
 } from '../control-plane/m1-contracts.js';
+import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
 import {
   connectOperatorStream,
   generateWorkflow,
   graphDownloadUrl,
+  jiraAttachmentUrl,
   listOperatorTasks,
+  loadJiraIssue,
   loadOperatorActivity,
   loadWorkflow,
+  syncJiraIssue,
 } from './api-client.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
@@ -55,9 +66,20 @@ type ActivityLoadState =
   | { readonly status: 'ready'; readonly response: OperatorActivityResponse }
   | { readonly status: 'failed'; readonly message: string };
 
+type JiraIssueLoadState =
+  | { readonly status: 'not_applicable' }
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly state: JiraIssueState }
+  | { readonly status: 'failed'; readonly message: string };
+
+type JiraSyncState =
+  | { readonly status: 'idle' }
+  | { readonly status: 'syncing'; readonly issueKey: string }
+  | { readonly status: 'failed'; readonly message: string };
+
 type ConsoleStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
-const STORAGE_KEY = 'tasker.operator.selectedFixtureId';
+const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 
 const formatValue = (value: unknown): string =>
   value === undefined ? '—' : JSON.stringify(value, null, 2);
@@ -89,21 +111,21 @@ const readStoredSelection = (): string | null => {
   return stored !== null && stored.length > 0 ? stored : null;
 };
 
-const writeStoredSelection = (fixtureId: string): void => {
+const writeStoredSelection = (taskId: string): void => {
   if (typeof window !== 'undefined') {
-    window.localStorage.setItem(STORAGE_KEY, fixtureId);
+    window.localStorage.setItem(STORAGE_KEY, taskId);
   }
 };
 
-const chooseInitialFixture = (
+const chooseInitialTask = (
   tasks: readonly OperatorTaskSummary[],
   storedSelection: string | null,
 ): string => {
-  if (storedSelection !== null && tasks.some((task) => task.fixture.id === storedSelection)) {
+  if (storedSelection !== null && tasks.some((task) => task.id === storedSelection)) {
     return storedSelection;
   }
 
-  return tasks.find((task) => task.status === 'backlog')?.fixture.id ?? tasks[0]?.fixture.id ?? '';
+  return tasks.find((task) => task.status === 'backlog')?.id ?? tasks[0]?.id ?? '';
 };
 
 const statusLabel = (status: OperatorTaskSummary['status']): string =>
@@ -185,13 +207,19 @@ const TaskQueue = ({
   tasks,
   selectedId,
   onSelect,
+  onImportJira,
+  jiraSync,
   liveStatus,
 }: {
   readonly tasks: readonly OperatorTaskSummary[];
   readonly selectedId: string;
-  readonly onSelect: (fixtureId: string) => void;
+  readonly onSelect: (taskId: string) => void;
+  readonly onImportJira: (issueKey: string) => void;
+  readonly jiraSync: JiraSyncState;
   readonly liveStatus: ConsoleStreamStatus;
 }) => {
+  const [importOpen, setImportOpen] = useState(false);
+  const [issueKey, setIssueKey] = useState('');
   const counts = useMemo(() => {
     const result = new Map<OperatorTaskSummary['status'], number>();
     for (const task of tasks) {
@@ -212,19 +240,61 @@ const TaskQueue = ({
             <h2 className="text-sm font-semibold">Tasks</h2>
             <span className="text-xs tabular-nums text-muted-foreground">{tasks.length}</span>
           </div>
-          <Tooltip>
-            <TooltipTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  liveStatus === 'live' ? 'bg-emerald-400' : 'bg-amber-400',
-                )}
-              />
-              {streamLabel(liveStatus)}
-            </TooltipTrigger>
-            <TooltipContent>Task updates from the persisted ledger</TooltipContent>
-          </Tooltip>
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  className={cn(
+                    'size-1.5 rounded-full',
+                    liveStatus === 'live' ? 'bg-emerald-400' : 'bg-amber-400',
+                  )}
+                />
+                {streamLabel(liveStatus)}
+              </TooltipTrigger>
+              <TooltipContent>Task updates from the persisted ledger</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Import Jira issue"
+                onClick={() => {
+                  setImportOpen((open) => !open);
+                }}
+              >
+                <Plus className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent>Import Jira issue</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
+        {importOpen ? (
+          <form
+            className="mt-2 flex gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (issueKey.trim().length === 0) return;
+              onImportJira(issueKey);
+              setIssueKey('');
+              setImportOpen(false);
+            }}
+          >
+            <input
+              className="h-7 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs uppercase outline-none placeholder:normal-case placeholder:text-muted-foreground focus:border-ring"
+              aria-label="Jira issue key"
+              placeholder="AVIA-13235"
+              value={issueKey}
+              onChange={(event) => {
+                setIssueKey(event.target.value);
+              }}
+            />
+            <Button size="sm" type="submit" disabled={jiraSync.status === 'syncing'}>
+              {jiraSync.status === 'syncing' ? <LoaderCircle className="animate-spin" /> : 'Open'}
+            </Button>
+          </form>
+        ) : null}
+        {jiraSync.status === 'failed' ? (
+          <p className="mt-1.5 text-[11px] text-destructive">{jiraSync.message}</p>
+        ) : null}
         <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
           {visibleCounts.map((status) => (
             <span key={status}>
@@ -241,20 +311,20 @@ const TaskQueue = ({
       <ScrollArea className="min-h-0 flex-1">
         <ol className="py-1" data-testid="task-list">
           {tasks.map((task) => {
-            const selected = task.fixture.id === selectedId;
+            const selected = task.id === selectedId;
 
             return (
-              <li key={task.fixture.id}>
+              <li key={task.id}>
                 <button
                   className={cn(
                     'group relative w-full px-3 py-2.5 text-left transition-colors hover:bg-muted/45',
                     selected && 'bg-muted/70',
                   )}
-                  data-testid={`task-item-${task.fixture.id}`}
+                  data-testid={`task-item-${task.id}`}
                   type="button"
                   aria-current={selected ? 'true' : undefined}
                   onClick={() => {
-                    onSelect(task.fixture.id);
+                    onSelect(task.id);
                   }}
                 >
                   {selected ? (
@@ -274,7 +344,7 @@ const TaskQueue = ({
                     </div>
                   </div>
                   <strong className="line-clamp-2 block text-[13px] font-medium leading-5 text-foreground">
-                    {task.fixture.title}
+                    {task.title}
                   </strong>
                 </button>
               </li>
@@ -291,13 +361,17 @@ const SelectedTaskHeader = ({
   workflow,
   activity,
   onGenerate,
+  onSyncJira,
   generating,
+  jiraSync,
 }: {
   readonly task: OperatorTaskSummary;
   readonly workflow: WorkflowLoadState;
   readonly activity: ActivityLoadState;
   readonly onGenerate: () => void;
+  readonly onSyncJira: (issueKey: string) => void;
   readonly generating: boolean;
+  readonly jiraSync: JiraSyncState;
 }) => (
   <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
     <div className="flex items-start justify-between gap-4">
@@ -308,7 +382,7 @@ const SelectedTaskHeader = ({
           <StateBadge className={statusTone(task.status)}>{statusLabel(task.status)}</StateBadge>
           <StateBadge>{task.currentStage}</StateBadge>
         </div>
-        <h1 className="truncate text-lg font-semibold tracking-tight">{task.fixture.title}</h1>
+        <h1 className="truncate text-lg font-semibold tracking-tight">{task.title}</h1>
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           <span data-testid="provider-session-banner">{formatProviderSession(activity)}</span>
           {task.updatedAt === null ? null : (
@@ -319,7 +393,7 @@ const SelectedTaskHeader = ({
           )}
         </div>
       </div>
-      {task.status === 'backlog' ? (
+      {task.status === 'backlog' && task.planning.status === 'available' ? (
         <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
           {generating ? (
             <LoaderCircle data-icon="inline-start" className="animate-spin" />
@@ -328,6 +402,42 @@ const SelectedTaskHeader = ({
           )}
           {generating ? 'Generating…' : 'Generate workflow'}
         </Button>
+      ) : task.origin.kind === 'jira' ? (
+        <div className="flex items-center gap-1.5">
+          {task.origin.browseUrl === null ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <a
+                    className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                    href={task.origin.browseUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Open in Jira"
+                  />
+                }
+              >
+                <ExternalLink className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent>Open in Jira</TooltipContent>
+            </Tooltip>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            disabled={jiraSync.status === 'syncing'}
+            onClick={() => {
+              onSyncJira(task.taskId);
+            }}
+          >
+            <RefreshCw
+              data-icon="inline-start"
+              className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
+            />
+            Sync
+          </Button>
+        </div>
       ) : workflow.status === 'ready' ? (
         <StateBadge className="bg-emerald-500/12 text-emerald-300">Workflow ready</StateBadge>
       ) : null}
@@ -381,6 +491,439 @@ const ValidationSurface = ({
         </ol>
       )}
     </section>
+  );
+};
+
+const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) => {
+  if (task.origin.kind !== 'jira' || task.planning.status !== 'blocked') return null;
+
+  return (
+    <section
+      className="flex items-center justify-between gap-4 border-b border-border bg-amber-500/4 px-5 py-2.5"
+      aria-label="Jira planning status"
+    >
+      <div className="flex min-w-0 items-center gap-2 text-sm">
+        <AlertTriangle className="size-4 shrink-0 text-amber-400" />
+        <strong>Workflow planning paused</strong>
+        <span className="truncate text-xs text-muted-foreground">{task.planning.reason}</span>
+      </div>
+      <StateBadge className="shrink-0 bg-emerald-500/12 text-emerald-300">
+        {`Jira snapshot ${task.origin.syncStatus}`}
+      </StateBadge>
+    </section>
+  );
+};
+
+type JiraDescriptionBlock =
+  | { readonly kind: 'heading'; readonly text: string }
+  | { readonly kind: 'paragraph'; readonly text: string }
+  | { readonly kind: 'ordered_list'; readonly items: readonly string[] }
+  | { readonly kind: 'unordered_list'; readonly items: readonly string[] };
+
+const parseJiraDescription = (source: string): readonly JiraDescriptionBlock[] => {
+  const blocks: JiraDescriptionBlock[] = [];
+  let paragraph: string[] = [];
+  let list: { kind: 'ordered_list' | 'unordered_list'; items: string[] } | null = null;
+
+  const flushParagraph = (): void => {
+    const text = paragraph.join(' ').trim();
+    if (text.length > 0) blocks.push({ kind: 'paragraph', text });
+    paragraph = [];
+  };
+  const flushList = (): void => {
+    if (list !== null && list.items.length > 0) blocks.push(list);
+    list = null;
+  };
+
+  for (const rawLine of source.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    const heading = /^h[1-6]\.\s+(?<text>.+)$/u.exec(line)?.groups?.text;
+    const orderedItem = /^#\s+(?<text>.+)$/u.exec(line)?.groups?.text;
+    const unorderedItem = /^\*\s+(?<text>.+)$/u.exec(line)?.groups?.text;
+
+    if (heading !== undefined) {
+      flushParagraph();
+      flushList();
+      blocks.push({ kind: 'heading', text: heading });
+    } else if (orderedItem !== undefined) {
+      flushParagraph();
+      if (list?.kind !== 'ordered_list') {
+        flushList();
+        list = { kind: 'ordered_list', items: [] };
+      }
+      list.items.push(orderedItem);
+    } else if (unorderedItem !== undefined) {
+      flushParagraph();
+      if (list?.kind !== 'unordered_list') {
+        flushList();
+        list = { kind: 'unordered_list', items: [] };
+      }
+      list.items.push(unorderedItem);
+    } else if (line.length === 0) {
+      flushParagraph();
+      flushList();
+    } else {
+      flushList();
+      paragraph.push(line);
+    }
+  }
+  flushParagraph();
+  flushList();
+  return blocks;
+};
+
+const INLINE_JIRA_TOKEN =
+  /(\{\{.*?\}\}|\[\^[^\]]+\]|\[[^\]|]+\|https?:\/\/[^\]]+\]|https?:\/\/[^\s]+)/gu;
+
+const renderJiraInline = (text: string, issue: JiraIssueSnapshot): readonly ReactNode[] => {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(INLINE_JIRA_TOKEN)) {
+    const index = match.index;
+    const token = match[0];
+    if (index > cursor) nodes.push(text.slice(cursor, index));
+
+    if (token.startsWith('{{') && token.endsWith('}}')) {
+      nodes.push(
+        <code className="rounded bg-muted/60 px-1 py-0.5 text-[0.9em]" key={index}>
+          {token.slice(2, -2).replaceAll('\\-', '-')}
+        </code>,
+      );
+    } else if (token.startsWith('[^')) {
+      const filename = token.slice(2, -1);
+      const attachment = issue.attachments.find((item) => item.filename === filename);
+      nodes.push(
+        attachment === undefined ? (
+          token
+        ) : (
+          <a
+            className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+            href={jiraAttachmentUrl(issue.issueKey, attachment.id)}
+            key={index}
+          >
+            {filename}
+          </a>
+        ),
+      );
+    } else if (token.startsWith('[')) {
+      const separator = token.indexOf('|');
+      nodes.push(
+        <a
+          className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+          href={token.slice(separator + 1, -1)}
+          key={index}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {token.slice(1, separator)}
+        </a>,
+      );
+    } else {
+      nodes.push(
+        <a
+          className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+          href={token}
+          key={index}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {token}
+        </a>,
+      );
+    }
+    cursor = index + token.length;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+};
+
+const JiraDescription = ({
+  issue,
+  source,
+}: {
+  readonly issue: JiraIssueSnapshot;
+  readonly source: string;
+}) => (
+  <div className="max-w-4xl space-y-2 text-[13px] leading-6 text-muted-foreground">
+    {parseJiraDescription(source).map((block, index) => {
+      if (block.kind === 'heading') {
+        return (
+          <h3 className="pt-2 text-sm font-semibold text-foreground first:pt-0" key={index}>
+            {renderJiraInline(block.text, issue)}
+          </h3>
+        );
+      }
+      if (block.kind === 'paragraph') {
+        return <p key={index}>{renderJiraInline(block.text, issue)}</p>;
+      }
+      const List = block.kind === 'ordered_list' ? 'ol' : 'ul';
+      return (
+        <List
+          className={cn(
+            'space-y-1 pl-5',
+            block.kind === 'ordered_list' ? 'list-decimal' : 'list-disc',
+          )}
+          key={index}
+        >
+          {block.items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderJiraInline(item, issue)}</li>
+          ))}
+        </List>
+      );
+    })}
+  </div>
+);
+
+const JiraAttachments = ({ issue }: { readonly issue: JiraIssueSnapshot }) => {
+  const images = issue.attachments.filter((attachment) => attachment.mimeType.startsWith('image/'));
+  const videos = issue.attachments.filter((attachment) => attachment.mimeType.startsWith('video/'));
+  const files = issue.attachments.filter(
+    (attachment) =>
+      !attachment.mimeType.startsWith('image/') && !attachment.mimeType.startsWith('video/'),
+  );
+  if (issue.attachments.length === 0) return null;
+
+  return (
+    <Collapsible>
+      <section className="mt-4 border-t border-border/70" aria-label="Jira attachments">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between py-3 text-left hover:text-foreground">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="size-3.5 text-muted-foreground" />
+            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Evidence · {issue.attachments.length}
+            </h3>
+          </div>
+          <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="pb-2">
+            {images.length === 0 ? null : (
+              <div className="flex flex-wrap gap-2">
+                {images.map((attachment) => (
+                  <a
+                    className="group w-40 min-w-0 overflow-hidden rounded-md bg-muted/20"
+                    href={jiraAttachmentUrl(issue.issueKey, attachment.id)}
+                    key={attachment.id}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      className="h-24 w-full object-contain transition-opacity group-hover:opacity-85"
+                      src={jiraAttachmentUrl(issue.issueKey, attachment.id)}
+                      alt={attachment.filename}
+                      loading="lazy"
+                    />
+                    <span className="block truncate px-2 py-1.5 text-[11px] text-muted-foreground">
+                      {attachment.filename}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {videos.length === 0 ? null : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {videos.map((attachment) => (
+                  <a
+                    className="flex h-12 w-64 min-w-0 items-center gap-2 rounded-md bg-muted/20 px-3 text-xs hover:bg-muted/40"
+                    href={jiraAttachmentUrl(issue.issueKey, attachment.id)}
+                    key={attachment.id}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Video className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+                    <span className="text-[11px] text-muted-foreground">View</span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {files.map((attachment) => (
+              <a
+                className="mt-2 flex items-center gap-2 text-xs text-primary"
+                href={jiraAttachmentUrl(issue.issueKey, attachment.id)}
+                key={attachment.id}
+              >
+                <FileText className="size-3.5" />
+                {attachment.filename}
+              </a>
+            ))}
+          </div>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+};
+
+const TaskDetails = ({
+  details,
+  onRetry,
+  syncing,
+}: {
+  readonly details: JiraIssueLoadState;
+  readonly onRetry: (issueKey: string) => void;
+  readonly syncing: boolean;
+}) => {
+  if (details.status === 'not_applicable') return null;
+  if (details.status === 'loading') {
+    return <EmptyState>Loading Jira snapshot…</EmptyState>;
+  }
+  if (details.status === 'failed') {
+    return <InlineError>{details.message}</InlineError>;
+  }
+
+  const state = details.state;
+  const issue = state.status === 'unavailable' ? null : state.issue;
+  const issueKey = state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
+  return (
+    <Collapsible defaultOpen>
+      <div className="border-b border-border" data-testid="jira-task-details">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+          <div className="flex min-w-0 items-center gap-2">
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
+            <span className="text-sm font-medium">Task details</span>
+            <StateBadge
+              className={
+                state.status === 'current'
+                  ? 'bg-emerald-500/12 text-emerald-300'
+                  : 'bg-amber-500/12 text-amber-300'
+              }
+            >
+              {state.status === 'current'
+                ? 'Jira synced'
+                : state.status === 'stale'
+                  ? 'Cached'
+                  : 'Unavailable'}
+            </StateBadge>
+          </div>
+          <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-5 pb-5">
+            {state.status === 'current' ? null : (
+              <div
+                className="mb-4 flex items-center justify-between gap-3 bg-amber-500/7 px-3 py-2 text-xs text-amber-200"
+                role="status"
+              >
+                <span>
+                  {state.problem.message}
+                  {state.status === 'stale'
+                    ? ` · cached ${formatShortDateTime(state.lastSuccessfulSyncAt)}`
+                    : ''}
+                </span>
+                {state.problem.retryable ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    disabled={syncing}
+                    onClick={() => {
+                      onRetry(issueKey);
+                    }}
+                  >
+                    <RefreshCw
+                      data-icon="inline-start"
+                      className={syncing ? 'animate-spin' : undefined}
+                    />
+                    Retry
+                  </Button>
+                ) : null}
+              </div>
+            )}
+            <div className="max-h-[430px] overflow-y-auto pr-2">
+              {issue === null ? (
+                <p className="text-sm text-muted-foreground">
+                  No Jira snapshot is available yet. The persisted intake will remain here while
+                  access is restored.
+                </p>
+              ) : (
+                <>
+                  <dl className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">Type</dt>
+                      <dd>{issue.issueType}</dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">Status</dt>
+                      <dd>{issue.status}</dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">Assignee</dt>
+                      <dd>{issue.assignee?.displayName ?? 'Unassigned'}</dd>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <dt className="text-muted-foreground">Priority</dt>
+                      <dd>{issue.priority}</dd>
+                    </div>
+                    {issue.repositoryHint === null ? null : (
+                      <div className="flex gap-1.5">
+                        <dt className="text-muted-foreground">Code</dt>
+                        <dd>
+                          <code>{issue.repositoryHint}</code>
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                  {issue.labels.length === 0 ? null : (
+                    <div className="mb-4 flex flex-wrap gap-1">
+                      {issue.labels.map((label) => (
+                        <StateBadge key={label}>{label}</StateBadge>
+                      ))}
+                    </div>
+                  )}
+                  <JiraDescription issue={issue} source={issue.description} />
+                  <JiraAttachments issue={issue} />
+                  {issue.comments.length === 0 ? null : (
+                    <section
+                      className="mt-4 border-t border-border/70 pt-4"
+                      aria-label="Jira comments"
+                    >
+                      <div className="mb-2 flex items-center gap-2">
+                        <MessageSquare className="size-3.5 text-muted-foreground" />
+                        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Comments · {issue.comments.length}
+                        </h3>
+                      </div>
+                      <ol className="space-y-3">
+                        {issue.comments.map((comment) => (
+                          <li key={comment.id}>
+                            <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+                              <strong className="font-medium">{comment.author.displayName}</strong>
+                              <time
+                                className="text-[11px] text-muted-foreground"
+                                dateTime={comment.createdAt}
+                              >
+                                {formatShortDateTime(comment.createdAt)}
+                              </time>
+                            </div>
+                            <JiraDescription issue={issue} source={comment.body} />
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  )}
+                  {issue.links.length === 0 ? null : (
+                    <section className="mt-4 border-t border-border/70 pt-4 text-xs">
+                      {issue.links.map((link) => (
+                        <div
+                          className="flex gap-2 py-1"
+                          key={`${link.relationship}:${link.issueKey}`}
+                        >
+                          <span className="text-muted-foreground">{link.relationship}</span>
+                          <span>
+                            {link.issueKey} · {link.summary}
+                          </span>
+                          <StateBadge>{link.status}</StateBadge>
+                        </div>
+                      ))}
+                    </section>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
   );
 };
 
@@ -532,7 +1075,13 @@ const WorkflowDiagnostics = ({ view }: { readonly view: WorkflowView }) => (
   </details>
 );
 
-const WorkflowSidebar = ({ workflow }: { readonly workflow: WorkflowLoadState }) => {
+const WorkflowSidebar = ({
+  workflow,
+  task,
+}: {
+  readonly workflow: WorkflowLoadState;
+  readonly task: OperatorTaskSummary | null;
+}) => {
   if (workflow.status === 'loading') {
     return (
       <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
@@ -542,6 +1091,60 @@ const WorkflowSidebar = ({ workflow }: { readonly workflow: WorkflowLoadState })
   }
 
   if (workflow.status === 'missing') {
+    if (task?.origin.kind === 'jira') {
+      return (
+        <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
+          <div className="border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold">Workflow</h2>
+              <StateBadge className="bg-amber-500/12 text-amber-300">blocked</StateBadge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              No workflow has been compiled for this Jira snapshot.
+            </p>
+          </div>
+          <div className="px-4 py-4 text-xs">
+            <p className="mb-4 text-[11px] uppercase tracking-wide text-muted-foreground">
+              {task.origin.issueKey} · Jira · {task.origin.syncStatus} snapshot
+            </p>
+            <ol className="space-y-1" aria-label="Workflow planning prerequisites">
+              {[
+                ['Jira snapshot', 'complete'],
+                ['Repository mapping', 'blocked'],
+                ['Read-only analysis', 'waiting'],
+                ['Compile & validate', 'waiting'],
+              ].map(([label, status], index) => (
+                <li className="relative flex min-h-9 items-start gap-2.5" key={label}>
+                  {index === 3 ? null : (
+                    <span className="absolute bottom-0 left-[5px] top-3 w-px bg-border" />
+                  )}
+                  <span
+                    className={cn(
+                      'relative mt-1 size-3 rounded-full border-2 border-background',
+                      status === 'complete'
+                        ? 'bg-emerald-400'
+                        : status === 'blocked'
+                          ? 'bg-amber-400'
+                          : 'bg-muted',
+                    )}
+                  />
+                  <div>
+                    <div className="font-medium">{label}</div>
+                    <div className="mt-0.5 capitalize text-muted-foreground">{status}</div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-4 border-t border-border pt-3">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Next</div>
+              <p className="mt-1 leading-5 text-muted-foreground">
+                Map the target repository, then run the read-only workflow analyzer.
+              </p>
+            </div>
+          </div>
+        </aside>
+      );
+    }
     return (
       <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
         <div className="border-b border-border px-4 py-3">
@@ -633,12 +1236,16 @@ export const App = () => {
   const [selectedId, setSelectedId] = useState<string>(() => readStoredSelection() ?? '');
   const [workflowState, setWorkflowState] = useState<WorkflowLoadState>({ status: 'loading' });
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
+  const [jiraIssueState, setJiraIssueState] = useState<JiraIssueLoadState>({
+    status: 'not_applicable',
+  });
+  const [jiraSyncState, setJiraSyncState] = useState<JiraSyncState>({ status: 'idle' });
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
   const [generating, setGenerating] = useState(false);
   const streamCursorRef = useRef(0);
 
   const selectedTask = useMemo(
-    () => tasks.find((task) => task.fixture.id === selectedId) ?? null,
+    () => tasks.find((task) => task.id === selectedId) ?? null,
     [tasks, selectedId],
   );
 
@@ -661,10 +1268,9 @@ export const App = () => {
 
       const currentSelectedId = selectedIdRef.current;
       const nextSelectedId =
-        currentSelectedId.length > 0 &&
-        nextTasks.some((task) => task.fixture.id === currentSelectedId)
+        currentSelectedId.length > 0 && nextTasks.some((task) => task.id === currentSelectedId)
           ? currentSelectedId
-          : chooseInitialFixture(nextTasks, readStoredSelection());
+          : chooseInitialTask(nextTasks, readStoredSelection());
 
       if (nextSelectedId !== selectedIdRef.current) {
         setSelectedId(nextSelectedId);
@@ -708,8 +1314,29 @@ export const App = () => {
     }
   };
 
+  const refreshSelectedJiraIssue = async (taskReference: string): Promise<void> => {
+    if (!taskReference.startsWith('jira:')) {
+      setJiraIssueState({ status: 'not_applicable' });
+      return;
+    }
+    setJiraIssueState({ status: 'loading' });
+    try {
+      const state = await loadJiraIssue(taskReference.slice('jira:'.length));
+      setJiraIssueState({ status: 'ready', state });
+    } catch (error) {
+      setJiraIssueState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Unexpected Jira snapshot failure',
+      });
+    }
+  };
+
   const refreshSelection = async (fixtureId: string): Promise<void> => {
-    await Promise.all([refreshSelectedWorkflow(fixtureId), refreshSelectedActivity(fixtureId)]);
+    await Promise.all([
+      refreshSelectedWorkflow(fixtureId),
+      refreshSelectedActivity(fixtureId),
+      refreshSelectedJiraIssue(fixtureId),
+    ]);
   };
 
   useEffect(() => {
@@ -764,18 +1391,45 @@ export const App = () => {
     };
   }, [selectedId.length]);
 
-  const handleSelectTask = (fixtureId: string): void => {
-    setSelectedId(fixtureId);
-    void refreshSelection(fixtureId);
+  const handleSelectTask = (taskId: string): void => {
+    setSelectedId(taskId);
+    void refreshSelection(taskId);
+  };
+
+  const handleJiraSync = (issueKeyInput: string): void => {
+    const issueKey = issueKeyInput.trim().toUpperCase();
+    if (issueKey.length === 0) return;
+    setJiraSyncState({ status: 'syncing', issueKey });
+    void syncJiraIssue(issueKey)
+      .then(async (state) => {
+        const normalizedKey =
+          state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
+        const taskReference = `jira:${normalizedKey}`;
+        await refreshTasks();
+        setSelectedId(taskReference);
+        await refreshSelection(taskReference);
+        setJiraSyncState({ status: 'idle' });
+      })
+      .catch((error: unknown) => {
+        setJiraSyncState({
+          status: 'failed',
+          message:
+            error instanceof Error ? error.message : 'Unexpected Jira synchronization failure',
+        });
+      });
   };
 
   const handleGenerate = (): void => {
-    if (selectedTask === null || selectedTask.status !== 'backlog') {
+    if (
+      selectedTask === null ||
+      selectedTask.status !== 'backlog' ||
+      selectedTask.planning.status !== 'available'
+    ) {
       return;
     }
 
     setGenerating(true);
-    void generateWorkflow(selectedTask.fixture.id)
+    void generateWorkflow(selectedTask.id)
       .then(async () => {
         const nextSelectedId = await refreshTasks();
         if (nextSelectedId !== null) {
@@ -838,6 +1492,8 @@ export const App = () => {
             tasks={tasks}
             selectedId={selectedId}
             onSelect={handleSelectTask}
+            onImportJira={handleJiraSync}
+            jiraSync={jiraSyncState}
             liveStatus={streamStatus}
           />
 
@@ -853,11 +1509,19 @@ export const App = () => {
                   workflow={workflowState}
                   activity={activityState}
                   onGenerate={handleGenerate}
+                  onSyncJira={handleJiraSync}
                   generating={generating}
+                  jiraSync={jiraSyncState}
                 />
                 {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}
+                <JiraPlanningSurface task={selectedTask} />
                 <ScrollArea className="min-h-0 flex-1">
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
+                  <TaskDetails
+                    details={jiraIssueState}
+                    onRetry={handleJiraSync}
+                    syncing={jiraSyncState.status === 'syncing'}
+                  />
                   {view === null ? null : (
                     <>
                       <WhyThisWorkflow view={view} />
@@ -869,7 +1533,7 @@ export const App = () => {
             )}
           </main>
 
-          <WorkflowSidebar workflow={workflowState} />
+          <WorkflowSidebar workflow={workflowState} task={selectedTask} />
         </div>
       </div>
     </TooltipProvider>

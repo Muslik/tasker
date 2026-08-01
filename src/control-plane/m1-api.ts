@@ -3,11 +3,16 @@ import { extname, join, relative, resolve } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import type { JiraIssueService, JiraIssueServiceError } from '../integrations/index.js';
 import { ApiErrorResponseSchema } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
 
 const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
+const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
+const JiraAttachmentParamsSchema = z
+  .object({ issueKey: z.string().min(1), attachmentId: z.string().min(1) })
+  .strict();
 const ProjectionParamsSchema = z.object({ projectionId: z.string().min(1) }).strict();
 const AssetParamsSchema = z.object({ '*': z.string().min(1) }).strict();
 const StreamQuerySchema = z
@@ -19,6 +24,7 @@ export interface BuildM1ApiOptions {
   readonly cockpitDirectory?: string | undefined;
   readonly logger?: boolean | undefined;
   readonly workflowGenerator?: WorkflowGenerator | undefined;
+  readonly jiraIssueService?: JiraIssueService | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -48,6 +54,27 @@ const sendServiceError = (reply: FastifyReply, error: M1ServiceError): FastifyRe
       return reply
         .code(502)
         .send(apiError('provider_failure', providerFailureSummary(error.failure)));
+  }
+};
+
+const sendJiraServiceError = (reply: FastifyReply, error: JiraIssueServiceError): FastifyReply => {
+  switch (error.kind) {
+    case 'invalid_issue_key':
+      return reply
+        .code(400)
+        .send(apiError('invalid_issue_key', 'Use a Jira key such as AVIA-13235'));
+    case 'issue_not_imported':
+      return reply
+        .code(404)
+        .send(apiError('jira_issue_not_imported', 'Import the Jira issue first'));
+    case 'attachment_not_found':
+      return reply.code(404).send(apiError('jira_attachment_not_found', 'Attachment not found'));
+    case 'attachment_unavailable':
+      return reply
+        .code(error.retryable ? 503 : 422)
+        .send(apiError('jira_attachment_unavailable', error.message));
+    case 'store_failure':
+      return reply.code(500).send(apiError('jira_store_failure', error.error.kind));
   }
 };
 
@@ -83,7 +110,14 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
 
   api.get('/api/operator/tasks', (_request, reply) => {
     const result = options.service.listOperatorTasks();
-    return result.ok ? reply.send(result.value) : sendServiceError(reply, result.error);
+    if (!result.ok) return sendServiceError(reply, result.error);
+    if (options.jiraIssueService === undefined) return reply.send(result.value);
+    const jiraTasks = options.jiraIssueService.listOperatorTasks();
+    if (!jiraTasks.ok) return sendJiraServiceError(reply, jiraTasks.error);
+    return reply.send({
+      tasks: [...jiraTasks.value, ...result.value.tasks],
+      streamCursor: result.value.streamCursor,
+    });
   });
 
   api.get('/api/operator/tasks/:fixtureId/activity', (request, reply) => {
@@ -92,8 +126,59 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
+    if (params.data.fixtureId.startsWith('jira:') && options.jiraIssueService !== undefined) {
+      const jiraResult = options.jiraIssueService.readActivity(params.data.fixtureId);
+      return jiraResult.ok
+        ? reply.send(jiraResult.value)
+        : sendJiraServiceError(reply, jiraResult.error);
+    }
+
     const result = options.service.readActivity(params.data.fixtureId);
     return result.ok ? reply.send(result.value) : sendServiceError(reply, result.error);
+  });
+
+  api.get('/api/jira/issues/:issueKey', (request, reply) => {
+    if (options.jiraIssueService === undefined) {
+      return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
+    }
+    const params = JiraIssueParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'issueKey is required'));
+    }
+    const result = options.jiraIssueService.read(params.data.issueKey);
+    if (!result.ok) return sendJiraServiceError(reply, result.error);
+    return result.value === null
+      ? reply.code(404).send(apiError('jira_issue_not_imported', 'Import the Jira issue first'))
+      : reply.send(result.value);
+  });
+
+  api.post('/api/jira/issues/:issueKey/sync', async (request, reply) => {
+    if (options.jiraIssueService === undefined) {
+      return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
+    }
+    const params = JiraIssueParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'issueKey is required'));
+    }
+    const result = await options.jiraIssueService.sync(params.data.issueKey);
+    return result.ok ? reply.send(result.value) : sendJiraServiceError(reply, result.error);
+  });
+
+  api.get('/api/jira/issues/:issueKey/attachments/:attachmentId', async (request, reply) => {
+    if (options.jiraIssueService === undefined) {
+      return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
+    }
+    const params = JiraAttachmentParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'Attachment identity is required'));
+    }
+    const result = await options.jiraIssueService.readAttachment(
+      params.data.issueKey,
+      params.data.attachmentId,
+    );
+    return result.ok
+      ? reply.type(result.value.contentType).send(Buffer.from(result.value.bytes))
+      : sendJiraServiceError(reply, result.error);
   });
 
   api.get('/api/events', (request, reply) => {

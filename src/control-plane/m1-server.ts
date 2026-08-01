@@ -3,6 +3,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { openSqliteLedger } from '../ledger/index.js';
+import {
+  createJiraIssueService,
+  JiraServerClient,
+  loadJiraConfiguration,
+} from '../integrations/index.js';
 import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
 import { systemClock } from '../shared/clock.js';
 import { buildM1Api } from './m1-api.js';
@@ -23,6 +28,11 @@ export const startM1Server = async (): Promise<void> => {
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const service = createM1WorkflowService(ledger.repository, systemClock);
+  const jiraIssueService = createJiraIssueService(
+    ledger.repository,
+    systemClock,
+    new JiraServerClient(loadJiraConfiguration()),
+  );
   const workflowGenerator =
     process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic'
       ? undefined
@@ -34,6 +44,7 @@ export const startM1Server = async (): Promise<void> => {
   const cockpitDirectory = resolve('dist/cockpit');
   const api = buildM1Api({
     service,
+    jiraIssueService,
     logger: true,
     ...(workflowGenerator === undefined ? {} : { workflowGenerator }),
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),

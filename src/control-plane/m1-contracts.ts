@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
@@ -171,10 +172,42 @@ export const OperatorTaskStatusSchema = z.enum([
   'failed',
 ]);
 
+export const OperatorTaskOriginSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('fixture'),
+      fixtureId: z.string().min(1),
+      family: FixtureFamilySchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('jira'),
+      issueKey: JiraIssueKeySchema,
+      issueType: z.string().min(1).nullable(),
+      browseUrl: z.url().nullable(),
+      syncStatus: z.enum(['current', 'stale', 'unavailable']),
+    })
+    .strict(),
+]);
+
+export const OperatorTaskPlanningSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('available') }).strict(),
+  z
+    .object({
+      status: z.literal('blocked'),
+      reason: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const OperatorTaskSummarySchema = z
   .object({
-    fixture: FixtureSummarySchema,
+    id: z.string().min(1),
     taskId: z.string().min(1),
+    title: z.string().min(1),
+    origin: OperatorTaskOriginSchema,
+    planning: OperatorTaskPlanningSchema,
     status: OperatorTaskStatusSchema,
     attention: z.enum(['none', 'operator']),
     currentStage: z.string().min(1),

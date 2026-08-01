@@ -382,8 +382,15 @@ export class M1WorkflowService {
 
       const view = stored.value;
       tasks.push({
-        fixture: toFixtureSummary(fixture),
+        id: fixture.fixtureId,
         taskId: fixture.taskId,
+        title: fixture.title,
+        origin: {
+          kind: 'fixture' as const,
+          fixtureId: fixture.fixtureId,
+          family: toFixtureSummary(fixture).family,
+        },
+        planning: { status: 'available' as const },
         status:
           view === null
             ? ('backlog' as const)

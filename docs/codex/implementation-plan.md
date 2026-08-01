@@ -14,6 +14,7 @@ complete only after its operator demo and deterministic evidence pass.
 |---|---|---|
 | M1 | `fixture task -> compiled workflow -> visible tree in local cockpit` | after M0+M1, roughly 6-10 focused implementation days |
 | M1.5 | `normalized task + real read-only repository inspection -> provider proposal -> validated visible workflow` | implemented and verified 2026-08-01 |
+| M1.6 | `Jira key -> persisted task snapshot -> operator details/activity`, including cached recovery after `403` | read-only Jira surface implemented and verified 2026-08-01; repository mapping remains |
 | M2 | `task -> visible workflow -> complete stub traversal`, including kill/restart, wait/resume, intervention, and handoff | after M0-M2, roughly 12-20 focused days |
 | M3 | one real subscription CLI executes a node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
 | M4 | a real provider changes an isolated worktree; a recoverable failure resumes at the failed node | re-estimate after M3; planning envelope 4-7 days |
@@ -341,6 +342,48 @@ may explicitly select the deterministic adapter for offline UI/compiler testing.
 
 2-4 focused days. Re-estimate M2 only after one real repository proposal is accepted
 and restored from the ledger.
+
+## 5.6 Milestone 1.6 — persisted Jira task surface
+
+### Goal
+
+Make a real Jira issue usable from the operator console without making Jira
+availability a prerequisite for retaining work. This is a read-only intake slice, not
+the later M5 eligibility/effect integration.
+
+### Implemented slice
+
+1. Import an issue key from the left task queue and persist the intake request before
+   contacting Jira.
+2. Normalize description, people, labels, repository hint, linked issues, comments,
+   and attachment metadata at the adapter boundary.
+3. Persist every successful snapshot in the ledger and restore it after restart.
+4. Classify `403` as retryable `access_blocked`; retain the last successful snapshot as
+   `stale` and expose an inline retry after VPN/access returns.
+5. Render Activity before the compact Jira details; keep evidence collapsed and proxy
+   attachments through the local authenticated adapter.
+6. Show repository mapping as a blocking prerequisite in both the status band and
+   workflow rail.
+7. Refuse workflow generation for imported Jira tasks until a concrete repository is
+   mapped. No fixture repository or workflow is silently substituted.
+
+### Acceptance evidence
+
+- `AVIA-13235` can be imported and read from the local console;
+- a successful snapshot survives a process restart;
+- a later `403` preserves the description, comments, and attachment metadata while
+  changing the sync state to `stale`;
+- Retry performs the smallest safe operation: only Jira synchronization is repeated;
+- attachment URLs are same-origin checked and payloads are bounded to 32 MiB;
+- Jira is read-only; no status, assignment, comment, or description mutation exists;
+- visual verdict for the operator surface is 93/100.
+
+### Remaining boundary
+
+The next slice must resolve a Jira task to an explicit local repository, capture that
+mapping as evidence, and only then invoke the existing M1.5 read-only analyzer. Jira
+writes remain part of later durable effect work; they must not be added as direct UI
+requests.
 
 ## 6. Milestone 2 — durable stub traversal
 

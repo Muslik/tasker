@@ -13,6 +13,7 @@ import type {
   FixtureSummary,
   WorkflowResponse,
 } from '../control-plane/m1-contracts.js';
+import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
@@ -152,6 +153,27 @@ export const generateWorkflow = async (fixtureId: string): Promise<WorkflowRespo
 
 export const graphDownloadUrl = (fixtureId: string): string =>
   `/api/workflows/${encodeURIComponent(fixtureId)}/graph.json`;
+
+export const loadJiraIssue = async (issueKey: string): Promise<JiraIssueState> => {
+  const result = await fetchJson(`/api/jira/issues/${encodeURIComponent(issueKey)}`);
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = JiraIssueStateSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Jira issue response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const syncJiraIssue = async (issueKey: string): Promise<JiraIssueState> => {
+  const result = await fetchJson(`/api/jira/issues/${encodeURIComponent(issueKey)}/sync`, {
+    method: 'POST',
+  });
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = JiraIssueStateSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Jira sync response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const jiraAttachmentUrl = (issueKey: string, attachmentId: string): string =>
+  `/api/jira/issues/${encodeURIComponent(issueKey)}/attachments/${encodeURIComponent(attachmentId)}`;
 
 export const connectOperatorStream = (
   after: number,
