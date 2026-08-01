@@ -26,12 +26,14 @@ import type {
   WorkflowView,
 } from '../control-plane/m1-contracts.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
+import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import {
   connectOperatorStream,
   generateWorkflow,
   graphDownloadUrl,
   jiraAttachmentUrl,
   listOperatorTasks,
+  listRepositories,
   loadJiraIssue,
   loadOperatorActivity,
   loadWorkflow,
@@ -205,6 +207,7 @@ const EmptyState = ({ children }: { readonly children: string }) => (
 
 const TaskQueue = ({
   tasks,
+  repositories,
   selectedId,
   onSelect,
   onImportJira,
@@ -212,14 +215,16 @@ const TaskQueue = ({
   liveStatus,
 }: {
   readonly tasks: readonly OperatorTaskSummary[];
+  readonly repositories: readonly RepositoryCatalogEntry[];
   readonly selectedId: string;
   readonly onSelect: (taskId: string) => void;
-  readonly onImportJira: (issueKey: string) => void;
+  readonly onImportJira: (issueKey: string, repository?: string) => void;
   readonly jiraSync: JiraSyncState;
   readonly liveStatus: ConsoleStreamStatus;
 }) => {
   const [importOpen, setImportOpen] = useState(false);
   const [issueKey, setIssueKey] = useState('');
+  const [repository, setRepository] = useState('');
   const counts = useMemo(() => {
     const result = new Map<OperatorTaskSummary['status'], number>();
     for (const task of tasks) {
@@ -269,12 +274,13 @@ const TaskQueue = ({
         </div>
         {importOpen ? (
           <form
-            className="mt-2 flex gap-1.5"
+            className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-1.5"
             onSubmit={(event) => {
               event.preventDefault();
               if (issueKey.trim().length === 0) return;
-              onImportJira(issueKey);
+              onImportJira(issueKey, repository.trim() || undefined);
               setIssueKey('');
+              setRepository('');
               setImportOpen(false);
             }}
           >
@@ -290,6 +296,23 @@ const TaskQueue = ({
             <Button size="sm" type="submit" disabled={jiraSync.status === 'syncing'}>
               {jiraSync.status === 'syncing' ? <LoaderCircle className="animate-spin" /> : 'Open'}
             </Button>
+            <input
+              className="col-span-2 h-7 min-w-0 rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+              aria-label="Repository (optional)"
+              placeholder="Repository (optional)"
+              list="tasker-repositories"
+              value={repository}
+              onChange={(event) => {
+                setRepository(event.target.value);
+              }}
+            />
+            <datalist id="tasker-repositories">
+              {repositories.map((entry) => (
+                <option key={`${entry.repositoryId}:${entry.remoteUrl ?? entry.checkout.path}`}>
+                  {entry.repositoryId}
+                </option>
+              ))}
+            </datalist>
           </form>
         ) : null}
         {jiraSync.status === 'failed' ? (
@@ -496,20 +519,19 @@ const ValidationSurface = ({
 
 const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) => {
   if (task.origin.kind !== 'jira' || task.planning.status !== 'blocked') return null;
+  const binding = task.origin.repositoryBinding;
+  const repositoryResolved = binding.status === 'resolved';
 
   return (
     <section
-      className="flex items-center justify-between gap-4 border-b border-border bg-amber-500/4 px-5 py-2.5"
+      className="border-b border-border bg-amber-500/4 px-5 py-2.5"
       aria-label="Jira planning status"
     >
       <div className="flex min-w-0 items-center gap-2 text-sm">
         <AlertTriangle className="size-4 shrink-0 text-amber-400" />
-        <strong>Workflow planning paused</strong>
+        <strong>{repositoryResolved ? 'Repository mapped' : 'Workflow planning paused'}</strong>
         <span className="truncate text-xs text-muted-foreground">{task.planning.reason}</span>
       </div>
-      <StateBadge className="shrink-0 bg-emerald-500/12 text-emerald-300">
-        {`Jira snapshot ${task.origin.syncStatus}`}
-      </StateBadge>
     </section>
   );
 };
@@ -794,6 +816,10 @@ const TaskDetails = ({
                   ? 'Cached'
                   : 'Unavailable'}
             </StateBadge>
+            <span className="text-[11px] text-muted-foreground">
+              {state.status === 'current' ? 'Synced' : 'Checked'}{' '}
+              {formatShortDateTime(state.recordedAt)}
+            </span>
           </div>
           <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
         </CollapsibleTrigger>
@@ -1092,6 +1118,21 @@ const WorkflowSidebar = ({
 
   if (workflow.status === 'missing') {
     if (task?.origin.kind === 'jira') {
+      const binding = task.origin.repositoryBinding;
+      const repositoryResolved = binding.status === 'resolved';
+      const repositoryLabel = repositoryResolved
+        ? binding.repository.repositoryId
+        : binding.status === 'missing'
+          ? null
+          : 'reference' in binding
+            ? binding.reference
+            : null;
+      const prerequisites = [
+        ['Jira snapshot', 'complete'],
+        ['Repository mapping', repositoryResolved ? 'complete' : 'blocked'],
+        ['Read-only analysis', repositoryResolved ? 'blocked' : 'waiting'],
+        ['Compile & validate', 'waiting'],
+      ] as const;
       return (
         <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
           <div className="border-b border-border px-4 py-3">
@@ -1106,14 +1147,10 @@ const WorkflowSidebar = ({
           <div className="px-4 py-4 text-xs">
             <p className="mb-4 text-[11px] uppercase tracking-wide text-muted-foreground">
               {task.origin.issueKey} · Jira · {task.origin.syncStatus} snapshot
+              {repositoryLabel === null ? '' : ` · ${repositoryLabel}`}
             </p>
             <ol className="space-y-1" aria-label="Workflow planning prerequisites">
-              {[
-                ['Jira snapshot', 'complete'],
-                ['Repository mapping', 'blocked'],
-                ['Read-only analysis', 'waiting'],
-                ['Compile & validate', 'waiting'],
-              ].map(([label, status], index) => (
+              {prerequisites.map(([label, status], index) => (
                 <li className="relative flex min-h-9 items-start gap-2.5" key={label}>
                   {index === 3 ? null : (
                     <span className="absolute bottom-0 left-[5px] top-3 w-px bg-border" />
@@ -1138,7 +1175,9 @@ const WorkflowSidebar = ({
             <div className="mt-4 border-t border-border pt-3">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Next</div>
               <p className="mt-1 leading-5 text-muted-foreground">
-                Map the target repository, then run the read-only workflow analyzer.
+                {repositoryResolved
+                  ? `Run the read-only workflow analyzer against ${binding.repository.repositoryId}.`
+                  : 'Add repo:name to the Jira description or re-import with a repository.'}
               </p>
             </div>
           </div>
@@ -1231,6 +1270,7 @@ const WorkflowSidebar = ({
 
 export const App = () => {
   const [tasks, setTasks] = useState<readonly OperatorTaskSummary[]>([]);
+  const [repositories, setRepositories] = useState<readonly RepositoryCatalogEntry[]>([]);
   const [tasksStatus, setTasksStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [tasksMessage, setTasksMessage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>(() => readStoredSelection() ?? '');
@@ -1343,7 +1383,11 @@ export const App = () => {
     let active = true;
 
     const initialize = async (): Promise<void> => {
-      const nextSelectedId = await refreshTasks();
+      const [nextSelectedId, catalog] = await Promise.all([
+        refreshTasks(),
+        listRepositories().catch(() => [] as const),
+      ]);
+      if (active) setRepositories(catalog);
       if (!active || nextSelectedId === null) {
         return;
       }
@@ -1396,11 +1440,11 @@ export const App = () => {
     void refreshSelection(taskId);
   };
 
-  const handleJiraSync = (issueKeyInput: string): void => {
+  const handleJiraSync = (issueKeyInput: string, repository?: string): void => {
     const issueKey = issueKeyInput.trim().toUpperCase();
     if (issueKey.length === 0) return;
     setJiraSyncState({ status: 'syncing', issueKey });
-    void syncJiraIssue(issueKey)
+    void syncJiraIssue(issueKey, repository)
       .then(async (state) => {
         const normalizedKey =
           state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
@@ -1490,6 +1534,7 @@ export const App = () => {
         <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px]">
           <TaskQueue
             tasks={tasks}
+            repositories={repositories}
             selectedId={selectedId}
             onSelect={handleSelectTask}
             onImportJira={handleJiraSync}

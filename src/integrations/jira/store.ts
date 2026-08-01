@@ -2,9 +2,26 @@ import type { LedgerRepository } from '../../ledger/repository.js';
 import type { JsonValue, LedgerConflict } from '../../ledger/types.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
+import {
+  JiraRepositoryBindingSchema,
+  type JiraRepositoryBinding,
+} from '../../repositories/contracts.js';
 import { JiraIssueStateSchema, type JiraIssueKey, type JiraIssueState } from './contracts.js';
 
 export const JIRA_ISSUE_PROJECTION = 'jira_issue';
+export const JIRA_REPOSITORY_BINDING_PROJECTION = 'jira_repository_binding';
+
+type CurrentJiraIssueState = Extract<JiraIssueState, { readonly status: 'current' }>;
+type UnavailableJiraIssueState = Exclude<JiraIssueState, CurrentJiraIssueState>;
+
+export type JiraIssueStoreUpdate =
+  | {
+      readonly state: CurrentJiraIssueState;
+      readonly repositoryBinding: JiraRepositoryBinding;
+    }
+  | {
+      readonly state: UnavailableJiraIssueState;
+    };
 
 export type JiraIssueStoreError =
   | {
@@ -18,6 +35,14 @@ export type JiraIssueStoreError =
     };
 
 const asJson = (value: unknown): JsonValue => value as JsonValue;
+
+const sameBindingState = (
+  left: JiraRepositoryBinding | null,
+  right: JiraRepositoryBinding,
+): boolean => {
+  if (left === null) return false;
+  return JSON.stringify(left) === JSON.stringify({ ...right, recordedAt: left.recordedAt });
+};
 
 export class JiraIssueStore {
   public constructor(
@@ -65,14 +90,36 @@ export class JiraIssueStore {
     return this.ledger.listEvents(`intake:jira:${issueKey}`);
   }
 
-  public save(stateInput: JiraIssueState): Outcome<JiraIssueState, JiraIssueStoreError> {
-    const state = JiraIssueStateSchema.parse(stateInput);
+  public readRepositoryBinding(
+    issueKey: JiraIssueKey,
+  ): Outcome<JiraRepositoryBinding | null, JiraIssueStoreError> {
+    const projection = this.ledger.readProjection(JIRA_REPOSITORY_BINDING_PROJECTION, issueKey);
+    if (projection === null) return ok(null);
+    const parsed = JiraRepositoryBindingSchema.safeParse(projection.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({
+          kind: 'projection_corrupt',
+          issueKey,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  public save(update: JiraIssueStoreUpdate): Outcome<JiraIssueState, JiraIssueStoreError> {
+    const state = JiraIssueStateSchema.parse(update.state);
     const issueKey = state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
     const aggregateId = `intake:jira:${issueKey}`;
     const head = this.ledger.readAggregateHead(aggregateId);
     const firstImport = head === null;
     const expectedVersion = head?.version ?? 0;
-    const syncEventType = state.status === 'current' ? 'JiraIssueSynced' : 'JiraIssueSyncBlocked';
+    const repositoryBinding =
+      'repositoryBinding' in update
+        ? JiraRepositoryBindingSchema.parse(update.repositoryBinding)
+        : null;
+    const previousBinding = this.readRepositoryBinding(issueKey);
+    if (!previousBinding.ok) return previousBinding;
     const events = [
       ...(firstImport
         ? [
@@ -85,34 +132,35 @@ export class JiraIssueStore {
             },
           ]
         : []),
-      {
-        eventId: `event:jira-sync:${issueKey}:${String(expectedVersion + 1)}`,
-        eventType: syncEventType,
-        eventSchemaVersion: 1 as const,
-        payload:
-          state.status === 'current'
-            ? { issueKey, remoteUpdatedAt: state.issue.updatedAt }
-            : { issueKey, problem: asJson(state.problem) },
-        actor: 'jira_adapter',
-      },
-      ...(state.status === 'current'
-        ? [
+      ...(repositoryBinding === null || sameBindingState(previousBinding.value, repositoryBinding)
+        ? []
+        : [
             {
-              eventId: `event:jira-planning-blocked:${issueKey}:${String(expectedVersion + 2)}`,
-              eventType: 'JiraWorkflowPlanningBlocked',
+              eventId: `event:jira-repository:${issueKey}:${String(
+                expectedVersion + (firstImport ? 2 : 1),
+              )}`,
+              eventType:
+                repositoryBinding.status === 'resolved'
+                  ? 'JiraRepositoryBound'
+                  : 'JiraRepositoryBindingBlocked',
               eventSchemaVersion: 1 as const,
-              payload: {
-                issueKey,
-                reason: 'repository_mapping_required',
-              },
-              actor: 'planner',
+              payload:
+                repositoryBinding.status === 'resolved'
+                  ? {
+                      issueKey,
+                      repositoryId: repositoryBinding.repository.repositoryId,
+                      source: repositoryBinding.source,
+                    }
+                  : {
+                      issueKey,
+                      status: repositoryBinding.status,
+                    },
+              actor: 'repository_resolver',
             },
-          ]
-        : []),
+          ]),
     ];
-    const aggregateVersion = expectedVersion + events.length;
     const result = this.ledger.transact({
-      aggregate: { aggregateId, expectedVersion, events },
+      ...(events.length === 0 ? {} : { aggregate: { aggregateId, expectedVersion, events } }),
       projections: [
         {
           kind: 'upsert',
@@ -120,32 +168,17 @@ export class JiraIssueStore {
           projectionId: issueKey,
           payload: asJson(state),
         },
-      ],
-      snapshots: [
-        {
-          snapshotId: `snapshot:jira:${issueKey}:${String(aggregateVersion)}`,
-          aggregateId,
-          aggregateVersion,
-          snapshotSchemaVersion: 1,
-          payload: asJson(state),
-        },
-      ],
-      ...(state.status === 'current'
-        ? {
-            artifacts: [
+        ...(repositoryBinding === null
+          ? []
+          : [
               {
-                artifactId: `jira-snapshot:${issueKey}:${String(aggregateVersion)}`,
-                artifactKind: 'jira_issue_snapshot',
-                storageUri: `ledger://artifacts/jira-snapshot:${issueKey}:${String(aggregateVersion)}`,
-                payload: asJson(state.issue),
-                metadata: {
-                  issueKey,
-                  remoteUpdatedAt: state.issue.updatedAt,
-                },
+                kind: 'upsert' as const,
+                projectionType: JIRA_REPOSITORY_BINDING_PROJECTION,
+                projectionId: issueKey,
+                payload: asJson(repositoryBinding),
               },
-            ],
-          }
-        : {}),
+            ]),
+      ],
       timestamp: this.clock.now(),
     });
 

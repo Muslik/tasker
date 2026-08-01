@@ -10,6 +10,7 @@ import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
+import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
@@ -28,17 +29,21 @@ describe('Jira issue persistence', () => {
     const firstLedger = openSqliteLedger({ filename: database, clock });
     resources.push({ directory, ledger: firstLedger });
     const successfulPort: JiraIssuePort = {
-      fetchIssue: vi.fn(() => Promise.resolve(ok(makeJiraSnapshot()))),
+      fetchIssue: vi.fn(() =>
+        Promise.resolve(ok(makeJiraSnapshot({ description: 'repo:front-avia' }))),
+      ),
       fetchAttachment: vi.fn(),
     };
-    const firstService = createJiraIssueService(firstLedger.repository, clock, successfulPort);
+    const firstService = createJiraIssueService(firstLedger.repository, clock, successfulPort, {
+      repositoryCatalog: makeRepositoryCatalog(),
+    });
 
     const firstSync = await firstService.sync('AVIA-13235');
 
     expect(firstSync).toMatchObject({ ok: true, value: { status: 'current' } });
     expect(
       firstLedger.repository.listEvents('intake:jira:AVIA-13235').map((event) => event.eventType),
-    ).toEqual(['JiraIntakeRequested', 'JiraIssueSynced', 'JiraWorkflowPlanningBlocked']);
+    ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
     firstLedger.close();
     resources.pop();
 
@@ -58,7 +63,14 @@ describe('Jira issue persistence', () => {
       ),
       fetchAttachment: vi.fn(),
     };
-    const restartedService = createJiraIssueService(restartedLedger.repository, clock, blockedPort);
+    const restartedService = createJiraIssueService(
+      restartedLedger.repository,
+      clock,
+      blockedPort,
+      {
+        repositoryCatalog: makeRepositoryCatalog(),
+      },
+    );
 
     const blockedSync = await restartedService.sync('AVIA-13235');
     const tasks = restartedService.listOperatorTasks();
@@ -79,6 +91,12 @@ describe('Jira issue persistence', () => {
           id: 'jira:AVIA-13235',
           status: 'needs_attention',
           currentStage: 'Jira sync blocked · showing cached snapshot',
+          origin: {
+            repositoryBinding: {
+              status: 'resolved',
+              repository: { repositoryId: 'front-avia' },
+            },
+          },
           planning: { status: 'blocked' },
         },
       ],
@@ -87,11 +105,6 @@ describe('Jira issue persistence', () => {
       restartedLedger.repository
         .listEvents('intake:jira:AVIA-13235')
         .map((event) => event.eventType),
-    ).toEqual([
-      'JiraIntakeRequested',
-      'JiraIssueSynced',
-      'JiraWorkflowPlanningBlocked',
-      'JiraIssueSyncBlocked',
-    ]);
+    ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
   });
 });

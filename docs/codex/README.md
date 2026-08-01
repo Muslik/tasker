@@ -23,20 +23,22 @@ Read in this order:
    discovery boundary.
 9. [`m1.6-jira-task-surface.md`](m1.6-jira-task-surface.md) — persisted read-only Jira
    intake, operator task details, attachment proxy, and VPN/403 recovery semantics.
+10. [`m1.7-repository-binding.md`](m1.7-repository-binding.md) — explicit Jira task to
+    local repository resolution without project-name guessing.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. The first full traversal of that graph on durable stub steps
 arrives at M2; corporate integrations remain later milestones.
 
-M0, M1, M1.5, and the M1.6 Jira surface are now implemented. The read-only operator
+M0, M1, M1.5, M1.6, and repository binding are now implemented. The read-only operator
 console has the task queue on the left, persisted activity and workflow rationale in
 the center, and the current graph on the right. It includes validation failures,
 waits, retry bounds, project/global policy decisions, verification rationale,
 capabilities, collapsed template diagnostics, SSE refresh, and JSON download.
 Execution remains disabled until M2. Provider analysis provenance and measured tokens
 are persisted and visible.
-Imported Jira tasks deliberately stop at repository mapping instead of compiling a
-workflow from guessed repository context.
+Imported Jira tasks deliberately stop at the read-only analyzer after repository
+mapping instead of compiling a workflow from Jira text alone.
 
 Older July 30 versions remain under `.omx/plans/` for audit history; they are not the
 current implementation source of truth.

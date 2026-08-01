@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
+import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
 export const M1_VIEW_SCHEMA_VERSION = 2;
@@ -187,6 +188,7 @@ export const OperatorTaskOriginSchema = z.discriminatedUnion('kind', [
       issueType: z.string().min(1).nullable(),
       browseUrl: z.url().nullable(),
       syncStatus: z.enum(['current', 'stale', 'unavailable']),
+      repositoryBinding: JiraRepositoryBindingSchema,
     })
     .strict(),
 ]);

@@ -14,6 +14,10 @@ import type {
   WorkflowResponse,
 } from '../control-plane/m1-contracts.js';
 import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
+import {
+  RepositoryCatalogResponseSchema,
+  type RepositoryCatalogEntry,
+} from '../repositories/contracts.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
@@ -98,6 +102,14 @@ export const listOperatorTasks = async (): Promise<OperatorTaskListResponse> => 
   return parsed.data;
 };
 
+export const listRepositories = async (): Promise<readonly RepositoryCatalogEntry[]> => {
+  const result = await fetchJson('/api/repositories');
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = RepositoryCatalogResponseSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Repository catalog does not match the cockpit contract');
+  return parsed.data.repositories;
+};
+
 export const loadOperatorActivity = async (
   fixtureId: string,
 ): Promise<OperatorActivityResponse> => {
@@ -162,9 +174,14 @@ export const loadJiraIssue = async (issueKey: string): Promise<JiraIssueState> =
   return parsed.data;
 };
 
-export const syncJiraIssue = async (issueKey: string): Promise<JiraIssueState> => {
+export const syncJiraIssue = async (
+  issueKey: string,
+  repository?: string,
+): Promise<JiraIssueState> => {
   const result = await fetchJson(`/api/jira/issues/${encodeURIComponent(issueKey)}/sync`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(repository === undefined ? {} : { repository }),
   });
   if (!result.response.ok) throw failureFrom(result);
   const parsed = JiraIssueStateSchema.safeParse(result.body);

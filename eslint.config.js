@@ -3,7 +3,15 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['.omx/**', 'coverage/**', 'dist/**', 'eslint.config.js', 'node_modules/**'],
+    ignores: [
+      '.omx/**',
+      'coverage/**',
+      'dist/**',
+      'eslint.config.js',
+      'node_modules/**',
+      'playwright-report/**',
+      'test-results/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,

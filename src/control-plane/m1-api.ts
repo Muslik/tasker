@@ -4,12 +4,17 @@ import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import type { JiraIssueService, JiraIssueServiceError } from '../integrations/index.js';
+import {
+  RepositoryCatalogResponseSchema,
+  RepositoryReferenceSchema,
+} from '../repositories/contracts.js';
 import { ApiErrorResponseSchema } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
 
 const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
 const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
+const JiraSyncBodySchema = z.object({ repository: RepositoryReferenceSchema.optional() }).strict();
 const JiraAttachmentParamsSchema = z
   .object({ issueKey: z.string().min(1), attachmentId: z.string().min(1) })
   .strict();
@@ -108,6 +113,17 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
 
   api.get('/api/fixtures', () => options.service.listFixtures());
 
+  api.get('/api/repositories', (_request, reply) => {
+    if (options.jiraIssueService === undefined) {
+      return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
+    }
+    return reply.send(
+      RepositoryCatalogResponseSchema.parse({
+        repositories: options.jiraIssueService.listRepositories(),
+      }),
+    );
+  });
+
   api.get('/api/operator/tasks', (_request, reply) => {
     const result = options.service.listOperatorTasks();
     if (!result.ok) return sendServiceError(reply, result.error);
@@ -160,7 +176,15 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'issueKey is required'));
     }
-    const result = await options.jiraIssueService.sync(params.data.issueKey);
+    const body = JiraSyncBodySchema.safeParse(request.body ?? {});
+    if (!body.success) {
+      return reply
+        .code(400)
+        .send(
+          apiError('invalid_repository', 'Repository must be a catalog name such as front-avia'),
+        );
+    }
+    const result = await options.jiraIssueService.sync(params.data.issueKey, body.data.repository);
     return result.ok ? reply.send(result.value) : sendJiraServiceError(reply, result.error);
   });
 

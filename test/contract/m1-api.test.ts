@@ -7,6 +7,7 @@ import {
   buildM1Api,
   createM1WorkflowService,
   FixtureListResponseSchema,
+  OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/index.js';
@@ -14,9 +15,11 @@ import type { JiraIssuePort } from '../../src/integrations/jira/client.js';
 import { JiraIssueStateSchema } from '../../src/integrations/jira/contracts.js';
 import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { RepositoryCatalogResponseSchema } from '../../src/repositories/contracts.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
+import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
@@ -27,7 +30,11 @@ const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
   resources.push({ directory, ledger });
   const service = createM1WorkflowService(ledger.repository, clock);
   const jiraIssueService =
-    jiraPort === undefined ? undefined : createJiraIssueService(ledger.repository, clock, jiraPort);
+    jiraPort === undefined
+      ? undefined
+      : createJiraIssueService(ledger.repository, clock, jiraPort, {
+          repositoryCatalog: makeRepositoryCatalog(),
+        });
   const generate = vi.fn((fixtureId: string) => Promise.resolve(service.generate(fixtureId)));
   return {
     api: buildM1Api({
@@ -72,9 +79,11 @@ describe('M1 HTTP API', () => {
     };
     const { api } = setup(false, jiraPort);
 
+    const repositoriesResponse = await api.inject({ method: 'GET', url: '/api/repositories' });
     const syncResponse = await api.inject({
       method: 'POST',
       url: '/api/jira/issues/AVIA-13235/sync',
+      payload: { repository: 'front-avia' },
     });
     const readResponse = await api.inject({
       method: 'GET',
@@ -87,7 +96,12 @@ describe('M1 HTTP API', () => {
       method: 'GET',
       url: '/api/jira/issues/AVIA-13235/attachments/245370',
     });
+    const repositories = RepositoryCatalogResponseSchema.parse(repositoriesResponse.json());
 
+    expect(repositories.repositories.map((repository) => repository.repositoryId)).toEqual([
+      'front-avia',
+      'ui-kit',
+    ]);
     expect(syncResponse.statusCode).toBe(200);
     expect(syncResponse.json()).toMatchObject({ status: 'current' });
     expect(issueState.status).toBe('current');
@@ -97,12 +111,55 @@ describe('M1 HTTP API', () => {
     expect(tasks.tasks[0]).toMatchObject({
       id: 'jira:AVIA-13235',
       title: 'Seat map uses the wrong color for the leg-space arrow',
-      origin: { kind: 'jira', syncStatus: 'current' },
+      origin: {
+        kind: 'jira',
+        syncStatus: 'current',
+        repositoryBinding: {
+          status: 'resolved',
+          source: 'intake_fallback',
+          repository: { repositoryId: 'front-avia' },
+        },
+      },
       planning: { status: 'blocked' },
+      status: 'backlog',
     });
     expect(attachmentResponse.statusCode).toBe(200);
     expect(attachmentResponse.headers['content-type']).toBe('video/mp4');
     expect(attachmentResponse.rawPayload).toEqual(Buffer.from([1, 2, 3]));
+
+    await api.close();
+  });
+
+  it('updates Jira sync state without growing the ledger or operator activity', async () => {
+    const jiraPort: JiraIssuePort = {
+      fetchIssue: vi.fn(() => Promise.resolve(ok(makeJiraSnapshot()))),
+      fetchAttachment: vi.fn(),
+    };
+    const { api, ledger } = setup(false, jiraPort);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await api.inject({
+        method: 'POST',
+        url: '/api/jira/issues/AVIA-13235/sync',
+        ...(attempt === 0 ? { payload: { repository: 'front-avia' } } : {}),
+      });
+    }
+    const response = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/jira%3AAVIA-13235/activity',
+    });
+    const activity = OperatorActivityResponseSchema.parse(response.json());
+    const auditEvents = ledger.repository.listEvents('intake:jira:AVIA-13235');
+
+    expect(response.statusCode).toBe(200);
+    expect(auditEvents.map((event) => event.eventType)).toEqual([
+      'JiraIntakeRequested',
+      'JiraRepositoryBound',
+    ]);
+    expect(activity.entries.map((entry) => entry.title)).toEqual([
+      'Jira issue imported',
+      'Repository mapped',
+    ]);
 
     await api.close();
   });

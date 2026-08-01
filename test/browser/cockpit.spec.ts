@@ -83,6 +83,7 @@ test('I can import a Jira issue and inspect its persisted description and eviden
 
   await page.getByRole('button', { name: 'Import Jira issue' }).click();
   await page.getByRole('textbox', { name: 'Jira issue key' }).fill('AVIA-13235');
+  await page.getByRole('combobox', { name: 'Repository (optional)' }).fill('front-avia');
   await page.getByRole('button', { name: 'Open' }).click();
 
   await expect(page.getByTestId('task-item-jira:AVIA-13235')).toHaveAttribute(
@@ -94,11 +95,15 @@ test('I can import a Jira issue and inspect its persisted description and eviden
   await expect(page.getByTestId('jira-task-details')).toContainText('Open seat selection');
   await expect(page.getByTestId('jira-task-details')).toContainText('Evidence · 2');
   await expect(page.getByTestId('jira-task-details')).toContainText('Comments · 1');
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Workflow planning paused',
+  await expect(page.getByTestId('task-activity-timeline')).toContainText('Repository mapped');
+  await expect(page.getByTestId('task-activity-timeline')).not.toContainText(
+    'Jira snapshot synchronized',
   );
   await expect(page.getByRole('button', { name: 'Generate workflow' })).toHaveCount(0);
-  await expect(page.getByText('Jira snapshot ready · repository mapping required')).toBeVisible();
+  await expect(page.getByText('front-avia mapped · Jira analyzer pending')).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
+    'Repository mappingcomplete',
+  );
 });
 
 test('generating a backlog task materializes the workflow, timeline, and graph tree', async ({

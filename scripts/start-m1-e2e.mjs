@@ -14,12 +14,14 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = '4311';
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const [{ buildM1Api, createM1WorkflowService }, jira, ledgerModule, shared] = await Promise.all([
-  import('../dist/control-plane/index.js'),
-  import('../dist/integrations/index.js'),
-  import('../dist/ledger/index.js'),
-  import('../dist/shared/index.js'),
-]);
+const [{ buildM1Api, createM1WorkflowService }, jira, ledgerModule, repositories, shared] =
+  await Promise.all([
+    import('../dist/control-plane/index.js'),
+    import('../dist/integrations/index.js'),
+    import('../dist/ledger/index.js'),
+    import('../dist/repositories/index.js'),
+    import('../dist/shared/index.js'),
+  ]);
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
 const service = createM1WorkflowService(ledger.repository, shared.systemClock);
@@ -70,24 +72,39 @@ const snapshot = jira.JiraIssueSnapshotSchema.parse({
   ],
   links: [],
 });
-const jiraIssueService = jira.createJiraIssueService(ledger.repository, shared.systemClock, {
-  fetchIssue: async () => ({ ok: true, value: snapshot }),
-  fetchAttachment: async (contentUrl) =>
-    contentUrl.endsWith('.png')
-      ? {
-          ok: true,
-          value: {
-            bytes: new TextEncoder().encode(
-              '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="160"><rect width="320" height="160" fill="#172026"/><rect x="72" y="38" width="176" height="84" rx="12" fill="#2dd4bf" opacity=".2"/><path d="M120 80h80m-20-18 20 18-20 18" stroke="#5eead4" stroke-width="8" fill="none"/><text x="16" y="145" fill="#94a3b8" font-family="sans-serif" font-size="12">before / after</text></svg>',
-            ),
-            contentType: 'image/svg+xml',
+const jiraIssueService = jira.createJiraIssueService(
+  ledger.repository,
+  shared.systemClock,
+  {
+    fetchIssue: async () => ({ ok: true, value: snapshot }),
+    fetchAttachment: async (contentUrl) =>
+      contentUrl.endsWith('.png')
+        ? {
+            ok: true,
+            value: {
+              bytes: new TextEncoder().encode(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="160"><rect width="320" height="160" fill="#172026"/><rect x="72" y="38" width="176" height="84" rx="12" fill="#2dd4bf" opacity=".2"/><path d="M120 80h80m-20-18 20 18-20 18" stroke="#5eead4" stroke-width="8" fill="none"/><text x="16" y="145" fill="#94a3b8" font-family="sans-serif" font-size="12">before / after</text></svg>',
+              ),
+              contentType: 'image/svg+xml',
+            },
+          }
+        : {
+            ok: true,
+            value: { bytes: new Uint8Array([1, 2, 3]), contentType: 'video/mp4' },
           },
-        }
-      : {
-          ok: true,
-          value: { bytes: new Uint8Array([1, 2, 3]), contentType: 'video/mp4' },
-        },
-});
+  },
+  {
+    repositoryCatalog: new repositories.StaticRepositoryCatalog([
+      {
+        repositoryId: 'front-avia',
+        remoteUrl: 'ssh://git@bitbucket.twiket.com/onetwotrip/front-avia.git',
+        checkout: { runnerId: 'e2e', path: resolve('.') },
+        checkoutPaths: [resolve('.')],
+        aliases: ['front-avia', 'onetwotrip/front-avia'],
+      },
+    ]),
+  },
+);
 const api = buildM1Api({ service, jiraIssueService });
 
 const close = async () => {
