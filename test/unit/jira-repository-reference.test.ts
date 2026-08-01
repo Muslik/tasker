@@ -18,8 +18,8 @@ const resolve = (description: string, intakeFallback?: string) =>
   });
 
 describe('Jira repository reference', () => {
-  it('uses the Jira description directive before an intake fallback', () => {
-    const binding = resolve('h3. Context\nrepo:ui-kit', 'front-avia');
+  it('uses the Jira description directive before an intake fallback', async () => {
+    const binding = await resolve('h3. Context\nrepo:ui-kit', 'front-avia');
 
     expect(binding).toMatchObject({
       status: 'resolved',
@@ -29,8 +29,8 @@ describe('Jira repository reference', () => {
     });
   });
 
-  it('uses the optional intake repository when Jira has no directive', () => {
-    const binding = resolve('h3. Context\nNo repository metadata', 'front-avia');
+  it('uses the optional intake repository when Jira has no directive', async () => {
+    const binding = await resolve('h3. Context\nNo repository metadata', 'front-avia');
 
     expect(binding).toMatchObject({
       status: 'resolved',
@@ -40,14 +40,14 @@ describe('Jira repository reference', () => {
     });
   });
 
-  it('stops without guessing when neither source names a repository', () => {
-    const binding = resolve('h3. Context\nNo repository metadata');
+  it('stops without guessing when neither source names a repository', async () => {
+    const binding = await resolve('h3. Context\nNo repository metadata');
 
     expect(binding).toMatchObject({ status: 'missing' });
   });
 
-  it('rejects conflicting Jira directives instead of choosing one', () => {
-    const binding = resolve('repo:front-avia\nrepo:ui-kit');
+  it('rejects conflicting Jira directives instead of choosing one', async () => {
+    const binding = await resolve('repo:front-avia\nrepo:ui-kit');
 
     expect(binding).toMatchObject({
       status: 'invalid',

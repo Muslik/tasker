@@ -24,7 +24,8 @@ Read in this order:
 9. [`m1.6-jira-task-surface.md`](m1.6-jira-task-surface.md) — persisted read-only Jira
    intake, operator task details, attachment proxy, and VPN/403 recovery semantics.
 10. [`m1.7-repository-binding.md`](m1.7-repository-binding.md) — explicit Jira task to
-    local repository resolution without project-name guessing.
+    managed Bitbucket checkout resolution without project-name guessing or touching
+    operator working clones.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. The first full traversal of that graph on durable stub steps

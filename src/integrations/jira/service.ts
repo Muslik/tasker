@@ -68,9 +68,11 @@ const bindingProblem = (binding: JiraRepositoryBinding): string => {
     case 'missing':
       return 'Add repo:name to the Jira description or supply a repository during import';
     case 'not_found':
-      return `Repository ${binding.reference} was not found in the local catalog`;
+      return `Repository ${binding.reference} was not found in Bitbucket`;
     case 'ambiguous':
-      return `Repository ${binding.reference} matches more than one remote`;
+      return `Repository ${binding.reference} exists in more than one Bitbucket project`;
+    case 'unavailable':
+      return binding.problem.message;
     case 'invalid':
       return 'The Jira description contains an invalid or conflicting repo directive';
   }
@@ -137,13 +139,53 @@ export class JiraIssueService {
     for (const state of states.value) {
       const binding = this.store.readRepositoryBinding(issueKeyFromState(state));
       if (!binding.ok) return err({ kind: 'store_failure', error: binding.error });
-      tasks.push(taskFromState(state, binding.value ?? missingBinding(state)));
+      tasks.push(taskFromState(state, this.currentBinding(state, binding.value)));
     }
     return ok(tasks);
   }
 
   public listRepositories(): readonly RepositoryCatalogEntry[] {
     return this.repositoryCatalog.list();
+  }
+
+  private currentBinding(
+    state: JiraIssueState,
+    persisted: JiraRepositoryBinding | null,
+  ): JiraRepositoryBinding {
+    if (persisted === null) return missingBinding(state);
+    if (persisted.status !== 'resolved') return persisted;
+    const managed = this.repositoryCatalog.find(persisted.reference);
+    if (managed.status === 'found') {
+      return JiraRepositoryBindingSchema.parse({ ...persisted, repository: managed.repository });
+    }
+    if (managed.status === 'not_found') {
+      return JiraRepositoryBindingSchema.parse({
+        status: 'unavailable',
+        issueKey: persisted.issueKey,
+        recordedAt: persisted.recordedAt,
+        source: persisted.source,
+        reference: persisted.reference,
+        problem: {
+          kind: 'unavailable',
+          message: 'Managed checkout is absent on this runner. Sync to provision it from Bitbucket',
+          retryable: true,
+        },
+      });
+    }
+    return JiraRepositoryBindingSchema.parse({
+      status: 'ambiguous',
+      issueKey: persisted.issueKey,
+      recordedAt: persisted.recordedAt,
+      source: persisted.source,
+      reference: persisted.reference,
+      candidates: managed.candidates.map((candidate) => ({
+        repositoryId: candidate.repositoryId,
+        projectKey:
+          candidate.aliases.find((alias) => alias.includes('/'))?.split('/')[0] ?? 'local',
+        reference: candidate.aliases.find((alias) => alias.includes('/')) ?? candidate.repositoryId,
+        remoteUrl: candidate.remoteUrl ?? `local:${candidate.checkout.path}`,
+      })),
+    });
   }
 
   public readRepositoryBinding(
@@ -319,7 +361,7 @@ export class JiraIssueService {
       next.status === 'current'
         ? this.store.save({
             state: next,
-            repositoryBinding: resolveJiraRepositoryBinding({
+            repositoryBinding: await resolveJiraRepositoryBinding({
               issue: next.issue,
               intakeFallback: intakeRepository,
               previousBinding: previousBinding.value,

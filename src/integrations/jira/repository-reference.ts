@@ -43,7 +43,7 @@ const previousIntakeReference = (binding: JiraRepositoryBinding | null): string 
   return binding.status === 'invalid' ? (binding.references[0] ?? null) : binding.reference;
 };
 
-const resolveReference = ({
+const resolveReference = async ({
   catalog,
   issueKey,
   recordedAt,
@@ -55,7 +55,7 @@ const resolveReference = ({
   readonly recordedAt: string;
   readonly source: RepositoryBindingSource;
   readonly reference: string;
-}): JiraRepositoryBinding => {
+}): Promise<JiraRepositoryBinding> => {
   const parsedReference = RepositoryReferenceSchema.safeParse(reference);
   if (!parsedReference.success) {
     return JiraRepositoryBindingSchema.parse({
@@ -66,7 +66,7 @@ const resolveReference = ({
       references: [reference],
     });
   }
-  const lookup = catalog.find(parsedReference.data);
+  const lookup = await catalog.resolve(parsedReference.data);
   if (lookup.status === 'not_found') {
     return JiraRepositoryBindingSchema.parse({
       status: 'not_found',
@@ -86,6 +86,16 @@ const resolveReference = ({
       candidates: lookup.candidates,
     });
   }
+  if (lookup.status === 'unavailable') {
+    return JiraRepositoryBindingSchema.parse({
+      status: 'unavailable',
+      issueKey,
+      recordedAt,
+      source,
+      reference: parsedReference.data,
+      problem: lookup.problem,
+    });
+  }
   return JiraRepositoryBindingSchema.parse({
     status: 'resolved',
     issueKey,
@@ -96,7 +106,7 @@ const resolveReference = ({
   });
 };
 
-export const resolveJiraRepositoryBinding = ({
+export const resolveJiraRepositoryBinding = async ({
   issue,
   intakeFallback,
   previousBinding,
@@ -110,7 +120,7 @@ export const resolveJiraRepositoryBinding = ({
   readonly recordedAt: string;
   readonly catalog: RepositoryCatalog;
   readonly referenceSource: JiraRepositoryReferenceSource;
-}): JiraRepositoryBinding => {
+}): Promise<JiraRepositoryBinding> => {
   const fromJira = referenceSource.read(issue);
   if (fromJira.status === 'invalid') {
     return JiraRepositoryBindingSchema.parse({
@@ -122,7 +132,7 @@ export const resolveJiraRepositoryBinding = ({
     });
   }
   if (fromJira.status === 'found') {
-    return resolveReference({
+    return await resolveReference({
       catalog,
       issueKey: issue.issueKey,
       recordedAt,
@@ -139,7 +149,7 @@ export const resolveJiraRepositoryBinding = ({
       recordedAt,
     });
   }
-  return resolveReference({
+  return await resolveReference({
     catalog,
     issueKey: issue.issueKey,
     recordedAt,

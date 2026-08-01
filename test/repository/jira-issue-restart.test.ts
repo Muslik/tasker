@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JiraIssuePort } from '../../src/integrations/jira/client.js';
 import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { StaticRepositoryCatalog } from '../../src/repositories/catalog.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
@@ -106,5 +107,42 @@ describe('Jira issue persistence', () => {
         .listEvents('intake:jira:AVIA-13235')
         .map((event) => event.eventType),
     ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
+  });
+
+  it('does not reuse a persisted checkout that is outside the current managed store', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-jira-managed-store-'));
+    const clock = makeAdjustableClock('2026-08-01T19:15:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const port: JiraIssuePort = {
+      fetchIssue: vi.fn(() =>
+        Promise.resolve(ok(makeJiraSnapshot({ description: 'repo:front-avia' }))),
+      ),
+      fetchAttachment: vi.fn(),
+    };
+    const importingService = createJiraIssueService(ledger.repository, clock, port, {
+      repositoryCatalog: makeRepositoryCatalog(),
+    });
+    await importingService.sync('AVIA-13235');
+    const restartedService = createJiraIssueService(ledger.repository, clock, port, {
+      repositoryCatalog: new StaticRepositoryCatalog([]),
+    });
+
+    const tasks = restartedService.listOperatorTasks();
+
+    expect(tasks).toMatchObject({
+      ok: true,
+      value: [
+        {
+          status: 'needs_attention',
+          origin: {
+            repositoryBinding: {
+              status: 'unavailable',
+              problem: { kind: 'unavailable', retryable: true },
+            },
+          },
+        },
+      ],
+    });
   });
 });

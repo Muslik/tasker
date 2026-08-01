@@ -15,7 +15,7 @@ complete only after its operator demo and deterministic evidence pass.
 | M1 | `fixture task -> compiled workflow -> visible tree in local cockpit` | after M0+M1, roughly 6-10 focused implementation days |
 | M1.5 | `normalized task + real read-only repository inspection -> provider proposal -> validated visible workflow` | implemented and verified 2026-08-01 |
 | M1.6 | `Jira key -> persisted current task snapshot -> operator details`, including cached recovery after `403` without sync-log growth | implemented and verified 2026-08-01 |
-| M1.7 | `Jira repo:name or import fallback -> logical repository + preferred local checkout` | implemented and verified 2026-08-02; read-only Jira analyzer remains |
+| M1.7 | `Jira repo:name or import fallback -> Bitbucket lookup -> managed application-data checkout` | implemented and verified 2026-08-02; read-only Jira analyzer remains |
 | M2 | `task -> visible workflow -> complete stub traversal`, including kill/restart, wait/resume, intervention, and handoff | after M0-M2, roughly 12-20 focused days |
 | M3 | one real subscription CLI executes a node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
 | M4 | a real provider changes an isolated worktree; a recoverable failure resumes at the failed node | re-estimate after M3; planning envelope 4-7 days |
@@ -385,15 +385,20 @@ the later M5 eligibility/effect integration.
 
 ### Implemented slice
 
-1. Scan configured local git roots and group duplicate checkouts by remote identity.
+1. Keep repositories in Tasker's OS application-data directory; never discover or
+   mutate the operator's `~/Projects/work` clones.
 2. Resolve `repo:name` from the Jira description first, then an optional Tasker import
    fallback. Never infer from a Jira project key.
-3. Persist the binding separately from the replaceable Jira projection, including the
+3. Reuse a managed checkout or query Bitbucket by exact name and clone one unique
+   result atomically. Require `project/repo` when equal names exist in several
+   projects.
+4. Persist the binding separately from the replaceable Jira projection, including the
    preferred checkout path and runner identity.
-4. Block unknown, conflicting, missing, and cross-remote ambiguous references.
-5. Keep the right workflow rail honest: mapping can be complete while the read-only
+5. Block unknown, conflicting, missing, cross-project ambiguous, Bitbucket access, and
+   clone-failure states without losing the Jira snapshot or prior work.
+6. Keep the right workflow rail honest: mapping can be complete while the read-only
    Jira analyzer is still pending.
-6. Expose a typed repository catalog to the minimal import form.
+7. Expose the typed managed repository catalog to the minimal import form.
 
 ### Remaining boundary
 

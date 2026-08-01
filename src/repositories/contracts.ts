@@ -5,7 +5,7 @@ export const RepositoryReferenceSchema = z
   .trim()
   .min(1)
   .max(128)
-  .regex(/^[a-z0-9._/-]+$/iu);
+  .regex(/^[a-z0-9._-]+(?:\/[a-z0-9._-]+)?$/iu);
 
 export const RepositoryCheckoutSchema = z
   .object({
@@ -27,6 +27,32 @@ export const RepositoryCatalogEntrySchema = z
 export const RepositoryCatalogResponseSchema = z
   .object({
     repositories: z.array(RepositoryCatalogEntrySchema),
+  })
+  .strict();
+
+export const RepositoryCandidateSchema = z
+  .object({
+    repositoryId: z.string().min(1),
+    projectKey: z.string().min(1),
+    reference: RepositoryReferenceSchema,
+    remoteUrl: z.string().min(1),
+  })
+  .strict();
+
+export const RepositoryProvisionProblemSchema = z
+  .object({
+    kind: z.enum([
+      'bitbucket_not_configured',
+      'auth_failed',
+      'access_blocked',
+      'unavailable',
+      'invalid_response',
+      'clone_failed',
+      'destination_conflict',
+    ]),
+    message: z.string().min(1),
+    retryable: z.boolean(),
+    httpStatus: z.number().int().optional(),
   })
   .strict();
 
@@ -56,7 +82,13 @@ export const JiraRepositoryBindingSchema = z.discriminatedUnion('status', [
     status: z.literal('ambiguous'),
     source: RepositoryBindingSourceSchema,
     reference: RepositoryReferenceSchema,
-    candidates: z.array(RepositoryCatalogEntrySchema).min(2),
+    candidates: z.array(RepositoryCandidateSchema).min(2),
+  }).strict(),
+  RepositoryBindingBaseSchema.extend({
+    status: z.literal('unavailable'),
+    source: RepositoryBindingSourceSchema,
+    reference: RepositoryReferenceSchema,
+    problem: RepositoryProvisionProblemSchema,
   }).strict(),
   RepositoryBindingBaseSchema.extend({
     status: z.literal('invalid'),
@@ -66,5 +98,7 @@ export const JiraRepositoryBindingSchema = z.discriminatedUnion('status', [
 ]);
 
 export type RepositoryCatalogEntry = z.infer<typeof RepositoryCatalogEntrySchema>;
+export type RepositoryCandidate = z.infer<typeof RepositoryCandidateSchema>;
+export type RepositoryProvisionProblem = z.infer<typeof RepositoryProvisionProblemSchema>;
 export type RepositoryBindingSource = z.infer<typeof RepositoryBindingSourceSchema>;
 export type JiraRepositoryBinding = z.infer<typeof JiraRepositoryBindingSchema>;

@@ -10,8 +10,11 @@ import {
 } from '../integrations/index.js';
 import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
 import {
-  discoverRepositoryCatalog,
+  BitbucketRepositoryClient,
+  createManagedRepositoryStore,
+  loadBitbucketRepositoryConfiguration,
   loadRepositoryCatalogConfiguration,
+  UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
 import { buildM1Api } from './m1-api.js';
@@ -32,7 +35,14 @@ export const startM1Server = async (): Promise<void> => {
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const service = createM1WorkflowService(ledger.repository, systemClock);
-  const repositoryCatalog = discoverRepositoryCatalog(loadRepositoryCatalogConfiguration());
+  const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
+  const repositoryCatalog = createManagedRepositoryStore(
+    loadRepositoryCatalogConfiguration(),
+    bitbucketConfiguration,
+    bitbucketConfiguration === null
+      ? new UnconfiguredBitbucketRepositorySource()
+      : new BitbucketRepositoryClient(bitbucketConfiguration),
+  );
   const jiraIssueService = createJiraIssueService(
     ledger.repository,
     systemClock,

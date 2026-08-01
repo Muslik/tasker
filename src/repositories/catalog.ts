@@ -1,11 +1,15 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { basename, delimiter, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, resolve } from 'node:path';
 
 import {
+  RepositoryCandidateSchema,
   RepositoryCatalogEntrySchema,
   RepositoryCatalogResponseSchema,
+  type RepositoryCandidate,
   type RepositoryCatalogEntry,
+  type RepositoryProvisionProblem,
 } from './contracts.js';
 
 export type RepositoryCatalogLookup =
@@ -13,9 +17,16 @@ export type RepositoryCatalogLookup =
   | { readonly status: 'not_found' }
   | { readonly status: 'ambiguous'; readonly candidates: readonly RepositoryCatalogEntry[] };
 
+export type RepositoryResolution =
+  | { readonly status: 'found'; readonly repository: RepositoryCatalogEntry }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'ambiguous'; readonly candidates: readonly RepositoryCandidate[] }
+  | { readonly status: 'unavailable'; readonly problem: RepositoryProvisionProblem };
+
 export interface RepositoryCatalog {
   list(): readonly RepositoryCatalogEntry[];
   find(reference: string): RepositoryCatalogLookup;
+  resolve(reference: string): Promise<RepositoryResolution>;
 }
 
 const normalizeLookup = (value: string): string =>
@@ -71,6 +82,17 @@ const preferredCheckout = (repositoryId: string, paths: readonly string[]): stri
     return left.localeCompare(right);
   })[0] as string;
 
+const candidateFromEntry = (repository: RepositoryCatalogEntry): RepositoryCandidate => {
+  const qualifiedAlias = repository.aliases.find((alias) => alias.includes('/'));
+  const projectKey = qualifiedAlias?.split('/')[0] ?? 'local';
+  return RepositoryCandidateSchema.parse({
+    repositoryId: repository.repositoryId,
+    projectKey,
+    reference: qualifiedAlias ?? repository.repositoryId,
+    remoteUrl: repository.remoteUrl ?? `local:${repository.checkout.path}`,
+  });
+};
+
 export class StaticRepositoryCatalog implements RepositoryCatalog {
   private readonly repositories: readonly RepositoryCatalogEntry[];
 
@@ -95,34 +117,64 @@ export class StaticRepositoryCatalog implements RepositoryCatalog {
     }
     return { status: 'ambiguous', candidates };
   }
+
+  public resolve(reference: string): Promise<RepositoryResolution> {
+    const lookup = this.find(reference);
+    return Promise.resolve(
+      lookup.status === 'ambiguous'
+        ? { status: 'ambiguous', candidates: lookup.candidates.map(candidateFromEntry) }
+        : lookup,
+    );
+  }
 }
 
 export interface RepositoryCatalogConfiguration {
-  readonly roots: readonly string[];
+  readonly storePath: string;
   readonly runnerId: string;
 }
+
+export const defaultRepositoryStorePath = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
+  homeDirectory: string = homedir(),
+): string => {
+  const override = environment.TASKER_REPOSITORY_STORE?.trim();
+  if (override) return resolve(override);
+  if (platform === 'darwin') {
+    return resolve(homeDirectory, 'Library', 'Application Support', 'Tasker', 'repositories');
+  }
+  if (platform === 'win32') {
+    return resolve(
+      environment.LOCALAPPDATA?.trim() || resolve(homeDirectory, 'AppData', 'Local'),
+      'Tasker',
+      'repositories',
+    );
+  }
+  return resolve(
+    environment.XDG_DATA_HOME?.trim() || resolve(homeDirectory, '.local', 'share'),
+    'tasker',
+    'repositories',
+  );
+};
 
 export const loadRepositoryCatalogConfiguration = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): RepositoryCatalogConfiguration => ({
-  roots: (environment.TASKER_REPOSITORY_ROOTS ?? resolve('..', 'work'))
-    .split(delimiter)
-    .map((root) => resolve(root))
-    .filter((root) => root.length > 0),
+  storePath: defaultRepositoryStorePath(environment),
   runnerId: environment.TASKER_RUNNER_ID?.trim() || 'local',
 });
 
 export const discoverRepositoryCatalog = (
   configuration: RepositoryCatalogConfiguration,
-): RepositoryCatalog => {
-  const discovered = configuration.roots.flatMap((root) => {
-    if (!existsSync(root)) return [];
-    return readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => resolve(root, entry.name))
-      .filter((repositoryPath) => existsSync(resolve(repositoryPath, '.git')))
-      .map((repositoryPath) => ({ repositoryPath, remoteUrl: readOrigin(repositoryPath) }));
-  });
+): StaticRepositoryCatalog => {
+  const root = configuration.storePath;
+  const discovered = !existsSync(root)
+    ? []
+    : readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+        .map((entry) => resolve(root, entry.name))
+        .filter((repositoryPath) => existsSync(resolve(repositoryPath, '.git')))
+        .map((repositoryPath) => ({ repositoryPath, remoteUrl: readOrigin(repositoryPath) }));
 
   const grouped = new Map<string, typeof discovered>();
   for (const repository of discovered) {

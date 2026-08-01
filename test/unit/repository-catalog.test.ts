@@ -5,7 +5,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { discoverRepositoryCatalog } from '../../src/repositories/catalog.js';
+import {
+  defaultRepositoryStorePath,
+  discoverRepositoryCatalog,
+  loadRepositoryCatalogConfiguration,
+} from '../../src/repositories/catalog.js';
 
 const directories: string[] = [];
 
@@ -37,7 +41,7 @@ describe('repository catalog', () => {
       'ssh://git@bitbucket.twiket.com/onetwotrip/front-avia.git',
     );
 
-    const catalog = discoverRepositoryCatalog({ roots: [root], runnerId: 'local-test' });
+    const catalog = discoverRepositoryCatalog({ storePath: root, runnerId: 'local-test' });
 
     expect(catalog.list()).toEqual([
       expect.objectContaining({
@@ -63,10 +67,35 @@ describe('repository catalog', () => {
       'front-backoffice-beta',
       'ssh://git@bitbucket.twiket.com/team-b/front-backoffice.git',
     );
-    const catalog = discoverRepositoryCatalog({ roots: [root], runnerId: 'local-test' });
+    const catalog = discoverRepositoryCatalog({ storePath: root, runnerId: 'local-test' });
 
     const lookup = catalog.find('front-backoffice');
 
     expect(lookup).toMatchObject({ status: 'ambiguous', candidates: [{}, {}] });
+  });
+
+  it('uses the macOS application data directory instead of a working checkout', () => {
+    const storePath = defaultRepositoryStorePath({}, 'darwin', '/Users/operator');
+
+    expect(storePath).toBe('/Users/operator/Library/Application Support/Tasker/repositories');
+  });
+
+  it('honors the Linux XDG data directory', () => {
+    const storePath = defaultRepositoryStorePath(
+      { XDG_DATA_HOME: '/srv/operator-data' },
+      'linux',
+      '/home/operator',
+    );
+
+    expect(storePath).toBe('/srv/operator-data/tasker/repositories');
+  });
+
+  it('allows one explicit managed-store override without scanning repository roots', () => {
+    const configuration = loadRepositoryCatalogConfiguration({
+      TASKER_REPOSITORY_STORE: '/var/lib/tasker/repos',
+      TASKER_REPOSITORY_ROOTS: '/Users/operator/Projects/work',
+    });
+
+    expect(configuration).toEqual({ storePath: '/var/lib/tasker/repos', runnerId: 'local' });
   });
 });
