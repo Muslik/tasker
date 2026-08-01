@@ -1,7 +1,7 @@
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { LedgerRepository } from '../ledger/repository.js';
-import type { ArtifactWrite, JsonValue, LedgerConflict } from '../ledger/types.js';
+import type { ArtifactWrite, EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import { WorkflowViewSchema, type WorkflowView } from './m1-contracts.js';
 
 export const M1_WORKFLOW_PROJECTION = 'm1_workflow';
@@ -63,6 +63,10 @@ export class M1WorkflowStore {
     projectionId: string,
   ): JsonValue | null {
     return this.ledger.readProjection(projectionType, projectionId)?.payload ?? null;
+  }
+
+  public listEvents(fixtureId?: string): readonly EventRecord[] {
+    return this.ledger.listEvents(fixtureId === undefined ? undefined : `intake:${fixtureId}`);
   }
 
   public save(

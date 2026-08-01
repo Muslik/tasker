@@ -13,6 +13,7 @@ const CommonFixtureSchema = z
     title: z.string().min(1),
     description: z.string().min(1),
     repository: RepositorySchema,
+    translationIntent: z.enum(['none', 'copy_change']),
   })
   .strict();
 
@@ -28,19 +29,16 @@ const FeatureWithReviewFixtureSchema = CommonFixtureSchema.extend({
   verification: z.enum(['full', 'full_with_visual']),
 }).strict();
 
-const TranslationCrossRepoFixtureSchema = CommonFixtureSchema.extend({
-  family: z.literal('translation_cross_repo'),
+const SharedComponentFixtureSchema = CommonFixtureSchema.extend({
+  family: z.literal('shared_component'),
   componentRepository: RepositorySchema,
-  devPublishCommand: z.string().min(1),
-  finalPublish: z.literal('human'),
-  translationCommand: z.string().min(1),
-  verification: z.literal('translation_and_targeted'),
+  componentPath: z.string().min(1),
 }).strict();
 
 export const TaskFamilyFixtureSchema = z.discriminatedUnion('family', [
   ShortBugfixFixtureSchema,
   FeatureWithReviewFixtureSchema,
-  TranslationCrossRepoFixtureSchema,
+  SharedComponentFixtureSchema,
 ]);
 
 const AcceptedFixtureSchema = z
@@ -97,6 +95,7 @@ const fixtureInputs = [
     title: 'Restore fare card when baggage data is absent',
     description: 'Reproduce the frontend regression, implement the smallest fix, and verify it.',
     repository: 'twiket/avia-web',
+    translationIntent: 'none',
     family: 'short_bugfix',
     reproduction: 'required',
     verification: 'targeted',
@@ -109,6 +108,7 @@ const fixtureInputs = [
     title: 'Add a reviewed itinerary feature across the booking flow',
     description: 'Plan, implement, visually verify, run the full suite, and prepare code review.',
     repository: 'twiket/avia-web',
+    translationIntent: 'none',
     family: 'feature_with_review',
     planReview: 'always',
     verification: 'full_with_visual',
@@ -121,12 +121,23 @@ const fixtureInputs = [
     title: 'Add translated component copy and consume its published version',
     description: 'Change a shared component, pause for translation and final publish, then verify.',
     repository: 'twiket/avia-web',
-    family: 'translation_cross_repo',
+    translationIntent: 'copy_change',
+    family: 'shared_component',
     componentRepository: 'twiket/ui-kit',
-    devPublishCommand: 'pnpm component:publish-dev',
-    finalPublish: 'human',
-    translationCommand: 'pnpm translations:pull',
-    verification: 'translation_and_targeted',
+    componentPath: 'packages/@ott/booking-copy',
+    expected: 'accepted',
+    proposalVariant: 'valid',
+  },
+  {
+    fixtureId: 'avia-14002-inline-copy',
+    taskId: 'AVIA-14002',
+    title: 'Add booking copy stored directly in the application locale JSON',
+    description: 'Change application-owned copy and verify it without an external translator wait.',
+    repository: 'twiket/avia-web',
+    translationIntent: 'copy_change',
+    family: 'feature_with_review',
+    planReview: 'on_questions',
+    verification: 'full',
     expected: 'accepted',
     proposalVariant: 'valid',
   },
@@ -144,6 +155,7 @@ const fixtureInputs = [
     title: `Rejected workflow fixture: ${suffix}`,
     description: 'Demonstrates a validator rejection without queueing or executing the graph.',
     repository: 'twiket/avia-web',
+    translationIntent: 'none' as const,
     family: 'short_bugfix' as const,
     reproduction: 'required' as const,
     verification: 'targeted' as const,

@@ -23,9 +23,12 @@ The first visible workflow has shipped in M1. The first full traversal of that g
 durable stub steps arrives at M2. Real providers and corporate integrations are
 deliberately later milestones.
 
-M0 and M1 are now implemented. M1 renders the persisted graph in a read-only cockpit
-and CLI, including validation failures, waits, retry bounds, verification rationale,
-capabilities, template diff, and JSON download. Execution remains disabled until M2.
+M0 and M1 are now implemented. M1 provides a read-only operator console with the task
+queue on the left, persisted activity and workflow rationale in the center, and the
+current graph on the right. It includes validation failures, waits, retry bounds,
+project/global policy decisions, verification rationale, capabilities, collapsed
+template diagnostics, SSE refresh, and JSON download. Execution remains disabled
+until M2.
 
 Older July 30 versions remain under `.omx/plans/` for audit history; they are not the
 current implementation source of truth.

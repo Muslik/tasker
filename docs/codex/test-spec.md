@@ -127,6 +127,9 @@ Evidence:
 - `reject_effect_without_idempotency_or_reconcile_policy`
 - `reject_wait_without_resolution_contract`
 - `verification_rationale_is_visible_before_execution`
+- `external_translation_policy_adds_extract_wait_and_pull`
+- `inline_json_translation_policy_adds_no_translation_nodes`
+- `assembly_decisions_explain_repository_policy_effects`
 
 Evidence:
 

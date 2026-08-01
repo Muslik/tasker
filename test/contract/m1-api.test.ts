@@ -7,6 +7,7 @@ import {
   buildM1Api,
   createM1WorkflowService,
   FixtureListResponseSchema,
+  OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
@@ -20,7 +21,7 @@ const setup = () => {
   const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
   resources.push({ directory, ledger });
   const service = createM1WorkflowService(ledger.repository, clock);
-  return { api: buildM1Api({ service }), ledger };
+  return { api: buildM1Api({ service }), ledger, service };
 };
 
 afterEach(() => {
@@ -64,7 +65,7 @@ describe('M1 HTTP API', () => {
     });
     const runResponse = await api.inject({ method: 'GET', url: '/api/runs/not-created-in-m1' });
 
-    expect(fixtures.fixtures).toHaveLength(8);
+    expect(fixtures.fixtures).toHaveLength(9);
     expect(generateResponse.statusCode).toBe(200);
     expect(generated.status).toBe('ready');
     expect(restored).toEqual(generated);
@@ -121,5 +122,68 @@ describe('M1 HTTP API', () => {
     expect(unknownFixture.json()).toMatchObject({ error: 'fixture_not_found' });
 
     await api.close();
+  });
+
+  it('renders persisted workflow state as an operator task queue', async () => {
+    const { api, service } = setup();
+    service.generate('avia-13236-short-bug');
+    service.generate('invalid-unknown-step');
+
+    const response = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
+    const taskList = OperatorTaskListResponseSchema.parse(response.json());
+    const { tasks } = taskList;
+
+    expect(response.statusCode).toBe(200);
+    expect(taskList.streamCursor).toBe(6);
+    expect(tasks.find((task) => task.taskId === 'AVIA-13236')).toMatchObject({
+      status: 'planned',
+      attention: 'none',
+    });
+    expect(tasks.find((task) => task.taskId === 'AVIA-15001')).toMatchObject({
+      status: 'workflow_rejected',
+      attention: 'operator',
+    });
+    expect(tasks.find((task) => task.taskId === 'AVIA-12536')).toMatchObject({
+      status: 'backlog',
+    });
+
+    await api.close();
+  });
+
+  it('exposes the selected task persisted activity without inventing agent output', async () => {
+    const { api, service } = setup();
+    service.generate('avia-13236-short-bug');
+
+    const response = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/avia-13236-short-bug/activity',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      providerSession: { status: 'not_started', reason: 'm1_planning_only' },
+      entries: [
+        { source: 'kernel', title: 'Intake accepted' },
+        { source: 'kernel', title: 'Task created' },
+        { source: 'planner', title: 'Workflow compiled and persisted' },
+      ],
+    });
+
+    await api.close();
+  });
+
+  it('replays persisted stream events after the supplied ledger cursor', () => {
+    const { service } = setup();
+    service.generate('avia-13236-short-bug');
+
+    const events = service.listStreamEventsAfter(2);
+
+    expect(events).toEqual([
+      {
+        sequence: 3,
+        fixtureId: 'avia-13236-short-bug',
+        eventType: 'WorkflowPlanned',
+      },
+    ]);
   });
 });

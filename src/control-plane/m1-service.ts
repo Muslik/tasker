@@ -14,10 +14,16 @@ import { JsonValueSchema, type JsonValue, type ValidationReport } from '../workf
 import {
   FixtureListResponseSchema,
   FixtureSummarySchema,
+  M1_VIEW_SCHEMA_VERSION,
+  OperatorActivityResponseSchema,
+  OperatorStreamEventSchema,
+  OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
   WorkflowTreeNodeSchema,
   WorkflowViewSchema,
   type FixtureSummary,
+  type OperatorActivityResponse,
+  type OperatorStreamEvent,
   type WorkflowResponse,
   type WorkflowTreeNode,
   type WorkflowView,
@@ -57,15 +63,15 @@ const fixturePurpose = (fixture: TaskFixture): string => {
       return 'Short bugfix with reproduction, bounded repair, verification, and review wait';
     case 'feature_with_review':
       return 'Feature with optional plan gate, full verification, and review wait';
-    case 'translation_cross_repo':
-      return 'Cross-repository component work with translation and publish waits';
+    case 'shared_component':
+      return 'Cross-repository component work with policy-selected coordination';
   }
 };
 
 const toFixtureSummary = (fixture: TaskFixture): FixtureSummary =>
   FixtureSummarySchema.parse({
     id: fixture.fixtureId,
-    title: `${fixture.taskId} · ${fixture.title}`,
+    title: fixture.title,
     family: fixture.expected === 'rejected' ? 'invalid_workflow' : fixture.family,
     purpose: fixturePurpose(fixture),
   });
@@ -168,7 +174,7 @@ const baseWorkflowView = (
   proposal: WorkflowProposalArtifact,
   persistedAt: string,
 ) => ({
-  schemaVersion: 1 as const,
+  schemaVersion: M1_VIEW_SCHEMA_VERSION,
   fixture: toFixtureSummary(fixture),
   intake: {
     id: `intake:${fixture.fixtureId}`,
@@ -183,6 +189,7 @@ const baseWorkflowView = (
   },
   workflow: {
     proposalId: `proposal:${fixture.fixtureId}`,
+    assemblyDecisions: proposal.assemblyDecisions,
     templateId: `${proposal.templateId}@1`,
     capabilities: proposal.capabilities,
     retryBudgets: retryBudgetRecord(proposal),
@@ -348,6 +355,122 @@ export class M1WorkflowService {
 
   public listFixtures(): ReturnType<typeof FixtureListResponseSchema.parse> {
     return FixtureListResponseSchema.parse({ fixtures: listTaskFixtures().map(toFixtureSummary) });
+  }
+
+  public listOperatorTasks(): Outcome<
+    ReturnType<typeof OperatorTaskListResponseSchema.parse>,
+    M1ServiceError
+  > {
+    const tasks = [];
+
+    for (const fixture of listTaskFixtures()) {
+      const stored = this.store.read(fixture.fixtureId);
+      if (!stored.ok) {
+        return err({ kind: 'store_failure', error: stored.error });
+      }
+
+      const view = stored.value;
+      tasks.push({
+        fixture: toFixtureSummary(fixture),
+        taskId: fixture.taskId,
+        status:
+          view === null
+            ? ('backlog' as const)
+            : view.workflow.status === 'valid'
+              ? ('planned' as const)
+              : ('workflow_rejected' as const),
+        attention: view?.workflow.status === 'rejected' ? ('operator' as const) : ('none' as const),
+        currentStage:
+          view === null
+            ? 'Awaiting workflow generation'
+            : view.workflow.status === 'valid'
+              ? 'Workflow ready · execution disabled in M1'
+              : 'Workflow validation failed',
+        updatedAt: view?.persistedAt ?? null,
+      });
+    }
+
+    const streamCursor = this.store.listEvents().at(-1)?.sequence ?? 0;
+    return ok(OperatorTaskListResponseSchema.parse({ tasks, streamCursor }));
+  }
+
+  public readActivity(fixtureId: string): Outcome<OperatorActivityResponse, M1ServiceError> {
+    if (findTaskFixture(fixtureId) === undefined) {
+      return err({ kind: 'fixture_not_found', fixtureId });
+    }
+
+    const entries = this.store.listEvents(fixtureId).map((event) => {
+      const source = event.actor === 'm1_deterministic_planner' ? 'planner' : 'kernel';
+
+      switch (event.eventType) {
+        case 'IntakeAccepted':
+          return {
+            sequence: event.sequence,
+            occurredAt: event.occurredAt,
+            source,
+            level: 'info' as const,
+            title: 'Intake accepted',
+            detail: 'The local task fixture passed the intake boundary.',
+          };
+        case 'TaskCreated':
+          return {
+            sequence: event.sequence,
+            occurredAt: event.occurredAt,
+            source,
+            level: 'info' as const,
+            title: 'Task created',
+            detail: 'The task projection was created in the durable ledger transaction.',
+          };
+        case 'WorkflowPlanned':
+          return {
+            sequence: event.sequence,
+            occurredAt: event.occurredAt,
+            source,
+            level: 'info' as const,
+            title: 'Workflow compiled and persisted',
+            detail: 'The deterministic validator accepted the proposed workflow graph.',
+          };
+        case 'WorkflowRejected':
+          return {
+            sequence: event.sequence,
+            occurredAt: event.occurredAt,
+            source,
+            level: 'error' as const,
+            title: 'Workflow rejected',
+            detail: 'The deterministic validator blocked the proposal before execution.',
+          };
+        default:
+          return {
+            sequence: event.sequence,
+            occurredAt: event.occurredAt,
+            source,
+            level: 'info' as const,
+            title: event.eventType,
+            detail: 'A persisted ledger event was recorded for this task.',
+          };
+      }
+    });
+
+    return ok(
+      OperatorActivityResponseSchema.parse({
+        fixtureId,
+        providerSession: { status: 'not_started', reason: 'm1_planning_only' },
+        entries,
+      }),
+    );
+  }
+
+  public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {
+    return this.store
+      .listEvents()
+      .filter((event) => event.sequence > sequence && event.aggregateId.startsWith('intake:'))
+      .map((event) =>
+        OperatorStreamEventSchema.parse({
+          sequence: event.sequence,
+          fixtureId: event.aggregateId.slice('intake:'.length),
+          eventType: event.eventType,
+        }),
+      );
   }
 
   public read(fixtureId: string): Outcome<WorkflowResponse | null, M1ServiceError> {

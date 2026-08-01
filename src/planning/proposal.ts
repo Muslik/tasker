@@ -22,6 +22,10 @@ import {
   selectWorkflowTemplate,
   WorkflowTemplateIdSchema,
 } from './templates.js';
+import {
+  resolvePackagePublicationPolicy,
+  resolveProjectWorkflowProfile,
+} from './project-policies.js';
 
 export const VerificationProfileSchema = z.enum([
   'full',
@@ -69,9 +73,20 @@ export const CapabilityMetadataSchema = z
   })
   .strict();
 
+export const WorkflowAssemblyDecisionSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    source: z.string().min(1),
+    reason: z.string().min(1),
+    effect: z.string().min(1),
+  })
+  .strict();
+
 export const WorkflowProposalArtifactSchema = z
   .object({
     analyzerVersion: z.literal('m1-deterministic@1'),
+    assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
     capabilities: CapabilityMetadataSchema,
     expectedArtifacts: z.array(ExpectedArtifactSchema),
     fixture: TaskFixtureSchema,
@@ -89,6 +104,7 @@ export type WorkflowProposalArtifact = z.infer<typeof WorkflowProposalArtifactSc
 export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 export type ExpectedArtifact = z.infer<typeof ExpectedArtifactSchema>;
 export type WaitMetadata = z.infer<typeof WaitMetadataSchema>;
+export type WorkflowAssemblyDecision = z.infer<typeof WorkflowAssemblyDecisionSchema>;
 
 const ProposalInputIssueSchema = z
   .object({
@@ -234,14 +250,154 @@ const createVerificationPlan = (fixture: TaskFixture): z.infer<typeof Verificati
             rationale: 'The feature spans multiple behaviors, so targeted checks are insufficient.',
           };
 
-    case 'translation_cross_repo':
-      return {
-        checks: ['translation resources pulled', 'targeted consumer tests'],
-        profile: 'translation_and_targeted',
-        rationale:
-          'External translation and package publication must resolve before consumer checks.',
-      };
+    case 'shared_component': {
+      const profile = resolveProjectWorkflowProfile(fixture.componentRepository);
+      const includesExternalTranslation =
+        fixture.translationIntent === 'copy_change' && profile.translations.kind === 'external';
+
+      return includesExternalTranslation
+        ? {
+            checks: ['translation resources pulled', 'targeted consumer tests'],
+            profile: 'translation_and_targeted',
+            rationale:
+              'The component project uses external translation, which must resolve before consumer checks.',
+          }
+        : {
+            checks: ['targeted component and consumer tests'],
+            profile: 'targeted',
+            rationale:
+              'The shared-component change needs focused checks in the component and its consumer.',
+          };
+    }
   }
+};
+
+const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssemblyDecision[] => {
+  const decisions: WorkflowAssemblyDecision[] = [
+    {
+      id: 'task-family',
+      title: 'Workflow family selected',
+      source: 'task-snapshot',
+      reason: `The intake classified this task as ${fixture.family}.`,
+      effect:
+        fixture.family === 'short_bugfix'
+          ? 'Start from the short bugfix flow with mandatory reproduction.'
+          : 'Start from the feature-with-review flow and specialize it for this task.',
+    },
+    {
+      id: 'bounded-repair',
+      title: 'Repair work is bounded',
+      source: 'global:bounded-repair',
+      reason: 'An unsuccessful implementation attempt must not loop forever.',
+      effect: 'The implementation loop is capped at three attempts before intervention.',
+    },
+  ];
+
+  switch (fixture.family) {
+    case 'short_bugfix':
+      decisions.push({
+        id: 'reproduction-required',
+        title: 'Reproduction required',
+        source: 'task-snapshot',
+        reason: 'The task is a bug and the fixture requires reproduction evidence.',
+        effect: 'Add reproduce-bug before implementation and targeted verification.',
+      });
+      break;
+
+    case 'feature_with_review':
+      decisions.push({
+        id: 'plan-review',
+        title: 'Plan review policy evaluated',
+        source: 'task-snapshot',
+        reason: `The task plan-review policy is ${fixture.planReview}.`,
+        effect:
+          fixture.planReview === 'always'
+            ? 'Insert a human plan-approval gate before implementation.'
+            : 'Continue automatically unless the analyzer raises a question.',
+      });
+      break;
+
+    case 'shared_component':
+      decisions.push({
+        id: 'cross-repository-component',
+        title: 'Shared component work detected',
+        source: 'task-snapshot',
+        reason: `The change belongs partly to ${fixture.componentRepository}.`,
+        effect: 'Implement the component in its repository before updating the consumer.',
+      });
+      break;
+  }
+
+  if (fixture.translationIntent === 'copy_change') {
+    const targetRepository =
+      fixture.family === 'shared_component' ? fixture.componentRepository : fixture.repository;
+    const profile = resolveProjectWorkflowProfile(targetRepository);
+
+    decisions.push(
+      profile.translations.kind === 'external'
+        ? {
+            id: 'translation-policy',
+            title: 'External translation policy applied',
+            source: `project:${targetRepository}`,
+            reason: `${targetRepository} is configured to synchronize copy through an external translator.`,
+            effect:
+              'Add extract and pull commands with a durable translation wait that releases the runner slot.',
+          }
+        : {
+            id: 'translation-policy',
+            title: 'Inline translation policy applied',
+            source:
+              profile.source === 'configured' ? `project:${targetRepository}` : 'project:default',
+            reason:
+              profile.source === 'configured'
+                ? `${targetRepository} is configured to keep copy directly in source or locale JSON.`
+                : `${targetRepository} has no project-specific translation flow, so the safe default keeps copy in source or locale JSON.`,
+            effect: 'Keep copy changes inside implementation; add no translation commands or wait.',
+          },
+    );
+  }
+
+  if (fixture.family === 'shared_component') {
+    const publication = resolvePackagePublicationPolicy(
+      fixture.componentRepository,
+      fixture.componentPath,
+    );
+    decisions.push(
+      publication.kind === 'human_final'
+        ? {
+            id: 'publication-policy',
+            title: 'Global package publication policy applied',
+            source: `global:${publication.policyId}`,
+            reason: `${publication.policyId} matched ${fixture.componentPath} in ${fixture.componentRepository}.`,
+            effect:
+              'Create a development publish, then persist a final-publish wait before consuming the supplied version.',
+          }
+        : {
+            id: 'publication-policy',
+            title: 'No package publication required',
+            source: 'global:default',
+            reason: `No global package rule matched ${fixture.componentPath} in ${fixture.componentRepository}.`,
+            effect: 'Add no publish commands or publication wait.',
+          },
+    );
+  }
+
+  decisions.push({
+    id: 'verification-profile',
+    title: 'Verification profile selected',
+    source: 'task-snapshot',
+    reason: createVerificationPlan(fixture).rationale,
+    effect: `Use the ${createVerificationPlan(fixture).profile} verification profile.`,
+  });
+  decisions.push({
+    id: 'code-review-wait',
+    title: 'Human code review retained',
+    source: 'global:code-review',
+    reason: 'Every task that prepares a PR must stop for operator review.',
+    effect: 'End the autonomous delivery phase at the code-review wait.',
+  });
+
+  return decisions;
 };
 
 const replaceRootChildren = (
@@ -334,6 +490,7 @@ const toProposalCandidate = (fixture: TaskFixture): unknown => {
 
   return {
     analyzerVersion: 'm1-deterministic@1',
+    assemblyDecisions: createAssemblyDecisions(fixture),
     capabilities: {
       available: [...available],
       required: [...metadata.requiredCapabilities],

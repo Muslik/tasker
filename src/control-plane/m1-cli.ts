@@ -43,7 +43,7 @@ const parseDatabasePath = (args: readonly string[]): string => {
   if (index >= 0 && (value === undefined || value.length === 0)) {
     throw new Error('--db requires a path');
   }
-  return resolve(value ?? '.tasker/m1.sqlite');
+  return resolve(value ?? '.tasker/m1-operator.sqlite');
 };
 
 export const runM1Cli = (args: readonly string[], write: WriteLine = console.log): number => {

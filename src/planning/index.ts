@@ -3,5 +3,6 @@ export * from './diff.js';
 export * from './fixtures.js';
 export * from './planner.js';
 export * from './presentation.js';
+export * from './project-policies.js';
 export * from './proposal.js';
 export * from './templates.js';

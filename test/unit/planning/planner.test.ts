@@ -15,15 +15,15 @@ const fixture = (fixtureId: string) => {
 };
 
 describe('M1 task workflow planning', () => {
-  it('compiles the three accepted task families into distinct inspectable graphs', () => {
+  it('compiles every accepted task policy into a distinct inspectable graph', () => {
     const results = listTaskFixtures()
       .filter((candidate) => candidate.expected === 'accepted')
       .map((candidate) => planTaskWorkflow(candidate));
 
-    expect(results).toHaveLength(3);
+    expect(results).toHaveLength(4);
     expect(results.every((result) => result.ok)).toBe(true);
     const hashes = results.flatMap((result) => (result.ok ? [result.value.compiled.hash] : []));
-    expect(new Set(hashes).size).toBe(3);
+    expect(new Set(hashes).size).toBe(4);
     expect(
       results.every(
         (result) =>
@@ -102,6 +102,15 @@ describe('M1 task workflow planning', () => {
     expect(result.value.proposal.retryBudgets.some((budget) => budget.scope === 'loop')).toBe(true);
     expect(result.value.proposal.expectedArtifacts.length).toBeGreaterThan(0);
     expect(result.value.proposal.verificationPlan.rationale).toContain('translation');
+    expect(result.value.proposal.assemblyDecisions.map((decision) => decision.id)).toEqual([
+      'task-family',
+      'bounded-repair',
+      'cross-repository-component',
+      'translation-policy',
+      'publication-policy',
+      'verification-profile',
+      'code-review-wait',
+    ]);
     expect(
       Object.values(result.value.presentation.nodes).some((node) => node.kind === 'wait'),
     ).toBe(true);
@@ -110,5 +119,62 @@ describe('M1 task workflow planning', () => {
       uses: 'component.consume_published@1',
     });
     expect(result.value.proposal.waits.every((wait) => wait.resumeAt === undefined)).toBe(true);
+    const publicationDecision = result.value.proposal.assemblyDecisions.find(
+      (decision) => decision.id === 'publication-policy',
+    );
+    expect(publicationDecision?.title).toBe('Global package publication policy applied');
+    expect(publicationDecision?.source).toBe('global:frontend-ott-package');
+    expect(publicationDecision?.reason).toContain('frontend-ott-package');
+  });
+
+  it('adds external translation work only when the target project policy requires it', () => {
+    const result = planTaskWorkflow(fixture('avia-14001-translation-component'));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.value.proposal.assemblyDecisions).toContainEqual(
+      expect.objectContaining({
+        id: 'translation-policy',
+        title: 'External translation policy applied',
+        source: 'project:twiket/ui-kit',
+      }),
+    );
+    expect(result.value.proposal.waits.map((entry) => entry.waitKind)).toContain(
+      'translation_complete@1',
+    );
+    expect(Object.values(result.value.presentation.nodes)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ uses: 'translations.extract@1' }),
+        expect.objectContaining({ uses: 'translations.pull@1' }),
+      ]),
+    );
+  });
+
+  it('keeps project-owned locale JSON inside implementation without translation orchestration', () => {
+    const result = planTaskWorkflow(fixture('avia-14002-inline-copy'));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.value.proposal.assemblyDecisions).toContainEqual(
+      expect.objectContaining({
+        id: 'translation-policy',
+        title: 'Inline translation policy applied',
+        source: 'project:twiket/avia-web',
+      }),
+    );
+    expect(result.value.proposal.waits.map((entry) => entry.waitKind)).not.toContain(
+      'translation_complete@1',
+    );
+    expect(
+      Object.values(result.value.presentation.nodes).some(
+        (node) =>
+          node.kind === 'step' &&
+          (node.uses === 'translations.extract@1' || node.uses === 'translations.pull@1'),
+      ),
+    ).toBe(false);
   });
 });

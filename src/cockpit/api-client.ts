@@ -1,9 +1,18 @@
 import {
   ApiErrorResponseSchema,
+  OperatorActivityResponseSchema,
+  OperatorStreamEventSchema,
+  OperatorTaskListResponseSchema,
   FixtureListResponseSchema,
   WorkflowResponseSchema,
 } from '../control-plane/m1-contracts.js';
-import type { FixtureSummary, WorkflowResponse } from '../control-plane/m1-contracts.js';
+import type {
+  OperatorActivityResponse,
+  OperatorStreamEvent,
+  OperatorTaskListResponse,
+  FixtureSummary,
+  WorkflowResponse,
+} from '../control-plane/m1-contracts.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
@@ -73,6 +82,38 @@ export const listFixtures = async (): Promise<readonly FixtureSummary[]> => {
   return parsed.data.fixtures;
 };
 
+export const listOperatorTasks = async (): Promise<OperatorTaskListResponse> => {
+  const result = await fetchJson('/api/operator/tasks');
+
+  if (!result.response.ok) {
+    throw failureFrom(result);
+  }
+
+  const parsed = OperatorTaskListResponseSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Operator task response does not match the cockpit contract');
+  }
+
+  return parsed.data;
+};
+
+export const loadOperatorActivity = async (
+  fixtureId: string,
+): Promise<OperatorActivityResponse> => {
+  const result = await fetchJson(`/api/operator/tasks/${encodeURIComponent(fixtureId)}/activity`);
+
+  if (!result.response.ok) {
+    throw failureFrom(result);
+  }
+
+  const parsed = OperatorActivityResponseSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Operator activity response does not match the cockpit contract');
+  }
+
+  return parsed.data;
+};
+
 export const loadWorkflow = async (fixtureId: string): Promise<WorkflowLookup> => {
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}`);
 
@@ -111,3 +152,44 @@ export const generateWorkflow = async (fixtureId: string): Promise<WorkflowRespo
 
 export const graphDownloadUrl = (fixtureId: string): string =>
   `/api/workflows/${encodeURIComponent(fixtureId)}/graph.json`;
+
+export const connectOperatorStream = (
+  after: number,
+  handlers: {
+    readonly onEvent: (event: OperatorStreamEvent) => void;
+    readonly onOpen: () => void;
+    readonly onError: (message: string) => void;
+  },
+): EventSource => {
+  const source = new EventSource(`/api/events?after=${encodeURIComponent(String(after))}`);
+
+  source.addEventListener('ledger', (rawEvent) => {
+    if (!(rawEvent instanceof MessageEvent)) {
+      handlers.onError('The operator event stream emitted an unexpected payload');
+      return;
+    }
+
+    try {
+      const payload: unknown = JSON.parse(String(rawEvent.data));
+      const parsedEvent = OperatorStreamEventSchema.safeParse(payload);
+      if (!parsedEvent.success) {
+        handlers.onError('The operator event stream payload did not match the contract');
+        return;
+      }
+
+      handlers.onEvent(parsedEvent.data);
+    } catch {
+      handlers.onError('The operator event stream payload was not valid JSON');
+    }
+  });
+
+  source.onopen = () => {
+    handlers.onOpen();
+  };
+
+  source.onerror = () => {
+    handlers.onError('The operator event stream is reconnecting');
+  };
+
+  return source;
+};

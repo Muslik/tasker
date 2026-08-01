@@ -9,6 +9,9 @@ import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
 const ProjectionParamsSchema = z.object({ projectionId: z.string().min(1) }).strict();
 const AssetParamsSchema = z.object({ '*': z.string().min(1) }).strict();
+const StreamQuerySchema = z
+  .object({ after: z.coerce.number().int().nonnegative().optional() })
+  .strict();
 
 export interface BuildM1ApiOptions {
   readonly service: M1WorkflowService;
@@ -71,6 +74,65 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   api.get('/api/health', () => ({ status: 'ok', milestone: 'm1' }));
 
   api.get('/api/fixtures', () => options.service.listFixtures());
+
+  api.get('/api/operator/tasks', (_request, reply) => {
+    const result = options.service.listOperatorTasks();
+    return result.ok ? reply.send(result.value) : sendServiceError(reply, result.error);
+  });
+
+  api.get('/api/operator/tasks/:fixtureId/activity', (request, reply) => {
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+
+    const result = options.service.readActivity(params.data.fixtureId);
+    return result.ok ? reply.send(result.value) : sendServiceError(reply, result.error);
+  });
+
+  api.get('/api/events', (request, reply) => {
+    const query = StreamQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return reply
+        .code(400)
+        .send(apiError('invalid_request', 'after must be a non-negative cursor'));
+    }
+
+    const header = request.headers['last-event-id'];
+    const headerValue = Array.isArray(header) ? header[0] : header;
+    const headerCursor = headerValue === undefined ? 0 : Number(headerValue);
+    let cursor = Math.max(
+      query.data.after ?? 0,
+      Number.isSafeInteger(headerCursor) ? headerCursor : 0,
+    );
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+
+    const flush = (): void => {
+      for (const event of options.service.listStreamEventsAfter(cursor)) {
+        reply.raw.write(
+          `id: ${String(event.sequence)}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`,
+        );
+        cursor = event.sequence;
+      }
+    };
+
+    flush();
+    const poll = setInterval(flush, 500);
+    const keepAlive = setInterval(() => reply.raw.write(': keep-alive\n\n'), 15_000);
+    reply.raw.once('close', () => {
+      clearInterval(poll);
+      clearInterval(keepAlive);
+    });
+
+    return reply;
+  });
 
   const registerProjectionRoute = (
     route: '/api/intakes/:projectionId' | '/api/runs/:projectionId' | '/api/tasks/:projectionId',

@@ -215,6 +215,103 @@ Agents never generate or import TypeScript code. Zod is the runtime schema sourc
 all three boundaries. The exact API and library decision are specified in
 [`technology-decisions.md`](technology-decisions.md#3-workflow-description).
 
+#### How a task becomes a workflow
+
+`Template -> task graph` is an internal implementation shorthand, not the operator
+model. The actual assembly pipeline is:
+
+```mermaid
+flowchart LR
+  T["Task snapshot"] --> F["Classify task family"]
+  F --> B["Select the smallest base flow"]
+  B --> P["Apply repository policies"]
+  P --> V["Select verification profile"]
+  V --> H["Insert bounded repair and human waits"]
+  H --> C["Compile and validate"]
+  C --> G["Persist graph plus assembly decisions"]
+```
+
+The family supplies only the stable skeleton: for example a bug starts with
+reproduction, while a feature may have a plan gate. Repository policy supplies
+project-specific behavior. A copy change in `twiket/ui-kit` can therefore add
+`extract -> translation wait -> pull`, while the same intent in `twiket/avia-web`
+stays inside the implementation step because that project stores copy inline or in
+locale JSON. An unknown repository receives the conservative simple policy and does
+not accidentally inherit external waits or publication effects.
+
+Workflow knowledge is resolved from two configuration layers:
+
+```yaml
+global:
+  repositoryKinds:
+    frontend:
+      packageRules:
+        - id: frontend-ott-package
+          pathPrefix: packages/@ott/
+          devPublish: pnpm component:publish-dev
+          finalPublish: human
+
+projects:
+  twiket/avia-web:
+    repositoryKind: frontend
+    translations: inline_json
+    verification:
+      rules:
+        - when: { changedPaths: [src/locales/**] }
+          run: [build]
+        - when: { changedPaths: [src/pages/**, src/features/**] }
+          run: [a, b, c, build, d]
+
+  twiket/ui-kit:
+    repositoryKind: frontend
+    translations:
+      kind: external
+      extract: pnpm translations:extract
+      pull: pnpm translations:pull
+```
+
+The real files use the typed TypeScript data DSL and Zod boundary; YAML above only
+illustrates the ownership. Global policy contains reusable workflow conventions such
+as where frontend `@ott` packages live and how they are published. A project profile
+contains only workflow-specific facts: translation mode, verification matrix,
+commands, repository links, and permitted effects. Code architecture, FSD, reducer
+style, and implementation conventions remain agent skills/instructions and are not
+duplicated here.
+
+The intended source layout is explicit:
+
+```text
+config/workflows/global/frontend.ts
+config/workflows/projects/twiket/avia-web.ts
+config/workflows/projects/twiket/ui-kit.ts
+```
+
+A profile may link a short Markdown note for human context, but prose alone cannot
+grant effects or create graph nodes. Only the validated typed fields participate in
+deterministic assembly. This keeps the files pleasant to review while preventing an
+agent interpretation of documentation from silently changing the workflow.
+
+Resolution precedence is explicit and recorded: hard safety/repository-mandatory
+checks cannot be downgraded; a project rule may specialize a matching global default;
+the analyzer recommendation fills only fields left open by policy. For example the
+shared-component fixture matches the project translation profile and independently
+matches the global `frontend-ott-package` publication rule. Both matches appear as
+separate assembly decisions.
+
+The compiler persists an ordered `assemblyDecisions` artifact alongside the graph.
+Each entry contains structured source provenance, the input fact, selected policy,
+and visible graph effect. The
+cockpit renders this as **Why this workflow**. The raw base-template diff remains an
+expandable diagnostic for harness authors; it is not the primary operator view.
+
+This boundary is deliberately mixed:
+
+- classification and recommended parameters may be agentic later;
+- policy lookup, graph construction, loop limits, capability checks, effect safety,
+  terminal paths, and persistence are deterministic;
+- changing a repository policy affects only future runs because every current run
+  keeps its immutable policy snapshot and graph hash.
+
 ### 6.2 StepType ABI
 
 Every registered step type declares:
@@ -431,12 +528,22 @@ Only `accepted` creates code-revision work automatically. Other dispositions pos
 idempotent PR reply and may open a clarification gate. Tasker does not resolve a human
 thread unless repository policy explicitly permits it.
 
-### 10.3 Translation wait
+### 10.3 Project-specific translation policy
 
-The workflow changes source text, runs extraction/upload, opens a slot-free
-`translation_ready` wait, consumes a correlated Loop/manual/external signal, runs the
-pull/sync command, and resumes at the following node. A process restart during the wait
-changes nothing.
+Project workflow policy is an operational contract for the harness, not a substitute
+for repository architecture documentation. It records workflow-only facts such as
+translation handling, verification obligations, required human gates, and external
+signals that can pause/resume a run.
+
+Translation orchestration is conditional on both task intent and repository policy.
+For an external-translation project, the workflow changes source text, runs
+extraction/upload, opens a slot-free `translation_ready` wait, consumes a correlated
+Loop/manual/external signal, runs the pull/sync command, and resumes at the following
+node. A process restart during the wait changes nothing.
+
+For a project whose copy is maintained inline or in locale JSON, those nodes do not
+exist. The code-change step edits the project-owned source and verification continues
+normally. This is absence by policy, not a skipped translation wait.
 
 ### 10.4 Cross-repository shared component
 

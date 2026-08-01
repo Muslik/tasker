@@ -16,7 +16,7 @@ const parsePort = (input: string | undefined): number => {
 };
 
 export const startM1Server = async (): Promise<void> => {
-  const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/m1.sqlite');
+  const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/m1-operator.sqlite');
   mkdirSync(dirname(databasePath), { recursive: true });
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });

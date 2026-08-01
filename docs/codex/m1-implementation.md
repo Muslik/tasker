@@ -24,15 +24,23 @@ flowchart LR
 
 ## What is implemented
 
-- three accepted fixture families:
+- four accepted fixtures across three workflow families:
   - short bugfix with reproduction and bounded repair;
   - feature with an optional plan-review gate and visual/full verification;
-  - translation plus shared-component workflow with translator and final-publish
-    waits;
+  - application-owned copy stored inline/JSON, with no translation commands or wait;
+  - shared-component workflow whose project policy independently adds translator and
+    final-publish waits;
 - five rejected fixtures: unknown step, missing terminal path, malformed unbounded
   loop, unmet capability, and unsafe effect metadata;
 - versioned step, predicate, and wait registries;
 - deterministic template selection and task-specific materialization;
+- explicit repository workflow policies and persisted **Why this workflow** assembly
+  decisions;
+- project workflow policy is treated as harness configuration rather than app
+  architecture documentation: it carries translation handling, verification shape,
+  and manual-gate facts only;
+- a separate global frontend package rule: component paths under `packages/@ott/`
+  receive the reusable dev-publish plus human-final-publish flow;
 - strict Zod parsing at fixture, proposal, projection, HTTP, and browser boundaries;
 - graph SHA-256, template-to-task diff, retry budgets, waits, expected artifacts,
   capability inventory, and verification rationale;
@@ -42,9 +50,12 @@ flowchart LR
 - atomic ledger commit of intake/task/workflow events, snapshot, projections, and
   linked proposal/validator/diff/graph artifacts;
 - persisted accepted and rejected outcomes with no outbox command;
-- Fastify endpoints for fixtures, intake/task/run/graph projections, workflow
-  generation/readback, and graph download;
-- read-only React/Vite cockpit and a dependency-free CLI semantic tree;
+- Fastify endpoints for fixtures, the operator task queue, persisted activity,
+  intake/task/run/graph projections, workflow generation/readback, and graph download;
+- native server-sent events that replay new ledger activity and refresh the selected
+  task without inventing an agent transcript;
+- read-only three-pane React/Vite operator console and a dependency-free CLI semantic
+  tree;
 - real file-backed restart, API-contract, and Playwright browser tests.
 
 ## Operator demo
@@ -59,14 +70,16 @@ fnm exec --using=24.16.0 /usr/local/bin/pnpm demo:m1
 ```
 
 Open `http://127.0.0.1:4311`, choose a fixture, and click **Generate workflow**. The
-cockpit shows intake eligibility, graph status/hash, verification policy, capabilities,
-semantic tree, waits and slot policy, retry bounds, template diff, validation errors,
-and a graph JSON download. Select `invalid-unknown-step` to see a rejected proposal
-that never becomes executable.
+left pane is the task queue, the center is the selected task's persisted activity,
+validation surface and **Why this workflow**, and the sticky right pane is the current
+workflow tree. It also shows graph status/hash, verification policy, capabilities,
+waits and slot policy, retry bounds, validation errors, and a graph JSON download. The
+raw template diff is collapsed under diagnostics. Select `invalid-unknown-step` to see
+a rejected proposal that never becomes executable.
 
-![M1 cockpit showing the translation and cross-repository workflow](artifacts/m1-cockpit.png)
+![M1 operator console showing task queue, persisted activity, and current workflow](artifacts/operator-cockpit.png)
 
-The production demo uses `.tasker/m1.sqlite`. To isolate a run:
+The production demo uses `.tasker/m1-operator.sqlite`. To isolate a run:
 
 ```bash
 TASKER_DB_PATH=/tmp/tasker-m1-demo.sqlite \
@@ -85,7 +98,11 @@ fnm exec --using=24.16.0 /usr/local/bin/pnpm m1 show avia-13236-short-bug \
 ## Durable behavior proven in M1
 
 - identical fixture and policy input produces the same compiled graph hash;
-- all three accepted families produce distinct graphs;
+- all four accepted task/policy combinations produce distinct graphs;
+- external translation is added only for the configured component repository; an
+  inline/JSON copy task contains no translation command or wait;
+- the `@ott` component path independently matches a reusable global frontend package
+  publication rule;
 - closing and reopening the SQLite ledger restores the same graph hash and diff;
 - repeated generation returns the persisted result instead of creating duplicate
   work;

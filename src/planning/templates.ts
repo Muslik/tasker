@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 import type { TaskFixture } from './fixtures.js';
 import {
+  resolvePackagePublicationPolicy,
+  resolveProjectWorkflowProfile,
+  type ProjectWorkflowProfile,
+} from './project-policies.js';
+import {
   bounded_loop,
   defineWorkflow,
   finalize,
@@ -21,6 +26,7 @@ const templateTask = {
   repository: 'template/repository',
   taskId: 'TASK-TEMPLATE',
   title: 'Task-specific title',
+  translationIntent: 'none',
 } as const;
 
 interface TaskContext {
@@ -29,6 +35,38 @@ interface TaskContext {
   readonly taskId: string;
   readonly title: string;
 }
+
+const translationNodes = (
+  task: TaskContext & { readonly translationIntent: 'copy_change' | 'none' },
+  repository: string,
+  profile: ProjectWorkflowProfile,
+): readonly WorkflowNodeSource[] => {
+  if (task.translationIntent === 'none' || profile.translations.kind === 'inline_json') {
+    return [];
+  }
+
+  return [
+    step('extract-translation-keys', {
+      uses: 'translations.extract@1',
+      with: {
+        command: profile.translations.extractCommand,
+        repository,
+        taskId: task.taskId,
+      },
+    }),
+    wait('wait-for-translator', {
+      for: 'translation_complete@1',
+    }),
+    step('pull-translations', {
+      uses: 'translations.pull@1',
+      with: {
+        command: profile.translations.pullCommand,
+        repository,
+        taskId: task.taskId,
+      },
+    }),
+  ];
+};
 
 const taskInput = (task: TaskContext, objective: string) => ({
   objective,
@@ -76,7 +114,7 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
   ]);
 
 const featureWithReviewRoot = (
-  task: TaskContext,
+  task: TaskContext & { readonly translationIntent: 'copy_change' | 'none' },
   options: { readonly includePlanGate: boolean; readonly includeVisualCheck: boolean },
 ): WorkflowNodeSource =>
   sequence('feature-delivery', [
@@ -115,6 +153,7 @@ const featureWithReviewRoot = (
           : []),
       ]),
     }),
+    ...translationNodes(task, task.repository, resolveProjectWorkflowProfile(task.repository)),
     step('prepare-pr', {
       uses: 'pr.prepare@1',
       with: taskInput(task, 'Prepare the feature for code review.'),
@@ -125,10 +164,40 @@ const featureWithReviewRoot = (
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
 
-const translationCrossRepoRoot = (
-  task: Extract<TaskFixture, { readonly family: 'translation_cross_repo' }>,
-): WorkflowNodeSource =>
-  sequence('translation-component-delivery', [
+const sharedComponentRoot = (
+  task: Extract<TaskFixture, { readonly family: 'shared_component' }>,
+): WorkflowNodeSource => {
+  const profile = resolveProjectWorkflowProfile(task.componentRepository);
+  const publication = resolvePackagePublicationPolicy(task.componentRepository, task.componentPath);
+  const verificationProfile =
+    task.translationIntent === 'copy_change' && profile.translations.kind === 'external'
+      ? 'translation_and_targeted'
+      : 'targeted';
+  const publicationNodes: readonly WorkflowNodeSource[] =
+    publication.kind === 'human_final'
+      ? [
+          step('publish-development-package', {
+            uses: 'component.dev_publish@1',
+            with: {
+              command: publication.developmentPublishCommand,
+              repository: task.componentRepository,
+              taskId: task.taskId,
+            },
+          }),
+          wait('wait-for-final-publish', {
+            for: 'final_publish@1',
+          }),
+          step('consume-published-version', {
+            uses: 'component.consume_published@1',
+            with: taskInput(
+              task,
+              'Consume the exact package version supplied by the resolved final-publish signal.',
+            ),
+          }),
+        ]
+      : [];
+
+  return sequence('shared-component-delivery', [
     step('analyze-task', {
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
@@ -144,48 +213,13 @@ const translationCrossRepoRoot = (
             'Implement copy in the shared component repository.',
           ),
         }),
-        step('extract-translation-keys', {
-          uses: 'translations.extract@1',
-          with: {
-            command: task.translationCommand,
-            repository: task.componentRepository,
-            taskId: task.taskId,
-          },
-        }),
       ]),
     }),
-    wait('wait-for-translator', {
-      for: 'translation_complete@1',
-    }),
-    step('pull-translations', {
-      uses: 'translations.pull@1',
-      with: {
-        command: task.translationCommand,
-        repository: task.componentRepository,
-        taskId: task.taskId,
-      },
-    }),
-    step('publish-development-package', {
-      uses: 'component.dev_publish@1',
-      with: {
-        command: task.devPublishCommand,
-        repository: task.componentRepository,
-        taskId: task.taskId,
-      },
-    }),
-    wait('wait-for-final-publish', {
-      for: 'final_publish@1',
-    }),
-    step('consume-published-version', {
-      uses: 'component.consume_published@1',
-      with: taskInput(
-        task,
-        'Consume the exact package version supplied by the resolved final-publish signal.',
-      ),
-    }),
+    ...translationNodes(task, task.componentRepository, profile),
+    ...publicationNodes,
     step('verify-targeted', {
       uses: 'verify.targeted@1',
-      with: verificationInput(task, 'translation_and_targeted'),
+      with: verificationInput(task, verificationProfile),
     }),
     step('prepare-pr', {
       uses: 'pr.prepare@1',
@@ -196,6 +230,7 @@ const translationCrossRepoRoot = (
     }),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
+};
 
 export const selectWorkflowTemplate = (fixture: TaskFixture): WorkflowTemplateId =>
   fixture.family === 'short_bugfix' ? 'short_bugfix' : 'feature_with_review';
@@ -240,11 +275,11 @@ export const materializeTaskWorkflow = (fixture: TaskFixture): WorkflowSource =>
         }),
       });
 
-    case 'translation_cross_repo':
+    case 'shared_component':
       return defineWorkflow({
         id: `${fixture.fixtureId}-workflow`,
         version: 1,
-        root: translationCrossRepoRoot(fixture),
+        root: sharedComponentRoot(fixture),
       });
   }
 };

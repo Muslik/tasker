@@ -2,12 +2,12 @@ import { z } from 'zod';
 
 import { JsonValueSchema } from '../workflow/schema.js';
 
-export const M1_VIEW_SCHEMA_VERSION = 1;
+export const M1_VIEW_SCHEMA_VERSION = 2;
 
 export const FixtureFamilySchema = z.enum([
   'short_bugfix',
   'feature_with_review',
-  'translation_cross_repo',
+  'shared_component',
   'invalid_workflow',
 ]);
 
@@ -26,6 +26,16 @@ export const WorkflowValidationIssueViewSchema = z
     message: z.string().min(1),
     path: z.array(z.union([z.string(), z.number()])),
     details: JsonValueSchema.optional(),
+  })
+  .strict();
+
+export const WorkflowAssemblyDecisionViewSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    source: z.string().min(1),
+    reason: z.string().min(1),
+    effect: z.string().min(1),
   })
   .strict();
 
@@ -87,6 +97,7 @@ export const WorkflowViewSchema = z
     workflow: z
       .object({
         proposalId: z.string().min(1),
+        assemblyDecisions: z.array(WorkflowAssemblyDecisionViewSchema).min(1),
         templateId: z.string().min(1),
         status: z.enum(['valid', 'rejected']),
         graphHash: z.string().min(1).nullable(),
@@ -147,8 +158,74 @@ export const ApiErrorResponseSchema = z
   })
   .strict();
 
+export const OperatorTaskStatusSchema = z.enum([
+  'backlog',
+  'planned',
+  'workflow_rejected',
+  'running',
+  'waiting',
+  'needs_attention',
+  'code_review',
+  'done',
+  'failed',
+]);
+
+export const OperatorTaskSummarySchema = z
+  .object({
+    fixture: FixtureSummarySchema,
+    taskId: z.string().min(1),
+    status: OperatorTaskStatusSchema,
+    attention: z.enum(['none', 'operator']),
+    currentStage: z.string().min(1),
+    updatedAt: z.iso.datetime().nullable(),
+  })
+  .strict();
+
+export const OperatorTaskListResponseSchema = z
+  .object({
+    tasks: z.array(OperatorTaskSummarySchema),
+    streamCursor: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const OperatorActivityEntrySchema = z
+  .object({
+    sequence: z.number().int().positive(),
+    occurredAt: z.iso.datetime(),
+    source: z.enum(['kernel', 'planner', 'agent', 'tool', 'operator']),
+    level: z.enum(['info', 'warning', 'error']),
+    title: z.string().min(1),
+    detail: z.string().min(1),
+  })
+  .strict();
+
+export const OperatorActivityResponseSchema = z
+  .object({
+    fixtureId: z.string().min(1),
+    providerSession: z
+      .object({
+        status: z.literal('not_started'),
+        reason: z.literal('m1_planning_only'),
+      })
+      .strict(),
+    entries: z.array(OperatorActivityEntrySchema),
+  })
+  .strict();
+
+export const OperatorStreamEventSchema = z
+  .object({
+    sequence: z.number().int().positive(),
+    fixtureId: z.string().min(1),
+    eventType: z.string().min(1),
+  })
+  .strict();
+
 export type FixtureFamily = z.infer<typeof FixtureFamilySchema>;
 export type FixtureSummary = z.infer<typeof FixtureSummarySchema>;
 export type WorkflowTreeNode = z.infer<typeof WorkflowTreeNodeSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
+export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
+export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;
+export type OperatorActivityResponse = z.infer<typeof OperatorActivityResponseSchema>;
+export type OperatorStreamEvent = z.infer<typeof OperatorStreamEventSchema>;

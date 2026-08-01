@@ -214,22 +214,28 @@ workflow Tasker proposes before any provider or integration executes.
 3. Implement analyzer output as an untrusted `WorkflowProposal` artifact.
 4. Implement deterministic compiler/validator that materializes the immutable graph.
 5. Persist snapshot, validator report, graph hash, provider capabilities, retry
-   budgets, waits, expected artifacts, and verification-plan rationale.
+   budgets, waits, expected artifacts, verification-plan rationale, and ordered
+   workflow-assembly decisions.
 6. Implement graph diff from template to task-specific graph.
 7. Add local HTTP read API for intake/task/run/graph projections.
-8. Add a minimal React/Vite cockpit page with:
-   - fixture/task selector;
-   - intake and eligibility result;
-   - workflow tree;
-   - node type/status/retry budget/wait icon;
+8. Add a React/Vite operator console with:
+   - a left task queue with persisted statuses and attention state;
+   - a center task surface with **Why this workflow** and the persisted activity
+     timeline;
+   - a right sticky current-workflow tree with node type/status/retry budget/waits;
    - verification profile and rationale;
-   - validation errors and graph JSON download.
+   - validation errors and graph JSON download;
+   - a native SSE feed that announces new ledger events and refreshes projections;
+   - the raw template diff collapsed under diagnostics rather than used as the main
+     workflow explanation.
 9. Keep the cockpit read-only in this milestone.
 10. Add a CLI graph renderer as a fallback/debug surface.
 
 ### Acceptance evidence
 
-- the three task families compile into distinct valid graphs;
+- four accepted task/policy combinations compile into distinct valid graphs;
+- copy intent in an external-translation project adds extract/wait/pull, while the
+  inline/JSON project adds none of those nodes;
 - identical task/policy input produces the same graph hash;
 - unknown step, missing terminal path, unmet capability, unsafe effect, or unbounded
   loop is shown as a validation failure and cannot be queued;
@@ -240,15 +246,16 @@ workflow Tasker proposes before any provider or integration executes.
 
 1. Open the local cockpit.
 2. Choose a fixture task.
-3. Click `Generate workflow`.
-4. Inspect the visible tree, template diff, waits, bounded loops, and verification
-   rationale.
+3. Click `Generate workflow` and see the left status and center ledger activity update
+   from the event stream.
+4. Inspect **Why this workflow**, the right-side tree, waits, bounded loops, and
+   verification rationale; expand the template diff only when debugging the compiler.
 5. restart the process and show the same persisted graph/hash.
 6. submit an invalid graph fixture and show a precise validator error.
 
 ### Artifacts
 
-- three compiled graph fixtures;
+- four compiled task/policy fixtures;
 - graph/template diff artifacts;
 - cockpit screenshot/video;
 - validator report examples;
