@@ -36,6 +36,9 @@ flowchart LR
 - strict Zod parsing at fixture, proposal, projection, HTTP, and browser boundaries;
 - graph SHA-256, template-to-task diff, retry budgets, waits, expected artifacts,
   capability inventory, and verification rationale;
+- compiler rejection of wait cursors that reference a node absent from the graph;
+- an explicit `consume-published-version` step after the human final-publish wait in
+  the cross-repository flow;
 - atomic ledger commit of intake/task/workflow events, snapshot, projections, and
   linked proposal/validator/diff/graph artifacts;
 - persisted accepted and rejected outcomes with no outbox command;

@@ -165,6 +165,23 @@ const stepDefinitions: readonly M1StepDefinition[] = [
   },
   {
     contract: {
+      id: 'component.consume_published',
+      version: '1',
+      inputSchema: taskInputSchema,
+      outputSchema: z.looseObject({}),
+      allowedEffects: ['workspace.write'],
+      requiredCapabilities: ['repository.read', 'workspace.write'],
+      resumeBoundary: 'step',
+      idempotency: 'key',
+      retryPolicy: 'bounded:2',
+      waitKinds: [],
+      artifactContracts: ['consumer-version-diff'],
+      reconciliation: { strategy: 'receipt' },
+    },
+    retryBudget: 2,
+  },
+  {
+    contract: {
       id: 'unsafe.effect',
       version: '1',
       inputSchema: taskInputSchema,

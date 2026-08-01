@@ -82,6 +82,7 @@ export interface ValidationIssue {
     | 'invalid_source'
     | 'invalid_terminal_structure'
     | 'missing_terminal_path'
+    | 'unknown_resume_target'
     | 'unknown_reference'
     | 'wait_without_resolution_contract';
   readonly message: string;

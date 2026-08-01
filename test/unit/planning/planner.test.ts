@@ -105,5 +105,10 @@ describe('M1 task workflow planning', () => {
     expect(
       Object.values(result.value.presentation.nodes).some((node) => node.kind === 'wait'),
     ).toBe(true);
+    expect(result.value.presentation.nodes['consume-published-version']).toMatchObject({
+      kind: 'step',
+      uses: 'component.consume_published@1',
+    });
+    expect(result.value.proposal.waits.every((wait) => wait.resumeAt === undefined)).toBe(true);
   });
 });

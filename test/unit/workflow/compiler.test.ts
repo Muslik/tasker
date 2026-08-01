@@ -148,7 +148,7 @@ describe('workflow compiler', () => {
         wait('code-review', {
           for: 'review_event@1',
           slotPolicy: 'release',
-          resumeAt: 'post-review',
+          resumeAt: 'waiting-for-review',
         }),
         finalize('waiting-for-review', {
           outcome: 'waiting_for_review',
@@ -498,6 +498,37 @@ describe('workflow compiler', () => {
           outcome: 'waiting_for_review',
         },
       ],
+    });
+  });
+
+  it('rejects a wait resume cursor that does not reference a graph node', () => {
+    const result = compileWorkflow({
+      contracts: baseContracts(),
+      source: defineWorkflow({
+        id: 'orphan-resume-target',
+        version: 1,
+        root: sequence('delivery', [
+          wait('code-review', {
+            for: 'review_event@1',
+            resumeAt: 'missing-review-handler',
+          }),
+          finalize('done', { outcome: 'waiting_for_review' }),
+        ]),
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error.issues).toContainEqual({
+      code: 'unknown_resume_target',
+      message: 'Wait "code-review" resumes at unknown node "missing-review-handler"',
+      path: ['root', 'children', 0, 'resumeAt'],
+      details: {
+        nodeId: 'code-review',
+        resumeAt: 'missing-review-handler',
+      },
     });
   });
 

@@ -71,7 +71,6 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
     }),
     wait('wait-for-code-review', {
       for: 'code_review@1',
-      resumeAt: 'process-review-comments',
     }),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
@@ -122,7 +121,6 @@ const featureWithReviewRoot = (
     }),
     wait('wait-for-code-review', {
       for: 'code_review@1',
-      resumeAt: 'process-review-comments',
     }),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
@@ -158,7 +156,6 @@ const translationCrossRepoRoot = (
     }),
     wait('wait-for-translator', {
       for: 'translation_complete@1',
-      resumeAt: 'pull-translations',
     }),
     step('pull-translations', {
       uses: 'translations.pull@1',
@@ -178,7 +175,13 @@ const translationCrossRepoRoot = (
     }),
     wait('wait-for-final-publish', {
       for: 'final_publish@1',
-      resumeAt: 'consume-published-version',
+    }),
+    step('consume-published-version', {
+      uses: 'component.consume_published@1',
+      with: taskInput(
+        task,
+        'Consume the exact package version supplied by the resolved final-publish signal.',
+      ),
     }),
     step('verify-targeted', {
       uses: 'verify.targeted@1',
@@ -190,7 +193,6 @@ const translationCrossRepoRoot = (
     }),
     wait('wait-for-code-review', {
       for: 'code_review@1',
-      resumeAt: 'process-review-comments',
     }),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);

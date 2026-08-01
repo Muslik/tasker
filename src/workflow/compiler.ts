@@ -37,6 +37,11 @@ interface ValidationContext {
   readonly contracts: WorkflowCompilerContracts;
   readonly duplicateIds: Map<string, IssuePath>;
   readonly issues: ValidationIssue[];
+  readonly resumeTargets: {
+    readonly nodeId: string;
+    readonly path: IssuePath;
+    readonly target: string;
+  }[];
   readonly references: {
     readonly predicates: Set<string>;
     readonly stepTypes: Set<string>;
@@ -122,6 +127,7 @@ const createValidationContext = (contracts: WorkflowCompilerContracts): Validati
   contracts,
   duplicateIds: new Map<string, IssuePath>(),
   issues: [],
+  resumeTargets: [],
   references: {
     predicates: new Set<string>(),
     stepTypes: new Set<string>(),
@@ -381,6 +387,14 @@ const normalizeNode = (
     case 'wait': {
       const waitContract = validateWaitReference(context, node.for, [...path, 'for']);
 
+      if (node.resumeAt !== undefined) {
+        context.resumeTargets.push({
+          nodeId: node.id,
+          path: [...path, 'resumeAt'],
+          target: node.resumeAt,
+        });
+      }
+
       return {
         kind: 'wait',
         id: node.id,
@@ -559,6 +573,21 @@ const compileValidWorkflow = (
   context: ValidationContext,
 ): Outcome<CompiledWorkflowArtifact, ValidationReport> => {
   const root = normalizeNode(context, source.root, ['root']);
+
+  for (const resumeTarget of context.resumeTargets) {
+    if (!context.duplicateIds.has(resumeTarget.target)) {
+      addIssue(context, {
+        code: 'unknown_resume_target',
+        message: `Wait "${resumeTarget.nodeId}" resumes at unknown node "${resumeTarget.target}"`,
+        path: resumeTarget.path,
+        details: {
+          nodeId: resumeTarget.nodeId,
+          resumeAt: resumeTarget.target,
+        },
+      });
+    }
+  }
+
   const terminalAnalysis = analyzeTerminalStructure(context, root, ['root']);
 
   if (terminalAnalysis.mayContinue) {
