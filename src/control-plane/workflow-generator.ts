@@ -150,7 +150,7 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
   private async generateOnce(taskReference: string): Promise<WorkflowGenerationResult> {
     const existing = this.service.read(taskReference);
     if (!existing.ok) return existing;
-    if (existing.value !== null) return { ok: true, value: existing.value };
+    if (existing.value?.status === 'ready') return { ok: true, value: existing.value };
 
     const subject = this.subjects.resolve(taskReference);
     if (!subject.ok) return subject;

@@ -114,20 +114,33 @@ export class M1WorkflowStore {
     artifacts: M1WorkflowArtifacts,
     analyzerReceipt?: WorkflowAnalyzerReceipt,
   ): Outcome<M1StoreResult, M1StoreError> {
-    const view = WorkflowViewSchema.parse(viewInput);
-    const existing = this.read(view.fixture.id);
+    const candidateView = WorkflowViewSchema.parse(viewInput);
+    const existing = this.read(candidateView.fixture.id);
 
     if (!existing.ok) {
       return existing;
     }
 
-    if (existing.value !== null) {
+    if (existing.value?.workflow.status === 'valid') {
       return ok({ disposition: 'already_exists', view: existing.value });
     }
 
-    const fixtureId = view.fixture.id;
+    const fixtureId = candidateView.fixture.id;
     const aggregateId = workflowAggregateId(fixtureId);
-    const proposalArtifactId = `proposal:${fixtureId}`;
+    const existingEvents = this.ledger.listEvents(aggregateId);
+    const attempt =
+      existingEvents.filter(
+        (event) => event.eventType === 'WorkflowPlanned' || event.eventType === 'WorkflowRejected',
+      ).length + 1;
+    const attemptSuffix = attempt === 1 ? '' : `:attempt-${String(attempt)}`;
+    const proposalArtifactId = `proposal:${fixtureId}${attemptSuffix}`;
+    const view =
+      attempt === 1
+        ? candidateView
+        : WorkflowViewSchema.parse({
+            ...candidateView,
+            workflow: { ...candidateView.workflow, proposalId: proposalArtifactId },
+          });
     const artifactWrites: ArtifactWrite[] = [
       {
         artifactId: proposalArtifactId,
@@ -137,17 +150,17 @@ export class M1WorkflowStore {
         metadata: { analyzer: artifacts.analyzerVersion },
       },
       {
-        artifactId: `validator:${fixtureId}`,
+        artifactId: `validator:${fixtureId}${attemptSuffix}`,
         artifactKind: 'workflow_validator_report',
-        storageUri: `ledger://artifacts/validator:${fixtureId}`,
+        storageUri: `ledger://artifacts/validator:${fixtureId}${attemptSuffix}`,
         payload: artifacts.validatorReport,
         metadata: { workflowStatus: view.workflow.status },
         parentArtifactId: proposalArtifactId,
       },
       {
-        artifactId: `diff:${fixtureId}`,
+        artifactId: `diff:${fixtureId}${attemptSuffix}`,
         artifactKind: 'workflow_template_diff',
-        storageUri: `ledger://artifacts/diff:${fixtureId}`,
+        storageUri: `ledger://artifacts/diff:${fixtureId}${attemptSuffix}`,
         payload: artifacts.diff,
         metadata: { templateId: view.workflow.templateId },
         parentArtifactId: proposalArtifactId,
@@ -156,9 +169,9 @@ export class M1WorkflowStore {
 
     if (artifacts.compiledGraph !== undefined) {
       artifactWrites.push({
-        artifactId: `graph:${fixtureId}`,
+        artifactId: `graph:${fixtureId}${attemptSuffix}`,
         artifactKind: 'compiled_workflow_graph',
-        storageUri: `ledger://artifacts/graph:${fixtureId}`,
+        storageUri: `ledger://artifacts/graph:${fixtureId}${attemptSuffix}`,
         payload: artifacts.compiledGraph,
         metadata: { graphHash: view.workflow.graphHash ?? 'rejected' },
         parentArtifactId: proposalArtifactId,
@@ -167,9 +180,9 @@ export class M1WorkflowStore {
 
     if (analyzerReceipt !== undefined) {
       artifactWrites.push({
-        artifactId: `analyzer-receipt:${fixtureId}`,
+        artifactId: `analyzer-receipt:${fixtureId}${attemptSuffix}`,
         artifactKind: 'workflow_analyzer_receipt',
-        storageUri: `ledger://artifacts/analyzer-receipt:${fixtureId}`,
+        storageUri: `ledger://artifacts/analyzer-receipt:${fixtureId}${attemptSuffix}`,
         payload: asJson(analyzerReceipt),
         metadata: {
           analyzer: analyzerReceipt.analyzerVersion,
@@ -179,34 +192,36 @@ export class M1WorkflowStore {
     }
 
     const persistedAt = this.clock.now();
-    const events: EventWrite[] = fixtureId.startsWith('jira:')
-      ? []
-      : [
-          {
-            eventId: `event:intake-accepted:${fixtureId}`,
-            eventType: 'IntakeAccepted',
-            eventSchemaVersion: 1,
-            payload: { fixtureId, intakeId: view.intake.id },
-            actor: 'm1_local_fixture',
-          },
-          {
-            eventId: `event:task-created:${fixtureId}`,
-            eventType: 'TaskCreated',
-            eventSchemaVersion: 1,
-            payload: { fixtureId, taskId: view.task.id },
-            actor: 'm1_local_fixture',
-          },
-        ];
+    const events: EventWrite[] =
+      fixtureId.startsWith('jira:') || existingEvents.length > 0
+        ? []
+        : [
+            {
+              eventId: `event:intake-accepted:${fixtureId}`,
+              eventType: 'IntakeAccepted',
+              eventSchemaVersion: 1,
+              payload: { fixtureId, intakeId: view.intake.id },
+              actor: 'm1_local_fixture',
+            },
+            {
+              eventId: `event:task-created:${fixtureId}`,
+              eventType: 'TaskCreated',
+              eventSchemaVersion: 1,
+              payload: { fixtureId, taskId: view.task.id },
+              actor: 'm1_local_fixture',
+            },
+          ];
 
     if (analyzerReceipt !== undefined) {
       events.push({
-        eventId: `event:workflow-analyzed:${fixtureId}`,
+        eventId: `event:workflow-analyzed:${fixtureId}${attemptSuffix}`,
         eventType: 'WorkflowAnalyzed',
         eventSchemaVersion: 1,
         payload: {
           analyzerVersion: analyzerReceipt.analyzerVersion,
           durationMs: analyzerReceipt.durationMs,
           fixtureId,
+          attempt,
           sessionId: analyzerReceipt.sessionId,
           usage: asJson(analyzerReceipt.usage),
         },
@@ -215,11 +230,12 @@ export class M1WorkflowStore {
     }
 
     events.push({
-      eventId: `event:workflow-planned:${fixtureId}`,
+      eventId: `event:workflow-planned:${fixtureId}${attemptSuffix}`,
       eventType: view.workflow.status === 'valid' ? 'WorkflowPlanned' : 'WorkflowRejected',
       eventSchemaVersion: 1,
       payload: {
         fixtureId,
+        attempt,
         graphHash: view.workflow.graphHash,
         status: view.workflow.status,
       },
@@ -262,14 +278,14 @@ export class M1WorkflowStore {
     const result = this.ledger.transact({
       aggregate: {
         aggregateId,
-        expectedVersion: 0,
+        expectedVersion: existingEvents.length,
         events,
       },
       snapshots: [
         {
-          snapshotId: `snapshot:${fixtureId}`,
+          snapshotId: `snapshot:${fixtureId}${attemptSuffix}`,
           aggregateId,
-          aggregateVersion: events.length,
+          aggregateVersion: existingEvents.length + events.length,
           snapshotSchemaVersion: 1,
           payload: asJson(view),
         },

@@ -207,6 +207,13 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
   await expect(page.getByTestId('validation-errors')).toBeVisible();
   await expect(page.getByTestId('workflow-sidebar')).toContainText('rejected');
   await expect(page.getByTestId('workflow-tree')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Regenerate workflow' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Regenerate workflow' }).click();
+
+  await expect(
+    page.getByTestId('task-activity-timeline').getByText('Workflow rejected'),
+  ).toHaveCount(2);
 });
 
 test('reloading restores the persisted workflow for the selected task', async ({ page }) => {

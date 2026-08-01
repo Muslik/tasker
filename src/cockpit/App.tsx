@@ -416,14 +416,19 @@ const SelectedTaskHeader = ({
           )}
         </div>
       </div>
-      {task.status === 'backlog' && task.planning.status === 'available' ? (
+      {(task.status === 'backlog' || task.status === 'workflow_rejected') &&
+      task.planning.status === 'available' ? (
         <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
           {generating ? (
             <LoaderCircle data-icon="inline-start" className="animate-spin" />
           ) : (
             <Sparkles data-icon="inline-start" />
           )}
-          {generating ? 'Generating…' : 'Generate workflow'}
+          {generating
+            ? 'Generating…'
+            : task.status === 'workflow_rejected'
+              ? 'Regenerate workflow'
+              : 'Generate workflow'}
         </Button>
       ) : task.origin.kind === 'jira' ? (
         <div className="flex items-center gap-1.5">
@@ -1476,7 +1481,7 @@ export const App = () => {
   const handleGenerate = (): void => {
     if (
       selectedTask === null ||
-      selectedTask.status !== 'backlog' ||
+      (selectedTask.status !== 'backlog' && selectedTask.status !== 'workflow_rejected') ||
       selectedTask.planning.status !== 'available'
     ) {
       return;

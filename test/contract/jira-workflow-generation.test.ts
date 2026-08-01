@@ -21,6 +21,7 @@ import {
 import { WorkflowAnalyzerReceiptSchema } from '../../src/providers/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
+import { WorkflowSourceSchema } from '../../src/workflow/index.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
 import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
@@ -65,15 +66,39 @@ describe('Jira workflow generation', () => {
     });
     const proposal = analyzeTaskFixture(task);
     if (!proposal.ok) throw new Error('Expected a valid analyzer fixture');
+    const validSource = WorkflowSourceSchema.parse(proposal.value.source);
+    if (validSource.root.kind !== 'sequence') throw new Error('Expected a sequence workflow');
+    const invalidSource = WorkflowSourceSchema.parse({
+      ...validSource,
+      root: {
+        ...validSource.root,
+        children: validSource.root.children.map((node) =>
+          node.kind === 'bounded_loop' && node.body.kind === 'sequence'
+            ? {
+                ...node,
+                body: {
+                  ...node.body,
+                  children: node.body.children.map((child) =>
+                    child.kind === 'step' && child.id === 'verify-targeted'
+                      ? { ...child, with: { taskId: 'AVIA-13235' } }
+                      : child,
+                  ),
+                },
+              }
+            : node,
+        ),
+      },
+    });
     const requests: Parameters<WorkflowAnalyzer['analyze']>[0][] = [];
     const analyzer: WorkflowAnalyzer = {
       analyze: (request) => {
         requests.push(request);
+        const attempt = requests.length;
         return Promise.resolve(
           ok({
             output: WorkflowAnalyzerOutputSchema.parse({
               assemblyDecisions: proposal.value.assemblyDecisions,
-              source: proposal.value.source,
+              source: attempt === 1 ? invalidSource : validSource,
               verificationPlan: proposal.value.verificationPlan,
             }),
             receipt: WorkflowAnalyzerReceiptSchema.parse({
@@ -83,11 +108,11 @@ describe('Jira workflow generation', () => {
               cliVersion: 'codex-cli test',
               model: 'gpt-5.4',
               serviceTier: 'fast',
-              sessionId: 'jira-workflow-session',
-              promptHash: 'a'.repeat(64),
+              sessionId: `jira-workflow-session-${String(attempt)}`,
+              promptHash: String(attempt).repeat(64),
               durationMs: 1234,
               usage: {
-                inputTokens: 1000,
+                inputTokens: attempt * 1000,
                 cachedInputTokens: 500,
                 outputTokens: 200,
                 reasoningOutputTokens: 50,
@@ -106,8 +131,10 @@ describe('Jira workflow generation', () => {
       analyzer,
     );
 
+    const rejected = await generator.generate('jira:AVIA-13235');
     const generated = await generator.generate('jira:AVIA-13235');
 
+    expect(rejected).toMatchObject({ ok: true, value: { status: 'rejected' } });
     expect(generated).toMatchObject({
       ok: true,
       value: {
@@ -115,9 +142,9 @@ describe('Jira workflow generation', () => {
         view: { fixture: { id: 'jira:AVIA-13235' }, workflow: { status: 'valid' } },
       },
     });
-    expect(requests).toHaveLength(1);
-    const request = requests[0];
-    if (request === undefined) throw new Error('Expected one analyzer request');
+    expect(requests).toHaveLength(2);
+    const request = requests[1];
+    if (request === undefined) throw new Error('Expected a retry analyzer request');
     const evidence = z
       .object({
         origin: z.literal('jira'),
@@ -158,9 +185,22 @@ describe('Jira workflow generation', () => {
     ).toEqual(['profile', 'taskId']);
     expect(
       ledger.repository.listEvents('workflow:jira:AVIA-13235').map((event) => event.eventType),
-    ).toEqual(['WorkflowAnalyzed', 'WorkflowPlanned']);
+    ).toEqual(['WorkflowAnalyzed', 'WorkflowRejected', 'WorkflowAnalyzed', 'WorkflowPlanned']);
+    expect(ledger.repository.readArtifact('validator:jira:AVIA-13235')).not.toBeNull();
+    expect(ledger.repository.readArtifact('graph:jira:AVIA-13235:attempt-2')).not.toBeNull();
     expect(
       ledger.repository.listEvents('intake:jira:AVIA-13235').map((event) => event.eventType),
     ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
+    const activity = service.readActivity('jira:AVIA-13235');
+    expect(activity.ok).toBe(true);
+    if (!activity.ok) throw new Error('Expected regenerated workflow activity');
+    expect(
+      activity.value.entries
+        .filter((entry) => entry.title === 'Task and repository analyzed')
+        .map((entry) => entry.detail),
+    ).toEqual([
+      'Codex completed read-only analysis in 1234 ms using 1200 measured tokens.',
+      'Codex completed read-only analysis in 1234 ms using 2200 measured tokens.',
+    ]);
   });
 });

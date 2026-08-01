@@ -1,5 +1,6 @@
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import { z } from 'zod';
 import {
   findTaskFixture,
   createWorkflowProposalFromAnalyzerOutput,
@@ -70,6 +71,18 @@ interface BuiltView {
   readonly artifacts: M1WorkflowArtifacts;
   readonly view: WorkflowView;
 }
+
+const WorkflowAnalyzedEventPayloadSchema = z
+  .object({
+    durationMs: z.number().nonnegative(),
+    usage: z
+      .object({
+        inputTokens: z.number().int().nonnegative(),
+        outputTokens: z.number().int().nonnegative(),
+      })
+      .loose(),
+  })
+  .loose();
 
 const fixturePurpose = (fixture: TaskFixture): string => {
   if (fixture.expected === 'rejected') {
@@ -457,17 +470,16 @@ export class M1WorkflowService {
             detail: 'The task projection was created in the durable ledger transaction.',
           };
         case 'WorkflowAnalyzed': {
-          const session = analyzerSession.value;
+          const analysis = WorkflowAnalyzedEventPayloadSchema.safeParse(event.payload);
           return {
             sequence: event.sequence,
             occurredAt: event.occurredAt,
             source,
             level: 'info' as const,
             title: 'Task and repository analyzed',
-            detail:
-              session === null
-                ? 'The provider proposal was persisted before deterministic validation.'
-                : `Codex completed read-only analysis in ${String(Math.round(session.durationMs))} ms using ${String(session.usage.inputTokens + session.usage.outputTokens)} measured tokens.`,
+            detail: !analysis.success
+              ? 'The provider proposal was persisted before deterministic validation.'
+              : `Codex completed read-only analysis in ${String(Math.round(analysis.data.durationMs))} ms using ${String(analysis.data.usage.inputTokens + analysis.data.usage.outputTokens)} measured tokens.`,
           };
         }
         case 'WorkflowPlanned':
@@ -566,7 +578,7 @@ export class M1WorkflowService {
   public generateTask(fixture: TaskFixture): Outcome<WorkflowResponse, M1ServiceError> {
     const existing = this.read(fixture.fixtureId);
     if (!existing.ok) return existing;
-    if (existing.value !== null) return ok(existing.value);
+    if (existing.value?.status === 'ready') return ok(existing.value);
 
     return this.persistPlanning(fixture, planTaskWorkflow(fixture));
   }
@@ -591,7 +603,7 @@ export class M1WorkflowService {
   ): Outcome<WorkflowResponse, M1ServiceError> {
     const existing = this.read(fixture.fixtureId);
     if (!existing.ok) return existing;
-    if (existing.value !== null) return ok(existing.value);
+    if (existing.value?.status === 'ready') return ok(existing.value);
 
     const proposal = createWorkflowProposalFromAnalyzerOutput(
       fixture,
