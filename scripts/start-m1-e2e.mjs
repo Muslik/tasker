@@ -24,6 +24,11 @@ const [control, jira, ledgerModule, repositories, shared] = await Promise.all([
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
 const service = control.createM1WorkflowService(ledger.repository, shared.systemClock);
+const runService = new control.DeterministicStubRunService(
+  ledger.repository,
+  service,
+  shared.systemClock,
+);
 const snapshot = jira.JiraIssueSnapshotSchema.parse({
   schemaVersion: 1,
   issueKey: 'AVIA-13235',
@@ -108,7 +113,7 @@ const workflowGenerator = new control.CodexWorkflowGenerator(
   service,
   new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService),
 );
-const api = control.buildM1Api({ service, jiraIssueService, workflowGenerator });
+const api = control.buildM1Api({ service, jiraIssueService, workflowGenerator, runService });
 
 const close = async () => {
   await api.close();

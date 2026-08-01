@@ -55,7 +55,7 @@ export const WorkflowTreeNodeSchema: z.ZodType<{
   readonly id: string;
   readonly kind: string;
   readonly label: string;
-  readonly status: 'planned';
+  readonly status: 'planned' | 'running' | 'waiting' | 'succeeded' | 'skipped' | 'failed';
   readonly retryBudget: number | null;
   readonly waitKind?: string | undefined;
   readonly slotPolicy?: 'release' | 'retain' | undefined;
@@ -66,7 +66,7 @@ export const WorkflowTreeNodeSchema: z.ZodType<{
       id: z.string().min(1),
       kind: z.string().min(1),
       label: z.string().min(1),
-      status: z.literal('planned'),
+      status: z.enum(['planned', 'running', 'waiting', 'succeeded', 'skipped', 'failed']),
       retryBudget: z.number().int().nonnegative().nullable(),
       waitKind: z.string().min(1).optional(),
       slotPolicy: z.enum(['release', 'retain']).optional(),
@@ -136,7 +136,7 @@ export const WorkflowViewSchema = z
             rationale: z.string().min(1),
           })
           .strict(),
-        executable: z.literal(false),
+        executable: z.boolean(),
       })
       .strict(),
     persistedAt: z.iso.datetime(),

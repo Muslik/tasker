@@ -12,7 +12,15 @@ import {
   ApiErrorResponseSchema,
   OperatorActivityResponseSchema,
   OperatorTaskSummarySchema,
+  WorkflowResponseSchema,
+  type OperatorTaskSummary,
 } from './m1-contracts.js';
+import {
+  RunProjectionSchema,
+  type DeterministicStubRunService,
+  type RunProjection,
+  type StubRunError,
+} from '../runner/index.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
 
@@ -34,6 +42,7 @@ export interface BuildM1ApiOptions {
   readonly logger?: boolean | undefined;
   readonly workflowGenerator?: WorkflowGenerator | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
+  readonly runService?: DeterministicStubRunService | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -93,6 +102,58 @@ const sendJiraServiceError = (reply: FastifyReply, error: JiraIssueServiceError)
   }
 };
 
+const sendRunError = (reply: FastifyReply, error: StubRunError): FastifyReply => {
+  switch (error.kind) {
+    case 'workflow_not_found':
+      return reply.code(404).send(apiError(error.kind, 'Generate this workflow first'));
+    case 'workflow_not_executable':
+      return reply.code(409).send(apiError(error.kind, 'Only a valid compiled workflow can start'));
+    case 'run_not_found':
+      return reply.code(404).send(apiError(error.kind, 'This workflow has not started'));
+    case 'run_not_waiting':
+      return reply.code(409).send(apiError(error.kind, 'The run is not waiting for a signal'));
+    case 'projection_corrupt':
+      return reply.code(500).send(apiError(error.kind, 'The persisted run projection is invalid'));
+    case 'ledger_conflict':
+      return reply.code(409).send(apiError(error.kind, 'The run changed concurrently; reload it'));
+  }
+};
+
+const applyRunToTask = (
+  task: OperatorTaskSummary,
+  run: RunProjection | null,
+): OperatorTaskSummary => {
+  if (run === null) return task;
+  if (run.status === 'executing') {
+    return OperatorTaskSummarySchema.parse({
+      ...task,
+      status: 'running',
+      attention: 'none',
+      currentStage: 'Executing deterministic stub workflow',
+      updatedAt: run.updatedAt,
+    });
+  }
+  if (run.status === 'waiting') {
+    const codeReview = run.wait?.waitKind === 'code_review@1';
+    return OperatorTaskSummarySchema.parse({
+      ...task,
+      status: codeReview ? 'code_review' : 'waiting',
+      attention: 'operator',
+      currentStage: codeReview
+        ? 'Waiting for code review'
+        : `Waiting for ${(run.wait?.waitKind ?? 'external signal').replace('@1', '').replaceAll('_', ' ')}`,
+      updatedAt: run.updatedAt,
+    });
+  }
+  return OperatorTaskSummarySchema.parse({
+    ...task,
+    status: 'done',
+    attention: 'none',
+    currentStage: 'Workflow completed',
+    updatedAt: run.updatedAt,
+  });
+};
+
 const contentType = (filename: string): string => {
   switch (extname(filename)) {
     case '.css':
@@ -137,7 +198,17 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   api.get('/api/operator/tasks', (_request, reply) => {
     const result = options.service.listOperatorTasks();
     if (!result.ok) return sendServiceError(reply, result.error);
-    if (options.jiraIssueService === undefined) return reply.send(result.value);
+    const withRunState = (task: OperatorTaskSummary): OperatorTaskSummary => {
+      if (options.runService === undefined) return task;
+      const run = options.runService.read(task.id);
+      return run.ok ? applyRunToTask(task, run.value) : task;
+    };
+    if (options.jiraIssueService === undefined) {
+      return reply.send({
+        ...result.value,
+        tasks: result.value.tasks.map(withRunState),
+      });
+    }
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
     if (!jiraTasks.ok) return sendJiraServiceError(reply, jiraTasks.error);
     const hydratedJiraTasks = [];
@@ -145,22 +216,24 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       const workflow = options.service.read(task.id);
       if (!workflow.ok) return sendServiceError(reply, workflow.error);
       hydratedJiraTasks.push(
-        workflow.value === null
-          ? task
-          : OperatorTaskSummarySchema.parse({
-              ...task,
-              status: workflow.value.status === 'ready' ? 'planned' : 'workflow_rejected',
-              attention: workflow.value.status === 'ready' ? 'none' : 'operator',
-              currentStage:
-                workflow.value.status === 'ready'
-                  ? 'Workflow ready · execution disabled in M1'
-                  : 'Workflow validation failed',
-              updatedAt: workflow.value.view.persistedAt,
-            }),
+        withRunState(
+          workflow.value === null
+            ? task
+            : OperatorTaskSummarySchema.parse({
+                ...task,
+                status: workflow.value.status === 'ready' ? 'planned' : 'workflow_rejected',
+                attention: workflow.value.status === 'ready' ? 'none' : 'operator',
+                currentStage:
+                  workflow.value.status === 'ready'
+                    ? 'Workflow ready · ready to start'
+                    : 'Workflow validation failed',
+                updatedAt: workflow.value.view.persistedAt,
+              }),
+        ),
       );
     }
     return reply.send({
-      tasks: [...hydratedJiraTasks, ...result.value.tasks],
+      tasks: [...hydratedJiraTasks, ...result.value.tasks.map(withRunState)],
       streamCursor: result.value.streamCursor,
     });
   });
@@ -183,15 +256,27 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             workflowResult.value.providerSession.status === 'completed'
               ? workflowResult.value.providerSession
               : jiraResult.value.providerSession,
-          entries: [...jiraResult.value.entries, ...workflowResult.value.entries].sort(
-            (left, right) => left.sequence - right.sequence,
-          ),
+          entries: [
+            ...jiraResult.value.entries,
+            ...workflowResult.value.entries,
+            ...(options.runService?.readActivity(params.data.fixtureId) ?? []),
+          ].sort((left, right) => left.sequence - right.sequence),
         }),
       );
     }
 
     const result = options.service.readActivity(params.data.fixtureId);
-    return result.ok ? reply.send(result.value) : sendServiceError(reply, result.error);
+    return result.ok
+      ? reply.send(
+          OperatorActivityResponseSchema.parse({
+            ...result.value,
+            entries: [
+              ...result.value.entries,
+              ...(options.runService?.readActivity(params.data.fixtureId) ?? []),
+            ].sort((left, right) => left.sequence - right.sequence),
+          }),
+        )
+      : sendServiceError(reply, result.error);
   });
 
   api.get('/api/jira/issues/:issueKey', (request, reply) => {
@@ -271,7 +356,11 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     });
 
     const flush = (): void => {
-      for (const event of options.service.listStreamEventsAfter(cursor)) {
+      const events = [
+        ...options.service.listStreamEventsAfter(cursor),
+        ...(options.runService?.listStreamEventsAfter(cursor) ?? []),
+      ].sort((left, right) => left.sequence - right.sequence);
+      for (const event of events) {
         reply.raw.write(
           `id: ${String(event.sequence)}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`,
         );
@@ -323,7 +412,54 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
     }
 
-    return reply.send(result.value);
+    return reply.send(
+      WorkflowResponseSchema.parse(
+        options.runService?.decorateWorkflow(result.value) ?? result.value,
+      ),
+    );
+  });
+
+  api.get('/api/workflows/:fixtureId/run', (request, reply) => {
+    if (options.runService === undefined) {
+      return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const result = options.runService.read(params.data.fixtureId);
+    if (!result.ok) return sendRunError(reply, result.error);
+    return result.value === null
+      ? reply.code(404).send(apiError('run_not_found', 'This workflow has not started'))
+      : reply.send(RunProjectionSchema.parse(result.value));
+  });
+
+  api.post('/api/workflows/:fixtureId/start', (request, reply) => {
+    if (options.runService === undefined) {
+      return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const result = options.runService.start(params.data.fixtureId);
+    return result.ok
+      ? reply.send(RunProjectionSchema.parse(result.value))
+      : sendRunError(reply, result.error);
+  });
+
+  api.post('/api/workflows/:fixtureId/resume', (request, reply) => {
+    if (options.runService === undefined) {
+      return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const result = options.runService.resume(params.data.fixtureId);
+    return result.ok
+      ? reply.send(RunProjectionSchema.parse(result.value))
+      : sendRunError(reply, result.error);
   });
 
   api.post('/api/workflows/:fixtureId/generate', async (request, reply) => {
@@ -338,7 +474,11 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         : await options.workflowGenerator.generate(params.data.fixtureId);
     if (!result.ok) return sendServiceError(reply, result.error);
 
-    return reply.send(result.value);
+    return reply.send(
+      WorkflowResponseSchema.parse(
+        options.runService?.decorateWorkflow(result.value) ?? result.value,
+      ),
+    );
   });
 
   api.get('/api/workflows/:fixtureId/graph.json', async (request, reply) => {
@@ -376,7 +516,9 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
     }
 
-    return reply.send(result.value.view.workflow);
+    return reply.send(
+      (options.runService?.decorateWorkflow(result.value) ?? result.value).view.workflow,
+    );
   });
 
   if (options.cockpitDirectory !== undefined) {

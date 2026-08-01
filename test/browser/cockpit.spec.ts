@@ -72,7 +72,7 @@ test('the operator console renders the queue and lets me inspect a task', async 
   await expect(page.getByTestId('selected-task')).toContainText(candidate.title);
   await expect(page.getByTestId('selected-task')).toContainText(candidate.currentStage);
   await expect(page.getByTestId('provider-session-banner')).toHaveText(
-    'not started · M1 planning only',
+    'no provider session · deterministic fixture',
   );
 });
 
@@ -151,6 +151,27 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   await expect(page.getByTestId('graph-hash')).not.toHaveText('not compiled');
   await expect(page.getByTestId('workflow-debug-details')).toContainText('Template → task graph');
   await expect(page.getByRole('link', { name: 'Download graph JSON' })).toBeVisible();
+});
+
+test('a planned workflow runs to the durable code-review wait', async ({ page }) => {
+  const tasks = await loadTasks(page);
+  const candidate = requireTask(
+    tasks.tasks.find((task) => task.status === 'planned') ?? pickBacklogTask(tasks.tasks),
+    'Expected a task that can reach stub execution',
+  );
+
+  await page.goto('/');
+  await clickTask(page, candidate.id);
+  if (candidate.status === 'backlog') {
+    await page.getByRole('button', { name: 'Generate workflow' }).click();
+  }
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+
+  await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review');
+  await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText('Run started');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText('Waiting for code review');
+  await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(2);
 });
 
 test('the project profile explains why inline copy adds no translation wait', async ({ page }) => {

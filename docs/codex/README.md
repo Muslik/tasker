@@ -29,18 +29,23 @@ Read in this order:
 11. [`m1.8-jira-workflow-generation.md`](m1.8-jira-workflow-generation.md) — real Jira
     snapshot plus managed checkout through the subscription analyzer, validator, ledger,
     and visible operator graph.
+12. [`m2-stub-execution.md`](m2-stub-execution.md) — first durable execution slice:
+    Start, per-node receipts, restart-safe cursor, realtime runtime state, and a
+    slot-releasing code-review wait.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
-subscription CLI provider. The first full traversal of that graph on durable stub steps
-arrives at M2; corporate integrations remain later milestones.
+subscription CLI provider. M2 has started: an accepted graph can now traverse durable
+stub steps and stop at its persisted code-review wait. Corporate integrations remain
+later milestones.
 
-M0, M1, M1.5, M1.6, M1.7, and M1.8 are now implemented. The read-only operator
+M0, M1, M1.5, M1.6, M1.7, M1.8, and the first M2 vertical slice are implemented. The operator
 console has the task queue on the left, persisted activity and workflow rationale in
 the center, and the current graph on the right. It includes validation failures,
 waits, retry bounds, project/global policy decisions, verification rationale,
 capabilities, collapsed template diagnostics, SSE refresh, and JSON download.
-Execution remains disabled until M2. Provider analysis provenance and measured tokens
-are persisted and visible.
+Execution is currently limited to deterministic local stubs; it performs no provider,
+repository, Jira, Bitbucket, or CI mutation. Provider analysis provenance and measured
+tokens are persisted and visible.
 An imported Jira task with a resolved checkout can now be compiled into a workflow.
 Jira text only selects a conservative admission template; the analyzer receives the
 full Jira snapshot and bounded repository evidence before proposing the graph.

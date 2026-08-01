@@ -3,10 +3,11 @@
 Personal, local-first task-adaptive agent harness. The canonical design and delivery
 status are under [`docs/codex`](docs/codex/README.md).
 
-M0 and M1 are implemented. A local fixture task now becomes an untrusted proposal,
+M0, M1, and the first M2 execution slice are implemented. A local fixture task now becomes an untrusted proposal,
 then a deterministic validated graph with a stable hash, persisted projections, a
-Fastify API, a CLI tree, and a read-only React cockpit. It intentionally cannot invoke
-providers, queue workflow nodes, or mutate remote systems yet.
+Fastify API, a CLI tree, and a React operator cockpit. An accepted graph can execute
+deterministic local stub nodes, survive restart, and stop at a durable code-review wait.
+It intentionally cannot execute real provider nodes or mutate remote systems yet.
 
 The cockpit is an operator console: task/status queue on the left, persisted realtime
 activity and workflow rationale in the center, and the selected workflow tree on the

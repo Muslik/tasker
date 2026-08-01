@@ -24,6 +24,15 @@ const nodeIcons: Readonly<Record<string, ComponentType<{ className?: string }>>>
   finalize: Check,
 };
 
+const statusTone: Readonly<Record<WorkflowTreeNode['status'], string>> = {
+  planned: 'bg-muted-foreground/50',
+  running: 'bg-cyan-400',
+  waiting: 'bg-amber-400',
+  succeeded: 'bg-emerald-400',
+  skipped: 'bg-muted-foreground/40',
+  failed: 'bg-destructive',
+};
+
 const Node = ({ node }: { readonly node: WorkflowTreeNode }) => {
   const Icon = nodeIcons[node.kind] ?? Braces;
 
@@ -43,7 +52,10 @@ const Node = ({ node }: { readonly node: WorkflowTreeNode }) => {
           {node.waitKind === undefined ? null : (
             <Pause className="size-3 shrink-0 text-amber-400" aria-label="durable wait" />
           )}
-          <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" aria-label="planned" />
+          <span
+            className={`size-1.5 shrink-0 rounded-full ${statusTone[node.status]}`}
+            aria-label={node.status}
+          />
         </TooltipTrigger>
         <TooltipContent side="left" align="center">
           <span className="font-mono">{node.id}</span>

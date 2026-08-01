@@ -1,0 +1,490 @@
+import { z } from 'zod';
+
+import type { M1WorkflowService } from '../control-plane/m1-service.js';
+import {
+  OperatorActivityEntrySchema,
+  OperatorStreamEventSchema,
+  type OperatorActivityResponse,
+  type OperatorStreamEvent,
+  type WorkflowResponse,
+  type WorkflowTreeNode,
+} from '../control-plane/m1-contracts.js';
+import type { LedgerRepository } from '../ledger/repository.js';
+import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
+import type { Clock } from '../shared/clock.js';
+import { err, ok, type Outcome } from '../shared/outcome.js';
+import { CompiledWorkflowSchema, type CompiledWorkflowNode } from '../workflow/schema.js';
+import {
+  RunProjectionSchema,
+  type RunNodeStatus,
+  type RunOperation,
+  type RunProjection,
+} from './contracts.js';
+
+const RUN_BY_TASK_PROJECTION = 'm2_run_by_task';
+const RUN_PROJECTION = 'm1_run';
+
+const RunEventPayloadSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    nodeId: z.string().min(1).optional(),
+    uses: z.string().min(1).optional(),
+    waitKind: z.string().min(1).optional(),
+    slotPolicy: z.enum(['release', 'retain']).optional(),
+    outcome: z.string().min(1).optional(),
+  })
+  .loose();
+
+export type StubRunError =
+  | { readonly kind: 'workflow_not_found'; readonly taskReference: string }
+  | { readonly kind: 'workflow_not_executable'; readonly taskReference: string }
+  | { readonly kind: 'run_not_found'; readonly taskReference: string }
+  | { readonly kind: 'run_not_waiting'; readonly taskReference: string }
+  | { readonly kind: 'projection_corrupt'; readonly projectionId: string }
+  | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict };
+
+export interface DriveOptions {
+  /** Test seam for simulating a process death after committed node transitions. */
+  readonly maxNodeTransitions?: number;
+}
+
+const asJson = (value: unknown): JsonValue => value as JsonValue;
+const runIdFor = (taskReference: string): string => `run:${taskReference}`;
+const waitIdFor = (runId: string, nodeId: string): string => `wait:${runId}:${nodeId}`;
+
+const executionPlan = (root: CompiledWorkflowNode): readonly RunOperation[] => {
+  const operations: RunOperation[] = [];
+
+  const visit = (node: CompiledWorkflowNode): void => {
+    switch (node.kind) {
+      case 'sequence':
+        for (const child of node.children) visit(child);
+        return;
+      case 'bounded_loop':
+        // Stub execution settles the first attempt successfully. Real executors will
+        // append another attempt only when the persisted predicate says to continue.
+        visit(node.body);
+        return;
+      case 'branch':
+        // Predicates are not executed in the M2 stub lane. Choosing `then` is explicit
+        // and deterministic so restart tests exercise cursor durability, not policy code.
+        visit(node.then);
+        return;
+      case 'step':
+        operations.push({ kind: 'step', nodeId: node.id, uses: node.uses });
+        return;
+      case 'wait':
+        operations.push({
+          kind: 'wait',
+          nodeId: node.id,
+          waitKind: node.for,
+          slotPolicy: node.slotPolicy,
+        });
+        return;
+      case 'gate':
+        operations.push({
+          kind: 'gate',
+          nodeId: node.id,
+          waitKind: node.resumeWhen,
+          slotPolicy: 'release',
+        });
+        return;
+      case 'finalize':
+        operations.push({ kind: 'finalize', nodeId: node.id, outcome: node.outcome });
+    }
+  };
+
+  visit(root);
+  return operations;
+};
+
+const initialNodeStates = (plan: readonly RunOperation[]): Record<string, RunNodeStatus> =>
+  Object.fromEntries(plan.map((operation) => [operation.nodeId, 'planned' as const]));
+
+const decorateTree = (
+  node: WorkflowTreeNode,
+  nodeStates: Readonly<Record<string, RunNodeStatus>>,
+): WorkflowTreeNode => {
+  const children = node.children.map((child) => decorateTree(child, nodeStates));
+  const directStatus = nodeStates[node.id];
+  const childStatuses = children.map((child) => child.status);
+  const derivedStatus: WorkflowTreeNode['status'] =
+    directStatus ??
+    (childStatuses.includes('failed')
+      ? 'failed'
+      : childStatuses.includes('waiting')
+        ? 'waiting'
+        : childStatuses.includes('running')
+          ? 'running'
+          : childStatuses.length > 0 &&
+              childStatuses.every((status) => status === 'succeeded' || status === 'skipped')
+            ? 'succeeded'
+            : childStatuses.some((status) => status === 'succeeded' || status === 'skipped')
+              ? 'running'
+              : 'planned');
+
+  return { ...node, status: derivedStatus, children };
+};
+
+export class DeterministicStubRunService {
+  public constructor(
+    private readonly ledger: LedgerRepository,
+    private readonly workflows: M1WorkflowService,
+    private readonly clock: Clock,
+  ) {}
+
+  public read(taskReference: string): Outcome<RunProjection | null, StubRunError> {
+    const projection = this.ledger.readProjection(RUN_BY_TASK_PROJECTION, taskReference);
+    if (projection === null) return ok(null);
+    const parsed = RunProjectionSchema.safeParse(projection.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({ kind: 'projection_corrupt', projectionId: taskReference });
+  }
+
+  public start(
+    taskReference: string,
+    options: DriveOptions = {},
+  ): Outcome<RunProjection, StubRunError> {
+    const existing = this.read(taskReference);
+    if (!existing.ok) return existing;
+    if (existing.value !== null) {
+      return existing.value.status === 'executing'
+        ? this.drive(existing.value, options)
+        : ok(existing.value);
+    }
+
+    const workflow = this.workflows.read(taskReference);
+    if (!workflow.ok || workflow.value === null) {
+      return err({ kind: 'workflow_not_found', taskReference });
+    }
+    if (workflow.value.status !== 'ready' || workflow.value.view.workflow.graph === null) {
+      return err({ kind: 'workflow_not_executable', taskReference });
+    }
+
+    const graph = CompiledWorkflowSchema.safeParse(workflow.value.view.workflow.graph);
+    if (!graph.success || workflow.value.view.workflow.graphHash === null) {
+      return err({ kind: 'workflow_not_executable', taskReference });
+    }
+
+    const now = this.clock.now();
+    const runId = runIdFor(taskReference);
+    const plan = executionPlan(graph.data.root);
+    const run = RunProjectionSchema.parse({
+      schemaVersion: 1,
+      runId,
+      taskReference,
+      taskId: workflow.value.view.task.id,
+      workflowId: graph.data.metadata.workflowId,
+      workflowHash: workflow.value.view.workflow.graphHash,
+      status: 'executing',
+      startedAt: now,
+      updatedAt: now,
+      completedAt: null,
+      cursor: 0,
+      plan,
+      nodeStates: initialNodeStates(plan),
+      effects: [],
+      wait: null,
+    });
+    const created = this.persist(run, 'RunStarted', { taskReference });
+    return created.ok ? this.drive(created.value, options) : created;
+  }
+
+  public resume(
+    taskReference: string,
+    signalKind = 'operator_continue',
+    options: DriveOptions = {},
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    if (current.value.status !== 'waiting' || current.value.wait === null) {
+      return err({ kind: 'run_not_waiting', taskReference });
+    }
+
+    const now = this.clock.now();
+    const wait = current.value.wait;
+    const resumed = RunProjectionSchema.parse({
+      ...current.value,
+      status: 'executing',
+      updatedAt: now,
+      cursor: current.value.cursor + 1,
+      nodeStates: { ...current.value.nodeStates, [wait.nodeId]: 'succeeded' },
+      wait: null,
+    });
+    const persisted = this.persist(
+      resumed,
+      'WaitResolved',
+      { taskReference, nodeId: wait.nodeId, waitKind: wait.waitKind },
+      {
+        signalId: `signal:${current.value.runId}:${wait.nodeId}`,
+        signalKind,
+        correlationKey: wait.waitId,
+        payload: { taskReference, nodeId: wait.nodeId },
+        status: 'resolved',
+        resolvedWaitKey: wait.waitId,
+      },
+    );
+    return persisted.ok ? this.drive(persisted.value, options) : persisted;
+  }
+
+  public decorateWorkflow(response: WorkflowResponse): WorkflowResponse {
+    const run = this.read(response.view.fixture.id);
+    if (!run.ok || response.view.workflow.tree === null || response.status !== 'ready') {
+      return response;
+    }
+    return {
+      ...response,
+      view: {
+        ...response.view,
+        workflow: {
+          ...response.view.workflow,
+          executable: true,
+          tree:
+            run.value === null
+              ? response.view.workflow.tree
+              : decorateTree(response.view.workflow.tree, run.value.nodeStates),
+        },
+      },
+    };
+  }
+
+  public listEvents(taskReference?: string): readonly EventRecord[] {
+    return taskReference === undefined
+      ? this.ledger.listEvents().filter((event) => event.aggregateId.startsWith('run:'))
+      : this.ledger.listEvents(runIdFor(taskReference));
+  }
+
+  public readActivity(taskReference: string): OperatorActivityResponse['entries'] {
+    return this.listEvents(taskReference).map((event) => {
+      const payload = RunEventPayloadSchema.parse(event.payload);
+      const common = {
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+        level: 'info' as const,
+      };
+      switch (event.eventType) {
+        case 'RunStarted':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Run started',
+            detail: 'The persisted workflow cursor entered deterministic stub execution.',
+          });
+        case 'StepStubbed':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'agent',
+            title: payload.nodeId ?? 'Workflow step completed',
+            detail: `${payload.uses ?? 'step'} produced a durable stub receipt.`,
+          });
+        case 'WaitOpened':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: `Waiting for ${(payload.waitKind ?? 'external signal').replace('@1', '').replaceAll('_', ' ')}`,
+            detail: `The run cursor is durable and the runner slot is ${payload.slotPolicy === 'retain' ? 'retained' : 'released'}.`,
+          });
+        case 'WaitResolved':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'operator',
+            title: 'Wait resolved',
+            detail: `Execution will continue after ${payload.nodeId ?? 'the persisted wait'}.`,
+          });
+        case 'RunCompleted':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Run completed',
+            detail: `The workflow reached ${payload.outcome ?? 'its terminal outcome'}.`,
+          });
+        default:
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: event.eventType,
+            detail: 'A durable run transition was committed.',
+          });
+      }
+    });
+  }
+
+  public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {
+    return this.listEvents()
+      .filter((event) => event.sequence > sequence)
+      .flatMap((event) => {
+        const taskReference = this.taskReferenceFor(event);
+        return taskReference === null
+          ? []
+          : [
+              OperatorStreamEventSchema.parse({
+                sequence: event.sequence,
+                fixtureId: taskReference,
+                eventType: event.eventType,
+              }),
+            ];
+      });
+  }
+
+  public taskReferenceFor(event: EventRecord): string | null {
+    const parsed = RunEventPayloadSchema.safeParse(event.payload);
+    return parsed.success ? parsed.data.taskReference : null;
+  }
+
+  private drive(
+    initial: RunProjection,
+    options: DriveOptions,
+  ): Outcome<RunProjection, StubRunError> {
+    let run = initial;
+    let transitions = 0;
+    const transitionLimit = options.maxNodeTransitions ?? Number.POSITIVE_INFINITY;
+
+    while (run.status === 'executing' && transitions < transitionLimit) {
+      const operation = run.plan[run.cursor];
+      if (operation === undefined) {
+        const completed = this.complete(run, 'completed');
+        if (!completed.ok) return completed;
+        run = completed.value;
+        break;
+      }
+
+      const result = this.executeOperation(run, operation);
+      if (!result.ok) return result;
+      run = result.value;
+      transitions += 1;
+    }
+
+    return ok(run);
+  }
+
+  private executeOperation(
+    run: RunProjection,
+    operation: RunOperation,
+  ): Outcome<RunProjection, StubRunError> {
+    const now = this.clock.now();
+    switch (operation.kind) {
+      case 'step': {
+        const effectKey = `${run.runId}:${operation.nodeId}:attempt-1`;
+        const next = RunProjectionSchema.parse({
+          ...run,
+          updatedAt: now,
+          cursor: run.cursor + 1,
+          nodeStates: { ...run.nodeStates, [operation.nodeId]: 'succeeded' },
+          effects: [
+            ...run.effects,
+            {
+              effectKey,
+              nodeId: operation.nodeId,
+              uses: operation.uses,
+              receiptId: `receipt:${effectKey}`,
+              completedAt: now,
+            },
+          ],
+        });
+        return this.persist(next, 'StepStubbed', {
+          taskReference: run.taskReference,
+          nodeId: operation.nodeId,
+          uses: operation.uses,
+        });
+      }
+      case 'gate':
+      case 'wait': {
+        const waitId = waitIdFor(run.runId, operation.nodeId);
+        const next = RunProjectionSchema.parse({
+          ...run,
+          status: 'waiting',
+          updatedAt: now,
+          nodeStates: { ...run.nodeStates, [operation.nodeId]: 'waiting' },
+          wait: {
+            waitId,
+            nodeId: operation.nodeId,
+            waitKind: operation.waitKind,
+            slotPolicy: operation.slotPolicy,
+            openedAt: now,
+          },
+        });
+        return this.persist(next, 'WaitOpened', {
+          taskReference: run.taskReference,
+          nodeId: operation.nodeId,
+          waitKind: operation.waitKind,
+          slotPolicy: operation.slotPolicy,
+        });
+      }
+      case 'finalize':
+        return this.complete(
+          RunProjectionSchema.parse({
+            ...run,
+            cursor: run.cursor + 1,
+            nodeStates: { ...run.nodeStates, [operation.nodeId]: 'succeeded' },
+          }),
+          operation.outcome,
+        );
+    }
+  }
+
+  private complete(run: RunProjection, outcome: string): Outcome<RunProjection, StubRunError> {
+    const now = this.clock.now();
+    return this.persist(
+      RunProjectionSchema.parse({
+        ...run,
+        status: 'completed',
+        updatedAt: now,
+        completedAt: now,
+        wait: null,
+      }),
+      'RunCompleted',
+      { taskReference: run.taskReference, outcome },
+    );
+  }
+
+  private persist(
+    run: RunProjection,
+    eventType: string,
+    payload: JsonValue,
+    signal?: {
+      readonly signalId: string;
+      readonly signalKind: string;
+      readonly correlationKey: string;
+      readonly payload: JsonValue;
+      readonly status: string;
+      readonly resolvedWaitKey: string;
+    },
+  ): Outcome<RunProjection, StubRunError> {
+    const head = this.ledger.readAggregateHead(run.runId);
+    const expectedVersion = head?.version ?? 0;
+    const result = this.ledger.transact({
+      aggregate: {
+        aggregateId: run.runId,
+        expectedVersion,
+        events: [
+          {
+            eventId: `event:${run.runId}:${String(expectedVersion + 1)}`,
+            eventType,
+            eventSchemaVersion: 1,
+            payload,
+            actor: 'm2_deterministic_stub_runner',
+          },
+        ],
+      },
+      projections: [
+        {
+          kind: 'upsert',
+          projectionType: RUN_BY_TASK_PROJECTION,
+          projectionId: run.taskReference,
+          payload: asJson(run),
+        },
+        {
+          kind: 'upsert',
+          projectionType: RUN_PROJECTION,
+          projectionId: run.runId,
+          payload: asJson(run),
+        },
+      ],
+      ...(signal === undefined ? {} : { signals: [signal] }),
+      timestamp: run.updatedAt,
+    });
+    return result.ok ? ok(run) : err({ kind: 'ledger_conflict', conflict: result.error });
+  }
+}

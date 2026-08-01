@@ -17,6 +17,7 @@ import {
   UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
+import { DeterministicStubRunService } from '../runner/index.js';
 import { buildM1Api } from './m1-api.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
@@ -35,6 +36,7 @@ export const startM1Server = async (): Promise<void> => {
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const service = createM1WorkflowService(ledger.repository, systemClock);
+  const runService = new DeterministicStubRunService(ledger.repository, service, systemClock);
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
@@ -67,6 +69,7 @@ export const startM1Server = async (): Promise<void> => {
     jiraIssueService,
     logger: true,
     workflowGenerator,
+    runService,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

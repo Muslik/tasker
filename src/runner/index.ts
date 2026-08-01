@@ -3,3 +3,5 @@ export const runnerModuleBoundary = {
   status: 'reserved',
   activatesAt: 'M2',
 } as const;
+export * from './contracts.js';
+export * from './stub-runner.js';

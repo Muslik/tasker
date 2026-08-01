@@ -12,6 +12,7 @@ import {
   LoaderCircle,
   MessageSquare,
   Plus,
+  Play,
   Radio,
   RefreshCw,
   Sparkles,
@@ -37,6 +38,7 @@ import {
   loadJiraIssue,
   loadOperatorActivity,
   loadWorkflow,
+  startWorkflow,
   syncJiraIssue,
 } from './api-client.js';
 import { Badge } from './components/ui/badge.js';
@@ -97,7 +99,7 @@ const formatProviderSession = (activity: ActivityLoadState): string => {
   if (activity.status === 'failed') return 'provider session unavailable';
 
   const session = activity.response.providerSession;
-  if (session.status === 'not_started') return 'not started · M1 planning only';
+  if (session.status === 'not_started') return 'no provider session · deterministic fixture';
 
   const seconds = Math.max(0.1, session.durationMs / 1000).toFixed(1);
   const measuredTokens = session.usage.inputTokens + session.usage.outputTokens;
@@ -384,95 +386,121 @@ const SelectedTaskHeader = ({
   workflow,
   activity,
   onGenerate,
+  onStart,
   onSyncJira,
   generating,
+  starting,
   jiraSync,
 }: {
   readonly task: OperatorTaskSummary;
   readonly workflow: WorkflowLoadState;
   readonly activity: ActivityLoadState;
   readonly onGenerate: () => void;
+  readonly onStart: () => void;
   readonly onSyncJira: (issueKey: string) => void;
   readonly generating: boolean;
+  readonly starting: boolean;
   readonly jiraSync: JiraSyncState;
-}) => (
-  <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <div className="mb-1 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">{task.taskId}</span>
-          <span className="text-muted-foreground/50">·</span>
-          <StateBadge className={statusTone(task.status)}>{statusLabel(task.status)}</StateBadge>
-          <StateBadge>{task.currentStage}</StateBadge>
+}) => {
+  const canGenerate =
+    (task.status === 'backlog' || task.status === 'workflow_rejected') &&
+    task.planning.status === 'available';
+  const canStart =
+    task.status === 'planned' &&
+    workflow.status === 'ready' &&
+    workflow.response.status === 'ready';
+
+  return (
+    <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">{task.taskId}</span>
+            <span className="text-muted-foreground/50">·</span>
+            <StateBadge className={statusTone(task.status)}>{statusLabel(task.status)}</StateBadge>
+            <StateBadge>{task.currentStage}</StateBadge>
+          </div>
+          <h1 className="truncate text-lg font-semibold tracking-tight">{task.title}</h1>
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span data-testid="provider-session-banner">{formatProviderSession(activity)}</span>
+            {task.updatedAt === null ? null : (
+              <>
+                <span>·</span>
+                <time dateTime={task.updatedAt}>{formatShortDateTime(task.updatedAt)}</time>
+              </>
+            )}
+          </div>
         </div>
-        <h1 className="truncate text-lg font-semibold tracking-tight">{task.title}</h1>
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span data-testid="provider-session-banner">{formatProviderSession(activity)}</span>
-          {task.updatedAt === null ? null : (
+        <div className="flex items-center gap-1.5">
+          {canGenerate ? (
+            <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
+              {generating ? (
+                <LoaderCircle data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Sparkles data-icon="inline-start" />
+              )}
+              {generating
+                ? 'Generating…'
+                : task.status === 'workflow_rejected'
+                  ? 'Regenerate workflow'
+                  : 'Generate workflow'}
+            </Button>
+          ) : null}
+          {canStart ? (
+            <Button size="sm" type="button" onClick={onStart} disabled={starting}>
+              {starting ? (
+                <LoaderCircle data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Play data-icon="inline-start" />
+              )}
+              {starting ? 'Starting…' : 'Start'}
+            </Button>
+          ) : null}
+          {task.origin.kind === 'jira' ? (
             <>
-              <span>·</span>
-              <time dateTime={task.updatedAt}>{formatShortDateTime(task.updatedAt)}</time>
+              {task.origin.browseUrl === null ? null : (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <a
+                        className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                        href={task.origin.browseUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label="Open in Jira"
+                      />
+                    }
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent>Open in Jira</TooltipContent>
+                </Tooltip>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                disabled={jiraSync.status === 'syncing'}
+                onClick={() => {
+                  onSyncJira(task.taskId);
+                }}
+              >
+                <RefreshCw
+                  data-icon="inline-start"
+                  className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
+                />
+                Sync
+              </Button>
             </>
-          )}
+          ) : workflow.status === 'ready' && !canStart ? (
+            <StateBadge className="bg-emerald-500/12 text-emerald-300">Workflow ready</StateBadge>
+          ) : null}
         </div>
       </div>
-      {(task.status === 'backlog' || task.status === 'workflow_rejected') &&
-      task.planning.status === 'available' ? (
-        <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
-          {generating ? (
-            <LoaderCircle data-icon="inline-start" className="animate-spin" />
-          ) : (
-            <Sparkles data-icon="inline-start" />
-          )}
-          {generating
-            ? 'Generating…'
-            : task.status === 'workflow_rejected'
-              ? 'Regenerate workflow'
-              : 'Generate workflow'}
-        </Button>
-      ) : task.origin.kind === 'jira' ? (
-        <div className="flex items-center gap-1.5">
-          {task.origin.browseUrl === null ? null : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <a
-                    className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    href={task.origin.browseUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label="Open in Jira"
-                  />
-                }
-              >
-                <ExternalLink className="size-3.5" />
-              </TooltipTrigger>
-              <TooltipContent>Open in Jira</TooltipContent>
-            </Tooltip>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            disabled={jiraSync.status === 'syncing'}
-            onClick={() => {
-              onSyncJira(task.taskId);
-            }}
-          >
-            <RefreshCw
-              data-icon="inline-start"
-              className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
-            />
-            Sync
-          </Button>
-        </div>
-      ) : workflow.status === 'ready' ? (
-        <StateBadge className="bg-emerald-500/12 text-emerald-300">Workflow ready</StateBadge>
-      ) : null}
-    </div>
-    {workflow.status === 'failed' ? <InlineError>{workflow.message}</InlineError> : null}
-  </section>
-);
+      {workflow.status === 'failed' ? <InlineError>{workflow.message}</InlineError> : null}
+    </section>
+  );
+};
 
 const ValidationSurface = ({
   task,
@@ -1297,6 +1325,7 @@ export const App = () => {
   const [jiraSyncState, setJiraSyncState] = useState<JiraSyncState>({ status: 'idle' });
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
   const [generating, setGenerating] = useState(false);
+  const [starting, setStarting] = useState(false);
   const streamCursorRef = useRef(0);
 
   const selectedTask = useMemo(
@@ -1506,6 +1535,25 @@ export const App = () => {
       });
   };
 
+  const handleStart = (): void => {
+    if (selectedTask === null || selectedTask.status !== 'planned') return;
+    setStarting(true);
+    void startWorkflow(selectedTask.id)
+      .then(async () => {
+        await refreshTasks();
+        await refreshSelection(selectedTask.id);
+      })
+      .catch((error: unknown) => {
+        setActivityState({
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Unexpected run failure',
+        });
+      })
+      .finally(() => {
+        setStarting(false);
+      });
+  };
+
   const view = workflowState.status === 'ready' ? workflowState.response.view : null;
 
   return (
@@ -1538,7 +1586,7 @@ export const App = () => {
               />
               SSE
             </span>
-            <StateBadge>M1 · planning only</StateBadge>
+            <StateBadge>M2 · stub execution</StateBadge>
           </div>
         </header>
 
@@ -1569,8 +1617,10 @@ export const App = () => {
                   workflow={workflowState}
                   activity={activityState}
                   onGenerate={handleGenerate}
+                  onStart={handleStart}
                   onSyncJira={handleJiraSync}
                   generating={generating}
+                  starting={starting}
                   jiraSync={jiraSyncState}
                 />
                 {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}

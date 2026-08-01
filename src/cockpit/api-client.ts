@@ -18,6 +18,7 @@ import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
 } from '../repositories/contracts.js';
+import { RunProjectionSchema, type RunProjection } from '../runner/contracts.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
@@ -160,6 +161,16 @@ export const generateWorkflow = async (fixtureId: string): Promise<WorkflowRespo
     throw new Error('Generated workflow does not match the cockpit contract');
   }
 
+  return parsed.data;
+};
+
+export const startWorkflow = async (fixtureId: string): Promise<RunProjection> => {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/start`, {
+    method: 'POST',
+  });
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = RunProjectionSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Run response does not match the cockpit contract');
   return parsed.data;
 };
 

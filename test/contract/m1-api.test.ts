@@ -7,6 +7,7 @@ import {
   buildM1Api,
   CodexWorkflowGenerator,
   createM1WorkflowService,
+  DeterministicStubRunService,
   FixtureListResponseSchema,
   OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
@@ -31,6 +32,7 @@ const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
   const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
   resources.push({ directory, ledger });
   const service = createM1WorkflowService(ledger.repository, clock);
+  const runService = new DeterministicStubRunService(ledger.repository, service, clock);
   const jiraIssueService =
     jiraPort === undefined
       ? undefined
@@ -48,6 +50,7 @@ const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
   return {
     api: buildM1Api({
       service,
+      runService,
       ...(jiraIssueService === undefined ? {} : { jiraIssueService }),
       ...(useWorkflowGenerator
         ? { workflowGenerator: { generate } }
@@ -58,6 +61,7 @@ const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
     generate,
     ledger,
     service,
+    runService,
   };
 };
 
@@ -237,6 +241,51 @@ describe('M1 HTTP API', () => {
     expect(graphProjectionResponse.json()).toEqual(generated.view.workflow);
     expect(runResponse.statusCode).toBe(404);
     expect(ledger.repository.listOutbox()).toEqual([]);
+
+    await api.close();
+  });
+
+  it('starts a persisted workflow and stops at the code-review wait', async () => {
+    const { api } = setup();
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+    });
+
+    const startedResponse = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/start',
+    });
+    const taskResponse = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
+    const activityResponse = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/avia-13236-short-bug/activity',
+    });
+    const workflowResponse = await api.inject({
+      method: 'GET',
+      url: '/api/workflows/avia-13236-short-bug',
+    });
+
+    expect(startedResponse.statusCode).toBe(200);
+    expect(startedResponse.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'code_review@1', slotPolicy: 'release' },
+    });
+    expect(OperatorTaskListResponseSchema.parse(taskResponse.json()).tasks[0]).toMatchObject({
+      status: 'code_review',
+      attention: 'operator',
+      currentStage: 'Waiting for code review',
+    });
+    expect(OperatorActivityResponseSchema.parse(activityResponse.json()).entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'Run started' }),
+        expect.objectContaining({ title: 'prepare-pr' }),
+        expect.objectContaining({ title: 'Waiting for code review' }),
+      ]),
+    );
+    expect(WorkflowResponseSchema.parse(workflowResponse.json()).view.workflow.tree?.status).toBe(
+      'waiting',
+    );
 
     await api.close();
   });
