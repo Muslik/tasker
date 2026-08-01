@@ -1,3 +1,15 @@
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Download,
+  GitBranch,
+  LoaderCircle,
+  Radio,
+  Sparkles,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
@@ -14,6 +26,22 @@ import {
   loadOperatorActivity,
   loadWorkflow,
 } from './api-client.js';
+import { Badge } from './components/ui/badge.js';
+import { Button } from './components/ui/button.js';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from './components/ui/collapsible.js';
+import { ScrollArea } from './components/ui/scroll-area.js';
+import { Separator } from './components/ui/separator.js';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './components/ui/tooltip.js';
+import { cn } from './lib/utils.js';
 import { WorkflowTree } from './WorkflowTree.js';
 
 type WorkflowLoadState =
@@ -50,11 +78,9 @@ const readStoredSelection = (): string | null => {
 };
 
 const writeStoredSelection = (fixtureId: string): void => {
-  if (typeof window === 'undefined') {
-    return;
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, fixtureId);
   }
-
-  window.localStorage.setItem(STORAGE_KEY, fixtureId);
 };
 
 const chooseInitialFixture = (
@@ -71,8 +97,38 @@ const chooseInitialFixture = (
 const statusLabel = (status: OperatorTaskSummary['status']): string =>
   status.replaceAll('_', ' ').replace(/^\w/, (character) => character.toUpperCase());
 
-const attentionLabel = (attention: OperatorTaskSummary['attention']): string =>
-  attention === 'operator' ? 'Operator attention' : 'Quiet';
+const statusTone = (status: OperatorTaskSummary['status']): string => {
+  switch (status) {
+    case 'done':
+      return 'bg-emerald-500/12 text-emerald-300';
+    case 'failed':
+    case 'workflow_rejected':
+      return 'bg-destructive/15 text-destructive';
+    case 'needs_attention':
+    case 'waiting':
+      return 'bg-amber-500/12 text-amber-300';
+    case 'running':
+      return 'bg-blue-500/12 text-blue-300';
+    case 'code_review':
+      return 'bg-violet-500/12 text-violet-300';
+    case 'backlog':
+    case 'planned':
+      return 'bg-muted text-muted-foreground';
+  }
+};
+
+const streamLabel = (status: ConsoleStreamStatus): string => {
+  switch (status) {
+    case 'live':
+      return 'Live';
+    case 'reconnecting':
+      return 'Reconnecting';
+    case 'connecting':
+      return 'Connecting';
+    case 'offline':
+      return 'Offline';
+  }
+};
 
 const sourceLabel = (source: OperatorActivityResponse['entries'][number]['source']): string =>
   source === 'kernel'
@@ -85,40 +141,31 @@ const sourceLabel = (source: OperatorActivityResponse['entries'][number]['source
           ? 'Agent'
           : 'Tool';
 
-const levelLabel = (level: OperatorActivityResponse['entries'][number]['level']): string =>
-  level === 'error' ? 'Error' : level === 'warning' ? 'Warning' : 'Info';
-
-const levelTone = (level: OperatorActivityResponse['entries'][number]['level']): string =>
-  level === 'error' ? 'danger' : level === 'warning' ? 'warning' : 'neutral';
-
-const SelectionBadge = ({
+const StateBadge = ({
   children,
-  tone,
+  className,
 }: {
   readonly children: string;
-  readonly tone: 'neutral' | 'good' | 'warning' | 'danger' | 'accent';
-}) => <span className={`badge badge--${tone}`}>{children}</span>;
-
-const SectionTitle = ({
-  eyebrow,
-  title,
-  detail,
-}: {
-  readonly eyebrow: string;
-  readonly title: string;
-  readonly detail?: string | undefined;
+  readonly className?: string;
 }) => (
-  <div className="section-title">
-    <p className="eyebrow">{eyebrow}</p>
-    <h2>{title}</h2>
-    {detail === undefined ? null : <p className="section-title__detail">{detail}</p>}
+  <Badge variant="ghost" className={cn('h-5 px-1.5 text-[11px] font-medium', className)}>
+    {children}
+  </Badge>
+);
+
+const InlineError = ({ children }: { readonly children: string }) => (
+  <div
+    className="flex items-center gap-2 border-y border-destructive/25 bg-destructive/8 px-4 py-2 text-sm text-destructive"
+    role="alert"
+  >
+    <AlertTriangle className="size-4 shrink-0" />
+    <span className="truncate">{children}</span>
   </div>
 );
 
-const EmptyPrompt = ({ title, detail }: { readonly title: string; readonly detail: string }) => (
-  <div className="empty-prompt">
-    <p className="empty-prompt__title">{title}</p>
-    <p>{detail}</p>
+const EmptyState = ({ children }: { readonly children: string }) => (
+  <div className="flex min-h-24 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+    {children}
   </div>
 );
 
@@ -141,469 +188,88 @@ const TaskQueue = ({
     return result;
   }, [tasks]);
 
-  return (
-    <aside className="pane pane--queue" aria-label="Task queue">
-      <div className="pane__header">
-        <div>
-          <p className="eyebrow">Queue</p>
-          <h2>Tasks</h2>
-        </div>
-        <SelectionBadge tone={liveStatus === 'live' ? 'good' : 'warning'}>
-          {liveStatus === 'live'
-            ? 'live'
-            : liveStatus === 'reconnecting'
-              ? 'reconnecting'
-              : 'syncing'}
-        </SelectionBadge>
-      </div>
+  const visibleCounts = (
+    ['backlog', 'planned', 'needs_attention', 'code_review', 'done'] as const
+  ).filter((status) => (counts.get(status) ?? 0) > 0);
 
-      <div className="queue-stats" aria-label="Task status summary">
-        {(
-          [
-            'backlog',
-            'planned',
-            'workflow_rejected',
-            'needs_attention',
-            'code_review',
-            'done',
-          ] as const
-        ).map((status) => (
-          <div key={status} className="queue-stat">
-            <span>{statusLabel(status)}</span>
-            <strong>{counts.get(status) ?? 0}</strong>
+  return (
+    <aside className="flex min-h-0 flex-col border-r border-border" aria-label="Task queue">
+      <div className="px-3 pb-2 pt-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-sm font-semibold">Tasks</h2>
+            <span className="text-xs tabular-nums text-muted-foreground">{tasks.length}</span>
           </div>
-        ))}
-      </div>
-
-      <ol className="task-list" data-testid="task-list">
-        {tasks.map((task) => {
-          const selected = task.fixture.id === selectedId;
-
-          return (
-            <li key={task.fixture.id}>
-              <button
-                className={`task-card ${selected ? 'task-card--selected' : ''}`}
-                data-testid={`task-item-${task.fixture.id}`}
-                type="button"
-                aria-current={selected ? 'true' : undefined}
-                onClick={() => {
-                  onSelect(task.fixture.id);
-                }}
-              >
-                <div className="task-card__topline">
-                  <div className="task-card__titles">
-                    <span className="task-card__task-id">{task.taskId}</span>
-                    <strong>{task.fixture.title}</strong>
-                  </div>
-                  {selected ? <SelectionBadge tone="accent">selected</SelectionBadge> : null}
-                </div>
-
-                <div className="task-card__badges">
-                  <SelectionBadge
-                    tone={
-                      task.status === 'done'
-                        ? 'good'
-                        : task.status === 'failed'
-                          ? 'danger'
-                          : 'neutral'
-                    }
-                  >
-                    {statusLabel(task.status)}
-                  </SelectionBadge>
-                  <SelectionBadge tone={task.attention === 'operator' ? 'warning' : 'neutral'}>
-                    {attentionLabel(task.attention)}
-                  </SelectionBadge>
-                </div>
-
-                <p className="task-card__stage">{task.currentStage}</p>
-                <p className="task-card__meta">{task.fixture.purpose}</p>
-                <time className="task-card__time" dateTime={task.updatedAt ?? undefined}>
-                  {task.updatedAt === null
-                    ? 'No ledger activity yet'
-                    : `Updated ${formatShortDateTime(task.updatedAt)}`}
-                </time>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </aside>
-  );
-};
-
-const ActivityTimeline = ({
-  activity,
-  streamStatus,
-}: {
-  readonly activity: ActivityLoadState;
-  readonly streamStatus: ConsoleStreamStatus;
-}) => {
-  const providerSession =
-    activity.status === 'ready'
-      ? activity.response.providerSession
-      : { status: 'not_started', reason: 'm1_planning_only' as const };
-
-  return (
-    <section className="panel panel--timeline" aria-label="Activity timeline">
-      <div className="panel__header">
-        <SectionTitle
-          eyebrow="Realtime surface"
-          title="Persisted activity"
-          detail="Kernel and planner events are persisted today. Agent and tool events will appear once execution is enabled."
-        />
-        <div className="panel__header-stack">
-          <SelectionBadge tone={streamStatus === 'live' ? 'good' : 'warning'}>
-            {streamStatus === 'live'
-              ? 'stream live'
-              : streamStatus === 'reconnecting'
-                ? 'reconnecting'
-                : 'stream paused'}
-          </SelectionBadge>
-          <SelectionBadge tone="neutral">
-            {providerSession.status === 'not_started'
-              ? 'not started · M1 planning only'
-              : providerSession.status}
-          </SelectionBadge>
+          <Tooltip>
+            <TooltipTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  liveStatus === 'live' ? 'bg-emerald-400' : 'bg-amber-400',
+                )}
+              />
+              {streamLabel(liveStatus)}
+            </TooltipTrigger>
+            <TooltipContent>Task updates from the persisted ledger</TooltipContent>
+          </Tooltip>
         </div>
-      </div>
-
-      {activity.status === 'loading' ? (
-        <EmptyPrompt
-          title="Loading activity"
-          detail="Reading the ledger timeline for the selected task."
-        />
-      ) : null}
-      {activity.status === 'failed' ? (
-        <div className="callout callout--danger" role="alert">
-          {activity.message}
-        </div>
-      ) : null}
-      {activity.status === 'ready' ? (
-        <div className="timeline" data-testid="task-activity-timeline">
-          {activity.response.entries.length === 0 ? (
-            <EmptyPrompt
-              title="No persisted activity"
-              detail="Generate the selected backlog task to create the first ledger events."
-            />
-          ) : (
-            activity.response.entries.map((entry) => (
-              <article key={entry.sequence} className="timeline-entry timeline-entry--open">
-                <div className="timeline-entry__rail" aria-hidden="true" />
-                <div className="timeline-entry__body">
-                  <div className="timeline-entry__head">
-                    <span className={`badge badge--${levelTone(entry.level)}`}>
-                      {levelLabel(entry.level)}
-                    </span>
-                    <span className="timeline-entry__source">{sourceLabel(entry.source)}</span>
-                    <time dateTime={entry.occurredAt}>{formatShortDateTime(entry.occurredAt)}</time>
-                  </div>
-                  <h3>{entry.title}</h3>
-                  <p>{entry.detail}</p>
-                  <span className="timeline-entry__sequence">#{entry.sequence}</span>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-      ) : null}
-    </section>
-  );
-};
-
-const WhyThisWorkflow = ({ view }: { readonly view: WorkflowView }) => (
-  <section className="panel" aria-label="Workflow assembly decisions">
-    <div className="panel__header">
-      <SectionTitle
-        eyebrow="Why this workflow"
-        title="Assembly decisions"
-        detail="The planner records why each branch exists. The UI shows those reasons directly instead of paraphrasing them into generic steps."
-      />
-      <SelectionBadge tone={view.workflow.status === 'valid' ? 'good' : 'danger'}>
-        {view.workflow.status}
-      </SelectionBadge>
-    </div>
-    <div className="decision-grid" data-testid="workflow-decisions">
-      {view.workflow.assemblyDecisions.map((decision) => (
-        <article className="decision-card" key={decision.id}>
-          <div className="decision-card__head">
-            <strong>{decision.title}</strong>
-            <code>{decision.source}</code>
-          </div>
-          <p>{decision.reason}</p>
-          <span>{decision.effect}</span>
-        </article>
-      ))}
-    </div>
-  </section>
-);
-
-const ValidationSurface = ({
-  task,
-  workflow,
-}: {
-  readonly task: OperatorTaskSummary | null;
-  readonly workflow: WorkflowLoadState;
-}) => {
-  if (workflow.status === 'loading') {
-    return (
-      <section className="panel" aria-label="Validation surface">
-        <EmptyPrompt
-          title="Validation surface loading"
-          detail="The selected task graph is being read from the ledger."
-        />
-      </section>
-    );
-  }
-
-  if (workflow.status === 'missing') {
-    return (
-      <section className="panel" aria-label="Validation surface">
-        <EmptyPrompt
-          title="No validator report yet"
-          detail="Generate a backlog task to materialize the validator output and the immutable task graph."
-        />
-      </section>
-    );
-  }
-
-  if (workflow.status === 'failed') {
-    return (
-      <section className="panel" aria-label="Validation surface">
-        <div className="callout callout--danger" role="alert">
-          {workflow.message}
-        </div>
-      </section>
-    );
-  }
-
-  const view = workflow.response.view;
-  const issues = view.workflow.validatorReport.issues;
-  const blocked = view.workflow.status === 'rejected' || issues.length > 0;
-
-  return (
-    <section className="panel" aria-label="Validation surface" data-testid="validation-panel">
-      <div className="panel__header">
-        <SectionTitle
-          eyebrow="Validation / intervention"
-          title={blocked ? 'Human review required' : 'Validator passed'}
-          detail="This panel is the operator’s decision point: what was accepted, what was blocked, and what needs intervention."
-        />
-        <SelectionBadge tone={blocked ? 'warning' : 'good'}>
-          {blocked ? 'needs review' : 'clear'}
-        </SelectionBadge>
-      </div>
-
-      <div className="validation-grid">
-        <article>
-          <span>Task state</span>
-          <strong>{task === null ? 'unknown' : statusLabel(task.status)}</strong>
-          <p>{task === null ? 'Task metadata is still loading' : task.currentStage}</p>
-        </article>
-        <article>
-          <span>Workflow state</span>
-          <strong>{view.workflow.status}</strong>
-          <p>{view.workflow.graphHash ?? 'not compiled'}</p>
-        </article>
-      </div>
-
-      {issues.length === 0 ? (
-        <div className="callout callout--neutral">
-          No structural issues were found. The graph is ready for later execution phases.
-        </div>
-      ) : (
-        <ol className="issue-list" data-testid="validation-errors">
-          {issues.map((issue) => (
-            <li key={`${issue.code}:${issue.path.join('.')}`}>
-              <div className="issue-list__topline">
-                <SelectionBadge tone="warning">{issue.code}</SelectionBadge>
-                <code>{issue.path.length === 0 ? '$' : issue.path.join(' → ')}</code>
-              </div>
-              <p>{issue.message}</p>
-              {issue.details === undefined ? null : <pre>{formatValue(issue.details)}</pre>}
-            </li>
+        <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+          {visibleCounts.map((status) => (
+            <span key={status}>
+              <strong className="font-medium tabular-nums text-foreground">
+                {counts.get(status)}
+              </strong>{' '}
+              {statusLabel(status).toLowerCase()}
+            </span>
           ))}
-        </ol>
-      )}
-
-      {blocked ? (
-        <div className="callout callout--danger">
-          Stop here and review the decision surface. In M1 this is a planning failure, not an
-          execution failure.
         </div>
-      ) : null}
-    </section>
-  );
-};
-
-const WorkflowDiagnostics = ({ view }: { readonly view: WorkflowView }) => (
-  <details className="panel diagnostics" data-testid="workflow-debug-details">
-    <summary>
-      <SectionTitle
-        eyebrow="Diagnostics"
-        title="Template → task graph"
-        detail="Collapsed by default. This is useful when you need to inspect the raw deterministic diff and the proposal source without turning the console into a blob of JSON."
-      />
-    </summary>
-    <div className="diagnostics__content">
-      <div className="diagnostics__columns">
-        <article>
-          <p className="eyebrow">Template</p>
-          <code>{view.workflow.templateId}</code>
-        </article>
-        <article>
-          <p className="eyebrow">Proposal</p>
-          <code>{view.workflow.proposalId}</code>
-        </article>
-        <article>
-          <p className="eyebrow">Hash</p>
-          <code data-testid="graph-hash">{view.workflow.graphHash ?? 'not compiled'}</code>
-        </article>
       </div>
+      <Separator />
 
-      {view.workflow.diff.length === 0 ? (
-        <EmptyPrompt
-          title="No graph diff"
-          detail="The selected task graph matches the chosen template exactly."
-        />
-      ) : (
-        <ol className="diff-list" data-testid="graph-diff">
-          {view.workflow.diff.map((entry, index) => (
-            <li key={`${entry.kind}:${entry.path}:${String(index)}`}>
-              <div className="diff-list__topline">
-                <SelectionBadge
-                  tone={
-                    entry.kind === 'removed'
-                      ? 'danger'
-                      : entry.kind === 'added'
-                        ? 'good'
-                        : 'warning'
-                  }
+      <ScrollArea className="min-h-0 flex-1">
+        <ol className="py-1" data-testid="task-list">
+          {tasks.map((task) => {
+            const selected = task.fixture.id === selectedId;
+
+            return (
+              <li key={task.fixture.id}>
+                <button
+                  className={cn(
+                    'group relative w-full px-3 py-2.5 text-left transition-colors hover:bg-muted/45',
+                    selected && 'bg-muted/70',
+                  )}
+                  data-testid={`task-item-${task.fixture.id}`}
+                  type="button"
+                  aria-current={selected ? 'true' : undefined}
+                  onClick={() => {
+                    onSelect(task.fixture.id);
+                  }}
                 >
-                  {entry.kind}
-                </SelectionBadge>
-                <code>{entry.path}</code>
-              </div>
-              <div className="diff-values">
-                <pre>{formatValue(entry.before)}</pre>
-                <span aria-hidden="true">→</span>
-                <pre>{formatValue(entry.after)}</pre>
-              </div>
-            </li>
-          ))}
+                  {selected ? (
+                    <span className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-primary" />
+                  ) : null}
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium tracking-wide text-muted-foreground">
+                      {task.taskId}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {task.attention === 'operator' ? (
+                        <AlertTriangle className="size-3 text-amber-400" aria-label="needs input" />
+                      ) : null}
+                      <StateBadge className={statusTone(task.status)}>
+                        {statusLabel(task.status)}
+                      </StateBadge>
+                    </div>
+                  </div>
+                  <strong className="line-clamp-2 block text-[13px] font-medium leading-5 text-foreground">
+                    {task.fixture.title}
+                  </strong>
+                </button>
+              </li>
+            );
+          })}
         </ol>
-      )}
-    </div>
-  </details>
-);
-
-const WorkflowSidebar = ({ workflow }: { readonly workflow: WorkflowLoadState }) => {
-  if (workflow.status === 'loading') {
-    return (
-      <aside className="pane pane--workflow" aria-label="Current workflow">
-        <EmptyPrompt
-          title="Loading workflow"
-          detail="Reading the selected task graph from the ledger."
-        />
-      </aside>
-    );
-  }
-
-  if (workflow.status === 'missing') {
-    return (
-      <aside className="pane pane--workflow" aria-label="Current workflow">
-        <EmptyPrompt
-          title="No workflow materialized yet"
-          detail="Generate a backlog task on the left. The workflow will then appear here and remain immutable until the ledger is updated."
-        />
-      </aside>
-    );
-  }
-
-  if (workflow.status === 'failed') {
-    return (
-      <aside className="pane pane--workflow" aria-label="Current workflow">
-        <div className="callout callout--danger" role="alert">
-          {workflow.message}
-        </div>
-      </aside>
-    );
-  }
-
-  const view = workflow.response.view;
-
-  return (
-    <aside
-      className="pane pane--workflow"
-      aria-label="Current workflow"
-      data-testid="workflow-sidebar"
-    >
-      <div className="workflow-sidebar__sticky">
-        <div className="panel__header">
-          <SectionTitle
-            eyebrow="Current workflow"
-            title={view.fixture.title}
-            detail="The operator console reads this graph from the ledger and never simulates execution."
-          />
-          <div className="panel__header-stack">
-            <SelectionBadge tone={view.workflow.status === 'valid' ? 'good' : 'danger'}>
-              {view.workflow.status}
-            </SelectionBadge>
-            {view.workflow.graphHash === null ? null : (
-              <a className="download-link" href={graphDownloadUrl(view.fixture.id)} download>
-                Download graph JSON
-              </a>
-            )}
-          </div>
-        </div>
-
-        <div className="workflow-metrics">
-          <article>
-            <span>Verification</span>
-            <strong>{view.workflow.verificationPlan.profile.replaceAll('_', ' ')}</strong>
-            <p>{view.workflow.verificationPlan.rationale}</p>
-          </article>
-          <article>
-            <span>Capabilities</span>
-            <strong>{view.workflow.capabilities.required.length}</strong>
-            <p>{view.workflow.capabilities.required.join(', ') || 'None required'}</p>
-          </article>
-          <article>
-            <span>Waits</span>
-            <strong>{view.workflow.waits.length}</strong>
-            <p>
-              {view.workflow.waits.length === 0
-                ? 'No durable waits'
-                : view.workflow.waits
-                    .map((wait) => `${wait.nodeId}:${wait.waitKind}/${wait.slotPolicy}`)
-                    .join(' · ')}
-            </p>
-          </article>
-          <article>
-            <span>Retries</span>
-            <strong>{Object.keys(view.workflow.retryBudgets).length}</strong>
-            <p>
-              {Object.entries(view.workflow.retryBudgets)
-                .map(([nodeId, budget]) => `${nodeId} ≤ ${String(budget)}`)
-                .join(' · ') || 'No retry budgets'}
-            </p>
-          </article>
-        </div>
-
-        <div className="workflow-graph">
-          <SectionTitle
-            eyebrow="Workflow tree"
-            title="Current task graph"
-            detail="The tree is sticky and independently scrollable on desktop so you can keep the queue and activity feed in view."
-          />
-          {view.workflow.tree === null ? (
-            <div className="callout callout--danger" role="alert">
-              This workflow was rejected before graph materialization.
-            </div>
-          ) : (
-            <WorkflowTree root={view.workflow.tree} />
-          )}
-        </div>
-      </div>
+      </ScrollArea>
     </aside>
   );
 };
@@ -618,104 +284,331 @@ const SelectedTaskHeader = ({
   readonly workflow: WorkflowLoadState;
   readonly onGenerate: () => void;
   readonly generating: boolean;
+}) => (
+  <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">{task.taskId}</span>
+          <span className="text-muted-foreground/50">·</span>
+          <StateBadge className={statusTone(task.status)}>{statusLabel(task.status)}</StateBadge>
+          <StateBadge>{task.currentStage}</StateBadge>
+        </div>
+        <h1 className="truncate text-lg font-semibold tracking-tight">{task.fixture.title}</h1>
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span data-testid="provider-session-banner">not started · M1 planning only</span>
+          {task.updatedAt === null ? null : (
+            <>
+              <span>·</span>
+              <time dateTime={task.updatedAt}>{formatShortDateTime(task.updatedAt)}</time>
+            </>
+          )}
+        </div>
+      </div>
+      {task.status === 'backlog' ? (
+        <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
+          {generating ? (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <Sparkles data-icon="inline-start" />
+          )}
+          {generating ? 'Generating…' : 'Generate workflow'}
+        </Button>
+      ) : workflow.status === 'ready' ? (
+        <StateBadge className="bg-emerald-500/12 text-emerald-300">Workflow ready</StateBadge>
+      ) : null}
+    </div>
+    {workflow.status === 'failed' ? <InlineError>{workflow.message}</InlineError> : null}
+  </section>
+);
+
+const ValidationSurface = ({
+  task,
+  view,
+}: {
+  readonly task: OperatorTaskSummary;
+  readonly view: WorkflowView;
 }) => {
-  const canGenerate = task.status === 'backlog';
+  const issues = view.workflow.validatorReport.issues;
+  const blocked = view.workflow.status === 'rejected' || issues.length > 0;
 
   return (
     <section
-      className="panel panel--selected"
-      aria-label="Selected task"
-      data-testid="selected-task"
-    >
-      <div className="panel__header panel__header--stacked">
-        <div>
-          <p className="eyebrow">Selected task</p>
-          <h1>{task.fixture.title}</h1>
-          <p className="section-title__detail">{task.fixture.purpose}</p>
-        </div>
-        <div className="panel__header-stack panel__header-stack--dense">
-          <SelectionBadge tone={task.attention === 'operator' ? 'warning' : 'neutral'}>
-            {attentionLabel(task.attention)}
-          </SelectionBadge>
-          <SelectionBadge
-            tone={
-              task.status === 'done'
-                ? 'good'
-                : task.status === 'failed'
-                  ? 'danger'
-                  : task.status === 'workflow_rejected'
-                    ? 'warning'
-                    : 'neutral'
-            }
-          >
-            {statusLabel(task.status)}
-          </SelectionBadge>
-          <SelectionBadge tone="neutral">{task.currentStage}</SelectionBadge>
-        </div>
-      </div>
-
-      <div className="selected-task__meta">
-        <div>
-          <span>Task ID</span>
-          <strong>{task.taskId}</strong>
-        </div>
-        <div>
-          <span>Fixture</span>
-          <strong>{task.fixture.id}</strong>
-        </div>
-        <div>
-          <span>Updated</span>
-          <strong>{task.updatedAt === null ? 'Never' : formatShortDateTime(task.updatedAt)}</strong>
-        </div>
-      </div>
-
-      <div className="selected-task__actions">
-        <div className="selected-task__session">
-          <p className="eyebrow">Provider session</p>
-          <strong data-testid="provider-session-banner">not started · M1 planning only</strong>
-          <p>
-            No provider calls are allowed in M1. This console is showing the planner and ledger
-            only.
-          </p>
-        </div>
-
-        {canGenerate ? (
-          <button
-            className="button button--primary"
-            type="button"
-            onClick={onGenerate}
-            disabled={generating}
-          >
-            {generating ? 'Generating…' : 'Generate workflow'}
-          </button>
-        ) : (
-          <div className="selected-task__locked">
-            <SelectionBadge tone="neutral">workflow already materialized</SelectionBadge>
-            <p>
-              Generation is only available for backlog tasks. This selected task is now read only.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {workflow.status === 'ready' || workflow.status === 'failed' ? null : (
-        <div className="callout callout--neutral" role="status">
-          {workflow.status === 'missing'
-            ? 'This task has no persisted workflow yet.'
-            : 'Loading the selected task timeline and workflow…'}
-        </div>
+      className={cn(
+        'border-b border-border px-5 py-2.5',
+        blocked ? 'bg-destructive/5' : 'bg-emerald-500/4',
       )}
-
-      {workflow.status === 'ready' ? (
-        <div className="selected-task__ready">
-          <SelectionBadge tone="good">workflow persisted</SelectionBadge>
-          <p>
-            The graph is compiled, hashed, and frozen in the ledger. Changes only happen when the
-            ledger is updated, not inside the UI.
-          </p>
-        </div>
-      ) : null}
+      aria-label="Validation surface"
+      data-testid="validation-panel"
+    >
+      <div className="flex items-center gap-2 text-sm">
+        {blocked ? (
+          <AlertTriangle className="size-4 text-destructive" />
+        ) : (
+          <CheckCircle2 className="size-4 text-emerald-400" />
+        )}
+        <strong>{blocked ? 'Human review required' : 'Validator passed'}</strong>
+        <span className="text-xs text-muted-foreground">
+          {task.currentStage} · {view.workflow.verificationPlan.profile.replaceAll('_', ' ')}
+        </span>
+      </div>
+      {issues.length === 0 ? null : (
+        <ol className="mt-2 space-y-1 pl-6" data-testid="validation-errors">
+          {issues.map((issue) => (
+            <li className="text-xs text-destructive" key={`${issue.code}:${issue.path.join('.')}`}>
+              <code>{issue.code}</code> · {issue.message}
+              {issue.details === undefined ? null : (
+                <pre className="mt-1 overflow-auto text-[11px] text-muted-foreground">
+                  {formatValue(issue.details)}
+                </pre>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
+  );
+};
+
+const ActivityTimeline = ({
+  activity,
+  streamStatus,
+}: {
+  readonly activity: ActivityLoadState;
+  readonly streamStatus: ConsoleStreamStatus;
+}) => (
+  <section className="px-5 py-4" aria-label="Activity timeline">
+    <div className="mb-3 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <Activity className="size-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Activity</h2>
+      </div>
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Radio className={cn('size-3', streamStatus === 'live' && 'text-emerald-400')} />
+        {streamLabel(streamStatus)}
+      </div>
+    </div>
+
+    {activity.status === 'loading' ? <EmptyState>Loading activity…</EmptyState> : null}
+    {activity.status === 'failed' ? <InlineError>{activity.message}</InlineError> : null}
+    {activity.status === 'ready' ? (
+      <ol className="relative" data-testid="task-activity-timeline">
+        {activity.response.entries.length === 0 ? (
+          <EmptyState>No persisted activity yet</EmptyState>
+        ) : (
+          activity.response.entries.map((entry, index) => (
+            <li className="relative flex gap-3 pb-4 last:pb-0" key={entry.sequence}>
+              {index === activity.response.entries.length - 1 ? null : (
+                <span className="absolute bottom-0 left-[7px] top-4 w-px bg-border" />
+              )}
+              <span
+                className={cn(
+                  'relative mt-1.5 size-3.5 shrink-0 rounded-full border-[3px] border-background',
+                  entry.level === 'error'
+                    ? 'bg-destructive'
+                    : entry.level === 'warning'
+                      ? 'bg-amber-400'
+                      : 'bg-muted-foreground',
+                )}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="mr-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {sourceLabel(entry.source)}
+                    </span>
+                    <strong className="text-sm font-medium">{entry.title}</strong>
+                  </div>
+                  <time
+                    className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+                    dateTime={entry.occurredAt}
+                  >
+                    {formatShortDateTime(entry.occurredAt)}
+                  </time>
+                </div>
+                <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">{entry.detail}</p>
+              </div>
+            </li>
+          ))
+        )}
+      </ol>
+    ) : null}
+  </section>
+);
+
+const WhyThisWorkflow = ({ view }: { readonly view: WorkflowView }) => (
+  <Collapsible>
+    <div className="border-t border-border" data-testid="workflow-decisions">
+      <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+        <div className="flex items-center gap-2">
+          <GitBranch className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Why this workflow</span>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {view.workflow.assemblyDecisions.length} decisions
+          </span>
+        </div>
+        <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ol className="pb-3" data-testid="workflow-decision-list">
+          {view.workflow.assemblyDecisions.map((decision) => (
+            <li
+              className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-5 py-2 hover:bg-muted/20"
+              key={decision.id}
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <strong className="truncate text-[13px] font-medium">{decision.title}</strong>
+                  <code className="shrink-0 text-[10px] text-muted-foreground">
+                    {decision.source}
+                  </code>
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">{decision.effect}</p>
+              </div>
+              <Tooltip>
+                <TooltipTrigger className="self-start text-[11px] text-muted-foreground underline decoration-dotted underline-offset-4">
+                  reason
+                </TooltipTrigger>
+                <TooltipContent className="max-w-sm">{decision.reason}</TooltipContent>
+              </Tooltip>
+            </li>
+          ))}
+        </ol>
+      </CollapsibleContent>
+    </div>
+  </Collapsible>
+);
+
+const WorkflowDiagnostics = ({ view }: { readonly view: WorkflowView }) => (
+  <details className="group border-t border-border" data-testid="workflow-debug-details">
+    <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-3 text-sm font-medium hover:bg-muted/30">
+      <span>Diagnostics</span>
+      <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+    </summary>
+    <div className="space-y-3 px-5 pb-4 text-xs">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
+        <dt>Template</dt>
+        <dd className="truncate font-mono text-foreground">{view.workflow.templateId}</dd>
+        <dt>Proposal</dt>
+        <dd className="truncate font-mono text-foreground">{view.workflow.proposalId}</dd>
+        <dt>Graph</dt>
+        <dd className="truncate font-mono text-foreground" data-testid="graph-hash">
+          {view.workflow.graphHash ?? 'not compiled'}
+        </dd>
+      </dl>
+      <p className="font-medium">Template → task graph</p>
+      {view.workflow.diff.length === 0 ? (
+        <p className="text-muted-foreground">No graph diff</p>
+      ) : (
+        <ol className="space-y-2" data-testid="graph-diff">
+          {view.workflow.diff.map((entry, index) => (
+            <li key={`${entry.kind}:${entry.path}:${String(index)}`}>
+              <div className="flex items-center gap-2">
+                <StateBadge>{entry.kind}</StateBadge>
+                <code className="truncate text-muted-foreground">{entry.path}</code>
+              </div>
+              <pre className="mt-1 max-h-32 overflow-auto rounded-md bg-muted/40 p-2 text-[10px] text-muted-foreground">
+                {formatValue(entry.before)} → {formatValue(entry.after)}
+              </pre>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  </details>
+);
+
+const WorkflowSidebar = ({ workflow }: { readonly workflow: WorkflowLoadState }) => {
+  if (workflow.status === 'loading') {
+    return (
+      <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
+        <EmptyState>Loading workflow…</EmptyState>
+      </aside>
+    );
+  }
+
+  if (workflow.status === 'missing') {
+    return (
+      <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold">Workflow</h2>
+        </div>
+        <EmptyState>Generate the task to inspect its workflow</EmptyState>
+      </aside>
+    );
+  }
+
+  if (workflow.status === 'failed') {
+    return (
+      <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold">Workflow</h2>
+        </div>
+        <InlineError>{workflow.message}</InlineError>
+      </aside>
+    );
+  }
+
+  const view = workflow.response.view;
+  const retryCount = Object.keys(view.workflow.retryBudgets).length;
+
+  return (
+    <aside
+      className="flex min-h-0 flex-col"
+      aria-label="Current workflow"
+      data-testid="workflow-sidebar"
+    >
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold">Workflow</h2>
+              <StateBadge
+                className={
+                  view.workflow.status === 'valid'
+                    ? 'bg-emerald-500/12 text-emerald-300'
+                    : 'bg-destructive/15 text-destructive'
+                }
+              >
+                {view.workflow.status}
+              </StateBadge>
+            </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{view.fixture.title}</p>
+          </div>
+          {view.workflow.graphHash === null ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <a
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                    href={graphDownloadUrl(view.fixture.id)}
+                    download
+                    aria-label="Download graph JSON"
+                  />
+                }
+              >
+                <Download className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent>Download graph JSON</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span>{view.workflow.verificationPlan.profile.replaceAll('_', ' ')}</span>
+          <span>{view.workflow.waits.length} waits</span>
+          <span>{retryCount} retries</span>
+          <span>{view.workflow.capabilities.required.length} capabilities</span>
+        </div>
+      </div>
+
+      <ScrollArea className="min-h-0 flex-1 px-2 py-2">
+        {view.workflow.tree === null ? (
+          <EmptyState>Workflow rejected before graph materialization</EmptyState>
+        ) : (
+          <WorkflowTree root={view.workflow.tree} />
+        )}
+      </ScrollArea>
+    </aside>
   );
 };
 
@@ -889,71 +782,81 @@ export const App = () => {
   const view = workflowState.status === 'ready' ? workflowState.response.view : null;
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">Tasker</p>
-          <h1>Operator console</h1>
-        </div>
-        <div className="app-header__meta">
-          <SelectionBadge tone={tasksStatus === 'ready' ? 'good' : 'warning'}>
-            {tasksStatus === 'ready' ? 'ledger ready' : 'loading ledger'}
-          </SelectionBadge>
-          <SelectionBadge tone={streamStatus === 'live' ? 'good' : 'warning'}>
-            {streamStatus === 'live'
-              ? 'SSE live'
-              : streamStatus === 'reconnecting'
-                ? 'SSE reconnecting'
-                : 'SSE offline'}
-          </SelectionBadge>
-          <SelectionBadge tone="neutral">M1 planning only</SelectionBadge>
-        </div>
-      </header>
-
-      {tasksStatus === 'failed' ? (
-        <div className="callout callout--danger" role="alert">
-          {tasksMessage ?? 'The operator task queue could not be loaded.'}
-        </div>
-      ) : null}
-
-      <div className="console-grid">
-        <TaskQueue
-          tasks={tasks}
-          selectedId={selectedId}
-          onSelect={handleSelectTask}
-          liveStatus={streamStatus}
-        />
-
-        <main className="console-main">
-          {selectedTask === null ? (
-            <EmptyPrompt
-              title="No task selected"
-              detail="Load the queue first, then pick the task you want to inspect."
-            />
-          ) : (
-            <>
-              <SelectedTaskHeader
-                task={selectedTask}
-                workflow={workflowState}
-                onGenerate={handleGenerate}
-                generating={generating}
+    <TooltipProvider>
+      <div className="flex h-dvh min-w-[1080px] flex-col bg-background text-foreground">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <Circle className="size-3.5 fill-current" />
+            </div>
+            <strong className="text-sm tracking-tight">Tasker</strong>
+            <span className="text-xs text-muted-foreground">Operator</span>
+          </div>
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  tasksStatus === 'ready' ? 'bg-emerald-400' : 'bg-amber-400',
+                )}
               />
+              Ledger
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  streamStatus === 'live' ? 'bg-emerald-400' : 'bg-amber-400',
+                )}
+              />
+              SSE
+            </span>
+            <StateBadge>M1 · planning only</StateBadge>
+          </div>
+        </header>
 
-              <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
+        {tasksStatus === 'failed' ? (
+          <InlineError>{tasksMessage ?? 'The task queue could not be loaded'}</InlineError>
+        ) : null}
 
-              {view === null ? null : (
-                <>
-                  <ValidationSurface task={selectedTask} workflow={workflowState} />
-                  <WhyThisWorkflow view={view} />
-                  <WorkflowDiagnostics view={view} />
-                </>
-              )}
-            </>
-          )}
-        </main>
+        <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px]">
+          <TaskQueue
+            tasks={tasks}
+            selectedId={selectedId}
+            onSelect={handleSelectTask}
+            liveStatus={streamStatus}
+          />
 
-        <WorkflowSidebar workflow={workflowState} />
+          <main className="flex min-h-0 flex-col border-r border-border">
+            {selectedTask === null ? (
+              <EmptyState>
+                {tasksStatus === 'loading' ? 'Loading tasks…' : 'Select a task'}
+              </EmptyState>
+            ) : (
+              <>
+                <SelectedTaskHeader
+                  task={selectedTask}
+                  workflow={workflowState}
+                  onGenerate={handleGenerate}
+                  generating={generating}
+                />
+                {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}
+                <ScrollArea className="min-h-0 flex-1">
+                  <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
+                  {view === null ? null : (
+                    <>
+                      <WhyThisWorkflow view={view} />
+                      <WorkflowDiagnostics view={view} />
+                    </>
+                  )}
+                </ScrollArea>
+              </>
+            )}
+          </main>
+
+          <WorkflowSidebar workflow={workflowState} />
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 };

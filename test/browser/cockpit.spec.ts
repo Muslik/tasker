@@ -37,7 +37,6 @@ const loadActivity = async (page: Page, fixtureId: string) => {
 
 const clickTask = async (page: Page, fixtureId: string) => {
   await page.getByTestId(`task-item-${fixtureId}`).click();
-  await expect(page.getByTestId(`task-item-${fixtureId}`)).toHaveAttribute('aria-current', 'true');
 };
 
 type LoadedTasks = Awaited<ReturnType<typeof loadTasks>>;
@@ -66,6 +65,10 @@ test('the operator console renders the queue and lets me inspect a task', async 
   );
   await clickTask(page, candidate.fixture.id);
 
+  await expect(page.getByTestId(`task-item-${candidate.fixture.id}`)).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
   await expect(page.getByTestId('selected-task')).toContainText(candidate.fixture.title);
   await expect(page.getByTestId('selected-task')).toContainText(candidate.currentStage);
   await expect(page.getByTestId('provider-session-banner')).toHaveText(
@@ -124,11 +127,12 @@ test('the project profile explains why inline copy adds no translation wait', as
     )?.title,
   ).toBe('Inline translation policy applied');
 
-  await expect(page.getByTestId('workflow-decisions')).toContainText(
+  await page.getByRole('button', { name: /Why this workflow/ }).click();
+  await expect(page.getByTestId('workflow-decision-list')).toContainText(
     'Inline translation policy applied',
   );
-  await expect(page.getByTestId('workflow-decisions')).toContainText('project:twiket/avia-web');
-  await expect(page.getByTestId('workflow-decisions')).toContainText(
+  await expect(page.getByTestId('workflow-decision-list')).toContainText('project:twiket/avia-web');
+  await expect(page.getByTestId('workflow-decision-list')).toContainText(
     'add no translation commands or wait',
   );
 });

@@ -15,6 +15,9 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "types": ["node", "vitest/globals"]
   },
   "include": [
