@@ -1,0 +1,68 @@
+{
+  "name": "tasker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": "24.x"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  },
+  "scripts": {
+    "build": "pnpm build:server && pnpm build:cockpit",
+    "build:server": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
+    "build:cockpit": "vite build",
+    "typecheck": "pnpm typecheck:server && pnpm typecheck:cockpit",
+    "typecheck:server": "tsc --noEmit",
+    "typecheck:cockpit": "tsc --noEmit -p tsconfig.cockpit.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:property": "vitest run --project property",
+    "test:repository": "vitest run --project repository",
+    "test:contract": "vitest run --project contract",
+    "test:recovery": "vitest run --project recovery",
+    "test:operator": "vitest run --project operator",
+    "test:e2e": "playwright test",
+    "test:integration": "pnpm test:repository && pnpm test:contract",
+    "test:coverage": "vitest run --coverage.enabled",
+    "demo:m0": "pnpm build && node dist/app/m0-demo.js",
+    "demo:m1": "pnpm build && node dist/control-plane/m1-server.js",
+    "dev:api:m1": "pnpm build:server && node dist/control-plane/m1-server.js",
+    "dev:cockpit": "vite",
+    "m1": "pnpm build:server && node dist/control-plane/m1-cli.js",
+    "e2e:api": "pnpm build:server && node scripts/start-m1-e2e.mjs",
+    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.2",
+    "fastify": "5.11.0",
+    "pino": "10.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.62.1",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.8.0",
+    "fast-check": "4.9.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vite": "8.2.0",
+    "vitest": "4.1.10"
+  }
+}
