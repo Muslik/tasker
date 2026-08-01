@@ -239,6 +239,42 @@ stays inside the implementation step because that project stores copy inline or 
 locale JSON. An unknown repository receives the conservative simple policy and does
 not accidentally inherit external waits or publication effects.
 
+#### Initial assembly is not omniscient
+
+The initial analyzer may read the normalized task, linked context, repository workflow
+policy, and repository in a read-only sandbox. It can inspect code and configuration,
+but it cannot claim facts that only execution can produce. A reproduction result,
+runtime failure, generated diff, or newly discovered dependency is therefore not a
+missing input that the initial planner must hallucinate.
+
+Assembly has two horizons:
+
+```mermaid
+flowchart LR
+  I["Initial snapshot + read-only repository inspection"] --> G1["Validated workflow v1"]
+  G1 --> E["Execute until a new fact is discovered"]
+  E --> O{"Typed step outcome"}
+  O -->|"completed"| N["Continue current graph"]
+  O -->|"workflow_change_required"| P["Preserve cursor, worktree, and evidence"]
+  P --> A["Assemble and validate continuation candidate"]
+  A --> R{"Policy / operator review"}
+  R -->|"accepted"| G2["Linked immutable continuation v2"]
+  R -->|"rejected"| H["Remain recoverably blocked"]
+```
+
+Every agent/tool step returns a typed outcome. `workflow_change_required` contains a
+persisted evidence artifact, the node where the fact appeared, the requested scope
+change, and the repositories or external dependencies involved. The executor cannot
+edit a graph. It hands the request back to the planner, which produces another
+untrusted proposal for the compiler and validator.
+
+The first implementation uses an immutable linked continuation/new run. This keeps
+the completed prefix and its hash intact while presenting one causal task history in
+the cockpit. Later `GraphRevision` support may append a validated suffix at declared
+expansion points, but it cannot rewrite completed nodes. Discovering a shared
+component during `bug.reproduce` or `code.implement` is the canonical scenario for
+this path.
+
 Workflow knowledge is resolved from two configuration layers:
 
 ```yaml

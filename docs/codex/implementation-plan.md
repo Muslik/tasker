@@ -13,6 +13,7 @@ complete only after its operator demo and deterministic evidence pass.
 | Milestone | What the owner can actually test | Near-horizon forecast |
 |---|---|---|
 | M1 | `fixture task -> compiled workflow -> visible tree in local cockpit` | after M0+M1, roughly 6-10 focused implementation days |
+| M1.5 | `normalized task + real read-only repository inspection -> provider proposal -> validated visible workflow` | implemented and verified 2026-08-01 |
 | M2 | `task -> visible workflow -> complete stub traversal`, including kill/restart, wait/resume, intervention, and handoff | after M0-M2, roughly 12-20 focused days |
 | M3 | one real subscription CLI executes a node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
 | M4 | a real provider changes an isolated worktree; a recoverable failure resumes at the failed node | re-estimate after M3; planning envelope 4-7 days |
@@ -22,6 +23,9 @@ complete only after its operator demo and deterministic evidence pass.
 | M8 | parent task -> linked cross-repo child -> dev publish -> parent verify -> human final publish -> resume | after single-run recovery and effects are proven |
 
 The first workflow picture is therefore **M1**, not the end of the integration project.
+M1.5 replaces the deterministic fixture analyzer with a real subscription-CLI analyzer
+without granting write or execution authority. It is the first point where the owner
+can give Tasker a task plus a repository and inspect the workflow assembled from both.
 The first full walk through the picture is **M2** on deterministic stub steps. This
 ordering is intentional: UI, compiler, and runtime semantics can be corrected before
 Jira, Bitbucket, and Jenkins make failures expensive to diagnose.
@@ -270,6 +274,74 @@ HTML tree served by the API. Do not defer the visual demo itself.
 
 4-6 focused days. Cumulative near-horizon forecast after M0: 6-10 focused days.
 
+## 5.5 Milestone 1.5 — real read-only workflow assembly
+
+### Goal
+
+Use one subscription-authenticated CLI to inspect a normalized task and its repository
+read-only, return a structured workflow proposal, then pass that proposal through the
+same deterministic compiler/validator and cockpit used by M1.
+
+### Entry criteria
+
+- M1 proposal, compiler, persistence, and cockpit contracts are green.
+- the provider adapter can run with an explicit read-only sandbox and structured final
+  output;
+- the normalized task and repository workflow-policy snapshot are available locally.
+
+### Implementation steps
+
+1. Extract a `WorkflowAnalyzerPort` whose output is untrusted JSON, not executable code.
+2. Define a narrow analyzer-output schema: proposed workflow source, assembly decisions,
+   and verification plan. Derive capabilities, waits, retry budgets, expected artifacts,
+   template diff, and graph hash inside Tasker.
+3. Add a Codex CLI adapter using saved ChatGPT subscription authentication,
+   non-interactive `exec`, `--ephemeral`, `--sandbox read-only`, and
+   `--output-schema`.
+4. Capture provider/session ID, CLI version, duration, structured usage, stderr, and
+   final proposal as redaction-aware attempt evidence.
+5. Add a command accepting task snapshot, repository path, and database path; compile
+   and persist the accepted or rejected result through the existing M1 store.
+6. Show analyzer provenance, duration, and measured token fields in the cockpit without
+   claiming an API dollar charge.
+7. Keep deterministic fixtures as the test adapter and offline fallback, not as the
+   production analyzer.
+8. Add the typed `workflow_change_required` step outcome and preserved replan contract
+   for M2. It does not mutate an M1 graph or execute a child run yet.
+
+### Acceptance evidence
+
+- the provider inspects a real repository in read-only mode and produces a proposal
+  that either compiles or is rejected with the normal validator report;
+- a malicious/invalid proposal cannot introduce an unknown step, unbounded loop, unsafe
+  effect, or unavailable capability;
+- replay of the persisted proposal produces the same graph hash without another
+  provider call;
+- provider duration/session/usage evidence is visible and clearly distinguished from
+  hypothetical API cost;
+- no repository file changes after analysis;
+- a typed late discovery can request replanning only by preserving evidence and
+  entering a recoverable gate.
+
+### Operator demo
+
+1. Choose a task snapshot and a real local repository.
+2. Run the analyzer and watch the provider attempt in the center activity surface.
+3. Inspect the generated graph and **Why this workflow** decisions.
+4. restart Tasker and show the identical persisted graph without calling the provider.
+5. feed an unsafe analyzer fixture and show deterministic rejection.
+
+### Rollback/containment
+
+If the provider is unavailable or quota-limited, preserve the analyzer attempt and
+open a recoverable wait; do not silently substitute a different proposal. The owner
+may explicitly select the deterministic adapter for offline UI/compiler testing.
+
+### Estimate
+
+2-4 focused days. Re-estimate M2 only after one real repository proposal is accepted
+and restored from the ledger.
+
 ## 6. Milestone 2 — durable stub traversal
 
 ### Goal
@@ -297,12 +369,15 @@ wait, intervention, takeover, replay, and slot semantics.
 7. Implement quota wait as a normal slot-free Wait.
 8. Implement human clarification gate and `InterventionEvent -> new Attempt` input
    materialization.
-9. Implement ManualTakeover checkpoint, effect reconciliation, lease release, write
+9. Accept `workflow_change_required` from a stub step, persist its evidence, preserve
+   the cursor/worktree, and compile a linked immutable continuation candidate. The
+   current graph cannot be edited in place.
+10. Implement ManualTakeover checkpoint, effect reconciliation, lease release, write
    freeze, handoff packet, and default new-run re-entry.
-10. Implement projection rebuild and process restart recovery.
-11. Extend cockpit with live state, active cursor, transcript, cost/time badges,
+11. Implement projection rebuild and process restart recovery.
+12. Extend cockpit with live state, active cursor, transcript, cost/time badges,
     wait/gate controls, intervention input, takeover control, and debug bundle link.
-12. Add kill injection at transaction/outbox/lease/wait boundaries.
+13. Add kill injection at transaction/outbox/lease/wait boundaries.
 
 ### Acceptance evidence
 
@@ -314,6 +389,8 @@ wait, intervention, takeover, replay, and slot semantics.
 - manual takeover stops all automation writes and produces a complete handoff packet;
 - restart while waiting consumes no runner slot;
 - replay never invokes a stub effect a second time.
+- a runtime discovery preserves the completed prefix and creates a validated linked
+  continuation candidate instead of mutating the current graph.
 
 ### Operator demo
 

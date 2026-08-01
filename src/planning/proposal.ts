@@ -83,9 +83,19 @@ export const WorkflowAssemblyDecisionSchema = z
   })
   .strict();
 
+export const WorkflowAnalyzerOutputSchema = z
+  .object({
+    assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
+    source: WorkflowSourceSchema,
+    verificationPlan: VerificationPlanSchema,
+  })
+  .strict();
+
+export const AnalyzerVersionSchema = z.string().regex(/^[a-z][a-z0-9_-]*@[1-9]\d*$/u);
+
 export const WorkflowProposalArtifactSchema = z
   .object({
-    analyzerVersion: z.literal('m1-deterministic@1'),
+    analyzerVersion: AnalyzerVersionSchema,
     assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
     capabilities: CapabilityMetadataSchema,
     expectedArtifacts: z.array(ExpectedArtifactSchema),
@@ -101,6 +111,7 @@ export const WorkflowProposalArtifactSchema = z
   .strict();
 
 export type WorkflowProposalArtifact = z.infer<typeof WorkflowProposalArtifactSchema>;
+export type WorkflowAnalyzerOutput = z.infer<typeof WorkflowAnalyzerOutputSchema>;
 export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 export type ExpectedArtifact = z.infer<typeof ExpectedArtifactSchema>;
 export type WaitMetadata = z.infer<typeof WaitMetadataSchema>;
@@ -123,7 +134,7 @@ export const ProposalInputFailureSchema = z
 export type ProposalInputFailure = z.infer<typeof ProposalInputFailureSchema>;
 export type AnalyzeTaskFailure = FixtureInputFailure | ProposalInputFailure;
 
-const availableCapabilities = Object.freeze([
+export const M1_AVAILABLE_CAPABILITIES = Object.freeze([
   'command.run',
   'git.write',
   'package.publish',
@@ -481,16 +492,40 @@ const applyRejectedVariant = (fixture: TaskFixture, source: WorkflowSource): unk
 
 const toProposalCandidate = (fixture: TaskFixture): unknown => {
   const validSource = materializeTaskWorkflow(fixture);
+  return proposalCandidateFromParts(fixture, 'm1-deterministic@1', {
+    assemblyDecisions: createAssemblyDecisions(fixture),
+    source: applyRejectedVariant(fixture, validSource),
+    verificationPlan: createVerificationPlan(fixture),
+  });
+};
+
+const proposalCandidateFromParts = (
+  fixture: TaskFixture,
+  analyzerVersion: string,
+  parts: {
+    readonly assemblyDecisions: readonly WorkflowAssemblyDecision[];
+    readonly source: unknown;
+    readonly verificationPlan: z.infer<typeof VerificationPlanSchema>;
+  },
+): unknown => {
   const templateId = selectWorkflowTemplate(fixture);
-  const metadata = collectProposalMetadata(validSource);
+  const parsedSource = WorkflowSourceSchema.safeParse(parts.source);
+  const metadata = parsedSource.success
+    ? collectProposalMetadata(parsedSource.data)
+    : {
+        expectedArtifacts: [],
+        requiredCapabilities: [],
+        retryBudgets: [],
+        waits: [],
+      };
   const available =
     fixture.expected === 'rejected' && fixture.proposalVariant === 'unmet_capability'
-      ? availableCapabilities.filter((capability) => capability !== 'repository.read')
-      : availableCapabilities;
+      ? M1_AVAILABLE_CAPABILITIES.filter((capability) => capability !== 'repository.read')
+      : M1_AVAILABLE_CAPABILITIES;
 
   return {
-    analyzerVersion: 'm1-deterministic@1',
-    assemblyDecisions: createAssemblyDecisions(fixture),
+    analyzerVersion,
+    assemblyDecisions: parts.assemblyDecisions,
     capabilities: {
       available: [...available],
       required: [...metadata.requiredCapabilities],
@@ -499,10 +534,10 @@ const toProposalCandidate = (fixture: TaskFixture): unknown => {
     fixture,
     proposalSchemaVersion: 1,
     retryBudgets: metadata.retryBudgets,
-    source: applyRejectedVariant(fixture, validSource),
+    source: parts.source,
     templateId,
     templateSource: getBaseWorkflowTemplate(templateId),
-    verificationPlan: createVerificationPlan(fixture),
+    verificationPlan: parts.verificationPlan,
     waits: metadata.waits,
   };
 };
@@ -538,6 +573,26 @@ export const analyzeTaskFixture = (
   // The analyzer is an untrusted boundary even while M1 uses a deterministic local implementation.
   const untrustedProposal: unknown = toProposalCandidate(fixtureResult.value);
   return parseWorkflowProposal(untrustedProposal);
+};
+
+export const createWorkflowProposalFromAnalyzerOutput = (
+  fixtureInput: unknown,
+  analyzerVersion: string,
+  outputInput: unknown,
+): Outcome<WorkflowProposalArtifact, AnalyzeTaskFailure> => {
+  const fixtureResult = parseTaskFixture(fixtureInput);
+  if (!fixtureResult.ok) {
+    return err(FixtureInputFailureSchema.parse(fixtureResult.error));
+  }
+
+  const output = WorkflowAnalyzerOutputSchema.safeParse(outputInput);
+  if (!output.success) {
+    return err(toProposalInputFailure(output.error.issues));
+  }
+
+  return parseWorkflowProposal(
+    proposalCandidateFromParts(fixtureResult.value, analyzerVersion, output.data),
+  );
 };
 
 export const proposalSourceAsJson = (proposal: WorkflowProposalArtifact): JsonValue | undefined => {

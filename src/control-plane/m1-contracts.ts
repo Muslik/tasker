@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
 export const M1_VIEW_SCHEMA_VERSION = 2;
@@ -202,12 +203,15 @@ export const OperatorActivityEntrySchema = z
 export const OperatorActivityResponseSchema = z
   .object({
     fixtureId: z.string().min(1),
-    providerSession: z
-      .object({
-        status: z.literal('not_started'),
-        reason: z.literal('m1_planning_only'),
-      })
-      .strict(),
+    providerSession: z.union([
+      z
+        .object({
+          status: z.literal('not_started'),
+          reason: z.literal('m1_planning_only'),
+        })
+        .strict(),
+      WorkflowAnalyzerReceiptSchema,
+    ]),
     entries: z.array(OperatorActivityEntrySchema),
   })
   .strict();

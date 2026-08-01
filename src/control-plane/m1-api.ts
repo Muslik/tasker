@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { ApiErrorResponseSchema } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
+import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
 
 const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
 const ProjectionParamsSchema = z.object({ projectionId: z.string().min(1) }).strict();
@@ -17,6 +18,7 @@ export interface BuildM1ApiOptions {
   readonly service: M1WorkflowService;
   readonly cockpitDirectory?: string | undefined;
   readonly logger?: boolean | undefined;
+  readonly workflowGenerator?: WorkflowGenerator | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -42,6 +44,10 @@ const sendServiceError = (reply: FastifyReply, error: M1ServiceError): FastifyRe
         .send(
           apiError('store_failure', `Ledger could not serve the workflow: ${error.error.kind}`),
         );
+    case 'provider_failure':
+      return reply
+        .code(502)
+        .send(apiError('provider_failure', providerFailureSummary(error.failure)));
   }
 };
 
@@ -176,7 +182,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
-    const result = options.service.generate(params.data.fixtureId);
+    const result =
+      options.workflowGenerator === undefined
+        ? options.service.generate(params.data.fixtureId)
+        : await options.workflowGenerator.generate(params.data.fixtureId);
     if (!result.ok) return sendServiceError(reply, result.error);
 
     return reply.send(result.value);

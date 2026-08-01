@@ -18,17 +18,20 @@ Read in this order:
    commands, demo artifacts, and the exact boundary before M1.
 7. [`m1-implementation.md`](m1-implementation.md) — the working task-to-workflow
    planner, durable projections, local API/CLI, cockpit, and operator demo.
+8. [`m1.5-implementation.md`](m1.5-implementation.md) — real subscription-CLI
+   workflow assembly, provider isolation, provenance, token evidence, and runtime
+   discovery boundary.
 
-The first visible workflow has shipped in M1. The first full traversal of that graph on
-durable stub steps arrives at M2. Real providers and corporate integrations are
-deliberately later milestones.
+The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
+subscription CLI provider. The first full traversal of that graph on durable stub steps
+arrives at M2; corporate integrations remain later milestones.
 
-M0 and M1 are now implemented. M1 provides a read-only operator console with the task
+M0, M1, and M1.5 are now implemented. The read-only operator console has the task
 queue on the left, persisted activity and workflow rationale in the center, and the
 current graph on the right. It includes validation failures, waits, retry bounds,
 project/global policy decisions, verification rationale, capabilities, collapsed
 template diagnostics, SSE refresh, and JSON download. Execution remains disabled
-until M2.
+until M2. Provider analysis provenance and measured tokens are persisted and visible.
 
 Older July 30 versions remain under `.omx/plans/` for audit history; they are not the
 current implementation source of truth.

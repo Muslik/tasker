@@ -11,6 +11,7 @@ for (const filename of [databasePath, `${databasePath}-shm`, `${databasePath}-wa
 
 process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = '4311';
+process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
 const { startM1Server } = await import('../dist/control-plane/m1-server.js');
 await startM1Server();

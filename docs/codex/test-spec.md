@@ -252,6 +252,10 @@ Evidence:
 ### R13 — Later graph expansion and child runs
 
 - `first_wave_run_uses_one_immutable_compiled_graph`
+- `runtime_discovery_returns_typed_workflow_change_required`
+- `workflow_change_request_preserves_cursor_worktree_and_evidence`
+- `first_wave_replan_compiles_linked_immutable_continuation`
+- `rejected_continuation_leaves_parent_recoverably_blocked`
 - `unsupported_first_wave_expansion_opens_preserved_replan_gate`
 - `graph_revision_only_applies_at_declared_expansion_point`
 - `graph_revision_preserves_parent_hash_and_node_lineage`

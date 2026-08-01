@@ -3,9 +3,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { openSqliteLedger } from '../ledger/index.js';
+import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
 import { systemClock } from '../shared/clock.js';
 import { buildM1Api } from './m1-api.js';
 import { createM1WorkflowService } from './m1-service.js';
+import { CodexWorkflowGenerator } from './workflow-generator.js';
 
 const parsePort = (input: string | undefined): number => {
   const port = input === undefined ? 4311 : Number(input);
@@ -21,10 +23,19 @@ export const startM1Server = async (): Promise<void> => {
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const service = createM1WorkflowService(ledger.repository, systemClock);
+  const workflowGenerator =
+    process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic'
+      ? undefined
+      : new CodexWorkflowGenerator(
+          service,
+          new CodexCliWorkflowAnalyzer(nodeCommandRunner),
+          resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
+        );
   const cockpitDirectory = resolve('dist/cockpit');
   const api = buildM1Api({
     service,
     logger: true,
+    ...(workflowGenerator === undefined ? {} : { workflowGenerator }),
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

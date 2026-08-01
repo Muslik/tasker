@@ -37,6 +37,7 @@
     "dev:api:m1": "pnpm build:server && node dist/control-plane/m1-server.js",
     "dev:cockpit": "vite",
     "m1": "pnpm build:server && node dist/control-plane/m1-cli.js",
+    "analyze:codex": "pnpm build:server && node dist/control-plane/analyzer-cli.js",
     "e2e:api": "pnpm build:server && node scripts/start-m1-e2e.mjs",
     "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },

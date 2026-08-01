@@ -68,6 +68,18 @@ const formatShortDateTime = (value: string): string =>
     timeStyle: 'short',
   }).format(new Date(value));
 
+const formatProviderSession = (activity: ActivityLoadState): string => {
+  if (activity.status === 'loading') return 'provider session loading';
+  if (activity.status === 'failed') return 'provider session unavailable';
+
+  const session = activity.response.providerSession;
+  if (session.status === 'not_started') return 'not started · M1 planning only';
+
+  const seconds = Math.max(0.1, session.durationMs / 1000).toFixed(1);
+  const measuredTokens = session.usage.inputTokens + session.usage.outputTokens;
+  return `${session.model} · read-only · ${seconds}s · ${measuredTokens.toLocaleString()} tok`;
+};
+
 const readStoredSelection = (): string | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -277,11 +289,13 @@ const TaskQueue = ({
 const SelectedTaskHeader = ({
   task,
   workflow,
+  activity,
   onGenerate,
   generating,
 }: {
   readonly task: OperatorTaskSummary;
   readonly workflow: WorkflowLoadState;
+  readonly activity: ActivityLoadState;
   readonly onGenerate: () => void;
   readonly generating: boolean;
 }) => (
@@ -296,7 +310,7 @@ const SelectedTaskHeader = ({
         </div>
         <h1 className="truncate text-lg font-semibold tracking-tight">{task.fixture.title}</h1>
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span data-testid="provider-session-banner">not started · M1 planning only</span>
+          <span data-testid="provider-session-banner">{formatProviderSession(activity)}</span>
           {task.updatedAt === null ? null : (
             <>
               <span>·</span>
@@ -837,6 +851,7 @@ export const App = () => {
                 <SelectedTaskHeader
                   task={selectedTask}
                   workflow={workflowState}
+                  activity={activityState}
                   onGenerate={handleGenerate}
                   generating={generating}
                 />

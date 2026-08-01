@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createM1WorkflowService } from '../../src/control-plane/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
+import {
+  analyzeTaskFixture,
+  findTaskFixture,
+  WorkflowAnalyzerOutputSchema,
+} from '../../src/planning/index.js';
+import { WorkflowAnalyzerReceiptSchema } from '../../src/providers/contracts.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const directories: string[] = [];
@@ -83,5 +89,75 @@ describe('M1 persisted workflow', () => {
     expect(ledger.repository.readArtifact('graph:invalid-unknown-step')).toBeNull();
 
     ledger.close();
+  });
+
+  it('restores provider provenance without re-planning an existing workflow', () => {
+    const filename = databasePath();
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const fixture = findTaskFixture('avia-13236-short-bug');
+    if (fixture === undefined) throw new Error('Expected workflow fixture');
+    const analyzed = analyzeTaskFixture(fixture);
+    if (!analyzed.ok) throw new Error('Expected deterministic proposal fixture');
+
+    const output = WorkflowAnalyzerOutputSchema.parse({
+      assemblyDecisions: analyzed.value.assemblyDecisions,
+      source: analyzed.value.source,
+      verificationPlan: analyzed.value.verificationPlan,
+    });
+    const receipt = WorkflowAnalyzerReceiptSchema.parse({
+      status: 'completed',
+      provider: 'codex_cli',
+      analyzerVersion: 'codex-cli@1',
+      cliVersion: 'codex-cli 0.120.0',
+      model: 'gpt-5.4',
+      serviceTier: 'fast',
+      sessionId: 'thread-first',
+      promptHash: 'a'.repeat(64),
+      durationMs: 1250,
+      usage: {
+        inputTokens: 1200,
+        cachedInputTokens: 800,
+        outputTokens: 240,
+        reasoningOutputTokens: 40,
+      },
+      hypotheticalApiCostUsd: null,
+    });
+    const firstLedger = openSqliteLedger({ filename, clock });
+    const firstService = createM1WorkflowService(firstLedger.repository, clock);
+
+    const generated = firstService.generateFromAnalyzerOutput(fixture.fixtureId, output, receipt);
+    expect(generated.ok).toBe(true);
+    expect(firstLedger.repository.listEvents(`intake:${fixture.fixtureId}`)).toHaveLength(4);
+    expect(
+      firstLedger.repository.readArtifact(`analyzer-receipt:${fixture.fixtureId}`),
+    ).not.toBeNull();
+    firstLedger.close();
+
+    const restartedLedger = openSqliteLedger({ filename, clock });
+    const restartedService = createM1WorkflowService(restartedLedger.repository, clock);
+    const activity = restartedService.readActivity(fixture.fixtureId);
+    const duplicate = restartedService.generateFromAnalyzerOutput(fixture.fixtureId, output, {
+      ...receipt,
+      sessionId: 'thread-second',
+      promptHash: 'b'.repeat(64),
+    });
+
+    expect(activity).toMatchObject({
+      ok: true,
+      value: { providerSession: { sessionId: 'thread-first' } },
+    });
+    if (!activity.ok) return;
+    expect(activity.value.entries).toHaveLength(4);
+    expect(activity.value.entries[2]).toMatchObject({
+      source: 'agent',
+      title: 'Task and repository analyzed',
+    });
+    expect(duplicate).toEqual(generated);
+    expect(
+      restartedLedger.repository.readProjection('m1_analyzer', fixture.fixtureId)?.payload,
+    ).toMatchObject({ sessionId: 'thread-first' });
+    expect(restartedLedger.repository.listEvents(`intake:${fixture.fixtureId}`)).toHaveLength(4);
+
+    restartedLedger.close();
   });
 });

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildM1Api,
@@ -15,13 +15,22 @@ import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
-const setup = () => {
+const setup = (useWorkflowGenerator = false) => {
   const directory = mkdtempSync(join(tmpdir(), 'tasker-m1-api-'));
   const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
   const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
   resources.push({ directory, ledger });
   const service = createM1WorkflowService(ledger.repository, clock);
-  return { api: buildM1Api({ service }), ledger, service };
+  const generate = vi.fn((fixtureId: string) => Promise.resolve(service.generate(fixtureId)));
+  return {
+    api: buildM1Api({
+      service,
+      ...(useWorkflowGenerator ? { workflowGenerator: { generate } } : {}),
+    }),
+    generate,
+    ledger,
+    service,
+  };
 };
 
 afterEach(() => {
@@ -32,6 +41,20 @@ afterEach(() => {
 });
 
 describe('M1 HTTP API', () => {
+  it('routes operator generation through the configured real-provider boundary', async () => {
+    const { api, generate } = setup(true);
+
+    const response = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(generate).toHaveBeenCalledExactlyOnceWith('avia-13236-short-bug');
+
+    await api.close();
+  });
+
   it('lists fixtures, generates a workflow, reads it, and downloads the exact graph', async () => {
     const { api, ledger } = setup();
 

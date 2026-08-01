@@ -11,6 +11,7 @@ import { createWorkflowDiff, GraphDiffArtifactSchema, type GraphDiffFailure } fr
 import { FixtureInputFailureSchema } from './fixtures.js';
 import {
   analyzeTaskFixture,
+  parseWorkflowProposal,
   ProposalInputFailureSchema,
   WorkflowProposalArtifactSchema,
   type WorkflowProposalArtifact,
@@ -113,7 +114,12 @@ export const planTaskWorkflow = (
       : err({ ...proposalResult.error, stage: 'proposal' });
   }
 
-  const proposal = proposalResult.value;
+  return planParsedWorkflowProposal(proposalResult.value);
+};
+
+const planParsedWorkflowProposal = (
+  proposal: WorkflowProposalArtifact,
+): Outcome<PlannedWorkflow, PlanningFailure> => {
   const compiledResult = compileWorkflow({
     contracts: M1_WORKFLOW_CONTRACTS,
     source: proposal.source,
@@ -169,4 +175,13 @@ export const planTaskWorkflow = (
       status: 'accepted',
     }),
   );
+};
+
+export const planWorkflowProposal = (
+  proposalInput: unknown,
+): Outcome<PlannedWorkflow, PlanningFailure> => {
+  const proposal = parseWorkflowProposal(proposalInput);
+  return proposal.ok
+    ? planParsedWorkflowProposal(proposal.value)
+    : err({ ...proposal.error, stage: 'proposal' });
 };

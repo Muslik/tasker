@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { AbiIdSchema, AbiVersionSchema, SlotPolicySchema, WaitReferenceSchema } from './schema.js';
+import { WorkflowChangeKindSchema } from './execution-result.js';
 
 const RuntimeSchemaSchema = z.custom<z.ZodType>(
   (value) => value instanceof z.ZodType,
@@ -30,6 +31,7 @@ export const StepTypeContractSchema = z.object({
   retryPolicy: z.string().min(1).optional(),
   waitKinds: z.array(WaitReferenceSchema).default([]),
   artifactContracts: z.array(ArtifactKindSchema).default([]),
+  workflowChanges: z.array(WorkflowChangeKindSchema).default([]),
   redactionPolicy: z.string().min(1).optional(),
   reconciliation: ReconciliationContractSchema.optional(),
 });
@@ -51,6 +53,7 @@ export const WaitContractSchema = z.object({
 
 export type ReconciliationContract = z.infer<typeof ReconciliationContractSchema>;
 export type StepTypeContract = z.infer<typeof StepTypeContractSchema>;
+export type StepTypeContractInput = z.input<typeof StepTypeContractSchema>;
 export type PredicateContract = z.infer<typeof PredicateContractSchema>;
 export type WaitContract = z.infer<typeof WaitContractSchema>;
 
@@ -68,9 +71,9 @@ export interface ContractRegistry<T extends VersionedContract> {
 export const toContractReference = (contract: VersionedContract): string =>
   `${contract.id}@${contract.version}`;
 
-const createRegistry = <T extends VersionedContract>(
-  schema: z.ZodType<T>,
-  entries: readonly T[],
+const createRegistry = <T extends VersionedContract, Input>(
+  schema: z.ZodType<T, Input>,
+  entries: readonly Input[],
 ): ContractRegistry<T> => {
   const parsed = entries.map((entry) => schema.parse(entry));
   const map = new Map<string, T>();
@@ -100,8 +103,9 @@ export type StepTypeRegistry = ContractRegistry<StepTypeContract>;
 export type PredicateRegistry = ContractRegistry<PredicateContract>;
 export type WaitRegistry = ContractRegistry<WaitContract>;
 
-export const createStepTypeRegistry = (entries: readonly StepTypeContract[]): StepTypeRegistry =>
-  createRegistry(StepTypeContractSchema, entries);
+export const createStepTypeRegistry = (
+  entries: readonly StepTypeContractInput[],
+): StepTypeRegistry => createRegistry(StepTypeContractSchema, entries);
 
 export const createPredicateRegistry = (entries: readonly PredicateContract[]): PredicateRegistry =>
   createRegistry(PredicateContractSchema, entries);

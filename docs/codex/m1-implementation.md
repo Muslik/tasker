@@ -117,3 +117,6 @@ M1 does not calculate a ready set, traverse nodes, acquire leases, dispatch an o
 run a provider, execute shell/git commands, resolve waits, or accept operator
 interventions. M2 will add durable traversal with deterministic stub executors while
 preserving the M1 graph and projection contracts.
+
+The real provider replacement for the deterministic analyzer is documented in
+[`m1.5-implementation.md`](m1.5-implementation.md).

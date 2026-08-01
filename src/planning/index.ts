@@ -1,4 +1,5 @@
 export * from './contracts.js';
+export * from './analyzer-context.js';
 export * from './diff.js';
 export * from './fixtures.js';
 export * from './planner.js';

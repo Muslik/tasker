@@ -37,6 +37,7 @@ const defineReadOnlyStep = (
   id: string,
   artifactContracts: readonly string[],
   retryBudget: number,
+  workflowChanges: StepTypeContract['workflowChanges'] = [],
 ): M1StepDefinition => ({
   contract: {
     id,
@@ -50,6 +51,7 @@ const defineReadOnlyStep = (
     retryPolicy: `bounded:${String(retryBudget)}`,
     waitKinds: [],
     artifactContracts: [...artifactContracts],
+    workflowChanges: [...workflowChanges],
   },
   retryBudget,
 });
@@ -60,7 +62,12 @@ interface M1StepDefinition {
 }
 
 const stepDefinitions: readonly M1StepDefinition[] = [
-  defineReadOnlyStep('task.analyze', ['analysis-report'], 1),
+  defineReadOnlyStep('task.analyze', ['analysis-report'], 1, [
+    'cross_repository_dependency',
+    'external_process_required',
+    'task_scope_changed',
+    'verification_scope_changed',
+  ]),
   {
     contract: {
       id: 'bug.reproduce',
@@ -74,6 +81,11 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:2',
       waitKinds: [],
       artifactContracts: ['reproduction-report'],
+      workflowChanges: [
+        'cross_repository_dependency',
+        'task_scope_changed',
+        'verification_scope_changed',
+      ],
       reconciliation: { strategy: 'probe' },
     },
     retryBudget: 2,
@@ -91,6 +103,12 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:3',
       waitKinds: [],
       artifactContracts: ['source-diff'],
+      workflowChanges: [
+        'cross_repository_dependency',
+        'external_process_required',
+        'task_scope_changed',
+        'verification_scope_changed',
+      ],
       reconciliation: { strategy: 'receipt' },
     },
     retryBudget: 3,
@@ -108,6 +126,7 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:2',
       waitKinds: [],
       artifactContracts: [`verification-${profile}`],
+      workflowChanges: ['verification_scope_changed'],
       reconciliation: { strategy: 'probe' },
     },
     retryBudget: 2,
@@ -125,6 +144,7 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:2',
       waitKinds: ['code_review@1'],
       artifactContracts: ['pull-request-draft'],
+      workflowChanges: [],
       reconciliation: { strategy: 'probe' },
     },
     retryBudget: 2,
@@ -142,6 +162,7 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:2',
       waitKinds: action === 'extract' ? ['translation_complete@1'] : [],
       artifactContracts: [action === 'extract' ? 'translation-keys' : 'translated-resources'],
+      workflowChanges: ['external_process_required'],
       reconciliation: { strategy: 'probe' },
     },
     retryBudget: 2,
@@ -159,6 +180,7 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:2',
       waitKinds: ['final_publish@1'],
       artifactContracts: ['development-package'],
+      workflowChanges: ['external_process_required'],
       reconciliation: { strategy: 'probe' },
     },
     retryBudget: 2,
@@ -176,6 +198,7 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:2',
       waitKinds: [],
       artifactContracts: ['consumer-version-diff'],
+      workflowChanges: ['cross_repository_dependency', 'verification_scope_changed'],
       reconciliation: { strategy: 'receipt' },
     },
     retryBudget: 2,
@@ -193,6 +216,7 @@ const stepDefinitions: readonly M1StepDefinition[] = [
       retryPolicy: 'bounded:0',
       waitKinds: [],
       artifactContracts: [],
+      workflowChanges: [],
     },
     retryBudget: 0,
   },
