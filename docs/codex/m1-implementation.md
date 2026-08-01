@@ -37,8 +37,9 @@ flowchart LR
 - explicit repository workflow policies and persisted **Why this workflow** assembly
   decisions;
 - project workflow policy is treated as harness configuration rather than app
-  architecture documentation: it carries translation handling, verification shape,
-  and manual-gate facts only;
+  architecture documentation: M1 resolves translation handling from it; the typed
+  verification matrix and additional manual-gate facts are the next profile extension
+  described in the canonical architecture;
 - a separate global frontend package rule: component paths under `packages/@ott/`
   receive the reusable dev-publish plus human-final-publish flow;
 - strict Zod parsing at fixture, proposal, projection, HTTP, and browser boundaries;
