@@ -1130,7 +1130,7 @@ const WorkflowSidebar = ({
       const prerequisites = [
         ['Jira snapshot', 'complete'],
         ['Repository mapping', repositoryResolved ? 'complete' : 'blocked'],
-        ['Read-only analysis', repositoryResolved ? 'blocked' : 'waiting'],
+        ['Read-only analysis', repositoryResolved ? 'ready' : 'waiting'],
         ['Compile & validate', 'waiting'],
       ] as const;
       return (
@@ -1138,7 +1138,15 @@ const WorkflowSidebar = ({
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold">Workflow</h2>
-              <StateBadge className="bg-amber-500/12 text-amber-300">blocked</StateBadge>
+              <StateBadge
+                className={
+                  repositoryResolved
+                    ? 'bg-emerald-500/12 text-emerald-300'
+                    : 'bg-amber-500/12 text-amber-300'
+                }
+              >
+                {repositoryResolved ? 'ready' : 'blocked'}
+              </StateBadge>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
               No workflow has been compiled for this Jira snapshot.
@@ -1160,9 +1168,11 @@ const WorkflowSidebar = ({
                       'relative mt-1 size-3 rounded-full border-2 border-background',
                       status === 'complete'
                         ? 'bg-emerald-400'
-                        : status === 'blocked'
-                          ? 'bg-amber-400'
-                          : 'bg-muted',
+                        : status === 'ready'
+                          ? 'bg-cyan-400'
+                          : status === 'blocked'
+                            ? 'bg-amber-400'
+                            : 'bg-muted',
                     )}
                   />
                   <div>

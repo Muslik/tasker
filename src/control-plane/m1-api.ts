@@ -8,7 +8,11 @@ import {
   RepositoryCatalogResponseSchema,
   RepositoryReferenceSchema,
 } from '../repositories/contracts.js';
-import { ApiErrorResponseSchema } from './m1-contracts.js';
+import {
+  ApiErrorResponseSchema,
+  OperatorActivityResponseSchema,
+  OperatorTaskSummarySchema,
+} from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
 
@@ -41,6 +45,12 @@ const sendServiceError = (reply: FastifyReply, error: M1ServiceError): FastifyRe
       return reply
         .code(404)
         .send(apiError('fixture_not_found', `Fixture ${error.fixtureId} does not exist`));
+    case 'task_not_found':
+      return reply
+        .code(404)
+        .send(apiError('task_not_found', `Task ${error.taskReference} does not exist`));
+    case 'generation_blocked':
+      return reply.code(409).send(apiError('generation_blocked', error.reason));
     case 'planner_contract_failure':
       return reply
         .code(500)
@@ -130,8 +140,27 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (options.jiraIssueService === undefined) return reply.send(result.value);
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
     if (!jiraTasks.ok) return sendJiraServiceError(reply, jiraTasks.error);
+    const hydratedJiraTasks = [];
+    for (const task of jiraTasks.value) {
+      const workflow = options.service.read(task.id);
+      if (!workflow.ok) return sendServiceError(reply, workflow.error);
+      hydratedJiraTasks.push(
+        workflow.value === null
+          ? task
+          : OperatorTaskSummarySchema.parse({
+              ...task,
+              status: workflow.value.status === 'ready' ? 'planned' : 'workflow_rejected',
+              attention: workflow.value.status === 'ready' ? 'none' : 'operator',
+              currentStage:
+                workflow.value.status === 'ready'
+                  ? 'Workflow ready · execution disabled in M1'
+                  : 'Workflow validation failed',
+              updatedAt: workflow.value.view.persistedAt,
+            }),
+      );
+    }
     return reply.send({
-      tasks: [...jiraTasks.value, ...result.value.tasks],
+      tasks: [...hydratedJiraTasks, ...result.value.tasks],
       streamCursor: result.value.streamCursor,
     });
   });
@@ -144,9 +173,21 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
 
     if (params.data.fixtureId.startsWith('jira:') && options.jiraIssueService !== undefined) {
       const jiraResult = options.jiraIssueService.readActivity(params.data.fixtureId);
-      return jiraResult.ok
-        ? reply.send(jiraResult.value)
-        : sendJiraServiceError(reply, jiraResult.error);
+      if (!jiraResult.ok) return sendJiraServiceError(reply, jiraResult.error);
+      const workflowResult = options.service.readActivity(params.data.fixtureId);
+      if (!workflowResult.ok) return sendServiceError(reply, workflowResult.error);
+      return reply.send(
+        OperatorActivityResponseSchema.parse({
+          fixtureId: params.data.fixtureId,
+          providerSession:
+            workflowResult.value.providerSession.status === 'completed'
+              ? workflowResult.value.providerSession
+              : jiraResult.value.providerSession,
+          entries: [...jiraResult.value.entries, ...workflowResult.value.entries].sort(
+            (left, right) => left.sequence - right.sequence,
+          ),
+        }),
+      );
     }
 
     const result = options.service.readActivity(params.data.fixtureId);

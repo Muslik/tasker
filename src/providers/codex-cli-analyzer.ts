@@ -244,6 +244,12 @@ The sourceJson field must contain the complete WorkflowSource as serialized JSON
 because the provider's strict-output schema cannot represent optional recursive DSL fields; Tasker
 will parse and validate that string against its authoritative workflow contract.
 
+The JSON encoded inside sourceJson MUST have exactly these top-level keys:
+{"id":"task-specific-workflow-id","version":1,"root":{...registered workflow node...}}
+Start by copying plannerContext.baseTemplate, then make only justified task-specific changes to its
+id and recursive root nodes. Do not invent an envelope. In particular, NEVER return top-level keys
+such as schemaVersion, task, repository, workflow, steps, or edges inside sourceJson.
+
 Use only node kinds and versioned contracts present in plannerContext. The base template is a
 starting point, not executable authority. Explain every material specialization in
 assemblyDecisions. Select verification from observable task/repository facts and policy.

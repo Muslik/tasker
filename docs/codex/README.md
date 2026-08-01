@@ -26,20 +26,24 @@ Read in this order:
 10. [`m1.7-repository-binding.md`](m1.7-repository-binding.md) — explicit Jira task to
     managed Bitbucket checkout resolution without project-name guessing or touching
     operator working clones.
+11. [`m1.8-jira-workflow-generation.md`](m1.8-jira-workflow-generation.md) — real Jira
+    snapshot plus managed checkout through the subscription analyzer, validator, ledger,
+    and visible operator graph.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. The first full traversal of that graph on durable stub steps
 arrives at M2; corporate integrations remain later milestones.
 
-M0, M1, M1.5, M1.6, and repository binding are now implemented. The read-only operator
+M0, M1, M1.5, M1.6, M1.7, and M1.8 are now implemented. The read-only operator
 console has the task queue on the left, persisted activity and workflow rationale in
 the center, and the current graph on the right. It includes validation failures,
 waits, retry bounds, project/global policy decisions, verification rationale,
 capabilities, collapsed template diagnostics, SSE refresh, and JSON download.
 Execution remains disabled until M2. Provider analysis provenance and measured tokens
 are persisted and visible.
-Imported Jira tasks deliberately stop at the read-only analyzer after repository
-mapping instead of compiling a workflow from Jira text alone.
+An imported Jira task with a resolved checkout can now be compiled into a workflow.
+Jira text only selects a conservative admission template; the analyzer receives the
+full Jira snapshot and bounded repository evidence before proposing the graph.
 
 Older July 30 versions remain under `.omx/plans/` for audit history; they are not the
 current implementation source of truth.

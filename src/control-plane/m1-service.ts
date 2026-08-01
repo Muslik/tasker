@@ -40,6 +40,15 @@ export type M1ServiceError =
       readonly fixtureId: string;
     }
   | {
+      readonly kind: 'task_not_found';
+      readonly taskReference: string;
+    }
+  | {
+      readonly kind: 'generation_blocked';
+      readonly taskReference: string;
+      readonly reason: string;
+    }
+  | {
       readonly kind: 'planner_contract_failure';
       readonly stage: PlanningFailure['stage'];
     }
@@ -190,7 +199,9 @@ const baseWorkflowView = (
     status: 'accepted' as const,
     eligibility: {
       eligible: true,
-      reason: 'Local M1 fixtures are eligible for deterministic planning only.',
+      reason: fixture.fixtureId.startsWith('jira:')
+        ? 'The current Jira snapshot and managed repository checkout are ready for workflow planning.'
+        : 'The local fixture is eligible for workflow planning.',
     },
   },
   task: {
@@ -413,10 +424,6 @@ export class M1WorkflowService {
   }
 
   public readActivity(fixtureId: string): Outcome<OperatorActivityResponse, M1ServiceError> {
-    if (findTaskFixture(fixtureId) === undefined) {
-      return err({ kind: 'fixture_not_found', fixtureId });
-    }
-
     const analyzerSession = this.store.readAnalyzerSession(fixtureId);
     if (!analyzerSession.ok) {
       return err({ kind: 'store_failure', error: analyzerSession.error });
@@ -506,11 +513,17 @@ export class M1WorkflowService {
   public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {
     return this.store
       .listEvents()
-      .filter((event) => event.sequence > sequence && event.aggregateId.startsWith('intake:'))
+      .filter(
+        (event) =>
+          event.sequence > sequence &&
+          (event.aggregateId.startsWith('intake:') || event.aggregateId.startsWith('workflow:')),
+      )
       .map((event) =>
         OperatorStreamEventSchema.parse({
           sequence: event.sequence,
-          fixtureId: event.aggregateId.slice('intake:'.length),
+          fixtureId: event.aggregateId.startsWith('workflow:')
+            ? event.aggregateId.slice('workflow:'.length)
+            : event.aggregateId.slice('intake:'.length),
           eventType: event.eventType,
         }),
       );
@@ -547,7 +560,11 @@ export class M1WorkflowService {
       return err({ kind: 'fixture_not_found', fixtureId });
     }
 
-    const existing = this.read(fixtureId);
+    return this.generateTask(fixture);
+  }
+
+  public generateTask(fixture: TaskFixture): Outcome<WorkflowResponse, M1ServiceError> {
+    const existing = this.read(fixture.fixtureId);
     if (!existing.ok) return existing;
     if (existing.value !== null) return ok(existing.value);
 
@@ -564,7 +581,15 @@ export class M1WorkflowService {
       return err({ kind: 'fixture_not_found', fixtureId });
     }
 
-    const existing = this.read(fixtureId);
+    return this.generateFromAnalyzerOutputForTask(fixture, output, receipt);
+  }
+
+  public generateFromAnalyzerOutputForTask(
+    fixture: TaskFixture,
+    output: WorkflowAnalyzerOutput,
+    receipt: WorkflowAnalyzerReceipt,
+  ): Outcome<WorkflowResponse, M1ServiceError> {
+    const existing = this.read(fixture.fixtureId);
     if (!existing.ok) return existing;
     if (existing.value !== null) return ok(existing.value);
 

@@ -19,7 +19,7 @@ import {
 import { systemClock } from '../shared/clock.js';
 import { buildM1Api } from './m1-api.js';
 import { createM1WorkflowService } from './m1-service.js';
-import { CodexWorkflowGenerator } from './workflow-generator.js';
+import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
 
 const parsePort = (input: string | undefined): number => {
   const port = input === undefined ? 4311 : Number(input);
@@ -49,20 +49,24 @@ export const startM1Server = async (): Promise<void> => {
     new JiraServerClient(loadJiraConfiguration()),
     { repositoryCatalog },
   );
-  const workflowGenerator =
+  const workflowAnalyzer =
     process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic'
       ? undefined
-      : new CodexWorkflowGenerator(
-          service,
-          new CodexCliWorkflowAnalyzer(nodeCommandRunner),
-          resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
-        );
+      : new CodexCliWorkflowAnalyzer(nodeCommandRunner);
+  const workflowGenerator = new CodexWorkflowGenerator(
+    service,
+    new WorkflowGenerationSubjectSource(
+      resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
+      jiraIssueService,
+    ),
+    workflowAnalyzer,
+  );
   const cockpitDirectory = resolve('dist/cockpit');
   const api = buildM1Api({
     service,
     jiraIssueService,
     logger: true,
-    ...(workflowGenerator === undefined ? {} : { workflowGenerator }),
+    workflowGenerator,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

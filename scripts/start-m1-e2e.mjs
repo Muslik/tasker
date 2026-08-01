@@ -14,17 +14,16 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = '4311';
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const [{ buildM1Api, createM1WorkflowService }, jira, ledgerModule, repositories, shared] =
-  await Promise.all([
-    import('../dist/control-plane/index.js'),
-    import('../dist/integrations/index.js'),
-    import('../dist/ledger/index.js'),
-    import('../dist/repositories/index.js'),
-    import('../dist/shared/index.js'),
-  ]);
+const [control, jira, ledgerModule, repositories, shared] = await Promise.all([
+  import('../dist/control-plane/index.js'),
+  import('../dist/integrations/index.js'),
+  import('../dist/ledger/index.js'),
+  import('../dist/repositories/index.js'),
+  import('../dist/shared/index.js'),
+]);
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
-const service = createM1WorkflowService(ledger.repository, shared.systemClock);
+const service = control.createM1WorkflowService(ledger.repository, shared.systemClock);
 const snapshot = jira.JiraIssueSnapshotSchema.parse({
   schemaVersion: 1,
   issueKey: 'AVIA-13235',
@@ -105,7 +104,11 @@ const jiraIssueService = jira.createJiraIssueService(
     ]),
   },
 );
-const api = buildM1Api({ service, jiraIssueService });
+const workflowGenerator = new control.CodexWorkflowGenerator(
+  service,
+  new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService),
+);
+const api = control.buildM1Api({ service, jiraIssueService, workflowGenerator });
 
 const close = async () => {
   await api.close();

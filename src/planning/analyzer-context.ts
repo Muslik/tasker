@@ -1,4 +1,5 @@
 import { JsonValueSchema, toContractReference, type JsonValue } from '../workflow/index.js';
+import { z } from 'zod';
 import { M1_AVAILABLE_CAPABILITIES } from './proposal.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import type { TaskFixture } from './fixtures.js';
@@ -13,7 +14,18 @@ export interface WorkflowAnalyzerContext {
   readonly plannerContext: JsonValue;
 }
 
-export const createWorkflowAnalyzerContext = (fixture: TaskFixture): WorkflowAnalyzerContext => {
+const inputContract = (schema: z.ZodType): JsonValue =>
+  JsonValueSchema.parse(
+    z.toJSONSchema(schema, {
+      io: 'input',
+      unrepresentable: 'any',
+    }),
+  );
+
+export const createWorkflowAnalyzerContext = (
+  fixture: TaskFixture,
+  taskSnapshot: JsonValue = JsonValueSchema.parse(fixture),
+): WorkflowAnalyzerContext => {
   const targetRepository =
     fixture.family === 'shared_component' ? fixture.componentRepository : fixture.repository;
   const publication =
@@ -22,7 +34,7 @@ export const createWorkflowAnalyzerContext = (fixture: TaskFixture): WorkflowAna
       : { kind: 'none' as const };
 
   return {
-    taskSnapshot: JsonValueSchema.parse(fixture),
+    taskSnapshot,
     plannerContext: JsonValueSchema.parse({
       availableCapabilities: M1_AVAILABLE_CAPABILITIES,
       baseTemplate: getBaseWorkflowTemplate(selectWorkflowTemplate(fixture)),
@@ -33,10 +45,12 @@ export const createWorkflowAnalyzerContext = (fixture: TaskFixture): WorkflowAna
       contracts: {
         predicates: M1_WORKFLOW_CONTRACTS.predicates.entries.map((contract) => ({
           reference: toContractReference(contract),
+          inputSchema: inputContract(contract.inputSchema),
           ...(contract.description === undefined ? {} : { description: contract.description }),
         })),
         steps: M1_WORKFLOW_CONTRACTS.stepTypes.entries.map((contract) => ({
           reference: toContractReference(contract),
+          inputSchema: inputContract(contract.inputSchema),
           allowedEffects: contract.allowedEffects,
           artifactContracts: contract.artifactContracts,
           requiredCapabilities: contract.requiredCapabilities,
@@ -44,6 +58,9 @@ export const createWorkflowAnalyzerContext = (fixture: TaskFixture): WorkflowAna
         })),
         waits: M1_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
           reference: toContractReference(contract),
+          ...(contract.resolutionSchema === undefined
+            ? {}
+            : { resolutionSchema: inputContract(contract.resolutionSchema) }),
           ...(contract.description === undefined ? {} : { description: contract.description }),
           ...(contract.slotPolicy === undefined ? {} : { slotPolicy: contract.slotPolicy }),
         })),

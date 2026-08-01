@@ -2,8 +2,10 @@ import { z } from 'zod';
 
 import { err, ok, type Outcome } from '../shared/outcome.js';
 
-const FixtureIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/u);
-const TaskIdSchema = z.string().regex(/^AVIA-[1-9][0-9]*$/u);
+const FixtureIdSchema = z
+  .string()
+  .regex(/^(?:[a-z0-9][a-z0-9-]*|jira:[A-Z][A-Z0-9_]+-[1-9][0-9]*)$/u);
+const TaskIdSchema = z.string().regex(/^[A-Z][A-Z0-9_]+-[1-9][0-9]*$/u);
 const RepositorySchema = z.string().regex(/^[a-z0-9._-]+\/[a-z0-9._-]+$/u);
 
 const CommonFixtureSchema = z

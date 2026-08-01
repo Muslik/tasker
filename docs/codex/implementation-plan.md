@@ -15,7 +15,8 @@ complete only after its operator demo and deterministic evidence pass.
 | M1 | `fixture task -> compiled workflow -> visible tree in local cockpit` | after M0+M1, roughly 6-10 focused implementation days |
 | M1.5 | `normalized task + real read-only repository inspection -> provider proposal -> validated visible workflow` | implemented and verified 2026-08-01 |
 | M1.6 | `Jira key -> persisted current task snapshot -> operator details`, including cached recovery after `403` without sync-log growth | implemented and verified 2026-08-01 |
-| M1.7 | `Jira repo:name or import fallback -> Bitbucket lookup -> managed application-data checkout` | implemented and verified 2026-08-02; read-only Jira analyzer remains |
+| M1.7 | `Jira repo:name or import fallback -> Bitbucket lookup -> managed application-data checkout` | implemented and verified 2026-08-02 |
+| M1.8 | `Jira snapshot + managed checkout -> read-only analyzer -> validated persisted workflow -> visible operator graph` | implemented and verified 2026-08-02 |
 | M2 | `task -> visible workflow -> complete stub traversal`, including kill/restart, wait/resume, intervention, and handoff | after M0-M2, roughly 12-20 focused days |
 | M3 | one real subscription CLI executes a node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
 | M4 | a real provider changes an isolated worktree; a recoverable failure resumes at the failed node | re-estimate after M3; planning envelope 4-7 days |
@@ -396,16 +397,40 @@ the later M5 eligibility/effect integration.
    preferred checkout path and runner identity.
 5. Block unknown, conflicting, missing, cross-project ambiguous, Bitbucket access, and
    clone-failure states without losing the Jira snapshot or prior work.
-6. Keep the right workflow rail honest: mapping can be complete while the read-only
-   Jira analyzer is still pending.
+6. Keep the right workflow rail honest: mapping can be complete while workflow
+   generation is ready but not started.
 7. Expose the typed managed repository catalog to the minimal import form.
+
+### Delivered continuation
+
+M1.8 passes the current Jira projection plus resolved checkout to the existing M1.5
+read-only analyzer, then compiles and validates its proposal. Jira writes remain part
+of later durable effect work; they must not be added as direct UI requests.
+
+## 5.8 Milestone 1.8 — Jira workflow generation
+
+### Implemented slice
+
+1. Admit a current Jira task only when its managed repository binding is resolved.
+2. Classify bugs and non-bugs into conservative base templates without pretending to
+   understand implementation details before repository analysis.
+3. Give the analyzer the full Jira snapshot, including comments, links, and attachment
+   metadata, plus the selected checkout and workflow policies/contracts.
+4. Send the analyzer proposal through the existing typed proposal boundary,
+   deterministic compiler, capability checks, and validator.
+5. Persist provider receipt, proposal, diff, validator report, graph, and workflow view
+   under a Jira-specific workflow aggregate. Do not collide with Jira intake history.
+6. Merge Jira intake decisions and workflow planning decisions into one operator
+   timeline while keeping repeated Jira synchronization out of activity.
+7. Change the task from backlog to planned and render the persisted graph on the right
+   without re-running analysis after reload.
 
 ### Remaining boundary
 
-The next slice must pass the current Jira projection plus resolved checkout to the
-existing M1.5 read-only analyzer, then compile and validate its proposal. Jira writes
-remain part of later durable effect work; they must not be added as direct UI
-requests.
+M2 executes this same graph with durable stub steps. Runtime discoveries such as an
+unexpected cross-repository component remain execution results that request a declared
+workflow continuation; initial planning must not claim knowledge that reproduction or
+implementation has not produced yet.
 
 ## 6. Milestone 2 — durable stub traversal
 

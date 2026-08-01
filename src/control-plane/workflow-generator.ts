@@ -1,13 +1,130 @@
-import { createWorkflowAnalyzerContext, findTaskFixture } from '../planning/index.js';
-import type { CodexCliWorkflowAnalyzer, CodexWorkflowAnalyzerFailure } from '../providers/index.js';
-import { err, type Outcome } from '../shared/outcome.js';
+import type { JiraIssueService, JiraWorkflowPlanningSource } from '../integrations/index.js';
+import {
+  createWorkflowAnalyzerContext,
+  findTaskFixture,
+  TaskFixtureSchema,
+  type TaskFixture,
+} from '../planning/index.js';
+import type {
+  CodexWorkflowAnalyzerFailure,
+  CodexWorkflowAnalyzerRequest,
+  CodexWorkflowAnalyzerSuccess,
+} from '../providers/index.js';
+import { err, ok, type Outcome } from '../shared/outcome.js';
+import { JsonValueSchema, type JsonValue } from '../workflow/index.js';
 import type { WorkflowResponse } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 
 export type WorkflowGenerationResult = Outcome<WorkflowResponse, M1ServiceError>;
 
 export interface WorkflowGenerator {
-  generate(fixtureId: string): Promise<WorkflowGenerationResult>;
+  generate(taskReference: string): Promise<WorkflowGenerationResult>;
+}
+
+export interface WorkflowAnalyzer {
+  analyze(
+    request: CodexWorkflowAnalyzerRequest,
+  ): Promise<Outcome<CodexWorkflowAnalyzerSuccess, CodexWorkflowAnalyzerFailure>>;
+}
+
+interface WorkflowGenerationSubject {
+  readonly repositoryPath: string;
+  readonly task: TaskFixture;
+  readonly taskSnapshot: JsonValue;
+}
+
+const qualifiedRepositoryReference = (aliases: readonly string[]): string | null =>
+  aliases.find((alias) => alias.includes('/')) ?? null;
+
+const taskFromJira = (
+  reference: string,
+  issue: Extract<JiraWorkflowPlanningSource, { readonly status: 'ready' }>,
+): Outcome<WorkflowGenerationSubject, M1ServiceError> => {
+  const repository = qualifiedRepositoryReference(issue.binding.repository.aliases);
+  if (repository === null) {
+    return err({
+      kind: 'generation_blocked',
+      taskReference: reference,
+      reason: 'The managed repository has no qualified project/repository identity',
+    });
+  }
+
+  const isBug = issue.issue.issueType.toLocaleLowerCase('en-US') === 'bug';
+  const task = TaskFixtureSchema.parse({
+    fixtureId: reference,
+    taskId: issue.issue.issueKey,
+    title: issue.issue.summary,
+    description: issue.issue.description.trim() || issue.issue.summary,
+    repository,
+    translationIntent: 'none',
+    ...(isBug
+      ? { family: 'short_bugfix', reproduction: 'required', verification: 'targeted' }
+      : { family: 'feature_with_review', planReview: 'on_questions', verification: 'full' }),
+    expected: 'accepted',
+    proposalVariant: 'valid',
+  });
+
+  return ok({
+    repositoryPath: issue.binding.repository.checkout.path,
+    task,
+    taskSnapshot: JsonValueSchema.parse({
+      origin: 'jira',
+      issue: issue.issue,
+      repository: {
+        reference: repository,
+        repositoryId: issue.binding.repository.repositoryId,
+        remoteUrl: issue.binding.repository.remoteUrl,
+      },
+      admission: {
+        family: task.family,
+        note: 'Deterministic admission selects a safe base template; the analyzer owns task-specific graph assembly.',
+      },
+    }),
+  });
+};
+
+export class WorkflowGenerationSubjectSource {
+  public constructor(
+    private readonly fixtureRepositoryPath: string,
+    private readonly jiraIssueService?: JiraIssueService,
+  ) {}
+
+  public resolve(taskReference: string): Outcome<WorkflowGenerationSubject, M1ServiceError> {
+    const fixture = findTaskFixture(taskReference);
+    if (fixture !== undefined) {
+      return ok({
+        repositoryPath: this.fixtureRepositoryPath,
+        task: fixture,
+        taskSnapshot: JsonValueSchema.parse(fixture),
+      });
+    }
+
+    if (!taskReference.startsWith('jira:') || this.jiraIssueService === undefined) {
+      return err({ kind: 'task_not_found', taskReference });
+    }
+
+    const source = this.jiraIssueService.readWorkflowPlanningSource(
+      taskReference.slice('jira:'.length),
+    );
+    if (!source.ok) {
+      return source.error.kind === 'issue_not_imported'
+        ? err({ kind: 'task_not_found', taskReference })
+        : err({
+            kind: 'generation_blocked',
+            taskReference,
+            reason: `Jira planning source failed: ${source.error.kind}`,
+          });
+    }
+    if (source.value.status === 'blocked') {
+      return err({
+        kind: 'generation_blocked',
+        taskReference,
+        reason: source.value.reason,
+      });
+    }
+
+    return taskFromJira(taskReference, source.value);
+  }
 }
 
 export class CodexWorkflowGenerator implements WorkflowGenerator {
@@ -15,34 +132,33 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
 
   public constructor(
     private readonly service: M1WorkflowService,
-    private readonly analyzer: CodexCliWorkflowAnalyzer,
-    private readonly repositoryPath: string,
+    private readonly subjects: WorkflowGenerationSubjectSource,
+    private readonly analyzer?: WorkflowAnalyzer,
   ) {}
 
-  public generate(fixtureId: string): Promise<WorkflowGenerationResult> {
-    const current = this.inFlight.get(fixtureId);
+  public generate(taskReference: string): Promise<WorkflowGenerationResult> {
+    const current = this.inFlight.get(taskReference);
     if (current !== undefined) return current;
 
-    const generation = this.generateOnce(fixtureId).finally(() => {
-      this.inFlight.delete(fixtureId);
+    const generation = this.generateOnce(taskReference).finally(() => {
+      this.inFlight.delete(taskReference);
     });
-    this.inFlight.set(fixtureId, generation);
+    this.inFlight.set(taskReference, generation);
     return generation;
   }
 
-  private async generateOnce(fixtureId: string): Promise<WorkflowGenerationResult> {
-    const existing = this.service.read(fixtureId);
+  private async generateOnce(taskReference: string): Promise<WorkflowGenerationResult> {
+    const existing = this.service.read(taskReference);
     if (!existing.ok) return existing;
     if (existing.value !== null) return { ok: true, value: existing.value };
 
-    const fixture = findTaskFixture(fixtureId);
-    if (fixture === undefined) {
-      return err({ kind: 'fixture_not_found', fixtureId });
-    }
+    const subject = this.subjects.resolve(taskReference);
+    if (!subject.ok) return subject;
+    if (this.analyzer === undefined) return this.service.generateTask(subject.value.task);
 
     const analyzed = await this.analyzer.analyze({
-      ...createWorkflowAnalyzerContext(fixture),
-      repositoryPath: this.repositoryPath,
+      ...createWorkflowAnalyzerContext(subject.value.task, subject.value.taskSnapshot),
+      repositoryPath: subject.value.repositoryPath,
     });
     if (!analyzed.ok) {
       return err({
@@ -52,8 +168,8 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
       });
     }
 
-    return this.service.generateFromAnalyzerOutput(
-      fixtureId,
+    return this.service.generateFromAnalyzerOutputForTask(
+      subject.value.task,
       analyzed.value.output,
       analyzed.value.receipt,
     );

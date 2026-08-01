@@ -76,7 +76,7 @@ test('the operator console renders the queue and lets me inspect a task', async 
   );
 });
 
-test('I can import a Jira issue and inspect its persisted description and evidence', async ({
+test('I can import a Jira issue, inspect its evidence, and compile its workflow', async ({
   page,
 }) => {
   await page.goto('/');
@@ -99,10 +99,27 @@ test('I can import a Jira issue and inspect its persisted description and eviden
   await expect(page.getByTestId('task-activity-timeline')).not.toContainText(
     'Jira snapshot synchronized',
   );
-  await expect(page.getByRole('button', { name: 'Generate workflow' })).toHaveCount(0);
-  await expect(page.getByText('front-avia mapped · Jira analyzer pending')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate workflow' })).toBeVisible();
+  await expect(page.getByText('front-avia mapped · ready to generate workflow')).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
     'Repository mappingcomplete',
+  );
+  await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
+    'Read-only analysisready',
+  );
+
+  await page.getByRole('button', { name: 'Generate workflow' }).click();
+
+  const workflow = await loadWorkflow(page, 'jira:AVIA-13235');
+  expect(workflow).toMatchObject({
+    status: 'ready',
+    view: { fixture: { id: 'jira:AVIA-13235', family: 'short_bugfix' } },
+  });
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Workflow compiled and persisted',
+  );
+  await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
+    'reproduce-bug',
   );
 });
 

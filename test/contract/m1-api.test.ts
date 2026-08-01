@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildM1Api,
+  CodexWorkflowGenerator,
   createM1WorkflowService,
   FixtureListResponseSchema,
   OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
+  WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import type { JiraIssuePort } from '../../src/integrations/jira/client.js';
 import { JiraIssueStateSchema } from '../../src/integrations/jira/contracts.js';
@@ -36,11 +38,22 @@ const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
           repositoryCatalog: makeRepositoryCatalog(),
         });
   const generate = vi.fn((fixtureId: string) => Promise.resolve(service.generate(fixtureId)));
+  const jiraWorkflowGenerator =
+    jiraIssueService === undefined
+      ? undefined
+      : new CodexWorkflowGenerator(
+          service,
+          new WorkflowGenerationSubjectSource(directory, jiraIssueService),
+        );
   return {
     api: buildM1Api({
       service,
       ...(jiraIssueService === undefined ? {} : { jiraIssueService }),
-      ...(useWorkflowGenerator ? { workflowGenerator: { generate } } : {}),
+      ...(useWorkflowGenerator
+        ? { workflowGenerator: { generate } }
+        : jiraWorkflowGenerator === undefined
+          ? {}
+          : { workflowGenerator: jiraWorkflowGenerator }),
     }),
     generate,
     ledger,
@@ -89,6 +102,11 @@ describe('M1 HTTP API', () => {
       method: 'GET',
       url: '/api/jira/issues/AVIA-13235',
     });
+    const generateResponse = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/jira%3AAVIA-13235/generate',
+    });
+    const generated = WorkflowResponseSchema.parse(generateResponse.json());
     const taskResponse = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
     const tasks = OperatorTaskListResponseSchema.parse(taskResponse.json());
     const issueState = JiraIssueStateSchema.parse(readResponse.json());
@@ -103,6 +121,14 @@ describe('M1 HTTP API', () => {
       'ui-kit',
     ]);
     expect(syncResponse.statusCode).toBe(200);
+    expect(generateResponse.statusCode).toBe(200);
+    expect(generated).toMatchObject({
+      status: 'ready',
+      view: {
+        fixture: { id: 'jira:AVIA-13235', family: 'short_bugfix' },
+        workflow: { status: 'valid' },
+      },
+    });
     expect(syncResponse.json()).toMatchObject({ status: 'current' });
     expect(issueState.status).toBe('current');
     if (issueState.status !== 'current') throw new Error('Expected a current Jira snapshot');
@@ -120,8 +146,8 @@ describe('M1 HTTP API', () => {
           repository: { repositoryId: 'front-avia' },
         },
       },
-      planning: { status: 'blocked' },
-      status: 'backlog',
+      planning: { status: 'available' },
+      status: 'planned',
     });
     expect(attachmentResponse.statusCode).toBe(200);
     expect(attachmentResponse.headers['content-type']).toBe('video/mp4');

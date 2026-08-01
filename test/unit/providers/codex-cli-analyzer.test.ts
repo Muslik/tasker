@@ -125,6 +125,8 @@ describe('Codex CLI workflow analyzer', () => {
     expect(executionRequest?.cwd).toMatch(/tasker-codex-analyzer-.+\/workspace$/u);
     expect(executionRequest?.env?.CODEX_HOME).toMatch(/tasker-codex-analyzer-.+\/codex-home$/u);
     expect(executionRequest?.stdin).toContain('Do not claim facts that require later execution');
+    expect(executionRequest?.stdin).toContain('MUST have exactly these top-level keys');
+    expect(executionRequest?.stdin).toContain('such as schemaVersion, task, repository, workflow');
     expect(runner.requests[1]?.args).toEqual(
       expect.arrayContaining([
         'exec',

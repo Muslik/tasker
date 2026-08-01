@@ -44,6 +44,9 @@ export interface M1StoreResult {
 
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 
+const workflowAggregateId = (taskReference: string): string =>
+  taskReference.startsWith('jira:') ? `workflow:${taskReference}` : `intake:${taskReference}`;
+
 export class M1WorkflowStore {
   public constructor(
     private readonly ledger: LedgerRepository,
@@ -79,7 +82,9 @@ export class M1WorkflowStore {
   }
 
   public listEvents(fixtureId?: string): readonly EventRecord[] {
-    return this.ledger.listEvents(fixtureId === undefined ? undefined : `intake:${fixtureId}`);
+    return this.ledger.listEvents(
+      fixtureId === undefined ? undefined : workflowAggregateId(fixtureId),
+    );
   }
 
   public readAnalyzerSession(
@@ -121,7 +126,7 @@ export class M1WorkflowStore {
     }
 
     const fixtureId = view.fixture.id;
-    const aggregateId = `intake:${fixtureId}`;
+    const aggregateId = workflowAggregateId(fixtureId);
     const proposalArtifactId = `proposal:${fixtureId}`;
     const artifactWrites: ArtifactWrite[] = [
       {
@@ -174,22 +179,24 @@ export class M1WorkflowStore {
     }
 
     const persistedAt = this.clock.now();
-    const events: EventWrite[] = [
-      {
-        eventId: `event:intake-accepted:${fixtureId}`,
-        eventType: 'IntakeAccepted',
-        eventSchemaVersion: 1,
-        payload: { fixtureId, intakeId: view.intake.id },
-        actor: 'm1_local_fixture',
-      },
-      {
-        eventId: `event:task-created:${fixtureId}`,
-        eventType: 'TaskCreated',
-        eventSchemaVersion: 1,
-        payload: { fixtureId, taskId: view.task.id },
-        actor: 'm1_local_fixture',
-      },
-    ];
+    const events: EventWrite[] = fixtureId.startsWith('jira:')
+      ? []
+      : [
+          {
+            eventId: `event:intake-accepted:${fixtureId}`,
+            eventType: 'IntakeAccepted',
+            eventSchemaVersion: 1,
+            payload: { fixtureId, intakeId: view.intake.id },
+            actor: 'm1_local_fixture',
+          },
+          {
+            eventId: `event:task-created:${fixtureId}`,
+            eventType: 'TaskCreated',
+            eventSchemaVersion: 1,
+            payload: { fixtureId, taskId: view.task.id },
+            actor: 'm1_local_fixture',
+          },
+        ];
 
     if (analyzerReceipt !== undefined) {
       events.push({

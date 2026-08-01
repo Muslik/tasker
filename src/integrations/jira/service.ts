@@ -18,6 +18,7 @@ import {
   JiraIssueKeySchema,
   JiraIssueStateSchema,
   type JiraIssueKey,
+  type JiraIssueSnapshot,
   type JiraIssueState,
 } from './contracts.js';
 import {
@@ -51,6 +52,17 @@ export type JiraIssueServiceError =
       readonly error: JiraIssueStoreError;
     };
 
+export type JiraWorkflowPlanningSource =
+  | {
+      readonly status: 'ready';
+      readonly issue: JiraIssueSnapshot;
+      readonly binding: Extract<JiraRepositoryBinding, { readonly status: 'resolved' }>;
+    }
+  | {
+      readonly status: 'blocked';
+      readonly reason: string;
+    };
+
 const issueKeyFromState = (state: JiraIssueState): JiraIssueKey =>
   state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
 
@@ -64,7 +76,7 @@ const missingBinding = (state: JiraIssueState): JiraRepositoryBinding =>
 const bindingProblem = (binding: JiraRepositoryBinding): string => {
   switch (binding.status) {
     case 'resolved':
-      return 'Jira workflow analysis for the resolved repository is not connected yet';
+      return 'The managed repository is ready for workflow generation';
     case 'missing':
       return 'Add repo:name to the Jira description or supply a repository during import';
     case 'not_found':
@@ -99,17 +111,21 @@ const taskFromState = (
       repositoryBinding,
     },
     planning: {
-      status: 'blocked',
-      reason: syncBlocked
-        ? 'Jira synchronization must recover before planning'
-        : bindingProblem(repositoryBinding),
+      ...(syncBlocked || !repositoryResolved
+        ? {
+            status: 'blocked' as const,
+            reason: syncBlocked
+              ? 'Jira synchronization must recover before planning'
+              : bindingProblem(repositoryBinding),
+          }
+        : { status: 'available' as const }),
     },
     status: syncBlocked || !repositoryResolved ? 'needs_attention' : 'backlog',
     attention: syncBlocked || !repositoryResolved ? 'operator' : 'none',
     currentStage:
       state.status === 'current'
         ? repositoryBinding.status === 'resolved'
-          ? `${repositoryBinding.repository.repositoryId} mapped · Jira analyzer pending`
+          ? `${repositoryBinding.repository.repositoryId} mapped · ready to generate workflow`
           : 'Jira snapshot ready · repository mapping required'
         : state.status === 'stale'
           ? 'Jira sync blocked · showing cached snapshot'
@@ -195,6 +211,28 @@ export class JiraIssueService {
     if (!parsed.success) return err({ kind: 'invalid_issue_key', input: issueKeyInput });
     const binding = this.store.readRepositoryBinding(parsed.data);
     return binding.ok ? binding : err({ kind: 'store_failure', error: binding.error });
+  }
+
+  public readWorkflowPlanningSource(
+    issueKeyInput: string,
+  ): Outcome<JiraWorkflowPlanningSource, JiraIssueServiceError> {
+    const state = this.read(issueKeyInput);
+    if (!state.ok) return state;
+    if (state.value === null) {
+      return err({ kind: 'issue_not_imported', issueKey: issueKeyInput });
+    }
+    if (state.value.status !== 'current') {
+      return ok({
+        status: 'blocked',
+        reason: 'Jira synchronization must recover before workflow generation',
+      });
+    }
+    const persisted = this.store.readRepositoryBinding(state.value.issue.issueKey);
+    if (!persisted.ok) return err({ kind: 'store_failure', error: persisted.error });
+    const binding = this.currentBinding(state.value, persisted.value);
+    return binding.status === 'resolved'
+      ? ok({ status: 'ready', issue: state.value.issue, binding })
+      : ok({ status: 'blocked', reason: bindingProblem(binding) });
   }
 
   public read(issueKeyInput: string): Outcome<JiraIssueState | null, JiraIssueServiceError> {
