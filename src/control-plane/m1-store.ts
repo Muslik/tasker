@@ -113,6 +113,7 @@ export class M1WorkflowStore {
     viewInput: WorkflowView,
     artifacts: M1WorkflowArtifacts,
     analyzerReceipt?: WorkflowAnalyzerReceipt,
+    options: { readonly projectTask?: boolean } = {},
   ): Outcome<M1StoreResult, M1StoreError> {
     const candidateView = WorkflowViewSchema.parse(viewInput);
     const existing = this.read(candidateView.fixture.id);
@@ -254,17 +255,20 @@ export class M1WorkflowStore {
       },
       {
         kind: 'upsert',
-        projectionType: 'm1_task',
-        projectionId: view.task.id,
-        payload: asJson({ fixture: view.fixture, task: view.task }),
-      },
-      {
-        kind: 'upsert',
         projectionType: M1_WORKFLOW_PROJECTION,
         projectionId: fixtureId,
         payload: asJson(view),
       },
     ];
+
+    if (options.projectTask !== false) {
+      projections.push({
+        kind: 'upsert',
+        projectionType: 'm1_task',
+        projectionId: view.task.id,
+        payload: asJson({ fixture: view.fixture, task: view.task }),
+      });
+    }
 
     if (analyzerReceipt !== undefined) {
       projections.push({

@@ -583,6 +583,16 @@ export class M1WorkflowService {
     return this.persistPlanning(fixture, planTaskWorkflow(fixture));
   }
 
+  public generateContinuationTask(fixture: TaskFixture): Outcome<WorkflowResponse, M1ServiceError> {
+    const existing = this.read(fixture.fixtureId);
+    if (!existing.ok) return existing;
+    if (existing.value?.status === 'ready') return ok(existing.value);
+
+    return this.persistPlanning(fixture, planTaskWorkflow(fixture), undefined, {
+      projectTask: false,
+    });
+  }
+
   public generateFromAnalyzerOutput(
     fixtureId: string,
     output: WorkflowAnalyzerOutput,
@@ -620,10 +630,37 @@ export class M1WorkflowService {
     return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), receipt);
   }
 
+  public generateContinuationFromAnalyzerOutput(
+    fixture: TaskFixture,
+    output: WorkflowAnalyzerOutput,
+    receipt: WorkflowAnalyzerReceipt,
+  ): Outcome<WorkflowResponse, M1ServiceError> {
+    const existing = this.read(fixture.fixtureId);
+    if (!existing.ok) return existing;
+    if (existing.value?.status === 'ready') return ok(existing.value);
+
+    const proposal = createWorkflowProposalFromAnalyzerOutput(
+      fixture,
+      receipt.analyzerVersion,
+      output,
+    );
+    if (!proposal.ok) {
+      return err({
+        kind: 'planner_contract_failure',
+        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+      });
+    }
+
+    return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), receipt, {
+      projectTask: false,
+    });
+  }
+
   private persistPlanning(
     fixture: TaskFixture,
     planning: ReturnType<typeof planTaskWorkflow>,
     receipt?: WorkflowAnalyzerReceipt,
+    options: { readonly projectTask?: boolean } = {},
   ): Outcome<WorkflowResponse, M1ServiceError> {
     const built = planning.ok
       ? buildAcceptedView(fixture, planning.value, this.clock.now())
@@ -631,7 +668,7 @@ export class M1WorkflowService {
 
     if (!built.ok) return built;
 
-    const saved = this.store.save(built.value.view, built.value.artifacts, receipt);
+    const saved = this.store.save(built.value.view, built.value.artifacts, receipt, options);
     if (!saved.ok) {
       return err({ kind: 'store_failure', error: saved.error });
     }

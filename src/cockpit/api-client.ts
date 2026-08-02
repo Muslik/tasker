@@ -17,6 +17,12 @@ import {
   ImplementationPlanningRecordSchema,
   type ImplementationPlanningRecord,
 } from '../control-plane/implementation-planning.js';
+import {
+  WorkflowContinuationRecordSchema,
+  WorkflowContinuationReviewCommandSchema,
+  type WorkflowContinuationRecord,
+  type WorkflowContinuationReviewCommand,
+} from '../control-plane/workflow-continuation-contracts.js';
 import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
 import {
   PlanningClarificationAnswerCommandSchema,
@@ -41,6 +47,10 @@ type WorkflowLookup =
 
 type ImplementationPlanLookup =
   | { readonly status: 'found'; readonly record: ImplementationPlanningRecord }
+  | { readonly status: 'missing' };
+
+type WorkflowContinuationLookup =
+  | { readonly status: 'found'; readonly record: WorkflowContinuationRecord }
   | { readonly status: 'missing' };
 
 type JsonResponse = {
@@ -177,6 +187,49 @@ export const loadImplementationPlan = async (
   const parsed = ImplementationPlanningRecordSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Implementation plan does not match the cockpit contract');
   return { status: 'found', record: parsed.data };
+};
+
+export const loadWorkflowContinuation = async (
+  fixtureId: string,
+): Promise<WorkflowContinuationLookup> => {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/continuation`);
+  if (result.response.status === 404) return { status: 'missing' };
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Workflow continuation does not match the cockpit contract');
+  return { status: 'found', record: parsed.data };
+};
+
+export const reviewWorkflowContinuation = async (
+  fixtureId: string,
+  commandInput: WorkflowContinuationReviewCommand,
+): Promise<WorkflowContinuationRecord> => {
+  const command = WorkflowContinuationReviewCommandSchema.parse(commandInput);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/continuation/review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Continuation review does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const retryWorkflowContinuation = async (
+  fixtureId: string,
+): Promise<WorkflowContinuationRecord> => {
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/continuation/retry`,
+    { method: 'POST' },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Continuation retry does not match the cockpit contract');
+  return parsed.data;
 };
 
 export const generateWorkflow = async (fixtureId: string): Promise<WorkflowResponse> => {

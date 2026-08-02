@@ -25,6 +25,7 @@ import { systemClock } from '../shared/clock.js';
 import { DeterministicStubRunService, DurableStubScheduler } from '../runner/index.js';
 import { buildM1Api } from './m1-api.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
+import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
 
@@ -91,6 +92,14 @@ export const startM1Server = async (): Promise<void> => {
       ? new DeterministicImplementationPlanner()
       : new CodexCliImplementationPlanner(nodeCommandRunner),
   });
+  const workflowContinuation = createWorkflowContinuationCoordinator({
+    ledger: ledger.repository,
+    clock: systemClock,
+    workflows: service,
+    subjects,
+    repositories: repositoryCatalog,
+    ...(workflowAnalyzer === undefined ? {} : { analyzer: workflowAnalyzer }),
+  });
   const cockpitDirectory = resolve('dist/cockpit');
   const api = buildM1Api({
     service,
@@ -98,6 +107,7 @@ export const startM1Server = async (): Promise<void> => {
     logger: true,
     workflowGenerator,
     implementationPlanning,
+    workflowContinuation,
     runService,
     scheduler,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),

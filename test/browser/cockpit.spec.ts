@@ -8,6 +8,7 @@ import {
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/m1-contracts.js';
+import { WorkflowContinuationRecordSchema } from '../../src/control-plane/workflow-continuation-contracts.js';
 
 const readJson = async <T>(response: APIResponse, schema: ZodType<T>): Promise<T> => {
   if (!response.ok()) {
@@ -229,6 +230,49 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
     'Implementation plan attached',
   );
+});
+
+test('I can review an immutable workflow continuation without losing the parent run', async ({
+  page,
+}) => {
+  const fixtureId = 'avia-13236-short-bug';
+  const tasks = await loadTasks(page);
+  const candidate = requireTask(
+    tasks.tasks.find((task) => task.id === fixtureId),
+    'Expected the short bug fixture to exist',
+  );
+
+  await page.goto('/');
+  await clickTask(page, fixtureId);
+  if (candidate.status === 'backlog') {
+    await page.getByRole('button', { name: 'Generate workflow' }).click();
+  }
+  const parentBefore = await loadWorkflow(page, fixtureId);
+  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
+
+  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('awaiting review');
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('twiket/ui-kit');
+  const continuationResponse = await page.request.get(`/api/workflows/${fixtureId}/continuation`);
+  const continuation = await readJson(continuationResponse, WorkflowContinuationRecordSchema);
+  if (continuation.status !== 'awaiting_review') {
+    throw new Error('Expected a reviewable continuation');
+  }
+  const continuationWorkflow = await loadWorkflow(page, continuation.candidate.taskReference);
+  expect(continuationWorkflow.view.workflow.graphHash).not.toBe(
+    parentBefore.view.workflow.graphHash,
+  );
+  await expect(page.getByTestId('workflow-sidebar')).toContainText('Continuation:');
+
+  await page.getByRole('button', { name: 'Accept workflow' }).click();
+
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('accepted');
+  await expect(page.getByTestId('selected-task')).toContainText(
+    'Continuation accepted · linked execution pending',
+  );
+  const parentAfter = await loadWorkflow(page, fixtureId);
+  expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
 });
 
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {

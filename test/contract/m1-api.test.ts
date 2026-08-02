@@ -8,6 +8,7 @@ import {
   CodexWorkflowGenerator,
   createImplementationPlanningCoordinator,
   createM1WorkflowService,
+  createWorkflowContinuationCoordinator,
   DeterministicStubRunService,
   FixtureListResponseSchema,
   ImplementationPlanningRecordSchema,
@@ -15,12 +16,14 @@ import {
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
   WorkflowGenerationSubjectSource,
+  WorkflowContinuationRecordSchema,
 } from '../../src/control-plane/index.js';
 import type { JiraIssuePort } from '../../src/integrations/jira/client.js';
 import { JiraIssueStateSchema } from '../../src/integrations/jira/contracts.js';
 import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { RepositoryCatalogResponseSchema } from '../../src/repositories/contracts.js';
+import type { RepositoryCatalog } from '../../src/repositories/catalog.js';
 import { RunProjectionSchema } from '../../src/runner/index.js';
 import {
   DeterministicImplementationPlanner,
@@ -92,10 +95,35 @@ const makeRevisionQuestioningPlanner = () => {
   return planner;
 };
 
+const makeWorkflowChangePlanner = (requiredCapabilities: readonly string[]) => {
+  const fallback = new DeterministicImplementationPlanner();
+  const planner: ImplementationPlanner = {
+    plan: async (request) => {
+      const result = await fallback.plan(request);
+      return result.ok
+        ? ok({
+            ...result.value,
+            decision: ImplementationPlanningDecisionSchema.parse({
+              status: 'workflow_change_required',
+              request: {
+                reason: 'The fix belongs to the shared seat component repository.',
+                discoveredRepositories: ['twiket/ui-kit'],
+                requiredCapabilities,
+                evidence: ['The affected component resolves from @ott/ui-kit.'],
+              },
+            }),
+          })
+        : result;
+    },
+  };
+  return planner;
+};
+
 const setup = (
   useWorkflowGenerator = false,
   jiraPort?: JiraIssuePort,
   implementationPlanner?: ImplementationPlanner,
+  repositoryCatalog: RepositoryCatalog = makeRepositoryCatalog(),
 ) => {
   const directory = mkdtempSync(join(tmpdir(), 'tasker-m1-api-'));
   const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
@@ -123,11 +151,22 @@ const setup = (
           subjects,
           planner: implementationPlanner,
         });
+  const workflowContinuation =
+    implementationPlanning === undefined
+      ? undefined
+      : createWorkflowContinuationCoordinator({
+          ledger: ledger.repository,
+          clock,
+          workflows: service,
+          subjects,
+          repositories: repositoryCatalog,
+        });
   return {
     api: buildM1Api({
       service,
       runService,
       ...(implementationPlanning === undefined ? {} : { implementationPlanning }),
+      ...(workflowContinuation === undefined ? {} : { workflowContinuation }),
       ...(jiraIssueService === undefined ? {} : { jiraIssueService }),
       ...(useWorkflowGenerator
         ? { workflowGenerator: { generate } }
@@ -460,6 +499,250 @@ describe('M1 HTTP API', () => {
       selectedStrategy: 'ralplan',
     });
     expect(automaticPlan.selectionReason).toContain('repository/publication boundaries');
+
+    await api.close();
+  });
+
+  it('compiles a validated immutable continuation and pauses the parent for review', async () => {
+    const { api } = setup(
+      false,
+      undefined,
+      makeWorkflowChangePlanner(['repository.read', 'command.run', 'workspace.write']),
+    );
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const parentBefore = WorkflowResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}` })).json(),
+    );
+    if (parentBefore.status !== 'ready') throw new Error('Expected a ready parent workflow');
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+
+    const continuation = WorkflowContinuationRecordSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/continuation` })).json(),
+    );
+    if (continuation.status !== 'awaiting_review') {
+      throw new Error('Expected a reviewable continuation');
+    }
+    const candidate = WorkflowResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: `/api/workflows/${continuation.candidate.taskReference}`,
+        })
+      ).json(),
+    );
+    const parentAfter = WorkflowResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}` })).json(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      runId: `run:${fixtureId}`,
+      status: 'waiting',
+      wait: { waitKind: 'workflow_continuation_review', slotPolicy: 'release' },
+      lease: null,
+      effects: [],
+    });
+    expect(continuation).toMatchObject({
+      attempt: 1,
+      reviewPolicy: 'review_all',
+      parent: {
+        taskReference: fixtureId,
+        graphHash: parentBefore.view.workflow.graphHash,
+      },
+      candidate: {
+        repositoryReference: 'twiket/ui-kit',
+      },
+    });
+    expect(candidate.status).toBe('ready');
+    if (candidate.status !== 'ready') throw new Error('Expected a ready candidate workflow');
+    expect(candidate.view.workflow.graphHash).not.toBe(parentBefore.view.workflow.graphHash);
+    expect(JSON.stringify(candidate.view.workflow.graph)).toContain('twiket/ui-kit');
+    expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
+
+    await api.close();
+  });
+
+  it('links an accepted continuation without rewriting the parent graph', async () => {
+    const { api } = setup(
+      false,
+      undefined,
+      makeWorkflowChangePlanner(['repository.read', 'command.run']),
+    );
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const parentBefore = WorkflowResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}` })).json(),
+    );
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/continuation/review`,
+      payload: { decision: 'accept' },
+    });
+
+    const run = RunProjectionSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/run` })).json(),
+    );
+    const parentAfter = WorkflowResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}` })).json(),
+    );
+    expect(response.statusCode).toBe(200);
+    expect(WorkflowContinuationRecordSchema.parse(response.json()).status).toBe('accepted');
+    expect(run).toMatchObject({
+      runId: `run:${fixtureId}`,
+      status: 'waiting',
+      wait: { waitKind: 'linked_continuation_ready', slotPolicy: 'release' },
+    });
+    expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
+
+    await api.close();
+  });
+
+  it('preserves the review candidate and parent wait when the operator rejects it', async () => {
+    const { api } = setup(false, undefined, makeWorkflowChangePlanner(['repository.read']));
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+    const before = WorkflowContinuationRecordSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/continuation` })).json(),
+    );
+    if (before.status !== 'awaiting_review') throw new Error('Expected a reviewable continuation');
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/continuation/review`,
+      payload: { decision: 'reject', guidance: 'Keep the fix in front-avia.' },
+    });
+
+    const run = RunProjectionSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/run` })).json(),
+    );
+    const candidateResponse = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${before.candidate.taskReference}`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(WorkflowContinuationRecordSchema.parse(response.json())).toMatchObject({
+      status: 'rejected_by_operator',
+      guidance: 'Keep the fix in front-avia.',
+      candidate: before.candidate,
+    });
+    expect(run).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'workflow_continuation_review', slotPolicy: 'release' },
+    });
+    expect(candidateResponse.statusCode).toBe(200);
+
+    await api.close();
+  });
+
+  it('keeps an invalid continuation blocked instead of executing an unmet capability', async () => {
+    const { api } = setup(false, undefined, makeWorkflowChangePlanner(['package.publish']));
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+
+    const continuation = WorkflowContinuationRecordSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/continuation` })).json(),
+    );
+    expect(response.statusCode).toBe(200);
+    expect(continuation).toMatchObject({
+      status: 'invalid',
+      issues: [expect.objectContaining({ code: 'capability_not_represented', retryable: false })],
+    });
+    expect(response.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'workflow_continuation_review', slotPolicy: 'release' },
+    });
+
+    await api.close();
+  });
+
+  it('retries a transient repository failure without restarting the parent run', async () => {
+    const repositoryCatalog = makeRepositoryCatalog();
+    let resolutions = 0;
+    const flakyCatalog: RepositoryCatalog = {
+      list: () => repositoryCatalog.list(),
+      find: (reference) => repositoryCatalog.find(reference),
+      resolve: async (reference) => {
+        resolutions += 1;
+        return resolutions === 1
+          ? {
+              status: 'unavailable' as const,
+              problem: {
+                kind: 'access_blocked' as const,
+                message: 'Bitbucket returned 403 while VPN was disconnected.',
+                retryable: true,
+                httpStatus: 403,
+              },
+            }
+          : repositoryCatalog.resolve(reference);
+      },
+    };
+    const { api } = setup(
+      false,
+      undefined,
+      makeWorkflowChangePlanner(['repository.read']),
+      flakyCatalog,
+    );
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const started = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+    const blocked = WorkflowContinuationRecordSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/continuation` })).json(),
+    );
+    if (blocked.status !== 'blocked') throw new Error('Expected a retryable repository block');
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/continuation/retry`,
+    });
+
+    const retried = WorkflowContinuationRecordSchema.parse(response.json());
+    const run = RunProjectionSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/run` })).json(),
+    );
+    expect(response.statusCode).toBe(200);
+    expect(blocked).toMatchObject({
+      attempt: 1,
+      parent: { runId: `run:${fixtureId}` },
+      issues: [expect.objectContaining({ code: 'repository_unavailable', retryable: true })],
+    });
+    expect(retried).toMatchObject({
+      status: 'awaiting_review',
+      attempt: 2,
+      parent: { runId: `run:${fixtureId}` },
+    });
+    expect(run).toMatchObject({
+      runId: `run:${fixtureId}`,
+      status: 'waiting',
+      wait: { waitKind: 'workflow_continuation_review', slotPolicy: 'release' },
+    });
+    expect(RunProjectionSchema.parse(started.json()).runId).toBe(run.runId);
 
     await api.close();
   });

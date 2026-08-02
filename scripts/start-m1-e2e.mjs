@@ -92,6 +92,22 @@ const snapshot = jira.JiraIssueSnapshotSchema.parse({
   ],
   links: [],
 });
+const repositoryCatalog = new repositories.StaticRepositoryCatalog([
+  {
+    repositoryId: 'front-avia',
+    remoteUrl: 'ssh://git@bitbucket.twiket.com/onetwotrip/front-avia.git',
+    checkout: { runnerId: 'e2e', path: resolve('.') },
+    checkoutPaths: [resolve('.')],
+    aliases: ['front-avia', 'onetwotrip/front-avia'],
+  },
+  {
+    repositoryId: 'ui-kit',
+    remoteUrl: 'ssh://git@bitbucket.twiket.com/twiket/ui-kit.git',
+    checkout: { runnerId: 'e2e', path: resolve('.') },
+    checkoutPaths: [resolve('.')],
+    aliases: ['ui-kit', 'twiket/ui-kit'],
+  },
+]);
 const jiraIssueService = jira.createJiraIssueService(
   ledger.repository,
   shared.systemClock,
@@ -114,15 +130,7 @@ const jiraIssueService = jira.createJiraIssueService(
           },
   },
   {
-    repositoryCatalog: new repositories.StaticRepositoryCatalog([
-      {
-        repositoryId: 'front-avia',
-        remoteUrl: 'ssh://git@bitbucket.twiket.com/onetwotrip/front-avia.git',
-        checkout: { runnerId: 'e2e', path: resolve('.') },
-        checkoutPaths: [resolve('.')],
-        aliases: ['front-avia', 'onetwotrip/front-avia'],
-      },
-    ]),
+    repositoryCatalog,
   },
 );
 const subjects = new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService);
@@ -137,11 +145,28 @@ const e2ePlanner = {
       request.context.operatorGuidance !== null ||
       snapshot === null ||
       typeof snapshot !== 'object' ||
-      Array.isArray(snapshot) ||
-      snapshot.fixtureId !== 'avia-14002-inline-copy'
+      Array.isArray(snapshot)
     ) {
       return result;
     }
+    if (snapshot.fixtureId === 'avia-13236-short-bug') {
+      return {
+        ...result,
+        value: {
+          ...result.value,
+          decision: {
+            status: 'workflow_change_required',
+            request: {
+              reason: 'The reproduced defect belongs to the shared seat component.',
+              discoveredRepositories: ['twiket/ui-kit'],
+              requiredCapabilities: ['repository.read', 'workspace.write', 'command.run'],
+              evidence: ['The seat implementation resolves from @ott/ui-kit.'],
+            },
+          },
+        },
+      };
+    }
+    if (snapshot.fixtureId !== 'avia-14002-inline-copy') return result;
     return {
       ...result,
       value: {
@@ -167,11 +192,19 @@ const implementationPlanning = control.createImplementationPlanningCoordinator({
   subjects,
   planner: e2ePlanner,
 });
+const workflowContinuation = control.createWorkflowContinuationCoordinator({
+  ledger: ledger.repository,
+  clock: shared.systemClock,
+  workflows: service,
+  subjects,
+  repositories: repositoryCatalog,
+});
 const api = control.buildM1Api({
   service,
   jiraIssueService,
   workflowGenerator,
   implementationPlanning,
+  workflowContinuation,
   runService,
   scheduler,
 });

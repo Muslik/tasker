@@ -59,6 +59,7 @@ export type StubRunError =
   | { readonly kind: 'run_settings_conflict'; readonly taskReference: string }
   | { readonly kind: 'run_not_at_plan_review'; readonly taskReference: string }
   | { readonly kind: 'run_not_at_planning_clarification'; readonly taskReference: string }
+  | { readonly kind: 'run_not_at_workflow_continuation'; readonly taskReference: string }
   | { readonly kind: 'plan_revision_target_not_found'; readonly taskReference: string }
   | { readonly kind: 'projection_corrupt'; readonly projectionId: string }
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict };
@@ -69,6 +70,11 @@ export interface DriveOptions {
 }
 
 interface PlanningClarificationWaitInput {
+  readonly attempt: number;
+  readonly artifactId: string;
+}
+
+interface WorkflowContinuationWaitInput {
   readonly attempt: number;
   readonly artifactId: string;
 }
@@ -379,6 +385,150 @@ export class DeterministicStubRunService {
             taskReference,
             artifactId: implementationPlan.artifactId,
           },
+          status: 'resolved',
+          resolvedWaitKey: run.wait.waitId,
+        },
+      },
+    );
+  }
+
+  public openWorkflowContinuation(
+    taskReference: string,
+    settingsInput: RunSettings,
+    continuation: WorkflowContinuationWaitInput,
+  ): Outcome<RunProjection, StubRunError> {
+    const settings = RunSettingsSchema.parse(settingsInput);
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+
+    let run: RunProjection;
+    if (current.value === null) {
+      const created = this.createQueuedRun(taskReference, settings, null);
+      if (!created.ok) return created;
+      run = created.value;
+    } else {
+      run = current.value;
+      if (
+        run.settings.planApproval !== settings.planApproval ||
+        run.settings.planningStrategy !== settings.planningStrategy
+      ) {
+        return err({ kind: 'run_settings_conflict', taskReference });
+      }
+      if (
+        run.status !== 'waiting' ||
+        (run.wait.waitKind !== 'plan.approved@1' && run.wait.waitKind !== 'human_clarification')
+      ) {
+        return err({ kind: 'run_not_at_workflow_continuation', taskReference });
+      }
+    }
+
+    const revisionTarget = run.planRevisionRequests.at(-1)?.targetNodeId;
+    const targetIndex = run.plan.findIndex(
+      (operation) =>
+        operation.kind === 'step' &&
+        (revisionTarget === undefined
+          ? operation.uses === 'task.analyze@1'
+          : operation.nodeId === revisionTarget),
+    );
+    const target = run.plan[targetIndex];
+    if (targetIndex < 0 || target?.kind !== 'step') {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+
+    const now = this.clock.now();
+    const priorWait = run.status === 'waiting' ? run.wait : null;
+    const waitId = `wait:${run.runId}:${target.nodeId}:continuation-attempt-${String(continuation.attempt)}`;
+    const waiting = RunProjectionSchema.parse({
+      ...run,
+      status: 'waiting',
+      startedAt: run.startedAt ?? now,
+      updatedAt: now,
+      cursor: targetIndex,
+      nodeStates: {
+        ...run.nodeStates,
+        ...(priorWait === null ? {} : { [priorWait.nodeId]: 'planned' as const }),
+        [target.nodeId]: 'waiting',
+      },
+      lease: null,
+      wait: {
+        waitId,
+        nodeId: target.nodeId,
+        waitKind: 'workflow_continuation_review',
+        slotPolicy: 'release',
+        openedAt: now,
+      },
+    });
+    return this.persist(
+      waiting,
+      'WorkflowContinuationWaitOpened',
+      {
+        taskReference,
+        nodeId: target.nodeId,
+        waitKind: 'workflow_continuation_review',
+        slotPolicy: 'release',
+        attempt: continuation.attempt,
+        artifactId: continuation.artifactId,
+      },
+      undefined,
+      priorWait === null
+        ? {}
+        : {
+            signal: {
+              signalId: `signal:${priorWait.waitId}:continuation-attempt-${String(continuation.attempt)}`,
+              signalKind: 'workflow_continuation_required',
+              correlationKey: priorWait.waitId,
+              payload: { taskReference, artifactId: continuation.artifactId },
+              status: 'resolved',
+              resolvedWaitKey: priorWait.waitId,
+            },
+          },
+    );
+  }
+
+  public acceptWorkflowContinuation(
+    taskReference: string,
+    continuationId: string,
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    const run = current.value;
+    if (run.status === 'waiting' && run.wait.waitKind === 'linked_continuation_ready') {
+      return ok(run);
+    }
+    if (run.status !== 'waiting' || run.wait.waitKind !== 'workflow_continuation_review') {
+      return err({ kind: 'run_not_at_workflow_continuation', taskReference });
+    }
+    const now = this.clock.now();
+    const nextWaitId = `${run.wait.waitId}:accepted`;
+    const accepted = RunProjectionSchema.parse({
+      ...run,
+      updatedAt: now,
+      wait: {
+        ...run.wait,
+        waitId: nextWaitId,
+        waitKind: 'linked_continuation_ready',
+        openedAt: now,
+      },
+    });
+    return this.persist(
+      accepted,
+      'WorkflowContinuationLinked',
+      {
+        taskReference,
+        nodeId: run.wait.nodeId,
+        continuationId,
+        waitKind: 'linked_continuation_ready',
+        slotPolicy: 'release',
+      },
+      undefined,
+      {
+        actor: 'operator',
+        signal: {
+          signalId: `signal:${run.wait.waitId}:accepted`,
+          signalKind: 'workflow_continuation_accepted',
+          correlationKey: run.wait.waitId,
+          payload: { taskReference, continuationId },
           status: 'resolved',
           resolvedWaitKey: run.wait.waitId,
         },
@@ -927,6 +1077,21 @@ export class DeterministicStubRunService {
             source: 'operator',
             title: 'Planning clarification resolved',
             detail: `Planning attempt ${String(payload.attempt ?? 1)} is ready and the same run will continue.`,
+          });
+        case 'WorkflowContinuationWaitOpened':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Waiting for workflow continuation review',
+            detail: `Planning attempt ${String(payload.attempt ?? 1)} requested a linked graph; the runner slot is released.`,
+          });
+        case 'WorkflowContinuationLinked':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'operator',
+            title: 'Workflow continuation linked',
+            detail:
+              'The accepted candidate is linked without modifying the parent graph or completed prefix.',
           });
         case 'WaitOpened':
           return OperatorActivityEntrySchema.parse({

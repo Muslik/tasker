@@ -473,21 +473,23 @@ implemented only for the bounded stub semantics documented there.
    open `human_clarification`, accept an operator answer, and create a new planning
    attempt without losing the repository snapshot or prior plan. This gate applies in
    both approval modes.
-3. **Workflow continuation.** Accept `workflow_change_required` from planning or later
-   execution, compile an immutable linked continuation, and start in `review_all`.
-   Keep deterministic validation mandatory, then graduate to `auto_safe` and
-   `auto_all_valid` using retrospective evidence.
+3. **Workflow continuation — planning-origin slice delivered 2026-08-02.** Accept
+   `workflow_change_required` from planning, compile an immutable linked candidate,
+   validate repository/capability lineage, and start in `review_all`. Transient
+   repository failures retry against the same parent run. Linked child execution and
+   runtime-originated requests remain.
 4. **Write preparation.** Reuse the managed checkout as a pinned read-only planning
    snapshot. M4 allocates a task branch and isolated worktree only after planning,
    clarification, and any required approval are resolved, immediately before the
    first write-capable node.
 
-Steps 1 and 2 are implemented and verified; see
+Steps 1-3 are implemented and verified for their documented boundaries; see
 [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md). The center surface
 shows the actual plan, strategy, provenance, measured tokens, immutable revisions, and
-blocking questions. Answers survive restart and continue the same run. The next
-operator-visible checkpoint is step 3: turn `workflow_change_required` into a validated
-linked continuation instead of a terminal planning response.
+blocking questions. Answers survive restart and continue the same run. See
+[`m2.2-workflow-continuation.md`](m2.2-workflow-continuation.md) for the candidate review
+and recovery contract. The next checkpoint executes the accepted candidate as a linked
+child run while retaining one causal task history.
 
 ### Entry criteria
 

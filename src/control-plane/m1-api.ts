@@ -6,7 +6,14 @@ import { z } from 'zod';
 import {
   ImplementationPlanningRecordSchema,
   type ImplementationPlanningCoordinator,
+  type ImplementationPlanningRecord,
 } from './implementation-planning.js';
+import {
+  WorkflowContinuationRecordSchema,
+  WorkflowContinuationReviewCommandSchema,
+  type WorkflowContinuationCoordinator,
+  type WorkflowContinuationError,
+} from './workflow-continuation.js';
 import type { JiraIssueService, JiraIssueServiceError } from '../integrations/index.js';
 import {
   RepositoryCatalogResponseSchema,
@@ -52,6 +59,7 @@ export interface BuildM1ApiOptions {
   readonly workflowGenerator?: WorkflowGenerator | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
+  readonly workflowContinuation?: WorkflowContinuationCoordinator | undefined;
   readonly runService?: DeterministicStubRunService | undefined;
   readonly scheduler?: DurableStubScheduler | undefined;
 }
@@ -133,6 +141,10 @@ const sendRunError = (reply: FastifyReply, error: StubRunError): FastifyReply =>
       return reply
         .code(409)
         .send(apiError(error.kind, 'The run is not waiting for planning clarification'));
+    case 'run_not_at_workflow_continuation':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'The run is not waiting for workflow continuation review'));
     case 'plan_revision_target_not_found':
       return reply
         .code(409)
@@ -141,6 +153,31 @@ const sendRunError = (reply: FastifyReply, error: StubRunError): FastifyReply =>
       return reply.code(500).send(apiError(error.kind, 'The persisted run projection is invalid'));
     case 'ledger_conflict':
       return reply.code(409).send(apiError(error.kind, 'The run changed concurrently; reload it'));
+  }
+};
+
+const sendContinuationError = (
+  reply: FastifyReply,
+  error: WorkflowContinuationError,
+): FastifyReply => {
+  switch (error.kind) {
+    case 'parent_workflow_not_ready':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'The parent workflow is not ready for continuation'));
+    case 'subject':
+      return reply
+        .code(503)
+        .send(apiError('workflow_continuation_subject_failed', error.error.kind));
+    case 'store':
+      return reply
+        .code(
+          error.error.kind === 'continuation_not_reviewable' ||
+            error.error.kind === 'continuation_not_retryable'
+            ? 409
+            : 500,
+        )
+        .send(apiError('workflow_continuation_store_failed', error.error.kind));
   }
 };
 
@@ -217,6 +254,35 @@ const resolveCockpitAsset = (directory: string, asset: string): string | null =>
 export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   const api = Fastify({ logger: options.logger ?? false });
 
+  const openWorkflowContinuation = async (
+    taskReference: string,
+    settings: RunProjection['settings'],
+    planning: Extract<
+      ImplementationPlanningRecord,
+      { readonly status: 'workflow_change_required' }
+    >,
+    reply: FastifyReply,
+  ): Promise<FastifyReply> => {
+    if (options.runService === undefined || options.workflowContinuation === undefined) {
+      return reply
+        .code(409)
+        .send(apiError('workflow_change_required', planning.decision.request.reason));
+    }
+    const waiting = options.runService.openWorkflowContinuation(taskReference, settings, {
+      attempt: planning.attempt,
+      artifactId: planning.artifactId,
+    });
+    if (!waiting.ok) return sendRunError(reply, waiting.error);
+    const proposed = await options.workflowContinuation.proposeFromPlanning(
+      taskReference,
+      waiting.value.runId,
+      planning,
+    );
+    return proposed.ok
+      ? reply.send(RunProjectionSchema.parse(waiting.value))
+      : sendContinuationError(reply, proposed.error);
+  };
+
   api.get('/api/health', () => ({ status: 'ok', milestone: 'm1' }));
 
   api.get('/api/fixtures', () => options.service.listFixtures());
@@ -239,7 +305,8 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       const withPlanning = options.implementationPlanning?.decorateTask(task) ?? task;
       if (options.runService === undefined) return withPlanning;
       const run = options.runService.read(task.id);
-      return run.ok ? applyRunToTask(withPlanning, run.value) : withPlanning;
+      const withRun = run.ok ? applyRunToTask(withPlanning, run.value) : withPlanning;
+      return options.workflowContinuation?.decorateTask(withRun) ?? withRun;
     };
     if (options.jiraIssueService === undefined) {
       return reply.send({
@@ -298,6 +365,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             ...jiraResult.value.entries,
             ...workflowResult.value.entries,
             ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
+            ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
             ...(options.runService?.readActivity(params.data.fixtureId) ?? []),
           ].sort((left, right) => left.sequence - right.sequence),
         }),
@@ -312,6 +380,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             entries: [
               ...result.value.entries,
               ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
+              ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
               ...(options.runService?.readActivity(params.data.fixtureId) ?? []),
             ].sort((left, right) => left.sequence - right.sequence),
           }),
@@ -399,6 +468,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       const events = [
         ...options.service.listStreamEventsAfter(cursor),
         ...(options.implementationPlanning?.listStreamEventsAfter(cursor) ?? []),
+        ...(options.workflowContinuation?.listStreamEventsAfter(cursor) ?? []),
         ...(options.runService?.listStreamEventsAfter(cursor) ?? []),
       ].sort((left, right) => left.sequence - right.sequence);
       for (const event of events) {
@@ -498,6 +568,70 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(ImplementationPlanningRecordSchema.parse(result.value));
   });
 
+  api.get('/api/workflows/:fixtureId/continuation', (request, reply) => {
+    if (options.workflowContinuation === undefined) {
+      return reply
+        .code(404)
+        .send(apiError('workflow_continuation_not_found', 'No continuation exists'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const result = options.workflowContinuation.read(params.data.fixtureId);
+    if (!result.ok) return sendContinuationError(reply, result.error);
+    return result.value === null
+      ? reply.code(404).send(apiError('workflow_continuation_not_found', 'No continuation exists'))
+      : reply.send(WorkflowContinuationRecordSchema.parse(result.value));
+  });
+
+  api.post('/api/workflows/:fixtureId/continuation/review', (request, reply) => {
+    if (options.workflowContinuation === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('workflow_continuation_not_configured', 'Continuation is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const command = WorkflowContinuationReviewCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(apiError('invalid_continuation_review', 'Accept or reject with non-empty guidance'));
+    }
+    const reviewed = options.workflowContinuation.review(params.data.fixtureId, command.data);
+    if (!reviewed.ok) return sendContinuationError(reply, reviewed.error);
+    if (reviewed.value.status === 'accepted') {
+      if (options.runService === undefined) {
+        return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
+      }
+      const linked = options.runService.acceptWorkflowContinuation(
+        params.data.fixtureId,
+        reviewed.value.continuationId,
+      );
+      if (!linked.ok) return sendRunError(reply, linked.error);
+    }
+    return reply.send(WorkflowContinuationRecordSchema.parse(reviewed.value));
+  });
+
+  api.post('/api/workflows/:fixtureId/continuation/retry', async (request, reply) => {
+    if (options.workflowContinuation === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('workflow_continuation_not_configured', 'Continuation is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const retried = await options.workflowContinuation.retry(params.data.fixtureId);
+    return retried.ok
+      ? reply.send(WorkflowContinuationRecordSchema.parse(retried.value))
+      : sendContinuationError(reply, retried.error);
+  });
+
   api.post('/api/workflows/:fixtureId/start', async (request, reply) => {
     if (options.runService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
@@ -550,9 +684,12 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           : sendRunError(reply, waiting.error);
       }
       if (planned.value.status === 'workflow_change_required') {
-        return reply
-          .code(409)
-          .send(apiError('workflow_change_required', planned.value.decision.request.reason));
+        return openWorkflowContinuation(
+          params.data.fixtureId,
+          command.data.settings,
+          planned.value,
+          reply,
+        );
       }
       implementationPlan = options.implementationPlanning.link(planned.value);
     }
@@ -651,9 +788,12 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           : sendRunError(reply, waiting.error);
       }
       if (planned.value.status === 'workflow_change_required') {
-        return reply
-          .code(409)
-          .send(apiError('workflow_change_required', planned.value.decision.request.reason));
+        return openWorkflowContinuation(
+          params.data.fixtureId,
+          recorded.value.settings,
+          planned.value,
+          reply,
+        );
       }
       const revised = options.runService.applyPlanRevision(
         params.data.fixtureId,
@@ -740,9 +880,12 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .send(apiError('implementation_planning_failed', planned.value.failure.message));
     }
     if (planned.value.status === 'workflow_change_required') {
-      return reply
-        .code(409)
-        .send(apiError('workflow_change_required', planned.value.decision.request.reason));
+      return openWorkflowContinuation(
+        params.data.fixtureId,
+        currentRun.value.settings,
+        planned.value,
+        reply,
+      );
     }
     if (planned.value.status === 'needs_clarification') {
       const waiting = options.runService.openPlanningClarification(
