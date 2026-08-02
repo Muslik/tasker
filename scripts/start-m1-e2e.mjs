@@ -142,7 +142,6 @@ const e2ePlanner = {
     const snapshot = request.context.taskSnapshot;
     if (
       !result.ok ||
-      request.context.operatorGuidance !== null ||
       snapshot === null ||
       typeof snapshot !== 'object' ||
       Array.isArray(snapshot)
@@ -166,6 +165,7 @@ const e2ePlanner = {
         },
       };
     }
+    if (request.context.operatorGuidance !== null) return result;
     if (snapshot.fixtureId !== 'avia-14002-inline-copy') return result;
     return {
       ...result,

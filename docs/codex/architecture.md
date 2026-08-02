@@ -294,7 +294,11 @@ flowchart LR
   P --> A["Assemble and validate continuation candidate"]
   A --> R{"Policy / operator review"}
   R -->|"accepted"| G2["Linked immutable continuation v2"]
-  R -->|"rejected"| H["Remain recoverably blocked"]
+  R -->|"rejected + guidance"| P2["Planning attempt N + 1"]
+  P2 -->|"new graph required"| A
+  P2 -->|"blocking question"| H["human_clarification"]
+  H --> P2
+  P2 -->|"parent plan is sufficient"| N["Resume parent run"]
 ```
 
 Every agent/tool step returns a typed outcome. `workflow_change_required` contains a
@@ -309,6 +313,12 @@ the cockpit. Later `GraphRevision` support may append a validated suffix at decl
 expansion points, but it cannot rewrite completed nodes. Discovering a shared
 component during `bug.reproduce` or `code.implement` is the canonical scenario for
 this path.
+
+Rejecting a candidate does not reject the task. The exact operator guidance becomes
+immutable input to planning attempt `N + 1`. The old candidate stays addressable for
+audit while the new attempt either proposes another immutable candidate, asks a
+blocking question, or proves that execution can continue inside the accepted parent
+graph. No branch edits the completed prefix or discards the existing run.
 
 #### Universal planning boundary
 

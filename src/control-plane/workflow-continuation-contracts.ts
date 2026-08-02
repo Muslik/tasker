@@ -75,6 +75,14 @@ export const WorkflowContinuationRecordSchema = z.discriminatedUnion('status', [
     guidance: z.string().min(1).max(10_000),
   }).strict(),
   WorkflowContinuationRecordBaseSchema.extend({
+    status: z.literal('superseded_by_plan'),
+    candidate: WorkflowContinuationCandidateSchema,
+    reviewedAt: z.iso.datetime(),
+    guidance: z.string().min(1).max(10_000),
+    resolvedAt: z.iso.datetime(),
+    implementationPlanArtifactId: z.string().min(1),
+  }).strict(),
+  WorkflowContinuationRecordBaseSchema.extend({
     status: z.literal('invalid'),
     candidateTaskReference: z.string().min(1).nullable(),
     issues: z.array(WorkflowContinuationIssueSchema).min(1),
@@ -91,10 +99,11 @@ export const WorkflowContinuationRecordSchema = z.discriminatedUnion('status', [
 ]);
 
 export const WorkflowContinuationReviewCommandSchema = z.discriminatedUnion('decision', [
-  z.object({ decision: z.literal('accept') }).strict(),
+  z.object({ decision: z.literal('accept'), continuationId: z.string().min(1) }).strict(),
   z
     .object({
       decision: z.literal('reject'),
+      continuationId: z.string().min(1),
       guidance: z.string().trim().min(1).max(10_000),
     })
     .strict(),

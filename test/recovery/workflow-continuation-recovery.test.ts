@@ -21,7 +21,7 @@ import { ok } from '../../src/shared/outcome.js';
 import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 describe('workflow continuation recovery', () => {
-  it('restores the parent wait and immutable candidate after restart', async () => {
+  it('restores the parent wait and revised immutable candidate after restart', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-continuation-recovery-'));
     const filename = join(directory, 'ledger.sqlite');
     const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
@@ -90,7 +90,38 @@ describe('workflow continuation recovery', () => {
     if (!proposed.ok || proposed.value.status !== 'awaiting_review') {
       throw new Error('Expected a reviewable continuation');
     }
-    const candidate = proposed.value.candidate;
+    const firstCandidate = proposed.value.candidate;
+    const rejected = firstContinuation.review('avia-13236-short-bug', {
+      decision: 'reject',
+      continuationId: proposed.value.continuationId,
+      guidance: 'Keep the new repository but add a narrower verification step.',
+    });
+    if (!rejected.ok || rejected.value.status !== 'rejected_by_operator') {
+      throw new Error('Expected durable rejection guidance');
+    }
+    const replanned = await planning.prepare(
+      'avia-13236-short-bug',
+      'fast',
+      rejected.value.guidance,
+    );
+    if (!replanned.ok || replanned.value.status !== 'workflow_change_required') {
+      throw new Error('Expected a revised workflow continuation request');
+    }
+    const updatedWait = firstRunner.openWorkflowContinuation(
+      'avia-13236-short-bug',
+      waiting.value.settings,
+      { attempt: replanned.value.attempt, artifactId: replanned.value.artifactId },
+    );
+    if (!updatedWait.ok) throw new Error('Expected the same durable continuation wait');
+    const reproposed = await firstContinuation.proposeFromPlanning(
+      'avia-13236-short-bug',
+      waiting.value.runId,
+      replanned.value,
+    );
+    if (!reproposed.ok || reproposed.value.status !== 'awaiting_review') {
+      throw new Error('Expected a revised reviewable continuation');
+    }
+    const candidate = reproposed.value.candidate;
     firstLedger.close();
 
     const restartedLedger = openSqliteLedger({ filename, clock });
@@ -114,7 +145,7 @@ describe('workflow continuation recovery', () => {
       const restoredCandidate = restartedWorkflows.read(candidate.taskReference);
       const restoredParent = restartedWorkflows.read('avia-13236-short-bug');
 
-      expect(restoredContinuation).toEqual(proposed);
+      expect(restoredContinuation).toEqual(reproposed);
       expect(restoredRun).toMatchObject({
         ok: true,
         value: {
@@ -130,6 +161,13 @@ describe('workflow continuation recovery', () => {
         value: {
           status: 'ready',
           view: { workflow: { graphHash: candidate.graphHash } },
+        },
+      });
+      expect(restartedWorkflows.read(firstCandidate.taskReference)).toMatchObject({
+        ok: true,
+        value: {
+          status: 'ready',
+          view: { workflow: { graphHash: firstCandidate.graphHash } },
         },
       });
       expect(restoredParent).toMatchObject({

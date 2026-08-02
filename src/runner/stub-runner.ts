@@ -269,7 +269,9 @@ export class DeterministicStubRunService {
       }
       if (
         run.status !== 'waiting' ||
-        (run.wait.waitKind !== 'plan.approved@1' && run.wait.waitKind !== 'human_clarification')
+        (run.wait.waitKind !== 'plan.approved@1' &&
+          run.wait.waitKind !== 'human_clarification' &&
+          run.wait.waitKind !== 'workflow_continuation_review')
       ) {
         return err({ kind: 'run_not_at_planning_clarification', taskReference });
       }
@@ -416,7 +418,9 @@ export class DeterministicStubRunService {
       }
       if (
         run.status !== 'waiting' ||
-        (run.wait.waitKind !== 'plan.approved@1' && run.wait.waitKind !== 'human_clarification')
+        (run.wait.waitKind !== 'plan.approved@1' &&
+          run.wait.waitKind !== 'human_clarification' &&
+          run.wait.waitKind !== 'workflow_continuation_review')
       ) {
         return err({ kind: 'run_not_at_workflow_continuation', taskReference });
       }
@@ -460,7 +464,9 @@ export class DeterministicStubRunService {
     });
     return this.persist(
       waiting,
-      'WorkflowContinuationWaitOpened',
+      priorWait?.waitKind === 'workflow_continuation_review'
+        ? 'WorkflowContinuationWaitUpdated'
+        : 'WorkflowContinuationWaitOpened',
       {
         taskReference,
         nodeId: target.nodeId,
@@ -482,6 +488,52 @@ export class DeterministicStubRunService {
               resolvedWaitKey: priorWait.waitId,
             },
           },
+    );
+  }
+
+  public resolveWorkflowContinuationRevision(
+    taskReference: string,
+    implementationPlan: ImplementationPlanLink,
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    const run = current.value;
+    if (run.status !== 'waiting' || run.wait.waitKind !== 'workflow_continuation_review') {
+      return err({ kind: 'run_not_at_workflow_continuation', taskReference });
+    }
+    const now = this.clock.now();
+    const queued = RunProjectionSchema.parse({
+      ...run,
+      status: 'queued',
+      updatedAt: now,
+      nodeStates: { ...run.nodeStates, [run.wait.nodeId]: 'planned' },
+      implementationPlan,
+      lease: null,
+      wait: null,
+    });
+    return this.persist(
+      queued,
+      'WorkflowContinuationRevisionResolved',
+      {
+        taskReference,
+        nodeId: run.wait.nodeId,
+        waitKind: run.wait.waitKind,
+        artifactId: implementationPlan.artifactId,
+        attempt: implementationPlan.attempt,
+      },
+      undefined,
+      {
+        actor: 'planner',
+        signal: {
+          signalId: `signal:${run.wait.waitId}:revised-plan-ready`,
+          signalKind: 'workflow_continuation_revision_ready',
+          correlationKey: run.wait.waitId,
+          payload: { taskReference, artifactId: implementationPlan.artifactId },
+          status: 'resolved',
+          resolvedWaitKey: run.wait.waitId,
+        },
+      },
     );
   }
 
@@ -1079,11 +1131,19 @@ export class DeterministicStubRunService {
             detail: `Planning attempt ${String(payload.attempt ?? 1)} is ready and the same run will continue.`,
           });
         case 'WorkflowContinuationWaitOpened':
+        case 'WorkflowContinuationWaitUpdated':
           return OperatorActivityEntrySchema.parse({
             ...common,
             source: 'kernel',
             title: 'Waiting for workflow continuation review',
             detail: `Planning attempt ${String(payload.attempt ?? 1)} requested a linked graph; the runner slot is released.`,
+          });
+        case 'WorkflowContinuationRevisionResolved':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'planner',
+            title: 'Workflow continuation no longer required',
+            detail: `Operator guidance produced planning attempt ${String(payload.attempt ?? 1)} for the parent run.`,
           });
         case 'WorkflowContinuationLinked':
           return OperatorActivityEntrySchema.parse({

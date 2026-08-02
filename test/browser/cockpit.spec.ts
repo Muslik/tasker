@@ -248,9 +248,10 @@ test('I can review an immutable workflow continuation without losing the parent 
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
   const parentBefore = await loadWorkflow(page, fixtureId);
-  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
-
-  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+  if (candidate.status === 'backlog' || candidate.status === 'planned') {
+    await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
+    await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+  }
 
   await expect(page.getByTestId('workflow-continuation-review')).toContainText('awaiting review');
   await expect(page.getByTestId('workflow-continuation-review')).toContainText('twiket/ui-kit');
@@ -264,6 +265,22 @@ test('I can review an immutable workflow continuation without losing the parent 
     parentBefore.view.workflow.graphHash,
   );
   await expect(page.getByTestId('workflow-sidebar')).toContainText('Continuation:');
+
+  const guidance = 'Keep the shared component, but add the targeted visual verification.';
+  await page.getByRole('textbox', { name: 'Workflow continuation guidance' }).fill(guidance);
+  await page
+    .getByTestId('workflow-continuation-review')
+    .getByRole('button', { name: 'Reject' })
+    .click();
+
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('attempt 2');
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('awaiting review');
+  const revisedResponse = await page.request.get(`/api/workflows/${fixtureId}/continuation`);
+  const revised = await readJson(revisedResponse, WorkflowContinuationRecordSchema);
+  if (revised.status !== 'awaiting_review') throw new Error('Expected a revised continuation');
+  expect(revised.candidate.taskReference).not.toBe(continuation.candidate.taskReference);
+  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
+  await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
 
   await page.getByRole('button', { name: 'Accept workflow' }).click();
 

@@ -50,6 +50,7 @@ type WorkflowContinuationStoreError =
       readonly issues: readonly string[];
     }
   | { readonly kind: 'continuation_not_reviewable'; readonly parentTaskReference: string }
+  | { readonly kind: 'continuation_not_resolvable'; readonly parentTaskReference: string }
   | { readonly kind: 'continuation_not_retryable'; readonly parentTaskReference: string };
 
 export type WorkflowContinuationError =
@@ -164,6 +165,9 @@ class WorkflowContinuationStore {
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
     const current = this.read(parentTaskReference);
     if (!current.ok) return current;
+    if (current.value !== null && current.value.continuationId !== command.continuationId) {
+      return ok(current.value);
+    }
     if (current.value?.status === 'accepted' && command.decision === 'accept') {
       return ok(current.value);
     }
@@ -194,6 +198,30 @@ class WorkflowContinuationStore {
         ? 'WorkflowContinuationAccepted'
         : 'WorkflowContinuationRejectedByOperator',
     );
+  }
+
+  public supersedeWithPlan(
+    parentTaskReference: string,
+    implementationPlanArtifactId: string,
+  ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
+    const current = this.read(parentTaskReference);
+    if (!current.ok) return current;
+    if (
+      current.value?.status === 'superseded_by_plan' &&
+      current.value.implementationPlanArtifactId === implementationPlanArtifactId
+    ) {
+      return ok(current.value);
+    }
+    if (current.value?.status !== 'rejected_by_operator') {
+      return err({ kind: 'continuation_not_resolvable', parentTaskReference });
+    }
+    const superseded = WorkflowContinuationRecordSchema.parse({
+      ...current.value,
+      status: 'superseded_by_plan',
+      resolvedAt: this.clock.now(),
+      implementationPlanArtifactId,
+    });
+    return this.save(superseded, 'WorkflowContinuationSupersededByPlan');
   }
 }
 
@@ -426,6 +454,17 @@ export class WorkflowContinuationCoordinator {
     return reviewed.ok ? reviewed : err({ kind: 'store', error: reviewed.error });
   }
 
+  public supersedeWithPlan(
+    parentTaskReference: string,
+    implementationPlanArtifactId: string,
+  ): Outcome<WorkflowContinuationRecord, WorkflowContinuationError> {
+    const superseded = this.store.supersedeWithPlan(
+      parentTaskReference,
+      implementationPlanArtifactId,
+    );
+    return superseded.ok ? superseded : err({ kind: 'store', error: superseded.error });
+  }
+
   public async retry(
     parentTaskReference: string,
   ): Promise<Outcome<WorkflowContinuationRecord, WorkflowContinuationError>> {
@@ -483,6 +522,8 @@ export class WorkflowContinuationCoordinator {
           currentStage: 'Continuation rejected by operator',
           updatedAt: record.reviewedAt,
         };
+      case 'superseded_by_plan':
+        return task;
       case 'blocked':
         return {
           ...task,
@@ -563,6 +604,13 @@ export class WorkflowContinuationCoordinator {
             title: 'Workflow continuation rejected by operator',
             detail:
               'The parent run remains recoverably blocked with the reviewed candidate preserved.',
+          });
+        case 'WorkflowContinuationSupersededByPlan':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            title: 'Workflow continuation replaced by revised plan',
+            detail:
+              'Operator guidance produced a parent implementation plan, so the linked candidate remains preserved but will not execute.',
           });
         default:
           throw new Error(`Unmapped workflow continuation event: ${event.eventType}`);

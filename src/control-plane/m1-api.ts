@@ -13,6 +13,7 @@ import {
   WorkflowContinuationReviewCommandSchema,
   type WorkflowContinuationCoordinator,
   type WorkflowContinuationError,
+  type WorkflowContinuationRecord,
 } from './workflow-continuation.js';
 import type { JiraIssueService, JiraIssueServiceError } from '../integrations/index.js';
 import {
@@ -173,6 +174,7 @@ const sendContinuationError = (
       return reply
         .code(
           error.error.kind === 'continuation_not_reviewable' ||
+            error.error.kind === 'continuation_not_resolvable' ||
             error.error.kind === 'continuation_not_retryable'
             ? 409
             : 500,
@@ -283,6 +285,100 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : sendContinuationError(reply, proposed.error);
   };
 
+  const reviseWorkflowContinuation = async (
+    taskReference: string,
+    rejected: Extract<WorkflowContinuationRecord, { readonly status: 'rejected_by_operator' }>,
+    reply: FastifyReply,
+  ): Promise<FastifyReply> => {
+    if (
+      options.runService === undefined ||
+      options.implementationPlanning === undefined ||
+      options.workflowContinuation === undefined
+    ) {
+      return reply
+        .code(503)
+        .send(apiError('implementation_planning_not_configured', 'Planning is disabled'));
+    }
+    const currentRun = options.runService.read(taskReference);
+    if (!currentRun.ok) return sendRunError(reply, currentRun.error);
+    if (
+      currentRun.value === null ||
+      currentRun.value.status !== 'waiting' ||
+      currentRun.value.wait.waitKind !== 'workflow_continuation_review'
+    ) {
+      return sendRunError(reply, {
+        kind: 'run_not_at_workflow_continuation',
+        taskReference,
+      });
+    }
+
+    const planned = await options.implementationPlanning.prepare(
+      taskReference,
+      currentRun.value.settings.planningStrategy,
+      rejected.guidance,
+    );
+    if (!planned.ok) {
+      return reply
+        .code(503)
+        .send(
+          apiError('implementation_planning_failed', `Planning stopped: ${planned.error.kind}`),
+        );
+    }
+    if (planned.value.status === 'planning') {
+      return reply
+        .code(409)
+        .send(apiError('implementation_planning_in_progress', 'Planning is still running'));
+    }
+    if (planned.value.status === 'failed') {
+      // The failed planning attempt is already durable. Returning the rejected record keeps
+      // this operator command retryable instead of disguising a domain wait as a transport loss.
+      return reply.send(WorkflowContinuationRecordSchema.parse(rejected));
+    }
+    if (planned.value.status === 'needs_clarification') {
+      const waiting = options.runService.openPlanningClarification(
+        taskReference,
+        currentRun.value.settings,
+        { attempt: planned.value.attempt, artifactId: planned.value.artifactId },
+      );
+      return waiting.ok
+        ? reply.send(WorkflowContinuationRecordSchema.parse(rejected))
+        : sendRunError(reply, waiting.error);
+    }
+    if (planned.value.status === 'workflow_change_required') {
+      const waiting = options.runService.openWorkflowContinuation(
+        taskReference,
+        currentRun.value.settings,
+        { attempt: planned.value.attempt, artifactId: planned.value.artifactId },
+      );
+      if (!waiting.ok) return sendRunError(reply, waiting.error);
+      const proposed = await options.workflowContinuation.proposeFromPlanning(
+        taskReference,
+        waiting.value.runId,
+        planned.value,
+      );
+      return proposed.ok
+        ? reply.send(WorkflowContinuationRecordSchema.parse(proposed.value))
+        : sendContinuationError(reply, proposed.error);
+    }
+
+    const implementationPlan = options.implementationPlanning.link(planned.value);
+    const queued = options.runService.resolveWorkflowContinuationRevision(
+      taskReference,
+      implementationPlan,
+    );
+    if (!queued.ok) return sendRunError(reply, queued.error);
+    const superseded = options.workflowContinuation.supersedeWithPlan(
+      taskReference,
+      implementationPlan.artifactId,
+    );
+    if (!superseded.ok) return sendContinuationError(reply, superseded.error);
+    if (options.scheduler === undefined) {
+      const continued = options.runService.claim(taskReference, 'direct-stub-runner');
+      if (!continued.ok) return sendRunError(reply, continued.error);
+    }
+    return reply.send(WorkflowContinuationRecordSchema.parse(superseded.value));
+  };
+
   api.get('/api/health', () => ({ status: 'ok', milestone: 'm1' }));
 
   api.get('/api/fixtures', () => options.service.listFixtures());
@@ -303,10 +399,20 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!result.ok) return sendServiceError(reply, result.error);
     const withRunState = (task: OperatorTaskSummary): OperatorTaskSummary => {
       const withPlanning = options.implementationPlanning?.decorateTask(task) ?? task;
-      if (options.runService === undefined) return withPlanning;
+      if (options.runService === undefined) {
+        return options.workflowContinuation?.decorateTask(withPlanning) ?? withPlanning;
+      }
       const run = options.runService.read(task.id);
       const withRun = run.ok ? applyRunToTask(withPlanning, run.value) : withPlanning;
-      return options.workflowContinuation?.decorateTask(withRun) ?? withRun;
+      const continuationOwnsStage =
+        !run.ok ||
+        run.value === null ||
+        (run.value.status === 'waiting' &&
+          (run.value.wait.waitKind === 'workflow_continuation_review' ||
+            run.value.wait.waitKind === 'linked_continuation_ready'));
+      return continuationOwnsStage
+        ? (options.workflowContinuation?.decorateTask(withRun) ?? withRun)
+        : withRun;
     };
     if (options.jiraIssueService === undefined) {
       return reply.send({
@@ -585,7 +691,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(WorkflowContinuationRecordSchema.parse(result.value));
   });
 
-  api.post('/api/workflows/:fixtureId/continuation/review', (request, reply) => {
+  api.post('/api/workflows/:fixtureId/continuation/review', async (request, reply) => {
     if (options.workflowContinuation === undefined) {
       return reply
         .code(503)
@@ -612,6 +718,9 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         reviewed.value.continuationId,
       );
       if (!linked.ok) return sendRunError(reply, linked.error);
+    }
+    if (reviewed.value.status === 'rejected_by_operator') {
+      return reviseWorkflowContinuation(params.data.fixtureId, reviewed.value, reply);
     }
     return reply.send(WorkflowContinuationRecordSchema.parse(reviewed.value));
   });
@@ -853,6 +962,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         taskReference: params.data.fixtureId,
       });
     }
+    const continuationBeforeAnswer = options.workflowContinuation?.read(params.data.fixtureId);
+    if (continuationBeforeAnswer !== undefined && !continuationBeforeAnswer.ok) {
+      return sendContinuationError(reply, continuationBeforeAnswer.error);
+    }
 
     const planned = await options.implementationPlanning.answer(
       params.data.fixtureId,
@@ -903,6 +1016,18 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       options.implementationPlanning.link(planned.value),
     );
     if (!queued.ok) return sendRunError(reply, queued.error);
+    if (continuationBeforeAnswer?.value?.status === 'rejected_by_operator') {
+      if (options.workflowContinuation === undefined) {
+        return reply
+          .code(503)
+          .send(apiError('workflow_continuation_not_configured', 'Continuation is disabled'));
+      }
+      const superseded = options.workflowContinuation.supersedeWithPlan(
+        params.data.fixtureId,
+        planned.value.artifactId,
+      );
+      if (!superseded.ok) return sendContinuationError(reply, superseded.error);
+    }
     if (options.scheduler !== undefined) {
       return reply.send(RunProjectionSchema.parse(queued.value));
     }

@@ -802,12 +802,21 @@ const ImplementationPlanSurface = ({
   }
   if (record.status === 'workflow_change_required') {
     return (
-      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+      <section
+        className="border-b border-border px-5 py-4"
+        aria-label="Implementation plan"
+        data-testid="implementation-plan"
+      >
         <div className="mb-1 flex items-center gap-2 text-sm">
           <GitBranch className="size-4 text-amber-300" />
           <strong>Workflow change required</strong>
+          <StateBadge>{record.selectedStrategy}</StateBadge>
+          <span className="text-[11px] text-muted-foreground">attempt {record.attempt}</span>
         </div>
         <p className="text-sm text-muted-foreground">{record.decision.request.reason}</p>
+        {record.operatorGuidance === null ? null : (
+          <p className="mt-1 text-xs text-muted-foreground">Operator: {record.operatorGuidance}</p>
+        )}
       </section>
     );
   }
@@ -884,21 +893,25 @@ const continuationCandidateReference = (record: WorkflowContinuationRecord): str
 
 const WorkflowContinuationSurface = ({
   continuation,
+  planning,
   candidateActivity,
   guidance,
   pendingOperation,
   onGuidanceChange,
   onAccept,
   onReject,
+  onRevise,
   onRetry,
 }: {
   readonly continuation: WorkflowContinuationLoadState;
+  readonly planning: ImplementationPlanLoadState;
   readonly candidateActivity: ActivityLoadState | null;
   readonly guidance: string;
   readonly pendingOperation: TaskOperation | null;
   readonly onGuidanceChange: (guidance: string) => void;
   readonly onAccept: () => void;
   readonly onReject: () => void;
+  readonly onRevise: () => void;
   readonly onRetry: () => void;
 }) => {
   if (continuation.status === 'loading' || continuation.status === 'missing') return null;
@@ -912,6 +925,9 @@ const WorkflowContinuationSurface = ({
   const retryable =
     (record.status === 'blocked' || record.status === 'failed') &&
     record.issues.some((issue) => issue.retryable);
+  const revisionRetryable =
+    record.status === 'rejected_by_operator' &&
+    !(planning.status === 'ready' && planning.record.status === 'needs_clarification');
 
   return (
     <section
@@ -950,6 +966,16 @@ const WorkflowContinuationSurface = ({
               <RefreshCw data-icon="inline-start" />
             )}
             Retry
+          </Button>
+        ) : null}
+        {revisionRetryable ? (
+          <Button size="sm" type="button" disabled={busy} onClick={onRevise}>
+            {pendingOperation === 'rejecting_continuation' ? (
+              <LoaderCircle data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <RefreshCw data-icon="inline-start" />
+            )}
+            Retry planning
           </Button>
         ) : null}
         {record.status === 'awaiting_review' ? (
@@ -1005,6 +1031,11 @@ const WorkflowContinuationSurface = ({
 
       {record.status === 'rejected_by_operator' ? (
         <p className="mt-2 text-xs text-muted-foreground">Operator: {record.guidance}</p>
+      ) : null}
+      {record.status === 'superseded_by_plan' ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Revised parent plan {record.implementationPlanArtifactId} replaces this candidate.
+        </p>
       ) : null}
     </section>
   );
@@ -2188,15 +2219,23 @@ export const App = () => {
   };
 
   const handleWorkflowContinuationReview = (decision: 'accept' | 'reject'): void => {
+    if (selectedTask === null || workflowContinuationState.status !== 'ready') {
+      return;
+    }
+    const record = workflowContinuationState.record;
     if (
-      selectedTask === null ||
-      workflowContinuationState.status !== 'ready' ||
-      workflowContinuationState.record.status !== 'awaiting_review'
+      (decision === 'accept' && record.status !== 'awaiting_review') ||
+      (decision === 'reject' &&
+        record.status !== 'awaiting_review' &&
+        record.status !== 'rejected_by_operator')
     ) {
       return;
     }
     const taskReference = selectedTask.id;
-    const guidance = continuationGuidanceDrafts.get(taskReference)?.trim() ?? '';
+    const guidance =
+      record.status === 'rejected_by_operator'
+        ? record.guidance
+        : (continuationGuidanceDrafts.get(taskReference)?.trim() ?? '');
     if (decision === 'reject' && guidance.length === 0) return;
     const operation =
       decision === 'accept'
@@ -2205,7 +2244,9 @@ export const App = () => {
     setPendingOperations((current) => new Map(current).set(taskReference, operation));
     void reviewWorkflowContinuation(
       taskReference,
-      decision === 'accept' ? { decision } : { decision, guidance },
+      decision === 'accept'
+        ? { decision, continuationId: record.continuationId }
+        : { decision, continuationId: record.continuationId, guidance },
     )
       .then(async () => {
         if (decision === 'reject') {
@@ -2369,6 +2410,7 @@ export const App = () => {
                 <JiraPlanningSurface task={selectedTask} />
                 <WorkflowContinuationSurface
                   continuation={workflowContinuationState}
+                  planning={implementationPlanState}
                   candidateActivity={continuationActivityState}
                   guidance={continuationGuidanceDrafts.get(selectedTask.id) ?? ''}
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
@@ -2381,6 +2423,9 @@ export const App = () => {
                     handleWorkflowContinuationReview('accept');
                   }}
                   onReject={() => {
+                    handleWorkflowContinuationReview('reject');
+                  }}
+                  onRevise={() => {
                     handleWorkflowContinuationReview('reject');
                   }}
                   onRetry={handleWorkflowContinuationRetry}

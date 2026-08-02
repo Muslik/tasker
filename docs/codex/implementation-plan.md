@@ -473,10 +473,12 @@ implemented only for the bounded stub semantics documented there.
    open `human_clarification`, accept an operator answer, and create a new planning
    attempt without losing the repository snapshot or prior plan. This gate applies in
    both approval modes.
-3. **Workflow continuation — planning-origin slice delivered 2026-08-02.** Accept
+3. **Workflow continuation — planning-origin slice delivered 2026-08-03.** Accept
    `workflow_change_required` from planning, compile an immutable linked candidate,
    validate repository/capability lineage, and start in `review_all`. Transient
-   repository failures retry against the same parent run. Linked child execution and
+   repository failures retry against the same parent run. Rejection guidance creates
+   planning attempt `N + 1`, which can propose a new candidate, ask a blocking
+   question, or resume the parent with a revised plan. Linked child execution and
    runtime-originated requests remain.
 4. **Write preparation.** Reuse the managed checkout as a pinned read-only planning
    snapshot. M4 allocates a task branch and isolated worktree only after planning,
