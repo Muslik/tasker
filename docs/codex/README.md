@@ -35,15 +35,17 @@ Read in this order:
     immutable plan-review correction loop, and a slot-releasing code-review wait.
 13. [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md) — real typed
     implementation plans through subscription Codex CLI, deterministic fast/ralplan
-    routing, persisted provenance/usage, plan revision, and the operator plan surface.
+    routing, persisted provenance/usage, plan revision, blocking clarification, and the
+    operator plan surface.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. M2 has started: accepted graphs can now queue and traverse
 durable stub steps in parallel up to configured capacity, recover fenced ownership,
 stop at persisted plan/code-review waits, and turn operator plan feedback into a new
-restart-safe provider attempt. Every accepted graph now retains the same planning boundary;
-the start checkbox determines only whether the operator must approve it. Corporate
-integrations remain later milestones.
+restart-safe provider attempt. Blocking planner questions also pause without consuming
+a slot, persist exact operator answers, and continue the same run. Every accepted graph
+retains the same planning boundary; the start checkbox determines only whether the
+operator must approve the resulting plan. Corporate integrations remain later milestones.
 
 M0, M1, M1.5, M1.6, M1.7, M1.8, and the first M2 vertical slice are implemented. The operator
 console has the task queue on the left, persisted activity and workflow rationale in

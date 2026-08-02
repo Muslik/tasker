@@ -127,12 +127,45 @@ const jiraIssueService = jira.createJiraIssueService(
 );
 const subjects = new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService);
 const workflowGenerator = new control.CodexWorkflowGenerator(service, subjects);
+const deterministicPlanner = new providers.DeterministicImplementationPlanner();
+const e2ePlanner = {
+  plan: async (request) => {
+    const result = await deterministicPlanner.plan(request);
+    const snapshot = request.context.taskSnapshot;
+    if (
+      !result.ok ||
+      request.context.operatorGuidance !== null ||
+      snapshot === null ||
+      typeof snapshot !== 'object' ||
+      Array.isArray(snapshot) ||
+      snapshot.fixtureId !== 'avia-14002-inline-copy'
+    ) {
+      return result;
+    }
+    return {
+      ...result,
+      value: {
+        ...result.value,
+        decision: {
+          status: 'needs_clarification',
+          questions: [
+            {
+              id: 'copy-owner',
+              question: 'Should this copy stay local to the application?',
+              reason: 'The answer determines whether execution stays in this repository.',
+            },
+          ],
+        },
+      },
+    };
+  },
+};
 const implementationPlanning = control.createImplementationPlanningCoordinator({
   ledger: ledger.repository,
   clock: shared.systemClock,
   workflows: service,
   subjects,
-  planner: new providers.DeterministicImplementationPlanner(),
+  planner: e2ePlanner,
 });
 const api = control.buildM1Api({
   service,

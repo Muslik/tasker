@@ -52,6 +52,19 @@ export const PlanningQuestionSchema = z
   })
   .strict();
 
+export const PlanningQuestionAnswerSchema = z
+  .object({
+    questionId: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    answer: z.string().trim().min(1).max(10_000),
+  })
+  .strict();
+
+export const PlanningClarificationAnswerCommandSchema = z
+  .object({
+    answers: z.array(PlanningQuestionAnswerSchema).min(1).max(10),
+  })
+  .strict();
+
 export const WorkflowChangeRequestSchema = z
   .object({
     reason: z.string().min(1).max(4_000),
@@ -95,5 +108,9 @@ export type PlanningStrategyRequest = z.infer<typeof PlanningStrategyRequestSche
 export type PlanningStrategy = z.infer<typeof PlanningStrategySchema>;
 export type ImplementationPlanLink = z.infer<typeof ImplementationPlanLinkSchema>;
 export type ImplementationPlan = z.infer<typeof ImplementationPlanSchema>;
+export type PlanningQuestionAnswer = z.infer<typeof PlanningQuestionAnswerSchema>;
+export type PlanningClarificationAnswerCommand = z.infer<
+  typeof PlanningClarificationAnswerCommandSchema
+>;
 export type ImplementationPlanningDecision = z.infer<typeof ImplementationPlanningDecisionSchema>;
 export type ImplementationPlannerContext = z.infer<typeof ImplementationPlannerContextSchema>;

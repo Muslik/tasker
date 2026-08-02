@@ -287,6 +287,31 @@ test('the project profile explains why inline copy adds no translation wait', as
   );
 });
 
+test('I can answer a blocking planning question and continue the same task', async ({ page }) => {
+  const fixtureId = 'avia-14002-inline-copy';
+
+  await page.goto('/');
+  await clickTask(page, fixtureId);
+  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
+  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+
+  await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Waiting');
+  await expect(page.getByTestId('planning-clarification')).toBeVisible();
+  await page
+    .getByRole('textbox', { name: 'Should this copy stay local to the application?' })
+    .fill('Yes, keep the copy in the application locale JSON.');
+  await page.getByRole('button', { name: 'Continue planning' }).click();
+
+  await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Code review');
+  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Planning clarification answered',
+  );
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Planning clarification resolved',
+  );
+});
+
 test('an invalid workflow is rejected and surfaces validation issues instead of a tree', async ({
   page,
 }) => {

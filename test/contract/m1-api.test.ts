@@ -21,7 +21,13 @@ import { JiraIssueStateSchema } from '../../src/integrations/jira/contracts.js';
 import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { RepositoryCatalogResponseSchema } from '../../src/repositories/contracts.js';
-import { DeterministicImplementationPlanner } from '../../src/providers/index.js';
+import { RunProjectionSchema } from '../../src/runner/index.js';
+import {
+  DeterministicImplementationPlanner,
+  type ImplementationPlanner,
+  type ImplementationPlannerRequest,
+} from '../../src/providers/index.js';
+import { ImplementationPlanningDecisionSchema } from '../../src/planning/implementation-plan.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
@@ -29,10 +35,67 @@ import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
+const makeQuestioningPlanner = () => {
+  const fallback = new DeterministicImplementationPlanner();
+  const requests: ImplementationPlannerRequest[] = [];
+  const planner: ImplementationPlanner = {
+    plan: async (request) => {
+      requests.push(request);
+      const result = await fallback.plan(request);
+      if (!result.ok || requests.length > 1) return result;
+      return ok({
+        ...result.value,
+        decision: ImplementationPlanningDecisionSchema.parse({
+          status: 'needs_clarification',
+          questions: [
+            {
+              id: 'target-browser',
+              question: 'Which browser must the reproduction cover?',
+              reason: 'The acceptance evidence depends on the selected browser.',
+            },
+            {
+              id: 'change-scope',
+              question: 'May the implementation change the shared component?',
+              reason: 'The answer changes the repository boundary of the plan.',
+            },
+          ],
+        }),
+      });
+    },
+  };
+  return { planner, requests };
+};
+
+const makeRevisionQuestioningPlanner = () => {
+  const fallback = new DeterministicImplementationPlanner();
+  let calls = 0;
+  const planner: ImplementationPlanner = {
+    plan: async (request) => {
+      calls += 1;
+      const result = await fallback.plan(request);
+      if (!result.ok || calls !== 2) return result;
+      return ok({
+        ...result.value,
+        decision: ImplementationPlanningDecisionSchema.parse({
+          status: 'needs_clarification',
+          questions: [
+            {
+              id: 'rollback-owner',
+              question: 'Who owns the rollback decision?',
+              reason: 'The requested revision does not define the approval boundary.',
+            },
+          ],
+        }),
+      });
+    },
+  };
+  return planner;
+};
+
 const setup = (
   useWorkflowGenerator = false,
   jiraPort?: JiraIssuePort,
-  useImplementationPlanning = false,
+  implementationPlanner?: ImplementationPlanner,
 ) => {
   const directory = mkdtempSync(join(tmpdir(), 'tasker-m1-api-'));
   const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
@@ -50,15 +113,16 @@ const setup = (
   const subjects = new WorkflowGenerationSubjectSource(directory, jiraIssueService);
   const jiraWorkflowGenerator =
     jiraIssueService === undefined ? undefined : new CodexWorkflowGenerator(service, subjects);
-  const implementationPlanning = useImplementationPlanning
-    ? createImplementationPlanningCoordinator({
-        ledger: ledger.repository,
-        clock,
-        workflows: service,
-        subjects,
-        planner: new DeterministicImplementationPlanner(),
-      })
-    : undefined;
+  const implementationPlanning =
+    implementationPlanner === undefined
+      ? undefined
+      : createImplementationPlanningCoordinator({
+          ledger: ledger.repository,
+          clock,
+          workflows: service,
+          subjects,
+          planner: implementationPlanner,
+        });
   return {
     api: buildM1Api({
       service,
@@ -307,7 +371,7 @@ describe('M1 HTTP API', () => {
   });
 
   it('plans through the selected provider before the run and persists plan revisions', async () => {
-    const { api } = setup(false, undefined, true);
+    const { api } = setup(false, undefined, new DeterministicImplementationPlanner());
     const fixtureId = 'avia-12536-feature-review';
     await api.inject({
       method: 'POST',
@@ -396,6 +460,153 @@ describe('M1 HTTP API', () => {
       selectedStrategy: 'ralplan',
     });
     expect(automaticPlan.selectionReason).toContain('repository/publication boundaries');
+
+    await api.close();
+  });
+
+  it('keeps the run at its durable clarification wait when an answer set is incomplete', async () => {
+    const questioning = makeQuestioningPlanner();
+    const { api } = setup(false, undefined, questioning.planner);
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const started = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+    if (started.statusCode !== 200) throw new Error('Expected a planning clarification wait');
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/planning-clarification`,
+      payload: { answers: [{ questionId: 'target-browser', answer: 'Chrome' }] },
+    });
+    const persistedRun = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${fixtureId}/run`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: 'invalid_clarification_answers' });
+    expect(persistedRun.json()).toMatchObject({
+      runId: `run:${fixtureId}`,
+      status: 'waiting',
+      wait: { waitKind: 'human_clarification', slotPolicy: 'release' },
+      lease: null,
+      effects: [],
+    });
+
+    await api.close();
+  });
+
+  it('persists exact clarification answers and continues the same run with the revised plan', async () => {
+    const questioning = makeQuestioningPlanner();
+    const { api, ledger } = setup(false, undefined, questioning.planner);
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const started = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+    if (started.statusCode !== 200) throw new Error('Expected a planning clarification wait');
+    const runId = RunProjectionSchema.parse(started.json()).runId;
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/planning-clarification`,
+      payload: {
+        answers: [
+          { questionId: 'change-scope', answer: 'Keep the fix in this repository.' },
+          { questionId: 'target-browser', answer: 'Chrome and Safari.' },
+        ],
+      },
+    });
+    const continued = RunProjectionSchema.parse(response.json());
+    const planResponse = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${fixtureId}/implementation-plan`,
+    });
+    const plan = ImplementationPlanningRecordSchema.parse(planResponse.json());
+    const activityResponse = await api.inject({
+      method: 'GET',
+      url: `/api/operator/tasks/${fixtureId}/activity`,
+    });
+    const activity = OperatorActivityResponseSchema.parse(activityResponse.json());
+
+    expect(response.statusCode).toBe(200);
+    expect(continued).toMatchObject({
+      runId,
+      status: 'waiting',
+      implementationPlan: { attempt: 2, selectedStrategy: 'fast' },
+      wait: { waitKind: 'code_review@1' },
+    });
+    expect(plan).toMatchObject({ status: 'ready', attempt: 2 });
+    expect(plan.operatorGuidance).toContain('Answer: Chrome and Safari.');
+    expect(questioning.requests[1]?.context.operatorGuidance).toContain(
+      'Answer: Keep the fix in this repository.',
+    );
+    expect(ledger.repository.readArtifact(`planning-answers:${fixtureId}:attempt-1`)).toMatchObject(
+      {
+        artifactKind: 'planning_clarification_answers',
+        payload: {
+          answers: [
+            { questionId: 'target-browser', answer: 'Chrome and Safari.' },
+            { questionId: 'change-scope', answer: 'Keep the fix in this repository.' },
+          ],
+        },
+      },
+    );
+    expect(activity.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: 'Waiting for planning clarification' }),
+        expect.objectContaining({ title: 'Planning clarification answered' }),
+        expect.objectContaining({ title: 'Planning clarification resolved' }),
+      ]),
+    );
+
+    await api.close();
+  });
+
+  it('returns a clarified plan revision to human review in the same run', async () => {
+    const { api } = setup(false, undefined, makeRevisionQuestioningPlanner());
+    const fixtureId = 'avia-12536-feature-review';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const started = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'required', planningStrategy: 'fast' } },
+    });
+    if (started.statusCode !== 200) throw new Error('Expected the initial plan review wait');
+    const runId = RunProjectionSchema.parse(started.json()).runId;
+    const requestedChanges = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/plan-review`,
+      payload: {
+        decision: 'request_changes',
+        guidance: 'Add an explicit rollback decision.',
+      },
+    });
+    if (requestedChanges.statusCode !== 200) {
+      throw new Error('Expected a clarification wait for the revised plan');
+    }
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/planning-clarification`,
+      payload: {
+        answers: [{ questionId: 'rollback-owner', answer: 'The operator owns it.' }],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      runId,
+      status: 'waiting',
+      implementationPlan: { attempt: 3 },
+      wait: { waitKind: 'plan.approved@1' },
+      planRevisionRequests: [{ priorAttempt: 1, nextAttempt: 2 }],
+    });
 
     await api.close();
   });

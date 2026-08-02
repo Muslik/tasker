@@ -5,10 +5,12 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import {
   ImplementationPlanningDecisionSchema,
   ImplementationPlanLinkSchema,
+  PlanningClarificationAnswerCommandSchema,
   PlanningStrategyRequestSchema,
   PlanningStrategySchema,
   type PlanningStrategy,
   type PlanningStrategyRequest,
+  type PlanningQuestionAnswer,
   type ImplementationPlanLink,
 } from '../planning/implementation-plan.js';
 import type {
@@ -106,7 +108,8 @@ export type ImplementationPlanningStoreError =
       readonly taskReference: string;
       readonly issues: readonly string[];
     }
-  | { readonly kind: 'planning_attempt_not_current'; readonly taskReference: string };
+  | { readonly kind: 'planning_attempt_not_current'; readonly taskReference: string }
+  | { readonly kind: 'clarification_answer_conflict'; readonly taskReference: string };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const aggregateIdFor = (taskReference: string): string => `implementation-plan:${taskReference}`;
@@ -234,6 +237,81 @@ export class ImplementationPlanningStore {
     );
   }
 
+  public recordClarificationAnswers(
+    planning: Extract<ImplementationPlanningRecord, { readonly status: 'needs_clarification' }>,
+    answers: readonly PlanningQuestionAnswer[],
+  ): Outcome<{ readonly artifactId: string }, ImplementationPlanningStoreError> {
+    const current = this.read(planning.taskReference);
+    if (!current.ok) return current;
+    if (
+      current.value?.status !== 'needs_clarification' ||
+      current.value.attempt !== planning.attempt
+    ) {
+      return err({
+        kind: 'planning_attempt_not_current',
+        taskReference: planning.taskReference,
+      });
+    }
+
+    const artifactId = `planning-answers:${planning.taskReference}:attempt-${String(planning.attempt)}`;
+    const payload = PlanningClarificationAnswerCommandSchema.parse({ answers });
+    const existing = this.ledger.readArtifact(artifactId);
+    if (existing !== null) {
+      const parsed = PlanningClarificationAnswerCommandSchema.safeParse(existing.payload);
+      return parsed.success && JSON.stringify(parsed.data) === JSON.stringify(payload)
+        ? ok({ artifactId })
+        : err({ kind: 'clarification_answer_conflict', taskReference: planning.taskReference });
+    }
+
+    const aggregateId = aggregateIdFor(planning.taskReference);
+    const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
+    const recordedAt = this.clock.now();
+    const result = this.ledger.transact({
+      aggregate: {
+        aggregateId,
+        expectedVersion,
+        events: [
+          {
+            eventId: `event:${aggregateId}:${String(expectedVersion + 1)}`,
+            eventType: 'PlanningClarificationAnswered',
+            eventSchemaVersion: 1,
+            payload: asJson({
+              taskReference: planning.taskReference,
+              attempt: planning.attempt,
+              artifactId,
+              questionCount: planning.decision.questions.length,
+            }),
+            actor: 'operator',
+          },
+        ],
+      },
+      artifacts: [
+        {
+          artifactId,
+          artifactKind: 'planning_clarification_answers',
+          storageUri: `ledger://artifacts/${artifactId}`,
+          payload: asJson(payload),
+          metadata: asJson({
+            taskReference: planning.taskReference,
+            sourceAttempt: planning.attempt,
+            questionArtifactId: planning.artifactId,
+          }),
+          createdAt: recordedAt,
+        },
+      ],
+      timestamp: recordedAt,
+    });
+    if (result.ok) return ok({ artifactId });
+
+    const concurrentlyRecorded = this.ledger.readArtifact(artifactId);
+    const parsed = PlanningClarificationAnswerCommandSchema.safeParse(
+      concurrentlyRecorded?.payload,
+    );
+    return parsed.success && JSON.stringify(parsed.data) === JSON.stringify(payload)
+      ? ok({ artifactId })
+      : err({ kind: 'ledger_conflict', conflict: result.error });
+  }
+
   public fail(
     planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     failure: ImplementationPlannerFailure,
@@ -325,6 +403,11 @@ const planningFailureView = (
 export type ImplementationPlanningError =
   | { readonly kind: 'subject'; readonly error: M1ServiceError }
   | { readonly kind: 'workflow_not_ready'; readonly taskReference: string }
+  | {
+      readonly kind: 'invalid_clarification_answers';
+      readonly taskReference: string;
+      readonly issues: readonly string[];
+    }
   | { readonly kind: 'store'; readonly error: ImplementationPlanningStoreError };
 
 const countWorkflowNodes = (value: JsonValue): number => {
@@ -394,6 +477,81 @@ export class ImplementationPlanningCoordinator {
     );
     this.inFlight.set(taskReference, pending);
     return pending;
+  }
+
+  public answer(
+    taskReference: string,
+    answersInput: readonly PlanningQuestionAnswer[],
+  ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
+    const command = PlanningClarificationAnswerCommandSchema.safeParse({
+      answers: answersInput,
+    });
+    if (!command.success) {
+      return Promise.resolve(
+        err({
+          kind: 'invalid_clarification_answers',
+          taskReference,
+          issues: command.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        }),
+      );
+    }
+    const current = this.store.read(taskReference);
+    if (!current.ok) return Promise.resolve(err({ kind: 'store', error: current.error }));
+    if (current.value?.status !== 'needs_clarification') {
+      return Promise.resolve(
+        err({
+          kind: 'invalid_clarification_answers',
+          taskReference,
+          issues: ['The current planning attempt is not waiting for clarification.'],
+        }),
+      );
+    }
+
+    const questions = current.value.decision.questions;
+    const provided = new Map<string, string>();
+    const duplicateIds: string[] = [];
+    for (const answer of command.data.answers) {
+      if (provided.has(answer.questionId)) duplicateIds.push(answer.questionId);
+      provided.set(answer.questionId, answer.answer);
+    }
+    const expectedIds = new Set(questions.map((question) => question.id));
+    const missingIds = questions
+      .map((question) => question.id)
+      .filter((questionId) => !provided.has(questionId));
+    const unexpectedIds = [...provided.keys()].filter((questionId) => !expectedIds.has(questionId));
+    const issues = [
+      ...duplicateIds.map((questionId) => `Duplicate answer for ${questionId}.`),
+      ...missingIds.map((questionId) => `Missing answer for ${questionId}.`),
+      ...unexpectedIds.map((questionId) => `Unexpected answer for ${questionId}.`),
+    ];
+    if (issues.length > 0) {
+      return Promise.resolve(err({ kind: 'invalid_clarification_answers', taskReference, issues }));
+    }
+
+    const answerFor = (questionId: string): string => {
+      const answer = provided.get(questionId);
+      if (answer === undefined) {
+        throw new Error(`Validated clarification answer ${questionId} is missing`);
+      }
+      return answer;
+    };
+    const answers = questions.map((question) => ({
+      questionId: question.id,
+      answer: answerFor(question.id),
+    }));
+    const recorded = this.store.recordClarificationAnswers(current.value, answers);
+    if (!recorded.ok) return Promise.resolve(err({ kind: 'store', error: recorded.error }));
+    const guidance = [
+      `Operator clarification for planning attempt ${String(current.value.attempt)}:`,
+      ...questions.flatMap((question) => [
+        `Question [${question.id}]: ${question.question}`,
+        `Answer: ${answerFor(question.id)}`,
+      ]),
+      `Answer artifact: ${recorded.value.artifactId}`,
+    ].join('\n');
+    return this.prepare(taskReference, current.value.requestedStrategy, guidance);
   }
 
   public link(record: ReadyImplementationPlanningRecord): ImplementationPlanLink {
@@ -476,6 +634,13 @@ export class ImplementationPlanningCoordinator {
             level: 'warning',
             title: 'Planning needs clarification',
             detail: 'Execution is blocked until the operator answers the persisted questions.',
+          });
+        case 'PlanningClarificationAnswered':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'operator',
+            title: 'Planning clarification answered',
+            detail: 'The typed answers were persisted and a new planning attempt can begin.',
           });
         case 'ImplementationPlanWorkflowChangeRequired':
           return OperatorActivityEntrySchema.parse({

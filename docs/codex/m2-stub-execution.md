@@ -124,9 +124,10 @@ state. At that gate:
   operator can review again without restarting the task.
 
 The planning node now attaches a real provider-generated typed `ImplementationPlan`;
-see [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md). A generic
-blocking-question answer/resume path is still pending; when implemented it will pause
-in both plan-approval modes.
+see [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md). Typed planner
+questions now open a slot-releasing `human_clarification` wait in both plan-approval
+modes. Exact operator answers are persisted before a new planning attempt resumes the
+same run. Executor-originated mid-run questions remain pending.
 
 ## Wait and resume
 
@@ -166,12 +167,12 @@ proves fence `1` cannot write after fence `2` takes ownership.
 
 Verification at delivery:
 
-- 126 Vitest tests across 30 files;
+- 131 Vitest tests across 30 files;
 - two dedicated restart/no-duplicate scenarios, including scheduler ownership change;
 - capacity `1`, capacity `2`, and stale-fence scheduler scenarios;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;
-- 10 Playwright operator scenarios, including plan correction and **Test workflow ->
-  code review wait**;
+- 11 Playwright operator scenarios, including plan correction, blocking clarification,
+  and **Test workflow -> code review wait**;
 - formatting, server/cockpit typecheck, lint, and production builds green.
 
 ## Still required for the full M2 gate

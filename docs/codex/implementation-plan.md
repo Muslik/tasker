@@ -17,7 +17,7 @@ complete only after its operator demo and deterministic evidence pass.
 | M1.6 | `Jira key -> persisted current task snapshot -> operator details`, including cached recovery after `403` without sync-log growth | implemented and verified 2026-08-01 |
 | M1.7 | `Jira repo:name or import fallback -> Bitbucket lookup -> managed application-data checkout` | implemented and verified 2026-08-02 |
 | M1.8 | `Jira snapshot + managed checkout -> read-only analyzer -> validated persisted workflow -> visible operator graph` | implemented and verified 2026-08-02 |
-| M2 | `task -> visible workflow -> real typed plan -> stub traversal`, including kill/restart, wait/resume, intervention, and handoff | implementation planning delivered; full gate remains open |
+| M2 | `task -> visible workflow -> real typed plan -> stub traversal`, including kill/restart, wait/resume, intervention, and handoff | planning + blocking clarification delivered; full gate remains open |
 | M3 | one real subscription CLI executes a non-planning node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
 | M4 | a real provider changes an isolated worktree; a recoverable failure resumes at the failed node | re-estimate after M3; planning envelope 4-7 days |
 | M5 | real Jira intake handles `400`, `not_eligible`, and eligible task compilation without partial runs | after the M4 worktree/recovery contract is green |
@@ -457,8 +457,9 @@ and that an expired owner cannot write after lease replacement. See
 [`m2-stub-execution.md`](m2-stub-execution.md).
 
 This does not close the M2 gate. Step 2 still needs heartbeat and outbox dispatch;
-steps 3, 7, 9, 10, and 13 remain. Step 8 is implemented for plan review but still needs
-the generalized mid-execution clarification path. Steps 1, 4-6, 11, and 12 are
+steps 3, 7, 9, 10, and 13 remain. Step 8 is implemented for planner questions and plan
+review but still needs executor-originated mid-execution clarification. Steps 1, 4-6,
+11, and 12 are
 implemented only for the bounded stub semantics documented there.
 
 ### Immediate execution order from the current checkpoint
@@ -468,7 +469,7 @@ implemented only for the bounded stub semantics documented there.
    bounded fast planner and the more expensive ralplan strategy, while allowing the
    operator to force either mode at run start. Planning always occurs; the current
    checkbox controls only human approval.
-2. **Blocking clarification.** Let either planner return typed blocking questions,
+2. **Blocking clarification — delivered 2026-08-02.** Let either planner return typed blocking questions,
    open `human_clarification`, accept an operator answer, and create a new planning
    attempt without losing the repository snapshot or prior plan. This gate applies in
    both approval modes.
@@ -481,11 +482,12 @@ implemented only for the bounded stub semantics documented there.
    clarification, and any required approval are resolved, immediately before the
    first write-capable node.
 
-Step 1 is implemented and verified; see
+Steps 1 and 2 are implemented and verified; see
 [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md). The center surface
-shows the actual plan, strategy, provenance, measured tokens, and immutable revisions.
-The next operator-visible checkpoint is step 2: make blocking questions answerable and
-resumable instead of forcing the agent to guess.
+shows the actual plan, strategy, provenance, measured tokens, immutable revisions, and
+blocking questions. Answers survive restart and continue the same run. The next
+operator-visible checkpoint is step 3: turn `workflow_change_required` into a validated
+linked continuation instead of a terminal planning response.
 
 ### Entry criteria
 
@@ -506,8 +508,8 @@ resumable instead of forcing the agent to guess.
    step cursor resume.
 7. Implement quota wait as a normal slot-free Wait.
 8. Implement human clarification gate and `InterventionEvent -> new Attempt` input
-   materialization. The plan-review variant now persists guidance and attempt lineage;
-   real provider input materialization and arbitrary execution gates remain.
+   materialization. Planner questions and plan-review revisions now persist exact
+   operator input and attempt lineage; arbitrary executor-originated gates remain.
 9. Accept `workflow_change_required` from a stub step, persist its evidence, preserve
    the cursor/worktree, and compile a linked immutable continuation candidate. The
    current graph cannot be edited in place.

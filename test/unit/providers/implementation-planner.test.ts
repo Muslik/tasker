@@ -145,4 +145,23 @@ describe('Codex CLI implementation planner', () => {
 
     expect(result).toMatchObject({ ok: false, error: { kind: 'invalid_planner_output' } });
   });
+
+  it('returns typed blocking questions without inventing an implementation plan', async () => {
+    const decision = {
+      status: 'needs_clarification',
+      questions: [
+        {
+          id: 'target-browser',
+          question: 'Which browser must the reproduction cover?',
+          reason: 'The evidence requirement changes with this choice.',
+        },
+      ],
+    } as const;
+    const runner = new RecordingRunner(JSON.stringify({ decisionJson: JSON.stringify(decision) }));
+    const planner = new CodexCliImplementationPlanner(runner);
+
+    const result = await planner.plan(request('fast'));
+
+    expect(result).toMatchObject({ ok: true, value: { decision } });
+  });
 });

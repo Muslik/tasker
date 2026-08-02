@@ -19,6 +19,10 @@ import {
 } from '../control-plane/implementation-planning.js';
 import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
 import {
+  PlanningClarificationAnswerCommandSchema,
+  type PlanningClarificationAnswerCommand,
+} from '../planning/implementation-plan.js';
+import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
 } from '../repositories/contracts.js';
@@ -221,6 +225,27 @@ export const reviewPlan = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = RunProjectionSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Plan review response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const answerPlanningClarification = async (
+  fixtureId: string,
+  commandInput: PlanningClarificationAnswerCommand,
+): Promise<RunProjection> => {
+  const command = PlanningClarificationAnswerCommandSchema.parse(commandInput);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/planning-clarification`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = RunProjectionSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Planning clarification response does not match the cockpit contract');
+  }
   return parsed.data;
 };
 

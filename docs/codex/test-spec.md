@@ -366,9 +366,12 @@ runtime projections update from ledger events; and a forced stop after two commi
 steps resumes from the same cursor. A real typed implementation plan now runs through
 subscription Codex CLI (or an explicit deterministic test provider), persists its
 strategy/provenance/token receipt, and survives operator-guided attempt revision. The
-full gate remains open for heartbeat/outbox dispatch, blocking clarification, provider capacity pools,
-quota behavior, generalized intervention, workflow continuation, takeover, projection
-rebuild, and the complete kill matrix.
+planner can also open a slot-releasing blocking-clarification wait; exact operator
+answers are persisted and resume the same run at a new planning attempt, including
+after restart and during plan revision. The full gate remains open for heartbeat/outbox
+dispatch, executor-originated clarification, provider capacity pools, quota behavior,
+generalized intervention, workflow continuation, takeover, projection rebuild, and the
+complete kill matrix.
 
 - one graph completes on stubs;
 - kill/restart matrix for kernel boundaries green;

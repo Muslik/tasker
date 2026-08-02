@@ -58,6 +58,7 @@ export type StubRunError =
   | { readonly kind: 'run_not_waiting'; readonly taskReference: string }
   | { readonly kind: 'run_settings_conflict'; readonly taskReference: string }
   | { readonly kind: 'run_not_at_plan_review'; readonly taskReference: string }
+  | { readonly kind: 'run_not_at_planning_clarification'; readonly taskReference: string }
   | { readonly kind: 'plan_revision_target_not_found'; readonly taskReference: string }
   | { readonly kind: 'projection_corrupt'; readonly projectionId: string }
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict };
@@ -65,6 +66,11 @@ export type StubRunError =
 export interface DriveOptions {
   /** Test seam for simulating a process death after committed node transitions. */
   readonly maxNodeTransitions?: number;
+}
+
+interface PlanningClarificationWaitInput {
+  readonly attempt: number;
+  readonly artifactId: string;
 }
 
 type LeaseBoundary =
@@ -222,6 +228,169 @@ export class DeterministicStubRunService {
         : err({ kind: 'run_settings_conflict', taskReference });
     }
 
+    const created = this.createQueuedRun(taskReference, settings, implementationPlan);
+    if (!created.ok) return created;
+    const run = created.value;
+    return this.persist(run, 'RunQueued', {
+      taskReference,
+      planApproval: settings.planApproval,
+      planningStrategy: settings.planningStrategy,
+      ...(implementationPlan === null ? {} : { artifactId: implementationPlan.artifactId }),
+    });
+  }
+
+  public openPlanningClarification(
+    taskReference: string,
+    settingsInput: RunSettings,
+    clarification: PlanningClarificationWaitInput,
+  ): Outcome<RunProjection, StubRunError> {
+    const settings = RunSettingsSchema.parse(settingsInput);
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+
+    let run: RunProjection;
+    if (current.value === null) {
+      const created = this.createQueuedRun(taskReference, settings, null);
+      if (!created.ok) return created;
+      run = created.value;
+    } else {
+      run = current.value;
+      if (
+        run.settings.planApproval !== settings.planApproval ||
+        run.settings.planningStrategy !== settings.planningStrategy
+      ) {
+        return err({ kind: 'run_settings_conflict', taskReference });
+      }
+      if (
+        run.status !== 'waiting' ||
+        (run.wait.waitKind !== 'plan.approved@1' && run.wait.waitKind !== 'human_clarification')
+      ) {
+        return err({ kind: 'run_not_at_planning_clarification', taskReference });
+      }
+    }
+
+    const revisionTarget = run.planRevisionRequests.at(-1)?.targetNodeId;
+    const targetIndex = run.plan.findIndex(
+      (operation) =>
+        operation.kind === 'step' &&
+        (revisionTarget === undefined
+          ? operation.uses === 'task.analyze@1'
+          : operation.nodeId === revisionTarget),
+    );
+    const target = run.plan[targetIndex];
+    if (targetIndex < 0 || target?.kind !== 'step') {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+
+    const now = this.clock.now();
+    const priorWait = run.status === 'waiting' ? run.wait : null;
+    const waitId = `wait:${run.runId}:${target.nodeId}:clarification-attempt-${String(clarification.attempt)}`;
+    const waiting = RunProjectionSchema.parse({
+      ...run,
+      status: 'waiting',
+      startedAt: run.startedAt ?? now,
+      updatedAt: now,
+      cursor: targetIndex,
+      nodeStates: {
+        ...run.nodeStates,
+        ...(priorWait === null ? {} : { [priorWait.nodeId]: 'planned' as const }),
+        [target.nodeId]: 'waiting',
+      },
+      lease: null,
+      wait: {
+        waitId,
+        nodeId: target.nodeId,
+        waitKind: 'human_clarification',
+        slotPolicy: 'release',
+        openedAt: now,
+      },
+    });
+    return this.persist(
+      waiting,
+      priorWait?.waitKind === 'human_clarification'
+        ? 'PlanningClarificationWaitUpdated'
+        : 'PlanningClarificationWaitOpened',
+      {
+        taskReference,
+        nodeId: target.nodeId,
+        waitKind: 'human_clarification',
+        slotPolicy: 'release',
+        attempt: clarification.attempt,
+        artifactId: clarification.artifactId,
+      },
+      undefined,
+      priorWait === null
+        ? {}
+        : {
+            signal: {
+              signalId: `signal:${priorWait.waitId}:clarification-attempt-${String(clarification.attempt)}`,
+              signalKind: 'planning_clarification_required',
+              correlationKey: priorWait.waitId,
+              payload: {
+                taskReference,
+                artifactId: clarification.artifactId,
+              },
+              status: 'resolved',
+              resolvedWaitKey: priorWait.waitId,
+            },
+          },
+    );
+  }
+
+  public resolvePlanningClarification(
+    taskReference: string,
+    implementationPlan: ImplementationPlanLink,
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    const run = current.value;
+    if (run.status !== 'waiting' || run.wait.waitKind !== 'human_clarification') {
+      return err({ kind: 'run_not_at_planning_clarification', taskReference });
+    }
+    const now = this.clock.now();
+    const queued = RunProjectionSchema.parse({
+      ...run,
+      status: 'queued',
+      updatedAt: now,
+      nodeStates: { ...run.nodeStates, [run.wait.nodeId]: 'planned' },
+      implementationPlan,
+      lease: null,
+      wait: null,
+    });
+    return this.persist(
+      queued,
+      'PlanningClarificationResolved',
+      {
+        taskReference,
+        nodeId: run.wait.nodeId,
+        waitKind: run.wait.waitKind,
+        artifactId: implementationPlan.artifactId,
+        attempt: implementationPlan.attempt,
+      },
+      undefined,
+      {
+        actor: 'operator',
+        signal: {
+          signalId: `signal:${run.wait.waitId}:answered`,
+          signalKind: 'planning_clarification_answered',
+          correlationKey: run.wait.waitId,
+          payload: {
+            taskReference,
+            artifactId: implementationPlan.artifactId,
+          },
+          status: 'resolved',
+          resolvedWaitKey: run.wait.waitId,
+        },
+      },
+    );
+  }
+
+  private createQueuedRun(
+    taskReference: string,
+    settings: RunSettings,
+    implementationPlan: ImplementationPlanLink | null,
+  ): Outcome<Extract<RunProjection, { readonly status: 'queued' }>, StubRunError> {
     const workflow = this.workflows.read(taskReference);
     if (!workflow.ok || workflow.value === null) {
       return err({ kind: 'workflow_not_found', taskReference });
@@ -229,18 +398,15 @@ export class DeterministicStubRunService {
     if (workflow.value.status !== 'ready' || workflow.value.view.workflow.graph === null) {
       return err({ kind: 'workflow_not_executable', taskReference });
     }
-
     const graph = CompiledWorkflowSchema.safeParse(workflow.value.view.workflow.graph);
     if (!graph.success || workflow.value.view.workflow.graphHash === null) {
       return err({ kind: 'workflow_not_executable', taskReference });
     }
-
     const now = this.clock.now();
-    const runId = runIdFor(taskReference);
     const plan = executionPlan(graph.data.root);
     const run = RunProjectionSchema.parse({
       schemaVersion: 1,
-      runId,
+      runId: runIdFor(taskReference),
       taskReference,
       taskId: workflow.value.view.task.id,
       workflowId: graph.data.metadata.workflowId,
@@ -260,12 +426,8 @@ export class DeterministicStubRunService {
       implementationPlan,
       wait: null,
     });
-    return this.persist(run, 'RunQueued', {
-      taskReference,
-      planApproval: settings.planApproval,
-      planningStrategy: settings.planningStrategy,
-      ...(implementationPlan === null ? {} : { artifactId: implementationPlan.artifactId }),
-    });
+    if (run.status !== 'queued') throw new Error('New run did not parse as queued');
+    return ok(run);
   }
 
   public claim(
@@ -750,6 +912,21 @@ export class DeterministicStubRunService {
             source: 'agent',
             title: 'Implementation plan attached',
             detail: `Planning attempt ${String(payload.attempt ?? 1)} is now the immutable input for execution.`,
+          });
+        case 'PlanningClarificationWaitOpened':
+        case 'PlanningClarificationWaitUpdated':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Waiting for planning clarification',
+            detail: `Planning attempt ${String(payload.attempt ?? 1)} needs an operator answer; the runner slot is released.`,
+          });
+        case 'PlanningClarificationResolved':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'operator',
+            title: 'Planning clarification resolved',
+            detail: `Planning attempt ${String(payload.attempt ?? 1)} is ready and the same run will continue.`,
           });
         case 'WaitOpened':
           return OperatorActivityEntrySchema.parse({

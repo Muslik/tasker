@@ -31,6 +31,7 @@ import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/con
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import {
+  answerPlanningClarification,
   connectOperatorStream,
   generateWorkflow,
   graphDownloadUrl,
@@ -93,7 +94,8 @@ type JiraSyncState =
 
 type ConsoleStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
-type TaskOperation = 'generating' | 'starting' | 'approving_plan' | 'requesting_plan_changes';
+type TaskOperation =
+  'generating' | 'starting' | 'approving_plan' | 'requesting_plan_changes' | 'answering_questions';
 
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 
@@ -698,8 +700,16 @@ const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) =
 
 const ImplementationPlanSurface = ({
   planning,
+  answers,
+  pending,
+  onAnswerChange,
+  onSubmitAnswers,
 }: {
   readonly planning: ImplementationPlanLoadState;
+  readonly answers: ReadonlyMap<string, string>;
+  readonly pending: boolean;
+  readonly onAnswerChange: (questionId: string, answer: string) => void;
+  readonly onSubmitAnswers: () => void;
 }) => {
   if (planning.status === 'missing') return null;
   if (planning.status === 'loading') {
@@ -731,20 +741,45 @@ const ImplementationPlanSurface = ({
     );
   }
   if (record.status === 'needs_clarification') {
+    const complete = record.decision.questions.every(
+      (question) => (answers.get(question.id) ?? '').trim().length > 0,
+    );
     return (
-      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+      <section
+        className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-4"
+        aria-label="Implementation plan"
+        data-testid="planning-clarification"
+      >
         <div className="mb-2 flex items-center gap-2 text-sm">
           <MessageSquare className="size-4 text-amber-300" />
           <strong>Planner needs clarification</strong>
         </div>
-        <ol className="list-decimal space-y-2 pl-5 text-sm">
+        <ol className="space-y-3">
           {record.decision.questions.map((question) => (
-            <li key={question.id}>
-              {question.question}
+            <li className="space-y-1" key={question.id}>
+              <label className="block text-sm font-medium" htmlFor={`answer-${question.id}`}>
+                {question.question}
+              </label>
               <p className="text-xs text-muted-foreground">{question.reason}</p>
+              <textarea
+                id={`answer-${question.id}`}
+                className="min-h-16 w-full resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+                placeholder="Your answer"
+                value={answers.get(question.id) ?? ''}
+                disabled={pending}
+                onChange={(event) => {
+                  onAnswerChange(question.id, event.target.value);
+                }}
+              />
             </li>
           ))}
         </ol>
+        <div className="mt-3 flex justify-end">
+          <Button size="sm" type="button" disabled={pending || !complete} onClick={onSubmitAnswers}>
+            {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+            {pending ? 'Planning…' : 'Continue planning'}
+          </Button>
+        </div>
       </section>
     );
   }
@@ -1588,6 +1623,9 @@ export const App = () => {
   const [planGuidanceDrafts, setPlanGuidanceDrafts] = useState<ReadonlyMap<string, string>>(
     new Map(),
   );
+  const [planningAnswerDrafts, setPlanningAnswerDrafts] = useState<
+    ReadonlyMap<string, ReadonlyMap<string, string>>
+  >(new Map());
   const [planApprovalDrafts, setPlanApprovalDrafts] = useState<ReadonlyMap<string, boolean>>(
     new Map(),
   );
@@ -1905,6 +1943,53 @@ export const App = () => {
       });
   };
 
+  const handlePlanningClarification = (): void => {
+    if (
+      selectedTask === null ||
+      implementationPlanState.status !== 'ready' ||
+      implementationPlanState.record.status !== 'needs_clarification'
+    ) {
+      return;
+    }
+    const taskReference = selectedTask.id;
+    const drafts = planningAnswerDrafts.get(taskReference) ?? new Map<string, string>();
+    const answers = implementationPlanState.record.decision.questions.map((question) => ({
+      questionId: question.id,
+      answer: (drafts.get(question.id) ?? '').trim(),
+    }));
+    if (answers.some((answer) => answer.answer.length === 0)) return;
+
+    setPendingOperations((current) => new Map(current).set(taskReference, 'answering_questions'));
+    void answerPlanningClarification(taskReference, { answers })
+      .then(async () => {
+        setPlanningAnswerDrafts((current) => {
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) {
+          await refreshSelection(taskReference);
+        }
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Unexpected clarification failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'answering_questions') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
   const view = workflowState.status === 'ready' ? workflowState.response.view : null;
 
   return (
@@ -2006,7 +2091,19 @@ export const App = () => {
                 <JiraPlanningSurface task={selectedTask} />
                 <ScrollArea className="min-h-0 flex-1">
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
-                  <ImplementationPlanSurface planning={implementationPlanState} />
+                  <ImplementationPlanSurface
+                    planning={implementationPlanState}
+                    answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
+                    pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
+                    onAnswerChange={(questionId, answer) => {
+                      setPlanningAnswerDrafts((current) => {
+                        const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
+                        taskAnswers.set(questionId, answer);
+                        return new Map(current).set(selectedTask.id, taskAnswers);
+                      });
+                    }}
+                    onSubmitAnswers={handlePlanningClarification}
+                  />
                   <TaskDetails
                     details={jiraIssueState}
                     onRetry={handleJiraSync}

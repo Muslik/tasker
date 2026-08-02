@@ -12,6 +12,7 @@ import {
   RepositoryCatalogResponseSchema,
   RepositoryReferenceSchema,
 } from '../repositories/contracts.js';
+import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
 import {
   ApiErrorResponseSchema,
   OperatorActivityResponseSchema,
@@ -128,6 +129,10 @@ const sendRunError = (reply: FastifyReply, error: StubRunError): FastifyReply =>
         .send(apiError(error.kind, 'This run already exists with different immutable settings'));
     case 'run_not_at_plan_review':
       return reply.code(409).send(apiError(error.kind, 'The run is not waiting for plan review'));
+    case 'run_not_at_planning_clarification':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'The run is not waiting for planning clarification'));
     case 'plan_revision_target_not_found':
       return reply
         .code(409)
@@ -535,9 +540,14 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           .send(apiError('implementation_planning_failed', planned.value.failure.message));
       }
       if (planned.value.status === 'needs_clarification') {
-        return reply
-          .code(409)
-          .send(apiError('planning_clarification_required', 'Answer the planning questions'));
+        const waiting = options.runService.openPlanningClarification(
+          params.data.fixtureId,
+          command.data.settings,
+          { attempt: planned.value.attempt, artifactId: planned.value.artifactId },
+        );
+        return waiting.ok
+          ? reply.send(RunProjectionSchema.parse(waiting.value))
+          : sendRunError(reply, waiting.error);
       }
       if (planned.value.status === 'workflow_change_required') {
         return reply
@@ -631,9 +641,14 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           .send(apiError('implementation_planning_in_progress', 'Planning is still running'));
       }
       if (planned.value.status === 'needs_clarification') {
-        return reply
-          .code(409)
-          .send(apiError('planning_clarification_required', 'Answer the planning questions'));
+        const waiting = options.runService.openPlanningClarification(
+          params.data.fixtureId,
+          recorded.value.settings,
+          { attempt: planned.value.attempt, artifactId: planned.value.artifactId },
+        );
+        return waiting.ok
+          ? reply.send(RunProjectionSchema.parse(waiting.value))
+          : sendRunError(reply, waiting.error);
       }
       if (planned.value.status === 'workflow_change_required') {
         return reply
@@ -658,6 +673,95 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!reviewed.ok) return sendRunError(reply, reviewed.error);
     if (options.scheduler !== undefined) {
       return reply.send(RunProjectionSchema.parse(reviewed.value));
+    }
+    const continued = options.runService.claim(params.data.fixtureId, 'direct-stub-runner');
+    return continued.ok
+      ? reply.send(RunProjectionSchema.parse(continued.value))
+      : sendRunError(reply, continued.error);
+  });
+
+  api.post('/api/workflows/:fixtureId/planning-clarification', async (request, reply) => {
+    if (options.runService === undefined || options.implementationPlanning === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('implementation_planning_not_configured', 'Planning is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const command = PlanningClarificationAnswerCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(apiError('invalid_clarification_answers', 'Provide a non-empty answer per question'));
+    }
+    const currentRun = options.runService.read(params.data.fixtureId);
+    if (!currentRun.ok) return sendRunError(reply, currentRun.error);
+    if (currentRun.value === null) {
+      return sendRunError(reply, {
+        kind: 'run_not_found',
+        taskReference: params.data.fixtureId,
+      });
+    }
+    if (
+      currentRun.value.status !== 'waiting' ||
+      currentRun.value.wait.waitKind !== 'human_clarification'
+    ) {
+      return sendRunError(reply, {
+        kind: 'run_not_at_planning_clarification',
+        taskReference: params.data.fixtureId,
+      });
+    }
+
+    const planned = await options.implementationPlanning.answer(
+      params.data.fixtureId,
+      command.data.answers,
+    );
+    if (!planned.ok) {
+      return planned.error.kind === 'invalid_clarification_answers'
+        ? reply
+            .code(400)
+            .send(apiError('invalid_clarification_answers', planned.error.issues.join(' ')))
+        : reply
+            .code(503)
+            .send(
+              apiError('implementation_planning_failed', `Planning stopped: ${planned.error.kind}`),
+            );
+    }
+    if (planned.value.status === 'planning') {
+      return reply
+        .code(409)
+        .send(apiError('implementation_planning_in_progress', 'Planning is still running'));
+    }
+    if (planned.value.status === 'failed') {
+      return reply
+        .code(503)
+        .send(apiError('implementation_planning_failed', planned.value.failure.message));
+    }
+    if (planned.value.status === 'workflow_change_required') {
+      return reply
+        .code(409)
+        .send(apiError('workflow_change_required', planned.value.decision.request.reason));
+    }
+    if (planned.value.status === 'needs_clarification') {
+      const waiting = options.runService.openPlanningClarification(
+        params.data.fixtureId,
+        currentRun.value.settings,
+        { attempt: planned.value.attempt, artifactId: planned.value.artifactId },
+      );
+      return waiting.ok
+        ? reply.send(RunProjectionSchema.parse(waiting.value))
+        : sendRunError(reply, waiting.error);
+    }
+
+    const queued = options.runService.resolvePlanningClarification(
+      params.data.fixtureId,
+      options.implementationPlanning.link(planned.value),
+    );
+    if (!queued.ok) return sendRunError(reply, queued.error);
+    if (options.scheduler !== undefined) {
+      return reply.send(RunProjectionSchema.parse(queued.value));
     }
     const continued = options.runService.claim(params.data.fixtureId, 'direct-stub-runner');
     return continued.ok
