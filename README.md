@@ -3,6 +3,11 @@
 Personal, local-first task-adaptive agent harness. The canonical design and delivery
 status are under [`docs/codex`](docs/codex/README.md).
 
+Prompts, step contracts, workflow templates, company policy, and project workflow
+guidance are editable under [`harness`](harness). See the
+[`customization guide`](docs/codex/customization-guide.md) before adding a step or
+using a separate company pack.
+
 M0, M1, and the first M2 execution slices are implemented. A local fixture task now becomes an untrusted proposal,
 then a deterministic validated graph with a stable hash, persisted projections, a
 Fastify API, a CLI tree, and a React operator cockpit. An accepted graph can execute

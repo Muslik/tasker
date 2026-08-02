@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "version": "1",
+  "repository": "twiket/ui-kit",
+  "repositoryKind": "frontend",
+  "translations": {
+    "kind": "external",
+    "extractCommand": "pnpm translations:extract",
+    "pullCommand": "pnpm translations:pull"
+  },
+  "workflowGuidance": "projects/twiket-ui-kit/workflow.md",
+  "workOverlay": "projects/twiket-ui-kit/work"
+}

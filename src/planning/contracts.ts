@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
 import {
+  getHarnessPack,
+  type HarnessStepDefinition,
+  type LoadedHarnessPack,
+  type LoadedHarnessStep,
+  type StepInputKindSchema,
+} from '../harness/index.js';
+import {
   createPredicateRegistry,
   createStepTypeRegistry,
   createWaitRegistry,
@@ -33,194 +40,49 @@ const commandInputSchema = z
   })
   .strict();
 
-const defineReadOnlyStep = (
-  id: string,
-  artifactContracts: readonly string[],
-  retryBudget: number,
-  workflowChanges: StepTypeContract['workflowChanges'] = [],
-): M1StepDefinition => ({
-  contract: {
-    id,
-    version: '1',
-    inputSchema: taskInputSchema,
-    outputSchema: z.looseObject({}),
-    allowedEffects: [],
-    requiredCapabilities: ['repository.read'],
-    resumeBoundary: 'attempt',
-    idempotency: 'none',
-    retryPolicy: `bounded:${String(retryBudget)}`,
-    waitKinds: [],
-    artifactContracts: [...artifactContracts],
-    workflowChanges: [...workflowChanges],
-  },
-  retryBudget,
-});
+type StepInputKind = z.infer<typeof StepInputKindSchema>;
+
+const inputSchemas = {
+  command: commandInputSchema,
+  json: z.looseObject({}),
+  task: taskInputSchema,
+  verification: verificationInputSchema,
+} satisfies Readonly<Record<StepInputKind, z.ZodType>>;
 
 interface M1StepDefinition {
   readonly contract: StepTypeContract;
-  readonly retryBudget: number;
+  readonly source: LoadedHarnessStep;
 }
 
-const stepDefinitions: readonly M1StepDefinition[] = [
-  defineReadOnlyStep('task.analyze', ['analysis-report'], 1, [
-    'cross_repository_dependency',
-    'external_process_required',
-    'task_scope_changed',
-    'verification_scope_changed',
-  ]),
-  {
-    contract: {
-      id: 'bug.reproduce',
-      version: '1',
-      inputSchema: taskInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['command.run'],
-      requiredCapabilities: ['command.run', 'repository.read'],
-      resumeBoundary: 'step',
-      idempotency: 'probe',
-      retryPolicy: 'bounded:2',
-      waitKinds: [],
-      artifactContracts: ['reproduction-report'],
-      workflowChanges: [
-        'cross_repository_dependency',
-        'task_scope_changed',
-        'verification_scope_changed',
-      ],
-      reconciliation: { strategy: 'probe' },
-    },
-    retryBudget: 2,
-  },
-  {
-    contract: {
-      id: 'code.implement',
-      version: '1',
-      inputSchema: taskInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['workspace.write'],
-      requiredCapabilities: ['repository.read', 'workspace.write'],
-      resumeBoundary: 'step',
-      idempotency: 'key',
-      retryPolicy: 'bounded:3',
-      waitKinds: [],
-      artifactContracts: ['source-diff'],
-      workflowChanges: [
-        'cross_repository_dependency',
-        'external_process_required',
-        'task_scope_changed',
-        'verification_scope_changed',
-      ],
-      reconciliation: { strategy: 'receipt' },
-    },
-    retryBudget: 3,
-  },
-  ...(['targeted', 'full', 'visual'] as const).map((profile): M1StepDefinition => ({
-    contract: {
-      id: `verify.${profile}`,
-      version: '1',
-      inputSchema: verificationInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['command.run'],
-      requiredCapabilities: ['command.run'],
-      resumeBoundary: 'step',
-      idempotency: 'probe',
-      retryPolicy: 'bounded:2',
-      waitKinds: [],
-      artifactContracts: [`verification-${profile}`],
-      workflowChanges: ['verification_scope_changed'],
-      reconciliation: { strategy: 'probe' },
-    },
-    retryBudget: 2,
-  })),
-  {
-    contract: {
-      id: 'pr.prepare',
-      version: '1',
-      inputSchema: taskInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['git.write'],
-      requiredCapabilities: ['git.write'],
-      resumeBoundary: 'step',
-      idempotency: 'probe',
-      retryPolicy: 'bounded:2',
-      waitKinds: ['code_review@1'],
-      artifactContracts: ['pull-request-draft'],
-      workflowChanges: [],
-      reconciliation: { strategy: 'probe' },
-    },
-    retryBudget: 2,
-  },
-  ...(['extract', 'pull'] as const).map((action): M1StepDefinition => ({
-    contract: {
-      id: `translations.${action}`,
-      version: '1',
-      inputSchema: commandInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['command.run'],
-      requiredCapabilities: ['command.run'],
-      resumeBoundary: 'step',
-      idempotency: 'probe',
-      retryPolicy: 'bounded:2',
-      waitKinds: action === 'extract' ? ['translation_complete@1'] : [],
-      artifactContracts: [action === 'extract' ? 'translation-keys' : 'translated-resources'],
-      workflowChanges: ['external_process_required'],
-      reconciliation: { strategy: 'probe' },
-    },
-    retryBudget: 2,
-  })),
-  {
-    contract: {
-      id: 'component.dev_publish',
-      version: '1',
-      inputSchema: commandInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['package.publish'],
-      requiredCapabilities: ['command.run', 'package.publish'],
-      resumeBoundary: 'step',
-      idempotency: 'probe',
-      retryPolicy: 'bounded:2',
-      waitKinds: ['final_publish@1'],
-      artifactContracts: ['development-package'],
-      workflowChanges: ['external_process_required'],
-      reconciliation: { strategy: 'probe' },
-    },
-    retryBudget: 2,
-  },
-  {
-    contract: {
-      id: 'component.consume_published',
-      version: '1',
-      inputSchema: taskInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['workspace.write'],
-      requiredCapabilities: ['repository.read', 'workspace.write'],
-      resumeBoundary: 'step',
-      idempotency: 'key',
-      retryPolicy: 'bounded:2',
-      waitKinds: [],
-      artifactContracts: ['consumer-version-diff'],
-      workflowChanges: ['cross_repository_dependency', 'verification_scope_changed'],
-      reconciliation: { strategy: 'receipt' },
-    },
-    retryBudget: 2,
-  },
-  {
-    contract: {
-      id: 'unsafe.effect',
-      version: '1',
-      inputSchema: taskInputSchema,
-      outputSchema: z.looseObject({}),
-      allowedEffects: ['remote.write'],
-      requiredCapabilities: ['remote.write'],
-      resumeBoundary: 'none',
-      idempotency: 'none',
-      retryPolicy: 'bounded:0',
-      waitKinds: [],
-      artifactContracts: [],
-      workflowChanges: [],
-    },
-    retryBudget: 0,
-  },
-];
+const splitReference = (reference: string): { readonly id: string; readonly version: string } => {
+  const separator = reference.lastIndexOf('@');
+  if (separator < 1) throw new Error(`Invalid versioned step reference: ${reference}`);
+  return { id: reference.slice(0, separator), version: reference.slice(separator + 1) };
+};
+
+const toRuntimeContract = (source: HarnessStepDefinition): StepTypeContract => {
+  const { id, version } = splitReference(source.reference);
+  return {
+    id,
+    version,
+    inputSchema: inputSchemas[source.inputKind],
+    outputSchema: z.looseObject({}),
+    allowedEffects: [...source.allowedEffects],
+    requiredCapabilities: [...source.requiredCapabilities],
+    resumeBoundary: source.resumeBoundary,
+    idempotency: source.idempotency,
+    retryPolicy: `bounded:${String(source.retryBudget)}`,
+    waitKinds: [...source.waitKinds],
+    artifactContracts: [...source.artifactContracts],
+    workflowChanges: [...source.workflowChanges],
+    ...(source.reconciliation === undefined
+      ? {}
+      : { reconciliation: { ...source.reconciliation } }),
+  };
+};
+
+const createStepDefinitions = (pack: LoadedHarnessPack): readonly M1StepDefinition[] =>
+  pack.steps.map((source) => ({ contract: toRuntimeContract(source), source }));
 
 const predicateContracts = [
   {
@@ -267,18 +129,30 @@ const waitContracts = [
   },
 ] satisfies readonly WaitContract[];
 
-export const M1_WORKFLOW_CONTRACTS: WorkflowCompilerContracts = Object.freeze({
-  predicates: createPredicateRegistry(predicateContracts),
-  stepTypes: createStepTypeRegistry(stepDefinitions.map(({ contract }) => contract)),
-  waits: createWaitRegistry(waitContracts),
-});
+export const createHarnessWorkflowContracts = (
+  pack: LoadedHarnessPack,
+): WorkflowCompilerContracts => {
+  const definitions = createStepDefinitions(pack);
+  return Object.freeze({
+    predicates: createPredicateRegistry(predicateContracts),
+    stepTypes: createStepTypeRegistry(definitions.map(({ contract }) => contract)),
+    waits: createWaitRegistry(waitContracts),
+  });
+};
+
+const defaultPack = getHarnessPack();
+const stepDefinitions = createStepDefinitions(defaultPack);
+
+export const M1_WORKFLOW_CONTRACTS = createHarnessWorkflowContracts(defaultPack);
 
 const retryBudgets = new Map(
-  stepDefinitions.map(({ contract, retryBudget }) => [
-    `${contract.id}@${contract.version}`,
-    retryBudget,
-  ]),
+  stepDefinitions.map(({ source }) => [source.reference, source.retryBudget]),
 );
 
 export const getStepRetryBudget = (reference: string): number | undefined =>
   retryBudgets.get(reference);
+
+const stepSources = new Map(stepDefinitions.map(({ source }) => [source.reference, source]));
+
+export const getHarnessStepDefinition = (reference: string): LoadedHarnessStep | undefined =>
+  stepSources.get(reference);

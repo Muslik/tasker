@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "twiket-frontend",
+  "version": "1",
+  "availableCapabilities": [
+    "command.run",
+    "git.write",
+    "package.publish",
+    "repository.read",
+    "workspace.write"
+  ],
+  "systemPrompts": {
+    "implementationPlanner": "prompts/implementation-planner.md",
+    "workflowAnalyzer": "prompts/workflow-analyzer.md"
+  },
+  "workflowTemplates": {
+    "feature_with_review": "workflows/feature-with-review.json",
+    "short_bugfix": "workflows/short-bugfix.json"
+  },
+  "globalPackageRules": [
+    {
+      "id": "frontend-ott-package",
+      "repositoryKind": "frontend",
+      "pathPrefix": "packages/@ott/",
+      "publication": {
+        "kind": "human_final",
+        "developmentPublishCommand": "pnpm component:publish-dev"
+      }
+    }
+  ],
+  "workOverlay": "work"
+}

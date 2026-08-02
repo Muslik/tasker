@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { getHarnessPack } from '../harness/index.js';
 import type { TaskFixture } from './fixtures.js';
 import {
   resolvePackagePublicationPolicy,
@@ -20,14 +21,6 @@ import {
 
 export const WorkflowTemplateIdSchema = z.enum(['feature_with_review', 'short_bugfix']);
 export type WorkflowTemplateId = z.infer<typeof WorkflowTemplateIdSchema>;
-
-const templateTask = {
-  description: 'Task-specific objective is supplied by the analyzer.',
-  repository: 'template/repository',
-  taskId: 'TASK-TEMPLATE',
-  title: 'Task-specific title',
-  translationIntent: 'none',
-} as const;
 
 interface TaskContext {
   readonly description: string;
@@ -237,23 +230,11 @@ export const selectWorkflowTemplate = (fixture: TaskFixture): WorkflowTemplateId
   fixture.family === 'short_bugfix' ? 'short_bugfix' : 'feature_with_review';
 
 export const getBaseWorkflowTemplate = (templateId: WorkflowTemplateId): WorkflowSource => {
-  switch (templateId) {
-    case 'short_bugfix':
-      return defineWorkflow({
-        id: 'template-short-bugfix',
-        version: 1,
-        root: shortBugfixRoot(templateTask),
-      });
-
-    case 'feature_with_review':
-      return defineWorkflow({
-        id: 'template-feature-with-review',
-        version: 1,
-        root: featureWithReviewRoot(templateTask, {
-          includeVisualCheck: false,
-        }),
-      });
+  const source = getHarnessPack().workflowTemplates.get(templateId);
+  if (source === undefined) {
+    throw new Error(`Harness pack does not define workflow template ${templateId}`);
   }
+  return defineWorkflow(source);
 };
 
 export const materializeTaskWorkflow = (fixture: TaskFixture): WorkflowSource => {

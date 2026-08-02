@@ -40,6 +40,9 @@ Read in this order:
 14. [`m2.2-workflow-continuation.md`](m2.2-workflow-continuation.md) — immutable linked
     workflow candidates, deterministic lineage validation, `review_all`, recoverable
     repository retry, candidate review, and linked child-run execution projected as one task.
+15. [`customization-guide.md`](customization-guide.md) — operator/developer extension
+    contract, prompt and harness pack layout, step registration, provider-neutral
+    `SkillRef` mapping, tracker adapter boundaries, and provenance-preserving materialization.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. M2 has started: accepted graphs can now queue and traverse

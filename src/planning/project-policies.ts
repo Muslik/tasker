@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { getHarnessPack, type LoadedHarnessPack } from '../harness/index.js';
+
 const TranslationPolicySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('inline_json') }).strict(),
   z
@@ -58,72 +60,70 @@ export type ResolvedPackagePublicationPolicy = z.infer<
   typeof ResolvedPackagePublicationPolicySchema
 >;
 
-const configuredProfiles = [
-  {
-    repository: 'twiket/ui-kit',
-    repositoryKind: 'frontend',
-    source: 'configured',
-    translations: {
-      kind: 'external',
-      extractCommand: 'pnpm translations:extract',
-      pullCommand: 'pnpm translations:pull',
-    },
-  },
-  {
-    repository: 'twiket/avia-web',
-    repositoryKind: 'frontend',
-    source: 'configured',
-    translations: { kind: 'inline_json' },
-  },
-] satisfies readonly z.input<typeof ProjectWorkflowProfileSchema>[];
+export interface ProjectPolicyResolver {
+  resolvePackagePublicationPolicy(
+    repository: string,
+    packagePath: string,
+  ): ResolvedPackagePublicationPolicy;
+  resolveProjectWorkflowProfile(repository: string): ProjectWorkflowProfile;
+}
 
-const globalPackageRules = [
-  {
-    id: 'frontend-ott-package',
-    repositoryKind: 'frontend',
-    pathPrefix: 'packages/@ott/',
-    publication: {
-      kind: 'human_final',
-      developmentPublishCommand: 'pnpm component:publish-dev',
-    },
-  },
-] satisfies readonly z.input<typeof GlobalPackageRuleSchema>[];
+export const createProjectPolicyResolver = (pack: LoadedHarnessPack): ProjectPolicyResolver => {
+  const profiles = new Map(
+    pack.projects.map((project) => {
+      const profile = ProjectWorkflowProfileSchema.parse({
+        repository: project.repository,
+        repositoryKind: project.repositoryKind,
+        source: 'configured',
+        translations: project.translations,
+      });
+      return [profile.repository, profile] as const;
+    }),
+  );
+  const packageRules = pack.company.globalPackageRules.map((input) =>
+    GlobalPackageRuleSchema.parse(input),
+  );
 
-const profiles = new Map(
-  configuredProfiles.map((input) => {
-    const profile = ProjectWorkflowProfileSchema.parse(input);
-    return [profile.repository, profile] as const;
-  }),
-);
+  const resolveProjectWorkflowProfile = (repository: string): ProjectWorkflowProfile =>
+    profiles.get(repository) ??
+    ProjectWorkflowProfileSchema.parse({
+      repository,
+      repositoryKind: 'generic',
+      source: 'default',
+      translations: { kind: 'inline_json' },
+    });
 
-const packageRules = globalPackageRules.map((input) => GlobalPackageRuleSchema.parse(input));
+  const resolvePackagePublicationPolicy = (
+    repository: string,
+    packagePath: string,
+  ): ResolvedPackagePublicationPolicy => {
+    const project = resolveProjectWorkflowProfile(repository);
+    const match = packageRules.find(
+      (rule) =>
+        rule.repositoryKind === project.repositoryKind && packagePath.startsWith(rule.pathPrefix),
+    );
+
+    return match === undefined
+      ? ResolvedPackagePublicationPolicySchema.parse({ kind: 'none', source: 'default' })
+      : ResolvedPackagePublicationPolicySchema.parse({
+          kind: match.publication.kind,
+          source: 'global',
+          policyId: match.id,
+          pathPrefix: match.pathPrefix,
+          developmentPublishCommand: match.publication.developmentPublishCommand,
+        });
+  };
+
+  return Object.freeze({ resolvePackagePublicationPolicy, resolveProjectWorkflowProfile });
+};
+
+const defaultResolver = createProjectPolicyResolver(getHarnessPack());
 
 export const resolveProjectWorkflowProfile = (repository: string): ProjectWorkflowProfile =>
-  profiles.get(repository) ??
-  ProjectWorkflowProfileSchema.parse({
-    repository,
-    repositoryKind: 'generic',
-    source: 'default',
-    translations: { kind: 'inline_json' },
-  });
+  defaultResolver.resolveProjectWorkflowProfile(repository);
 
 export const resolvePackagePublicationPolicy = (
   repository: string,
   packagePath: string,
-): ResolvedPackagePublicationPolicy => {
-  const project = resolveProjectWorkflowProfile(repository);
-  const match = packageRules.find(
-    (rule) =>
-      rule.repositoryKind === project.repositoryKind && packagePath.startsWith(rule.pathPrefix),
-  );
-
-  return match === undefined
-    ? ResolvedPackagePublicationPolicySchema.parse({ kind: 'none', source: 'default' })
-    : ResolvedPackagePublicationPolicySchema.parse({
-        kind: match.publication.kind,
-        source: 'global',
-        policyId: match.id,
-        pathPrefix: match.pathPrefix,
-        developmentPublishCommand: match.publication.developmentPublishCommand,
-      });
-};
+): ResolvedPackagePublicationPolicy =>
+  defaultResolver.resolvePackagePublicationPolicy(repository, packagePath);

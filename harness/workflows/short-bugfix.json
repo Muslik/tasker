@@ -1,0 +1,77 @@
+{
+  "id": "template-short-bugfix",
+  "version": 1,
+  "root": {
+    "kind": "sequence",
+    "id": "short-bugfix-delivery",
+    "children": [
+      {
+        "kind": "step",
+        "id": "analyze-task",
+        "uses": "task.analyze@1",
+        "with": {
+          "objective": "Task-specific objective is supplied by the analyzer.",
+          "repository": "template/repository",
+          "taskId": "TASK-TEMPLATE"
+        }
+      },
+      {
+        "kind": "gate",
+        "id": "review-plan",
+        "reason": "Every task produces a plan; immutable run settings decide whether a human reviews it.",
+        "resumeWhen": "plan.approved@1",
+        "with": { "taskId": "TASK-TEMPLATE" }
+      },
+      {
+        "kind": "step",
+        "id": "reproduce-bug",
+        "uses": "bug.reproduce@1",
+        "with": {
+          "objective": "Reproduce the reported behavior and preserve evidence.",
+          "repository": "template/repository",
+          "taskId": "TASK-TEMPLATE"
+        }
+      },
+      {
+        "kind": "bounded_loop",
+        "id": "implementation-loop",
+        "maxAttempts": 3,
+        "until": "attempt.succeeded@1",
+        "body": {
+          "kind": "sequence",
+          "id": "implementation-attempt",
+          "children": [
+            {
+              "kind": "step",
+              "id": "implement-fix",
+              "uses": "code.implement@1",
+              "with": {
+                "objective": "Task-specific title",
+                "repository": "template/repository",
+                "taskId": "TASK-TEMPLATE"
+              }
+            },
+            {
+              "kind": "step",
+              "id": "verify-targeted",
+              "uses": "verify.targeted@1",
+              "with": { "profile": "targeted", "taskId": "TASK-TEMPLATE" }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "step",
+        "id": "prepare-pr",
+        "uses": "pr.prepare@1",
+        "with": {
+          "objective": "Prepare the implementation for code review.",
+          "repository": "template/repository",
+          "taskId": "TASK-TEMPLATE"
+        }
+      },
+      { "kind": "wait", "id": "wait-for-code-review", "for": "code_review@1" },
+      { "kind": "finalize", "id": "waiting-for-review", "outcome": "waiting_for_review" }
+    ]
+  }
+}

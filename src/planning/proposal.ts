@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { getHarnessPack } from '../harness/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   JsonValueSchema,
@@ -135,11 +136,7 @@ export type ProposalInputFailure = z.infer<typeof ProposalInputFailureSchema>;
 export type AnalyzeTaskFailure = FixtureInputFailure | ProposalInputFailure;
 
 export const M1_AVAILABLE_CAPABILITIES = Object.freeze([
-  'command.run',
-  'git.write',
-  'package.publish',
-  'repository.read',
-  'workspace.write',
+  ...getHarnessPack().company.availableCapabilities,
 ]);
 
 const sortedUnique = (values: readonly string[]): string[] =>

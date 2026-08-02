@@ -1,0 +1,67 @@
+{
+  "id": "template-feature-with-review",
+  "version": 1,
+  "root": {
+    "kind": "sequence",
+    "id": "feature-delivery",
+    "children": [
+      {
+        "kind": "step",
+        "id": "analyze-task",
+        "uses": "task.analyze@1",
+        "with": {
+          "objective": "Task-specific objective is supplied by the analyzer.",
+          "repository": "template/repository",
+          "taskId": "TASK-TEMPLATE"
+        }
+      },
+      {
+        "kind": "gate",
+        "id": "review-plan",
+        "reason": "Every task produces a plan; immutable run settings decide whether a human reviews it.",
+        "resumeWhen": "plan.approved@1",
+        "with": { "taskId": "TASK-TEMPLATE" }
+      },
+      {
+        "kind": "bounded_loop",
+        "id": "implementation-loop",
+        "maxAttempts": 3,
+        "until": "attempt.succeeded@1",
+        "body": {
+          "kind": "sequence",
+          "id": "implementation-attempt",
+          "children": [
+            {
+              "kind": "step",
+              "id": "implement-feature",
+              "uses": "code.implement@1",
+              "with": {
+                "objective": "Task-specific title",
+                "repository": "template/repository",
+                "taskId": "TASK-TEMPLATE"
+              }
+            },
+            {
+              "kind": "step",
+              "id": "verify-full",
+              "uses": "verify.full@1",
+              "with": { "profile": "full", "taskId": "TASK-TEMPLATE" }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "step",
+        "id": "prepare-pr",
+        "uses": "pr.prepare@1",
+        "with": {
+          "objective": "Prepare the feature for code review.",
+          "repository": "template/repository",
+          "taskId": "TASK-TEMPLATE"
+        }
+      },
+      { "kind": "wait", "id": "wait-for-code-review", "for": "code_review@1" },
+      { "kind": "finalize", "id": "waiting-for-review", "outcome": "waiting_for_review" }
+    ]
+  }
+}

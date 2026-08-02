@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
+import { getHarnessPack, renderPromptTemplate } from '../harness/index.js';
 import {
   ImplementationPlannerContextSchema,
   ImplementationPlanningDecisionSchema,
@@ -211,40 +212,14 @@ return the final consensus decision through the required JSON schema.`
       : `Use one bounded planning pass and only the immutable repository evidence supplied below.
 Do not call tools or shell commands. Do not start a consensus or implementation workflow.`;
 
-  return `
-You are the implementation planner for a Tasker run.
-
-${strategyInstruction}
-
-The repository is available as the current working directory in a read-only sandbox. You may use
-read-only shell and file tools to inspect it. Do not edit files, install dependencies, create a
-branch, run mutating commands, call external systems, or implement the task.
-
-Return exactly one JSON object with the top-level key decisionJson. Its value must be a serialized
-JSON decision matching one of these shapes:
-
-1. Ready:
-{"status":"ready","plan":{"schemaVersion":1,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":["..."],"risks":[{"risk":"...","mitigation":"..."}],"acceptanceCriteria":["observable outcome"]}}
-
-2. Needs clarification when a missing human decision materially changes behavior or scope:
-{"status":"needs_clarification","questions":[{"id":"kebab-case","question":"...","reason":"why execution cannot safely choose"}]}
-
-3. Workflow change required when the compiled workflow cannot execute the grounded plan, for
-example because another repository or undeclared capability is required:
-{"status":"workflow_change_required","request":{"reason":"...","discoveredRepositories":["..."],"requiredCapabilities":["..."],"evidence":["repository evidence"]}}
-
-Do not ask questions whose answer is discoverable in the task snapshot, workflow, or repository.
-Do not claim the bug is reproduced or the fix works: those are execution facts. A ready plan must
-fit the supplied compiled workflow and its effect boundaries. Every plan step needs at least one
-verification item. Use exact known file paths; when the precise file is not yet knowable, state a
-bounded search target instead of inventing a path.
-
-plannerContext:
-${JSON.stringify(request.context, null, 2)}
-
-repositoryEvidence:
-${evidence === null ? 'Available through read-only repository tools.' : JSON.stringify(evidence, null, 2)}
-`.trim();
+  return renderPromptTemplate(getHarnessPack().prompts.implementationPlanner.content, {
+    strategyInstruction,
+    plannerContext: JSON.stringify(request.context, null, 2),
+    repositoryEvidence:
+      evidence === null
+        ? 'Available through read-only repository tools.'
+        : JSON.stringify(evidence, null, 2),
+  });
 };
 
 const invalidOutput = (issues: readonly string[]): Outcome<never, ImplementationPlannerFailure> =>
