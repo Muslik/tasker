@@ -332,6 +332,12 @@ prior plan. A blocking question always opens `human_clarification`, even in auto
 mode. “Do not review my plan” is not permission for the agent to invent a missing
 product decision.
 
+The planning strategy is another immutable run setting: `fast`, `ralplan`, or `auto`.
+Explicit operator selection wins. `auto` is a deterministic policy decision whose
+selected strategy and reason are persisted. Fast planning receives a bounded immutable
+repository evidence bundle; ralplan receives the repository through a read-only
+consensus-planning boundary. Both must return the same validated decision contract.
+
 Workflow knowledge is resolved from two configuration layers:
 
 ```yaml

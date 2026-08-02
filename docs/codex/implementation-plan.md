@@ -17,8 +17,8 @@ complete only after its operator demo and deterministic evidence pass.
 | M1.6 | `Jira key -> persisted current task snapshot -> operator details`, including cached recovery after `403` without sync-log growth | implemented and verified 2026-08-01 |
 | M1.7 | `Jira repo:name or import fallback -> Bitbucket lookup -> managed application-data checkout` | implemented and verified 2026-08-02 |
 | M1.8 | `Jira snapshot + managed checkout -> read-only analyzer -> validated persisted workflow -> visible operator graph` | implemented and verified 2026-08-02 |
-| M2 | `task -> visible workflow -> complete stub traversal`, including kill/restart, wait/resume, intervention, and handoff | after M0-M2, roughly 12-20 focused days |
-| M3 | one real subscription CLI executes a node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
+| M2 | `task -> visible workflow -> real typed plan -> stub traversal`, including kill/restart, wait/resume, intervention, and handoff | implementation planning delivered; full gate remains open |
+| M3 | one real subscription CLI executes a non-planning node in that same workflow | re-estimate after M2; planning envelope 3-6 focused days |
 | M4 | a real provider changes an isolated worktree; a recoverable failure resumes at the failed node | re-estimate after M3; planning envelope 4-7 days |
 | M5 | real Jira intake handles `400`, `not_eligible`, and eligible task compilation without partial runs | after the M4 worktree/recovery contract is green |
 | M6 | real `Jira -> code/worktree -> PR -> concurrent CI/review -> revise -> waiting_for_review` | dependency-gated; do not promise a calendar date before M4 evidence |
@@ -463,7 +463,7 @@ implemented only for the bounded stub semantics documented there.
 
 ### Immediate execution order from the current checkpoint
 
-1. **Typed implementation planning.** Replace the `task.analyze@1` stub receipt with a
+1. **Typed implementation planning — delivered 2026-08-02.** Replace the `task.analyze@1` stub receipt with a
    persisted `ImplementationPlan` artifact. Add a deterministic router between a
    bounded fast planner and the more expensive ralplan strategy, while allowing the
    operator to force either mode at run start. Planning always occurs; the current
@@ -481,10 +481,11 @@ implemented only for the bounded stub semantics documented there.
    clarification, and any required approval are resolved, immediately before the
    first write-capable node.
 
-The next operator-visible checkpoint is step 1: the center surface shows the actual
-plan, its strategy/provenance/token estimate, and either **Approve / Request changes**
-or an automatic-continuation receipt. Step 2 then makes questions resumable instead of
-forcing the agent to guess.
+Step 1 is implemented and verified; see
+[`m2.1-implementation-planning.md`](m2.1-implementation-planning.md). The center surface
+shows the actual plan, strategy, provenance, measured tokens, and immutable revisions.
+The next operator-visible checkpoint is step 2: make blocking questions answerable and
+resumable instead of forcing the agent to guess.
 
 ### Entry criteria
 
@@ -563,8 +564,9 @@ the persisted event contract cannot change.
 
 ### Goal
 
-Choose the first real provider from local evidence and execute a real agent node
-through the already-proven kernel.
+Choose the first provider for non-planning execution from local evidence and execute a
+real implementation or verification node through the already-proven kernel. Codex is
+already proven for read-only workflow analysis and implementation planning.
 
 ### Entry criteria
 

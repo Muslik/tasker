@@ -26,7 +26,9 @@ import type {
   WorkflowResponse,
   WorkflowView,
 } from '../control-plane/m1-contracts.js';
+import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
+import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import {
   connectOperatorStream,
@@ -35,6 +37,7 @@ import {
   jiraAttachmentUrl,
   listOperatorTasks,
   listRepositories,
+  loadImplementationPlan,
   loadJiraIssue,
   loadOperatorActivity,
   loadWorkflow,
@@ -69,6 +72,12 @@ type WorkflowLoadState =
 type ActivityLoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly response: OperatorActivityResponse }
+  | { readonly status: 'failed'; readonly message: string };
+
+type ImplementationPlanLoadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'missing' }
+  | { readonly status: 'ready'; readonly record: ImplementationPlanningRecord }
   | { readonly status: 'failed'; readonly message: string };
 
 type JiraIssueLoadState =
@@ -404,6 +413,8 @@ const SelectedTaskHeader = ({
   onStart,
   requirePlanApproval,
   onRequirePlanApprovalChange,
+  planningStrategy,
+  onPlanningStrategyChange,
   onSyncJira,
   pendingOperation,
   jiraSync,
@@ -415,6 +426,8 @@ const SelectedTaskHeader = ({
   readonly onStart: () => void;
   readonly requirePlanApproval: boolean;
   readonly onRequirePlanApprovalChange: (required: boolean) => void;
+  readonly planningStrategy: PlanningStrategyRequest;
+  readonly onPlanningStrategyChange: (strategy: PlanningStrategyRequest) => void;
   readonly onSyncJira: (issueKey: string) => void;
   readonly pendingOperation: TaskOperation | null;
   readonly jiraSync: JiraSyncState;
@@ -467,6 +480,22 @@ const SelectedTaskHeader = ({
           ) : null}
           {canStart ? (
             <>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="sr-only">Planning strategy</span>
+                <select
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
+                  aria-label="Planning strategy"
+                  value={planningStrategy}
+                  disabled={starting}
+                  onChange={(event) => {
+                    onPlanningStrategyChange(event.target.value as PlanningStrategyRequest);
+                  }}
+                >
+                  <option value="auto">Auto plan</option>
+                  <option value="fast">Fast plan</option>
+                  <option value="ralplan">Ralplan</option>
+                </select>
+              </label>
               <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                 <input
                   className="size-3.5 accent-primary"
@@ -664,6 +693,135 @@ const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) =
         <span className="truncate text-xs text-muted-foreground">{task.planning.reason}</span>
       </div>
     </section>
+  );
+};
+
+const ImplementationPlanSurface = ({
+  planning,
+}: {
+  readonly planning: ImplementationPlanLoadState;
+}) => {
+  if (planning.status === 'missing') return null;
+  if (planning.status === 'loading') {
+    return <EmptyState>Loading implementation plan…</EmptyState>;
+  }
+  if (planning.status === 'failed') return <InlineError>{planning.message}</InlineError>;
+
+  const record = planning.record;
+  if (record.status === 'planning') {
+    return (
+      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+        <div className="flex items-center gap-2 text-sm">
+          <LoaderCircle className="size-4 animate-spin text-primary" />
+          <strong>Implementation plan</strong>
+          <span className="text-xs text-muted-foreground">{record.selectedStrategy}</span>
+        </div>
+      </section>
+    );
+  }
+  if (record.status === 'failed') {
+    return (
+      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+        <div className="flex items-center gap-2 text-sm text-amber-300">
+          <AlertTriangle className="size-4" />
+          <strong>Planning paused</strong>
+          <span className="text-xs text-muted-foreground">{record.failure.message}</span>
+        </div>
+      </section>
+    );
+  }
+  if (record.status === 'needs_clarification') {
+    return (
+      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+        <div className="mb-2 flex items-center gap-2 text-sm">
+          <MessageSquare className="size-4 text-amber-300" />
+          <strong>Planner needs clarification</strong>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm">
+          {record.decision.questions.map((question) => (
+            <li key={question.id}>
+              {question.question}
+              <p className="text-xs text-muted-foreground">{question.reason}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+    );
+  }
+  if (record.status === 'workflow_change_required') {
+    return (
+      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+        <div className="mb-1 flex items-center gap-2 text-sm">
+          <GitBranch className="size-4 text-amber-300" />
+          <strong>Workflow change required</strong>
+        </div>
+        <p className="text-sm text-muted-foreground">{record.decision.request.reason}</p>
+      </section>
+    );
+  }
+
+  const plan = record.decision.plan;
+  const measuredTokens = record.receipt.usage.inputTokens + record.receipt.usage.outputTokens;
+  const apiCost =
+    record.receipt.hypotheticalApiCostUsd === null
+      ? 'API cost unrated'
+      : `~$${record.receipt.hypotheticalApiCostUsd.toFixed(2)} API`;
+  return (
+    <Collapsible defaultOpen>
+      <section
+        className="border-b border-border"
+        aria-label="Implementation plan"
+        data-testid="implementation-plan"
+      >
+        <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <GitBranch className="size-4 text-muted-foreground" />
+              <strong className="text-sm">Implementation plan</strong>
+              <StateBadge>{record.selectedStrategy}</StateBadge>
+              <span className="text-[11px] text-muted-foreground">
+                attempt {record.attempt} · {record.receipt.provider} ·{' '}
+                {(record.receipt.durationMs / 1000).toFixed(1)}s · {measuredTokens.toLocaleString()}{' '}
+                tok · {apiCost}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{plan.title}</p>
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-5 pb-4">
+            <p className="mb-3 max-w-4xl text-[13px] leading-5 text-muted-foreground">
+              {plan.summary}
+            </p>
+            <ol className="space-y-3">
+              {plan.steps.map((step, index) => (
+                <li className="grid grid-cols-[20px_minmax(0,1fr)] gap-2" key={step.id}>
+                  <span className="text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+                  <div className="min-w-0">
+                    <strong className="text-[13px] font-medium">{step.title}</strong>
+                    <p className="text-xs leading-5 text-muted-foreground">{step.objective}</p>
+                    {step.files.length === 0 ? null : (
+                      <p className="truncate font-mono text-[10px] text-muted-foreground/80">
+                        {step.files.join(' · ')}
+                      </p>
+                    )}
+                    <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                      {step.verification.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-4 text-[11px] text-muted-foreground">
+              Why {record.selectedStrategy}: {record.selectionReason}
+            </p>
+          </div>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 };
 
@@ -1417,6 +1575,8 @@ export const App = () => {
   const [selectedId, setSelectedId] = useState<string>(() => readStoredSelection() ?? '');
   const [workflowState, setWorkflowState] = useState<WorkflowLoadState>({ status: 'loading' });
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
+  const [implementationPlanState, setImplementationPlanState] =
+    useState<ImplementationPlanLoadState>({ status: 'missing' });
   const [jiraIssueState, setJiraIssueState] = useState<JiraIssueLoadState>({
     status: 'not_applicable',
   });
@@ -1431,6 +1591,9 @@ export const App = () => {
   const [planApprovalDrafts, setPlanApprovalDrafts] = useState<ReadonlyMap<string, boolean>>(
     new Map(),
   );
+  const [planningStrategyDrafts, setPlanningStrategyDrafts] = useState<
+    ReadonlyMap<string, PlanningStrategyRequest>
+  >(new Map());
   const streamCursorRef = useRef(0);
 
   const selectedTask = useMemo(
@@ -1503,6 +1666,23 @@ export const App = () => {
     }
   };
 
+  const refreshSelectedImplementationPlan = async (fixtureId: string): Promise<void> => {
+    setImplementationPlanState({ status: 'loading' });
+    try {
+      const response = await loadImplementationPlan(fixtureId);
+      setImplementationPlanState(
+        response.status === 'found'
+          ? { status: 'ready', record: response.record }
+          : { status: 'missing' },
+      );
+    } catch (error) {
+      setImplementationPlanState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Unexpected planning failure',
+      });
+    }
+  };
+
   const refreshSelectedJiraIssue = async (taskReference: string): Promise<void> => {
     if (!taskReference.startsWith('jira:')) {
       setJiraIssueState({ status: 'not_applicable' });
@@ -1524,6 +1704,7 @@ export const App = () => {
     await Promise.all([
       refreshSelectedWorkflow(fixtureId),
       refreshSelectedActivity(fixtureId),
+      refreshSelectedImplementationPlan(fixtureId),
       refreshSelectedJiraIssue(fixtureId),
     ]);
   };
@@ -1652,9 +1833,13 @@ export const App = () => {
     if (selectedTask === null || selectedTask.status !== 'planned') return;
     const taskReference = selectedTask.id;
     const requirePlanApproval = planApprovalDrafts.get(taskReference) ?? true;
+    const planningStrategy = planningStrategyDrafts.get(taskReference) ?? 'auto';
     setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
     void startWorkflow(taskReference, {
-      settings: { planApproval: requirePlanApproval ? 'required' : 'automatic' },
+      settings: {
+        planApproval: requirePlanApproval ? 'required' : 'automatic',
+        planningStrategy,
+      },
     })
       .then(async () => {
         await refreshTasks();
@@ -1790,6 +1975,12 @@ export const App = () => {
                       new Map(current).set(selectedTask.id, required),
                     );
                   }}
+                  planningStrategy={planningStrategyDrafts.get(selectedTask.id) ?? 'auto'}
+                  onPlanningStrategyChange={(strategy) => {
+                    setPlanningStrategyDrafts((current) =>
+                      new Map(current).set(selectedTask.id, strategy),
+                    );
+                  }}
                   onSyncJira={handleJiraSync}
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
@@ -1815,6 +2006,7 @@ export const App = () => {
                 <JiraPlanningSurface task={selectedTask} />
                 <ScrollArea className="min-h-0 flex-1">
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
+                  <ImplementationPlanSurface planning={implementationPlanState} />
                   <TaskDetails
                     details={jiraIssueState}
                     onRetry={handleJiraSync}

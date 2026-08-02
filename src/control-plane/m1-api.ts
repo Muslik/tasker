@@ -3,6 +3,10 @@ import { extname, join, relative, resolve } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import {
+  ImplementationPlanningRecordSchema,
+  type ImplementationPlanningCoordinator,
+} from './implementation-planning.js';
 import type { JiraIssueService, JiraIssueServiceError } from '../integrations/index.js';
 import {
   RepositoryCatalogResponseSchema,
@@ -46,6 +50,7 @@ export interface BuildM1ApiOptions {
   readonly logger?: boolean | undefined;
   readonly workflowGenerator?: WorkflowGenerator | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
+  readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly runService?: DeterministicStubRunService | undefined;
   readonly scheduler?: DurableStubScheduler | undefined;
 }
@@ -226,9 +231,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     const result = options.service.listOperatorTasks();
     if (!result.ok) return sendServiceError(reply, result.error);
     const withRunState = (task: OperatorTaskSummary): OperatorTaskSummary => {
-      if (options.runService === undefined) return task;
+      const withPlanning = options.implementationPlanning?.decorateTask(task) ?? task;
+      if (options.runService === undefined) return withPlanning;
       const run = options.runService.read(task.id);
-      return run.ok ? applyRunToTask(task, run.value) : task;
+      return run.ok ? applyRunToTask(withPlanning, run.value) : withPlanning;
     };
     if (options.jiraIssueService === undefined) {
       return reply.send({
@@ -286,6 +292,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           entries: [
             ...jiraResult.value.entries,
             ...workflowResult.value.entries,
+            ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
             ...(options.runService?.readActivity(params.data.fixtureId) ?? []),
           ].sort((left, right) => left.sequence - right.sequence),
         }),
@@ -299,6 +306,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             ...result.value,
             entries: [
               ...result.value.entries,
+              ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
               ...(options.runService?.readActivity(params.data.fixtureId) ?? []),
             ].sort((left, right) => left.sequence - right.sequence),
           }),
@@ -385,6 +393,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     const flush = (): void => {
       const events = [
         ...options.service.listStreamEventsAfter(cursor),
+        ...(options.implementationPlanning?.listStreamEventsAfter(cursor) ?? []),
         ...(options.runService?.listStreamEventsAfter(cursor) ?? []),
       ].sort((left, right) => left.sequence - right.sequence);
       for (const event of events) {
@@ -461,7 +470,30 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(RunProjectionSchema.parse(result.value));
   });
 
-  api.post('/api/workflows/:fixtureId/start', (request, reply) => {
+  api.get('/api/workflows/:fixtureId/implementation-plan', (request, reply) => {
+    if (options.implementationPlanning === undefined) {
+      return reply
+        .code(404)
+        .send(apiError('implementation_plan_not_found', 'No implementation plan exists'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const result = options.implementationPlanning.read(params.data.fixtureId);
+    if (!result.ok) {
+      return reply
+        .code(500)
+        .send(apiError('implementation_plan_store_failure', 'The plan projection is invalid'));
+    }
+    return result.value === null
+      ? reply
+          .code(404)
+          .send(apiError('implementation_plan_not_found', 'No implementation plan exists'))
+      : reply.send(ImplementationPlanningRecordSchema.parse(result.value));
+  });
+
+  api.post('/api/workflows/:fixtureId/start', async (request, reply) => {
     if (options.runService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
     }
@@ -477,13 +509,59 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!command.success) {
       return reply.code(400).send(apiError('invalid_run_settings', 'Run settings are invalid'));
     }
+    const existingRun = options.runService.read(params.data.fixtureId);
+    if (!existingRun.ok) return sendRunError(reply, existingRun.error);
+    let implementationPlan = existingRun.value?.implementationPlan ?? null;
+    if (existingRun.value === null && options.implementationPlanning !== undefined) {
+      const planned = await options.implementationPlanning.prepare(
+        params.data.fixtureId,
+        command.data.settings.planningStrategy,
+      );
+      if (!planned.ok) {
+        return reply
+          .code(503)
+          .send(
+            apiError('implementation_planning_failed', `Planning stopped: ${planned.error.kind}`),
+          );
+      }
+      if (planned.value.status === 'planning') {
+        return reply
+          .code(409)
+          .send(apiError('implementation_planning_in_progress', 'Planning is still running'));
+      }
+      if (planned.value.status === 'failed') {
+        return reply
+          .code(503)
+          .send(apiError('implementation_planning_failed', planned.value.failure.message));
+      }
+      if (planned.value.status === 'needs_clarification') {
+        return reply
+          .code(409)
+          .send(apiError('planning_clarification_required', 'Answer the planning questions'));
+      }
+      if (planned.value.status === 'workflow_change_required') {
+        return reply
+          .code(409)
+          .send(apiError('workflow_change_required', planned.value.decision.request.reason));
+      }
+      implementationPlan = options.implementationPlanning.link(planned.value);
+    }
     if (options.scheduler !== undefined) {
-      const queued = options.scheduler.enqueue(params.data.fixtureId, command.data.settings);
+      const queued = options.scheduler.enqueue(
+        params.data.fixtureId,
+        command.data.settings,
+        implementationPlan,
+      );
       return queued.ok
         ? reply.send(RunProjectionSchema.parse(queued.value))
         : sendRunError(reply, queued.error.error);
     }
-    const started = options.runService.start(params.data.fixtureId, command.data.settings);
+    const started = options.runService.start(
+      params.data.fixtureId,
+      command.data.settings,
+      {},
+      implementationPlan,
+    );
     return started.ok
       ? reply.send(RunProjectionSchema.parse(started.value))
       : sendRunError(reply, started.error);
@@ -506,7 +584,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : sendRunError(reply, result.error);
   });
 
-  api.post('/api/workflows/:fixtureId/plan-review', (request, reply) => {
+  api.post('/api/workflows/:fixtureId/plan-review', async (request, reply) => {
     if (options.runService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
     }
@@ -519,6 +597,61 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply
         .code(400)
         .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan guidance'));
+    }
+
+    if (
+      command.data.decision === 'request_changes' &&
+      options.implementationPlanning !== undefined
+    ) {
+      const recorded = options.runService.recordPlanChanges(
+        params.data.fixtureId,
+        command.data.guidance,
+      );
+      if (!recorded.ok) return sendRunError(reply, recorded.error);
+      const planned = await options.implementationPlanning.prepare(
+        params.data.fixtureId,
+        recorded.value.settings.planningStrategy,
+        command.data.guidance,
+      );
+      if (!planned.ok) {
+        return reply
+          .code(503)
+          .send(
+            apiError('implementation_planning_failed', `Planning stopped: ${planned.error.kind}`),
+          );
+      }
+      if (planned.value.status === 'failed') {
+        return reply
+          .code(503)
+          .send(apiError('implementation_planning_failed', planned.value.failure.message));
+      }
+      if (planned.value.status === 'planning') {
+        return reply
+          .code(409)
+          .send(apiError('implementation_planning_in_progress', 'Planning is still running'));
+      }
+      if (planned.value.status === 'needs_clarification') {
+        return reply
+          .code(409)
+          .send(apiError('planning_clarification_required', 'Answer the planning questions'));
+      }
+      if (planned.value.status === 'workflow_change_required') {
+        return reply
+          .code(409)
+          .send(apiError('workflow_change_required', planned.value.decision.request.reason));
+      }
+      const revised = options.runService.applyPlanRevision(
+        params.data.fixtureId,
+        options.implementationPlanning.link(planned.value),
+      );
+      if (!revised.ok) return sendRunError(reply, revised.error);
+      if (options.scheduler !== undefined) {
+        return reply.send(RunProjectionSchema.parse(revised.value));
+      }
+      const continued = options.runService.claim(params.data.fixtureId, 'direct-stub-runner');
+      return continued.ok
+        ? reply.send(RunProjectionSchema.parse(continued.value))
+        : sendRunError(reply, continued.error);
     }
 
     const reviewed = options.runService.reviewPlan(params.data.fixtureId, command.data);

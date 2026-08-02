@@ -33,12 +33,15 @@ Read in this order:
     queue capacity, fenced ownership, per-node receipts, restart-safe cursor, realtime
     runtime state, mandatory planning with immutable per-run human-approval policy, an
     immutable plan-review correction loop, and a slot-releasing code-review wait.
+13. [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md) — real typed
+    implementation plans through subscription Codex CLI, deterministic fast/ralplan
+    routing, persisted provenance/usage, plan revision, and the operator plan surface.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. M2 has started: accepted graphs can now queue and traverse
 durable stub steps in parallel up to configured capacity, recover fenced ownership,
 stop at persisted plan/code-review waits, and turn operator plan feedback into a new
-restart-safe attempt. Every accepted graph now retains the same planning boundary;
+restart-safe provider attempt. Every accepted graph now retains the same planning boundary;
 the start checkbox determines only whether the operator must approve it. Corporate
 integrations remain later milestones.
 
@@ -47,9 +50,10 @@ console has the task queue on the left, persisted activity and workflow rational
 the center, and the current graph on the right. It includes validation failures,
 waits, retry bounds, project/global policy decisions, verification rationale,
 capabilities, collapsed template diagnostics, SSE refresh, and JSON download.
-Execution is currently limited to deterministic local stubs; it performs no provider,
-repository, Jira, Bitbucket, or CI mutation. Provider analysis provenance and measured
-tokens are persisted and visible.
+Implementation planning now uses a real subscription Codex CLI provider; later graph
+nodes remain deterministic local stubs. Tasker performs no repository, Jira,
+Bitbucket, or CI mutation. Provider provenance and measured tokens are persisted and
+visible.
 An imported Jira task with a resolved checkout can now be compiled into a workflow.
 Jira text only selects a conservative admission template; the analyzer receives the
 full Jira snapshot and bounded repository evidence before proposing the graph.

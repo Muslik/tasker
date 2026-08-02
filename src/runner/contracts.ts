@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+import {
+  ImplementationPlanLinkSchema,
+  PlanningStrategyRequestSchema,
+} from '../planning/implementation-plan.js';
+
 export const RUN_VIEW_SCHEMA_VERSION = 1;
 
 export const RunNodeStatusSchema = z.enum([
@@ -61,18 +66,21 @@ export const StubEffectReceiptSchema = z
     uses: z.string().min(1),
     receiptId: z.string().min(1),
     completedAt: z.iso.datetime(),
+    artifactId: z.string().min(1).optional(),
   })
   .strict();
 
 export const RunSettingsSchema = z
   .object({
     planApproval: z.enum(['required', 'automatic']),
+    planningStrategy: PlanningStrategyRequestSchema,
   })
   .strict()
   .readonly();
 
 export const DEFAULT_RUN_SETTINGS = {
   planApproval: 'required',
+  planningStrategy: 'auto',
 } as const satisfies z.input<typeof RunSettingsSchema>;
 
 export const RunStartCommandSchema = z
@@ -130,6 +138,7 @@ const runBaseShape = {
   effects: z.array(StubEffectReceiptSchema),
   planRevisionRequests: z.array(PlanRevisionRequestSchema).default([]),
   settings: RunSettingsSchema.default(DEFAULT_RUN_SETTINGS),
+  implementationPlan: ImplementationPlanLinkSchema.nullable().default(null),
 };
 
 export const RunProjectionSchema = z.discriminatedUnion('status', [

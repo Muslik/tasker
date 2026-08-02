@@ -18,10 +18,11 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = String(apiPort);
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const [control, jira, ledgerModule, repositories, shared] = await Promise.all([
+const [control, jira, ledgerModule, providers, repositories, shared] = await Promise.all([
   import('../dist/control-plane/index.js'),
   import('../dist/integrations/index.js'),
   import('../dist/ledger/index.js'),
+  import('../dist/providers/index.js'),
   import('../dist/repositories/index.js'),
   import('../dist/shared/index.js'),
 ]);
@@ -124,14 +125,20 @@ const jiraIssueService = jira.createJiraIssueService(
     ]),
   },
 );
-const workflowGenerator = new control.CodexWorkflowGenerator(
-  service,
-  new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService),
-);
+const subjects = new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService);
+const workflowGenerator = new control.CodexWorkflowGenerator(service, subjects);
+const implementationPlanning = control.createImplementationPlanningCoordinator({
+  ledger: ledger.repository,
+  clock: shared.systemClock,
+  workflows: service,
+  subjects,
+  planner: new providers.DeterministicImplementationPlanner(),
+});
 const api = control.buildM1Api({
   service,
   jiraIssueService,
   workflowGenerator,
+  implementationPlanning,
   runService,
   scheduler,
 });

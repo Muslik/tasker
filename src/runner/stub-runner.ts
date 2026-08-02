@@ -11,6 +11,7 @@ import {
 } from '../control-plane/m1-contracts.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type { ArtifactWrite, EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
+import type { ImplementationPlanLink } from '../planning/implementation-plan.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, type CompiledWorkflowNode } from '../workflow/schema.js';
@@ -43,6 +44,8 @@ const RunEventPayloadSchema = z
     nextAttempt: z.number().int().positive().optional(),
     targetNodeId: z.string().min(1).optional(),
     planApproval: z.enum(['required', 'automatic']).optional(),
+    planningStrategy: z.enum(['auto', 'fast', 'ralplan']).optional(),
+    artifactId: z.string().min(1).optional(),
   })
   .loose();
 
@@ -181,12 +184,16 @@ export class DeterministicStubRunService {
     taskReference: string,
     settingsInput: RunSettings = DEFAULT_RUN_SETTINGS,
     options: DriveOptions = {},
+    implementationPlan: ImplementationPlanLink | null = null,
   ): Outcome<RunProjection, StubRunError> {
     const settings = RunSettingsSchema.parse(settingsInput);
     const existing = this.read(taskReference);
     if (!existing.ok) return existing;
     if (existing.value !== null) {
-      if (existing.value.settings.planApproval !== settings.planApproval) {
+      if (
+        existing.value.settings.planApproval !== settings.planApproval ||
+        existing.value.settings.planningStrategy !== settings.planningStrategy
+      ) {
         return err({ kind: 'run_settings_conflict', taskReference });
       }
       if (existing.value.status === 'executing') return this.drive(existing.value, options);
@@ -196,19 +203,21 @@ export class DeterministicStubRunService {
       return ok(existing.value);
     }
 
-    const queued = this.enqueue(taskReference, settings);
+    const queued = this.enqueue(taskReference, settings, implementationPlan);
     return queued.ok ? this.claim(taskReference, 'direct-stub-runner', options) : queued;
   }
 
   public enqueue(
     taskReference: string,
     settingsInput: RunSettings = DEFAULT_RUN_SETTINGS,
+    implementationPlan: ImplementationPlanLink | null = null,
   ): Outcome<RunProjection, StubRunError> {
     const settings = RunSettingsSchema.parse(settingsInput);
     const existing = this.read(taskReference);
     if (!existing.ok) return existing;
     if (existing.value !== null) {
-      return existing.value.settings.planApproval === settings.planApproval
+      return existing.value.settings.planApproval === settings.planApproval &&
+        existing.value.settings.planningStrategy === settings.planningStrategy
         ? ok(existing.value)
         : err({ kind: 'run_settings_conflict', taskReference });
     }
@@ -248,9 +257,15 @@ export class DeterministicStubRunService {
       effects: [],
       planRevisionRequests: [],
       settings,
+      implementationPlan,
       wait: null,
     });
-    return this.persist(run, 'RunQueued', { taskReference, planApproval: settings.planApproval });
+    return this.persist(run, 'RunQueued', {
+      taskReference,
+      planApproval: settings.planApproval,
+      planningStrategy: settings.planningStrategy,
+      ...(implementationPlan === null ? {} : { artifactId: implementationPlan.artifactId }),
+    });
   }
 
   public claim(
@@ -505,6 +520,158 @@ export class DeterministicStubRunService {
     );
   }
 
+  public recordPlanChanges(
+    taskReference: string,
+    guidanceInput: string,
+  ): Outcome<RunProjection, StubRunError> {
+    const command = PlanReviewCommandSchema.parse({
+      decision: 'request_changes',
+      guidance: guidanceInput,
+    });
+    if (command.decision !== 'request_changes') {
+      throw new Error('Expected a request_changes command');
+    }
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    const run = current.value;
+    if (run.status !== 'waiting' || run.wait.waitKind !== 'plan.approved@1') {
+      return err({ kind: 'run_not_at_plan_review', taskReference });
+    }
+    const review = run.wait;
+    const targetIndex = run.plan.findLastIndex(
+      (operation, index) =>
+        index < run.cursor && operation.kind === 'step' && operation.uses === 'task.analyze@1',
+    );
+    const target = run.plan[targetIndex];
+    if (targetIndex < 0 || target?.kind !== 'step') {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+    const priorAttempt =
+      run.planRevisionRequests.at(-1)?.nextAttempt ??
+      run.effects.filter((effect) => effect.nodeId === target.nodeId).length;
+    if (priorAttempt < 1) {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+    const nextAttempt = priorAttempt + 1;
+    const now = this.clock.now();
+    const interventionId = `intervention:${run.runId}:${target.nodeId}:attempt-${String(nextAttempt)}`;
+    const guidanceArtifactId = `guidance:${run.runId}:${target.nodeId}:attempt-${String(nextAttempt)}`;
+    const recorded = RunProjectionSchema.parse({
+      ...run,
+      updatedAt: now,
+      planRevisionRequests: [
+        ...run.planRevisionRequests,
+        {
+          interventionId,
+          reviewNodeId: review.nodeId,
+          targetNodeId: target.nodeId,
+          priorAttempt,
+          nextAttempt,
+          guidanceArtifactId,
+          createdAt: now,
+        },
+      ],
+    });
+    return this.persist(
+      recorded,
+      'PlanChangesRequested',
+      {
+        taskReference,
+        nodeId: review.nodeId,
+        targetNodeId: target.nodeId,
+        guidanceArtifactId,
+        attempt: priorAttempt,
+        nextAttempt,
+      },
+      undefined,
+      {
+        actor: 'operator',
+        artifacts: [
+          {
+            artifactId: guidanceArtifactId,
+            artifactKind: 'operator_guidance',
+            storageUri: `ledger://artifacts/${guidanceArtifactId}`,
+            payload: { guidance: command.guidance },
+            metadata: {
+              taskReference,
+              reviewNodeId: review.nodeId,
+              targetNodeId: target.nodeId,
+              priorAttempt,
+              nextAttempt,
+            },
+            createdAt: now,
+          },
+        ],
+      },
+    );
+  }
+
+  public applyPlanRevision(
+    taskReference: string,
+    implementationPlan: ImplementationPlanLink,
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    const run = current.value;
+    if (run.status !== 'waiting' || run.wait.waitKind !== 'plan.approved@1') {
+      return err({ kind: 'run_not_at_plan_review', taskReference });
+    }
+    const revision = run.planRevisionRequests.at(-1);
+    if (revision === undefined) {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+    const targetIndex = run.plan.findIndex(
+      (operation) => operation.kind === 'step' && operation.nodeId === revision.targetNodeId,
+    );
+    if (targetIndex < 0) {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+    const now = this.clock.now();
+    const revised = RunProjectionSchema.parse({
+      ...run,
+      status: 'queued',
+      updatedAt: now,
+      cursor: targetIndex,
+      nodeStates: {
+        ...run.nodeStates,
+        [revision.targetNodeId]: 'planned',
+        [revision.reviewNodeId]: 'planned',
+      },
+      implementationPlan,
+      lease: null,
+      wait: null,
+    });
+    return this.persist(
+      revised,
+      'ImplementationPlanRevisionReady',
+      {
+        taskReference,
+        nodeId: revision.reviewNodeId,
+        targetNodeId: revision.targetNodeId,
+        attempt: revision.nextAttempt,
+        artifactId: implementationPlan.artifactId,
+      },
+      undefined,
+      {
+        actor: 'planner',
+        signal: {
+          signalId: `signal:${run.wait.waitId}:revision-ready-${String(revision.nextAttempt)}`,
+          signalKind: 'plan_revision_ready',
+          correlationKey: run.wait.waitId,
+          payload: {
+            taskReference,
+            nodeId: revision.reviewNodeId,
+            artifactId: implementationPlan.artifactId,
+          },
+          status: 'resolved',
+          resolvedWaitKey: run.wait.waitId,
+        },
+      },
+    );
+  }
+
   public list(): Outcome<readonly RunProjection[], StubRunError> {
     const runs: RunProjection[] = [];
     for (const projection of this.ledger.listProjections(RUN_BY_TASK_PROJECTION)) {
@@ -577,6 +744,13 @@ export class DeterministicStubRunService {
             title: payload.nodeId ?? 'Workflow step completed',
             detail: `${payload.uses ?? 'step'} attempt ${String(payload.attempt ?? 1)} produced a durable stub receipt.`,
           });
+        case 'ImplementationPlanAttached':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'agent',
+            title: 'Implementation plan attached',
+            detail: `Planning attempt ${String(payload.attempt ?? 1)} is now the immutable input for execution.`,
+          });
         case 'WaitOpened':
           return OperatorActivityEntrySchema.parse({
             ...common,
@@ -612,6 +786,13 @@ export class DeterministicStubRunService {
             source: 'kernel',
             title: 'Plan review not required',
             detail: 'Immutable run settings allow execution to continue after plan validation.',
+          });
+        case 'ImplementationPlanRevisionReady':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'planner',
+            title: `Implementation plan revised · attempt ${String(payload.attempt ?? '?')}`,
+            detail: 'The new typed plan is persisted; execution will reattach it before review.',
           });
         case 'RunCompleted':
           return OperatorActivityEntrySchema.parse({
@@ -689,6 +870,8 @@ export class DeterministicStubRunService {
         const attempt =
           run.effects.filter((effect) => effect.nodeId === operation.nodeId).length + 1;
         const effectKey = `${run.runId}:${operation.nodeId}:attempt-${String(attempt)}`;
+        const planArtifactId =
+          operation.uses === 'task.analyze@1' ? run.implementationPlan?.artifactId : undefined;
         const next = RunProjectionSchema.parse({
           ...run,
           updatedAt: now,
@@ -702,17 +885,19 @@ export class DeterministicStubRunService {
               uses: operation.uses,
               receiptId: `receipt:${effectKey}`,
               completedAt: now,
+              ...(planArtifactId === undefined ? {} : { artifactId: planArtifactId }),
             },
           ],
         });
         return this.persist(
           next,
-          'StepStubbed',
+          planArtifactId === undefined ? 'StepStubbed' : 'ImplementationPlanAttached',
           {
             taskReference: run.taskReference,
             nodeId: operation.nodeId,
             uses: operation.uses,
             attempt,
+            ...(planArtifactId === undefined ? {} : { artifactId: planArtifactId }),
           },
           { kind: 'guard', lease: run.lease },
         );

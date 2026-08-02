@@ -6,3 +6,4 @@ export const providersModuleBoundary = {
 export * from './codex-cli-analyzer.js';
 export * from './command-runner.js';
 export * from './contracts.js';
+export * from './implementation-planner.js';

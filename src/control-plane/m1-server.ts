@@ -8,7 +8,12 @@ import {
   JiraServerClient,
   loadJiraConfiguration,
 } from '../integrations/index.js';
-import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
+import {
+  CodexCliImplementationPlanner,
+  CodexCliWorkflowAnalyzer,
+  DeterministicImplementationPlanner,
+  nodeCommandRunner,
+} from '../providers/index.js';
 import {
   BitbucketRepositoryClient,
   createManagedRepositoryStore,
@@ -19,6 +24,7 @@ import {
 import { systemClock } from '../shared/clock.js';
 import { DeterministicStubRunService, DurableStubScheduler } from '../runner/index.js';
 import { buildM1Api } from './m1-api.js';
+import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
 
@@ -67,24 +73,31 @@ export const startM1Server = async (): Promise<void> => {
     new JiraServerClient(loadJiraConfiguration()),
     { repositoryCatalog },
   );
-  const workflowAnalyzer =
-    process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic'
-      ? undefined
-      : new CodexCliWorkflowAnalyzer(nodeCommandRunner);
-  const workflowGenerator = new CodexWorkflowGenerator(
-    service,
-    new WorkflowGenerationSubjectSource(
-      resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
-      jiraIssueService,
-    ),
-    workflowAnalyzer,
+  const deterministicProviders = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
+  const workflowAnalyzer = deterministicProviders
+    ? undefined
+    : new CodexCliWorkflowAnalyzer(nodeCommandRunner);
+  const subjects = new WorkflowGenerationSubjectSource(
+    resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
+    jiraIssueService,
   );
+  const workflowGenerator = new CodexWorkflowGenerator(service, subjects, workflowAnalyzer);
+  const implementationPlanning = createImplementationPlanningCoordinator({
+    ledger: ledger.repository,
+    clock: systemClock,
+    workflows: service,
+    subjects,
+    planner: deterministicProviders
+      ? new DeterministicImplementationPlanner()
+      : new CodexCliImplementationPlanner(nodeCommandRunner),
+  });
   const cockpitDirectory = resolve('dist/cockpit');
   const api = buildM1Api({
     service,
     jiraIssueService,
     logger: true,
     workflowGenerator,
+    implementationPlanning,
     runService,
     scheduler,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),

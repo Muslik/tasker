@@ -10,8 +10,9 @@ incremental M2 slice, not the complete M2 milestone.
 ## Operator path
 
 1. Generate a valid workflow as before.
-2. Choose whether **Review plan** is enabled, then press **Test workflow** in the task
-   header. This never starts a real provider or repository operation.
+2. Choose **Auto plan**, **Fast plan**, or **Ralplan**, choose whether **Review plan**
+   is enabled, then press **Test workflow**. Planning invokes the configured read-only
+   provider; later execution remains stubbed and no repository mutation occurs.
 3. The task becomes `queued`, then `running` when scheduler capacity is available.
 4. Every deterministic stub step appends a ledger event and a unique effect receipt.
 5. Every graph reaches `task.analyze@1` and then the `plan.approved@1` boundary. With
@@ -26,8 +27,9 @@ The normal HTTP path is:
 
 - `POST /api/workflows/:taskReference/start` — durably enqueue the one current run;
   its JSON body is
-  `{ "settings": { "planApproval": "required" | "automatic" } }` and defaults to
-  `required` for old clients;
+  `{ "settings": { "planApproval": "required" | "automatic", "planningStrategy":
+  "auto" | "fast" | "ralplan" } }`; omitting the entire body uses `required` and
+  `auto`;
 - `GET /api/workflows/:taskReference/run` — inspect its durable projection;
 - `POST /api/workflows/:taskReference/plan-review` — approve the current plan gate or
   request a new planning attempt with operator guidance;
@@ -67,7 +69,7 @@ that graph and stores it in a separate run projection together with:
 - per-node runtime states;
 - deterministic effect keys and stub receipts;
 - immutable plan-revision requests and their operator-guidance artifact IDs;
-- immutable run settings, currently `planApproval: required | automatic`;
+- immutable run settings: `planApproval` and `planningStrategy`;
 - the current wait, including wait kind and slot policy;
 - start, update, and completion timestamps.
 
@@ -121,11 +123,10 @@ state. At that gate:
 - after attempt `N + 1`, a new wait cycle opens at the same plan-review gate, so the
   operator can review again without restarting the task.
 
-The current executor still produces a deterministic planning stub receipt. This slice
-proves the operator interaction, lineage, replay, and restart contracts. Materializing
-the guidance into a real provider-generated typed `ImplementationPlan` is the next
-provider-executor slice. A generic blocking-question wait is also still pending; when
-implemented it will pause in both plan-approval modes.
+The planning node now attaches a real provider-generated typed `ImplementationPlan`;
+see [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md). A generic
+blocking-question answer/resume path is still pending; when implemented it will pause
+in both plan-approval modes.
 
 ## Wait and resume
 
@@ -165,7 +166,7 @@ proves fence `1` cannot write after fence `2` takes ownership.
 
 Verification at delivery:
 
-- 120 Vitest tests across 28 files;
+- 126 Vitest tests across 30 files;
 - two dedicated restart/no-duplicate scenarios, including scheduler ownership change;
 - capacity `1`, capacity `2`, and stale-fence scheduler scenarios;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;
@@ -183,5 +184,5 @@ Verification at delivery:
 - generalized mid-execution intervention beyond the implemented plan-review correction;
 - `workflow_change_required` as an immutable linked continuation;
 - manual takeover, write freeze, reconciliation, and handoff packet;
-- time/cost aggregation, attempt transcripts, and debug bundle controls;
+- hypothetical API-dollar rate cards, full attempt transcripts, and debug bundle controls;
 - projection rebuild from events and the complete kill-injection matrix.

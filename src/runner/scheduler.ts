@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { LedgerRepository } from '../ledger/repository.js';
+import type { ImplementationPlanLink } from '../planning/implementation-plan.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { DEFAULT_RUN_SETTINGS, type RunProjection, type RunSettings } from './contracts.js';
@@ -60,8 +61,9 @@ export class DurableStubScheduler {
   public enqueue(
     taskReference: string,
     settings: RunSettings = DEFAULT_RUN_SETTINGS,
+    implementationPlan: ImplementationPlanLink | null = null,
   ): Outcome<RunProjection, StubSchedulerError> {
-    const result = this.runner.enqueue(taskReference, settings);
+    const result = this.runner.enqueue(taskReference, settings, implementationPlan);
     return result.ok ? result : err({ kind: 'runner', error: result.error });
   }
 

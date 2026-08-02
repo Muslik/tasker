@@ -1,17 +1,5 @@
-import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
-import {
-  access,
-  chmod,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { z } from 'zod';
@@ -25,42 +13,13 @@ import {
 } from '../planning/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { CommandRunner } from './command-runner.js';
+import {
+  parseCodexStream,
+  prepareIsolatedCodexHome,
+  providerFailureMessage,
+  sha256,
+} from './codex-cli-support.js';
 import { WorkflowAnalyzerReceiptSchema, type WorkflowAnalyzerReceipt } from './contracts.js';
-
-const TokenUsageSchema = z
-  .object({
-    input_tokens: z.number().int().nonnegative(),
-    cached_input_tokens: z.number().int().nonnegative(),
-    output_tokens: z.number().int().nonnegative(),
-    reasoning_output_tokens: z.number().int().nonnegative().optional(),
-  })
-  .loose();
-
-const ThreadStartedSchema = z
-  .object({
-    type: z.literal('thread.started'),
-    thread_id: z.string().min(1),
-  })
-  .loose();
-
-const AgentMessageCompletedSchema = z
-  .object({
-    type: z.literal('item.completed'),
-    item: z
-      .object({
-        type: z.literal('agent_message'),
-        text: z.string().min(1),
-      })
-      .loose(),
-  })
-  .loose();
-
-const TurnCompletedSchema = z
-  .object({
-    type: z.literal('turn.completed'),
-    usage: TokenUsageSchema,
-  })
-  .loose();
 
 const WorkflowAnalyzerProviderOutputSchema = z
   .object({
@@ -104,14 +63,6 @@ export type CodexWorkflowAnalyzerFailure =
       readonly kind: 'invalid_analyzer_output';
       readonly issues: readonly string[];
     };
-
-interface ParsedCodexStream {
-  readonly sessionId: string;
-  readonly finalMessage: string;
-  readonly usage: z.infer<typeof TokenUsageSchema>;
-}
-
-const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 interface RepositoryEvidence {
   readonly files: readonly string[];
@@ -181,53 +132,6 @@ const collectRepositoryEvidence = async (repositoryPath: string): Promise<Reposi
   return { files, workflowDocuments };
 };
 
-const copySubscriptionAuth = async (targetCodexHome: string): Promise<void> => {
-  const sourceCodexHome = process.env.CODEX_HOME ?? join(homedir(), '.codex');
-  const sourceAuth = join(sourceCodexHome, 'auth.json');
-
-  try {
-    await access(sourceAuth, constants.R_OK);
-  } catch {
-    return;
-  }
-
-  await mkdir(targetCodexHome, { recursive: true });
-  const targetAuth = join(targetCodexHome, 'auth.json');
-  await copyFile(sourceAuth, targetAuth);
-  await chmod(targetAuth, 0o600);
-};
-
-const providerFailureMessage = (stdout: string): string => {
-  for (const line of stdout.split(/\r?\n/u).reverse()) {
-    try {
-      const event = JSON.parse(line) as unknown;
-      if (
-        typeof event === 'object' &&
-        event !== null &&
-        'message' in event &&
-        typeof event.message === 'string'
-      ) {
-        return event.message;
-      }
-      if (
-        typeof event === 'object' &&
-        event !== null &&
-        'error' in event &&
-        typeof event.error === 'object' &&
-        event.error !== null &&
-        'message' in event.error &&
-        typeof event.error.message === 'string'
-      ) {
-        return event.error.message;
-      }
-    } catch {
-      // A failed provider may mix non-JSON diagnostics into stdout; continue to earlier lines.
-    }
-  }
-
-  return 'Codex CLI exited without a structured provider error';
-};
-
 const analyzerPrompt = (
   request: CodexWorkflowAnalyzerRequest,
   repositoryEvidence: RepositoryEvidence,
@@ -272,52 +176,6 @@ repositoryEvidence:
 ${JSON.stringify(repositoryEvidence, null, 2)}
 `.trim();
 
-const parseCodexStream = (
-  stdout: string,
-): Outcome<
-  ParsedCodexStream,
-  Extract<CodexWorkflowAnalyzerFailure, { kind: 'invalid_event_stream' }>
-> => {
-  let sessionId: string | null = null;
-  let finalMessage: string | null = null;
-  let usage: z.infer<typeof TokenUsageSchema> | null = null;
-
-  for (const line of stdout.split(/\r?\n/u).filter((entry) => entry.trim().length > 0)) {
-    let event: unknown;
-    try {
-      event = JSON.parse(line) as unknown;
-    } catch {
-      return err({ kind: 'invalid_event_stream', message: 'Codex emitted non-JSON stdout' });
-    }
-
-    const thread = ThreadStartedSchema.safeParse(event);
-    if (thread.success) {
-      sessionId = thread.data.thread_id;
-      continue;
-    }
-
-    const message = AgentMessageCompletedSchema.safeParse(event);
-    if (message.success) {
-      finalMessage = message.data.item.text;
-      continue;
-    }
-
-    const completed = TurnCompletedSchema.safeParse(event);
-    if (completed.success) {
-      usage = completed.data.usage;
-    }
-  }
-
-  if (sessionId === null || finalMessage === null || usage === null) {
-    return err({
-      kind: 'invalid_event_stream',
-      message: 'Codex stream did not contain thread, final message, and usage evidence',
-    });
-  }
-
-  return ok({ sessionId, finalMessage, usage });
-};
-
 export class CodexCliWorkflowAnalyzer {
   public constructor(
     private readonly runner: CommandRunner,
@@ -358,7 +216,7 @@ export class CodexCliWorkflowAnalyzer {
     const serviceTier = this.options.serviceTier ?? 'fast';
 
     try {
-      await copySubscriptionAuth(isolatedCodexHome);
+      await prepareIsolatedCodexHome(isolatedCodexHome);
       await mkdir(isolatedWorkspace, { recursive: true });
       await writeFile(
         schemaPath,

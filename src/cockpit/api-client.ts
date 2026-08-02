@@ -13,6 +13,10 @@ import type {
   FixtureSummary,
   WorkflowResponse,
 } from '../control-plane/m1-contracts.js';
+import {
+  ImplementationPlanningRecordSchema,
+  type ImplementationPlanningRecord,
+} from '../control-plane/implementation-planning.js';
 import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
 import {
   RepositoryCatalogResponseSchema,
@@ -29,6 +33,10 @@ import {
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
+  | { readonly status: 'missing' };
+
+type ImplementationPlanLookup =
+  | { readonly status: 'found'; readonly record: ImplementationPlanningRecord }
   | { readonly status: 'missing' };
 
 type JsonResponse = {
@@ -152,6 +160,19 @@ export const loadWorkflow = async (fixtureId: string): Promise<WorkflowLookup> =
   }
 
   return { status: 'found', response: parsed.data };
+};
+
+export const loadImplementationPlan = async (
+  fixtureId: string,
+): Promise<ImplementationPlanLookup> => {
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/implementation-plan`,
+  );
+  if (result.response.status === 404) return { status: 'missing' };
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = ImplementationPlanningRecordSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Implementation plan does not match the cockpit contract');
+  return { status: 'found', record: parsed.data };
 };
 
 export const generateWorkflow = async (fixtureId: string): Promise<WorkflowResponse> => {

@@ -204,10 +204,15 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
+  await expect(page.getByRole('combobox', { name: 'Planning strategy' })).toHaveValue('auto');
   await expect(page.getByRole('checkbox', { name: 'Review plan before execution' })).toBeChecked();
   await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
 
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
+  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 1');
+  await expect(page.getByTestId('implementation-plan')).toContainText(
+    'Implement the requested task',
+  );
   await expect(page.getByTestId('plan-review-controls')).toBeVisible();
   await page.getByRole('textbox', { name: 'Plan review guidance' }).fill(guidance);
   await page.getByRole('button', { name: 'Request changes' }).click();
@@ -215,12 +220,14 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
   await expect(page.getByTestId('plan-review-controls')).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Plan review guidance' })).toHaveValue('');
+  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
+  await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
     'Plan changes requested · attempt 2',
   );
   await expect(page.getByTestId('task-activity-timeline')).toContainText(guidance);
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'task.analyze@1 attempt 2',
+    'Implementation plan attached',
   );
 });
 

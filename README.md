@@ -3,13 +3,15 @@
 Personal, local-first task-adaptive agent harness. The canonical design and delivery
 status are under [`docs/codex`](docs/codex/README.md).
 
-M0, M1, and the first M2 execution slice are implemented. A local fixture task now becomes an untrusted proposal,
+M0, M1, and the first M2 execution slices are implemented. A local fixture task now becomes an untrusted proposal,
 then a deterministic validated graph with a stable hash, persisted projections, a
 Fastify API, a CLI tree, and a React operator cockpit. An accepted graph can execute
 deterministic local stub nodes through a bounded queue, survive scheduler restart, and
 stop at durable plan-review and code-review waits. At plan review, the operator can
-approve or request changes; guidance is persisted as a new immutable planning attempt.
-It intentionally cannot execute real provider nodes or mutate remote systems yet.
+approve or request changes; guidance is persisted as a new immutable provider planning
+attempt. Planning uses subscription Codex CLI with operator-selectable `auto`, `fast`,
+or `ralplan` strategy. Later workflow nodes remain deterministic stubs, and Tasker
+cannot mutate repositories or remote systems yet.
 
 The cockpit is an operator console: task/status queue on the left, persisted realtime
 activity and workflow rationale in the center, and the selected workflow tree on the

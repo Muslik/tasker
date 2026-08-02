@@ -38,7 +38,7 @@ describe('M2 durable stub execution', () => {
     expect(generated.ok).toBe(true);
     const interrupted = firstRunner.start(
       'avia-13236-short-bug',
-      { planApproval: 'automatic' },
+      { planApproval: 'automatic', planningStrategy: 'auto' },
       { maxNodeTransitions: 3 },
     );
     expect(interrupted).toMatchObject({
@@ -59,6 +59,7 @@ describe('M2 durable stub execution', () => {
     );
     const resumed = restartedRunner.start('avia-13236-short-bug', {
       planApproval: 'automatic',
+      planningStrategy: 'auto',
     });
 
     expect(resumed).toMatchObject({
@@ -80,6 +81,7 @@ describe('M2 durable stub execution', () => {
 
     const duplicateStart = restartedRunner.start('avia-13236-short-bug', {
       planApproval: 'automatic',
+      planningStrategy: 'auto',
     });
     expect(duplicateStart).toEqual(resumed);
     expect(restartedRunner.listEvents('avia-13236-short-bug')).toHaveLength(

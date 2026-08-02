@@ -27,7 +27,7 @@ export interface WorkflowAnalyzer {
   ): Promise<Outcome<CodexWorkflowAnalyzerSuccess, CodexWorkflowAnalyzerFailure>>;
 }
 
-interface WorkflowGenerationSubject {
+export interface WorkflowGenerationSubject {
   readonly repositoryPath: string;
   readonly task: TaskFixture;
   readonly taskSnapshot: JsonValue;

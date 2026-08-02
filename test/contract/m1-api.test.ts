@@ -6,9 +6,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildM1Api,
   CodexWorkflowGenerator,
+  createImplementationPlanningCoordinator,
   createM1WorkflowService,
   DeterministicStubRunService,
   FixtureListResponseSchema,
+  ImplementationPlanningRecordSchema,
   OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
@@ -19,6 +21,7 @@ import { JiraIssueStateSchema } from '../../src/integrations/jira/contracts.js';
 import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { RepositoryCatalogResponseSchema } from '../../src/repositories/contracts.js';
+import { DeterministicImplementationPlanner } from '../../src/providers/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
@@ -26,7 +29,11 @@ import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
-const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
+const setup = (
+  useWorkflowGenerator = false,
+  jiraPort?: JiraIssuePort,
+  useImplementationPlanning = false,
+) => {
   const directory = mkdtempSync(join(tmpdir(), 'tasker-m1-api-'));
   const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
   const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
@@ -40,17 +47,23 @@ const setup = (useWorkflowGenerator = false, jiraPort?: JiraIssuePort) => {
           repositoryCatalog: makeRepositoryCatalog(),
         });
   const generate = vi.fn((fixtureId: string) => Promise.resolve(service.generate(fixtureId)));
+  const subjects = new WorkflowGenerationSubjectSource(directory, jiraIssueService);
   const jiraWorkflowGenerator =
-    jiraIssueService === undefined
-      ? undefined
-      : new CodexWorkflowGenerator(
-          service,
-          new WorkflowGenerationSubjectSource(directory, jiraIssueService),
-        );
+    jiraIssueService === undefined ? undefined : new CodexWorkflowGenerator(service, subjects);
+  const implementationPlanning = useImplementationPlanning
+    ? createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects,
+        planner: new DeterministicImplementationPlanner(),
+      })
+    : undefined;
   return {
     api: buildM1Api({
       service,
       runService,
+      ...(implementationPlanning === undefined ? {} : { implementationPlanning }),
       ...(jiraIssueService === undefined ? {} : { jiraIssueService }),
       ...(useWorkflowGenerator
         ? { workflowGenerator: { generate } }
@@ -255,7 +268,7 @@ describe('M1 HTTP API', () => {
     const startedResponse = await api.inject({
       method: 'POST',
       url: '/api/workflows/avia-13236-short-bug/start',
-      payload: { settings: { planApproval: 'automatic' } },
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'auto' } },
     });
     const taskResponse = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
     const activityResponse = await api.inject({
@@ -289,6 +302,100 @@ describe('M1 HTTP API', () => {
     expect(WorkflowResponseSchema.parse(workflowResponse.json()).view.workflow.tree?.status).toBe(
       'waiting',
     );
+
+    await api.close();
+  });
+
+  it('plans through the selected provider before the run and persists plan revisions', async () => {
+    const { api } = setup(false, undefined, true);
+    const fixtureId = 'avia-12536-feature-review';
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/generate`,
+    });
+
+    const startedResponse = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'required', planningStrategy: 'fast' } },
+    });
+    const firstPlanResponse = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${fixtureId}/implementation-plan`,
+    });
+    const firstPlan = ImplementationPlanningRecordSchema.parse(firstPlanResponse.json());
+
+    expect(startedResponse.statusCode).toBe(200);
+    expect(startedResponse.json()).toMatchObject({
+      status: 'waiting',
+      settings: { planApproval: 'required', planningStrategy: 'fast' },
+      implementationPlan: {
+        attempt: 1,
+        requestedStrategy: 'fast',
+        selectedStrategy: 'fast',
+      },
+      wait: { waitKind: 'plan.approved@1' },
+    });
+    expect(firstPlan).toMatchObject({
+      status: 'ready',
+      attempt: 1,
+      receipt: { provider: 'deterministic', strategy: 'fast' },
+      decision: { status: 'ready', plan: { title: 'Implement the requested task' } },
+    });
+
+    const guidance = 'Add a rollback check before implementation.';
+    const reviewResponse = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/plan-review`,
+      payload: { decision: 'request_changes', guidance },
+    });
+    const revisedPlanResponse = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${fixtureId}/implementation-plan`,
+    });
+    const revisedPlan = ImplementationPlanningRecordSchema.parse(revisedPlanResponse.json());
+
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(reviewResponse.json()).toMatchObject({
+      status: 'waiting',
+      implementationPlan: { attempt: 2, selectedStrategy: 'fast' },
+      wait: { waitKind: 'plan.approved@1' },
+    });
+    expect(revisedPlan).toMatchObject({
+      status: 'ready',
+      attempt: 2,
+      operatorGuidance: guidance,
+      decision: {
+        status: 'ready',
+        plan: {
+          title: 'Revise the implementation plan',
+        },
+      },
+    });
+    if (revisedPlan.status !== 'ready') throw new Error('Expected the revised plan to be ready');
+    expect(revisedPlan.decision.plan.summary).toContain(guidance);
+
+    const crossRepositoryFixture = 'avia-14001-translation-component';
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${crossRepositoryFixture}/generate`,
+    });
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${crossRepositoryFixture}/start`,
+      payload: { settings: { planApproval: 'required', planningStrategy: 'auto' } },
+    });
+    const automaticPlanResponse = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${crossRepositoryFixture}/implementation-plan`,
+    });
+    const automaticPlan = ImplementationPlanningRecordSchema.parse(automaticPlanResponse.json());
+    expect(automaticPlan).toMatchObject({
+      status: 'ready',
+      requestedStrategy: 'auto',
+      selectedStrategy: 'ralplan',
+    });
+    expect(automaticPlan.selectionReason).toContain('repository/publication boundaries');
 
     await api.close();
   });
@@ -362,13 +469,13 @@ describe('M1 HTTP API', () => {
     await api.inject({
       method: 'POST',
       url: '/api/workflows/avia-13236-short-bug/start',
-      payload: { settings: { planApproval: 'required' } },
+      payload: { settings: { planApproval: 'required', planningStrategy: 'auto' } },
     });
 
     const conflictingStart = await api.inject({
       method: 'POST',
       url: '/api/workflows/avia-13236-short-bug/start',
-      payload: { settings: { planApproval: 'automatic' } },
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'auto' } },
     });
     const persistedRun = await api.inject({
       method: 'GET',

@@ -363,8 +363,10 @@ an immutable per-run setting either opens that wait or records an automatic cont
 after the same planning node, and a conflicting duplicate start is rejected. Another
 run reaches a slot-releasing code-review wait; API/UI
 runtime projections update from ledger events; and a forced stop after two committed
-steps resumes from the same cursor. The full gate remains open for heartbeat/outbox
-dispatch, a real typed plan artifact, blocking clarification, provider capacity pools,
+steps resumes from the same cursor. A real typed implementation plan now runs through
+subscription Codex CLI (or an explicit deterministic test provider), persists its
+strategy/provenance/token receipt, and survives operator-guided attempt revision. The
+full gate remains open for heartbeat/outbox dispatch, blocking clarification, provider capacity pools,
 quota behavior, generalized intervention, workflow continuation, takeover, projection
 rebuild, and the complete kill matrix.
 

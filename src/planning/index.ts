@@ -2,6 +2,7 @@ export * from './contracts.js';
 export * from './analyzer-context.js';
 export * from './diff.js';
 export * from './fixtures.js';
+export * from './implementation-plan.js';
 export * from './planner.js';
 export * from './presentation.js';
 export * from './project-policies.js';
