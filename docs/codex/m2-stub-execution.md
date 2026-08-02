@@ -9,7 +9,8 @@ This is the first M2 slice, not the complete M2 milestone.
 ## Operator path
 
 1. Generate a valid workflow as before.
-2. Press **Start** in the task header.
+2. Press **Test workflow** in the task header. This never starts a real provider or
+   repository operation.
 3. The task becomes `running` while the run is executable.
 4. Every deterministic stub step appends a ledger event and a unique effect receipt.
 5. A `code_review@1` node changes the task to `code_review`, marks the workflow rail
@@ -97,7 +98,7 @@ Verification at delivery:
 - 110 Vitest tests across 26 files;
 - one dedicated kill/restart/no-duplicate recovery scenario;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;
-- 8 Playwright operator scenarios, including **Start -> code review wait**;
+- 8 Playwright operator scenarios, including **Test workflow -> code review wait**;
 - formatting, server/cockpit typecheck, lint, and production builds green.
 
 ## Still required for the full M2 gate
@@ -111,4 +112,3 @@ Verification at delivery:
 - manual takeover, write freeze, reconciliation, and handoff packet;
 - time/cost aggregation, attempt transcripts, and debug bundle controls;
 - projection rebuild from events and the complete kill-injection matrix.
-

@@ -441,9 +441,9 @@ wait, intervention, takeover, replay, and slot semantics.
 
 ### Delivered vertical slice (2026-08-02)
 
-The first executable path is green: operator **Start**, immutable graph-to-operation
-plan, per-node transactions and stub receipts, restart-safe cursor, durable wait/signal,
-SSE activity, queue/runtime tree projections, and stop at the code-review wait. A
+The first executable path is green: operator **Test workflow**, immutable
+graph-to-operation plan, per-node transactions and stub receipts, restart-safe cursor,
+durable wait/signal, SSE activity, queue/runtime tree projections, and stop at the code-review wait. A
 kill/restart test proves that two committed steps are not repeated after reopening the
 database. See [`m2-stub-execution.md`](m2-stub-execution.md).
 

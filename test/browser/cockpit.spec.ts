@@ -153,7 +153,7 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   await expect(page.getByRole('link', { name: 'Download graph JSON' })).toBeVisible();
 });
 
-test('a planned workflow runs to the durable code-review wait', async ({ page }) => {
+test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
   const tasks = await loadTasks(page);
   const candidate = requireTask(
     tasks.tasks.find((task) => task.status === 'planned') ?? pickBacklogTask(tasks.tasks),
@@ -165,7 +165,7 @@ test('a planned workflow runs to the durable code-review wait', async ({ page })
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
-  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
 
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review');
   await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');

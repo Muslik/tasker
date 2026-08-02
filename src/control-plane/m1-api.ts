@@ -225,7 +225,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
                 attention: workflow.value.status === 'ready' ? 'none' : 'operator',
                 currentStage:
                   workflow.value.status === 'ready'
-                    ? 'Workflow ready · ready to start'
+                    ? 'Workflow ready · ready to test on stubs'
                     : 'Workflow validation failed',
                 updatedAt: workflow.value.view.persistedAt,
               }),

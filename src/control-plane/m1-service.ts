@@ -426,7 +426,7 @@ export class M1WorkflowService {
           view === null
             ? 'Awaiting workflow generation'
             : view.workflow.status === 'valid'
-              ? 'Workflow ready · ready to start'
+              ? 'Workflow ready · ready to test on stubs'
               : 'Workflow validation failed',
         updatedAt: view?.persistedAt ?? null,
       });

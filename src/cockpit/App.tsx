@@ -453,7 +453,7 @@ const SelectedTaskHeader = ({
               ) : (
                 <Play data-icon="inline-start" />
               )}
-              {starting ? 'Starting…' : 'Start'}
+              {starting ? 'Testing…' : 'Test workflow'}
             </Button>
           ) : null}
           {task.origin.kind === 'jira' ? (
