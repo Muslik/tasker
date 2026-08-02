@@ -167,7 +167,7 @@ proves fence `1` cannot write after fence `2` takes ownership.
 
 Verification at delivery:
 
-- 137 Vitest tests across 31 files;
+- 144 Vitest tests across 31 files;
 - two dedicated restart/no-duplicate scenarios, including scheduler ownership change;
 - capacity `1`, capacity `2`, and stale-fence scheduler scenarios;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;
@@ -183,7 +183,7 @@ Verification at delivery:
 - duplicate signal classification and correlation policies;
 - quota waits and proof that another queued run reuses the slot;
 - generalized mid-execution intervention beyond the implemented plan-review correction;
-- linked child-run execution after the delivered planning-origin continuation review;
+- runtime-originated workflow continuation from a real reproduction or implementation outcome;
 - manual takeover, write freeze, reconciliation, and handoff packet;
 - hypothetical API-dollar rate cards, full attempt transcripts, and debug bundle controls;
 - projection rebuild from events and the complete kill-injection matrix.

@@ -21,7 +21,7 @@ import { ok } from '../../src/shared/outcome.js';
 import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 describe('workflow continuation recovery', () => {
-  it('restores the parent wait and revised immutable candidate after restart', async () => {
+  it('restores the parent, revised candidate, and linked child execution after restart', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-continuation-recovery-'));
     const filename = join(directory, 'ledger.sqlite');
     const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
@@ -125,6 +125,7 @@ describe('workflow continuation recovery', () => {
     firstLedger.close();
 
     const restartedLedger = openSqliteLedger({ filename, clock });
+    let restartedLedgerClosed = false;
     try {
       const restartedWorkflows = createM1WorkflowService(restartedLedger.repository, clock);
       const restartedRunner = new DeterministicStubRunService(
@@ -174,8 +175,83 @@ describe('workflow continuation recovery', () => {
         ok: true,
         value: { view: { workflow: { graphHash: parentGraphHash } } },
       });
-    } finally {
+
+      const accepted = restartedContinuation.review('avia-13236-short-bug', {
+        decision: 'accept',
+        continuationId: reproposed.value.continuationId,
+      });
+      if (!accepted.ok || accepted.value.status !== 'accepted') {
+        throw new Error('Expected the continuation to be accepted');
+      }
+      const parentAccepted = restartedRunner.acceptWorkflowContinuation(
+        'avia-13236-short-bug',
+        accepted.value.continuationId,
+      );
+      if (!parentAccepted.ok) throw new Error('Expected the parent acceptance wait');
+      const child = restartedRunner.enqueueWorkflowContinuation(
+        'avia-13236-short-bug',
+        accepted.value.continuationId,
+        accepted.value.candidate.taskReference,
+      );
+      if (!child.ok) throw new Error('Expected a linked child run');
+      const linked = restartedContinuation.linkExecution('avia-13236-short-bug', {
+        taskReference: child.value.taskReference,
+        runId: child.value.runId,
+      });
+      if (!linked.ok) throw new Error('Expected durable execution linkage');
+      const started = restartedRunner.claim(child.value.taskReference, 'recovery-runner');
+      if (!started.ok || started.value.status !== 'waiting') {
+        throw new Error('Expected the linked run to reach its durable wait');
+      }
+
       restartedLedger.close();
+      restartedLedgerClosed = true;
+      const executionLedger = openSqliteLedger({ filename, clock });
+      try {
+        const executionWorkflows = createM1WorkflowService(executionLedger.repository, clock);
+        const executionRunner = new DeterministicStubRunService(
+          executionLedger.repository,
+          executionWorkflows,
+          clock,
+        );
+        const executionContinuation = createWorkflowContinuationCoordinator({
+          ledger: executionLedger.repository,
+          clock,
+          workflows: executionWorkflows,
+          subjects,
+          repositories: makeRepositoryCatalog(),
+        });
+
+        expect(executionContinuation.read('avia-13236-short-bug')).toMatchObject({
+          ok: true,
+          value: {
+            status: 'linked',
+            child: { taskReference: candidate.taskReference },
+          },
+        });
+        expect(executionRunner.read('avia-13236-short-bug')).toMatchObject({
+          ok: true,
+          value: {
+            status: 'waiting',
+            wait: { waitKind: 'linked_continuation_running' },
+          },
+        });
+        expect(executionRunner.read(candidate.taskReference)).toMatchObject({
+          ok: true,
+          value: {
+            status: 'waiting',
+            lineage: {
+              kind: 'workflow_continuation',
+              parentTaskReference: 'avia-13236-short-bug',
+              parentRunId: 'run:avia-13236-short-bug',
+            },
+          },
+        });
+      } finally {
+        executionLedger.close();
+      }
+    } finally {
+      if (!restartedLedgerClosed) restartedLedger.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

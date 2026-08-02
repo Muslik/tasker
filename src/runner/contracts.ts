@@ -123,6 +123,18 @@ export const RunLeaseSchema = z
   })
   .strict();
 
+export const RunLineageSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('root') }).strict(),
+  z
+    .object({
+      kind: z.literal('workflow_continuation'),
+      parentTaskReference: z.string().min(1),
+      parentRunId: z.string().min(1),
+      continuationId: z.string().min(1),
+    })
+    .strict(),
+]);
+
 const runBaseShape = {
   schemaVersion: z.literal(RUN_VIEW_SCHEMA_VERSION),
   runId: z.string().min(1),
@@ -139,6 +151,7 @@ const runBaseShape = {
   planRevisionRequests: z.array(PlanRevisionRequestSchema).default([]),
   settings: RunSettingsSchema.default(DEFAULT_RUN_SETTINGS),
   implementationPlan: ImplementationPlanLinkSchema.nullable().default(null),
+  lineage: RunLineageSchema.default({ kind: 'root' }),
 };
 
 export const RunProjectionSchema = z.discriminatedUnion('status', [
@@ -191,3 +204,4 @@ export type ExecutingRunProjection = Extract<RunProjection, { readonly status: '
 export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;
 export type RunSettings = z.infer<typeof RunSettingsSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
+export type RunLineage = z.infer<typeof RunLineageSchema>;

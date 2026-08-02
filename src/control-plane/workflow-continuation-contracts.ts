@@ -48,6 +48,13 @@ const WorkflowContinuationCandidateSchema = z
   })
   .strict();
 
+const WorkflowContinuationChildSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    runId: z.string().min(1),
+  })
+  .strict();
+
 const WorkflowContinuationRecordBaseSchema = z.object({
   schemaVersion: z.literal(1),
   continuationId: z.string().min(1),
@@ -67,6 +74,13 @@ export const WorkflowContinuationRecordSchema = z.discriminatedUnion('status', [
     status: z.literal('accepted'),
     candidate: WorkflowContinuationCandidateSchema,
     reviewedAt: z.iso.datetime(),
+  }).strict(),
+  WorkflowContinuationRecordBaseSchema.extend({
+    status: z.literal('linked'),
+    candidate: WorkflowContinuationCandidateSchema,
+    reviewedAt: z.iso.datetime(),
+    linkedAt: z.iso.datetime(),
+    child: WorkflowContinuationChildSchema,
   }).strict(),
   WorkflowContinuationRecordBaseSchema.extend({
     status: z.literal('rejected_by_operator'),

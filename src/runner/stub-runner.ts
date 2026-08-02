@@ -22,6 +22,7 @@ import {
   RunSettingsSchema,
   type ExecutingRunProjection,
   type PlanReviewCommand,
+  type RunLineage,
   type RunNodeStatus,
   type RunOperation,
   type RunProjection,
@@ -46,6 +47,11 @@ const RunEventPayloadSchema = z
     planApproval: z.enum(['required', 'automatic']).optional(),
     planningStrategy: z.enum(['auto', 'fast', 'ralplan']).optional(),
     artifactId: z.string().min(1).optional(),
+    parentTaskReference: z.string().min(1).optional(),
+    parentRunId: z.string().min(1).optional(),
+    continuationId: z.string().min(1).optional(),
+    childTaskReference: z.string().min(1).optional(),
+    childRunId: z.string().min(1).optional(),
   })
   .loose();
 
@@ -60,6 +66,7 @@ export type StubRunError =
   | { readonly kind: 'run_not_at_plan_review'; readonly taskReference: string }
   | { readonly kind: 'run_not_at_planning_clarification'; readonly taskReference: string }
   | { readonly kind: 'run_not_at_workflow_continuation'; readonly taskReference: string }
+  | { readonly kind: 'linked_run_conflict'; readonly taskReference: string }
   | { readonly kind: 'plan_revision_target_not_found'; readonly taskReference: string }
   | { readonly kind: 'projection_corrupt'; readonly projectionId: string }
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict };
@@ -545,7 +552,11 @@ export class DeterministicStubRunService {
     if (!current.ok) return current;
     if (current.value === null) return err({ kind: 'run_not_found', taskReference });
     const run = current.value;
-    if (run.status === 'waiting' && run.wait.waitKind === 'linked_continuation_ready') {
+    if (
+      run.status === 'waiting' &&
+      (run.wait.waitKind === 'linked_continuation_ready' ||
+        run.wait.waitKind === 'linked_continuation_running')
+    ) {
       return ok(run);
     }
     if (run.status !== 'waiting' || run.wait.waitKind !== 'workflow_continuation_review') {
@@ -588,10 +599,111 @@ export class DeterministicStubRunService {
     );
   }
 
+  public enqueueWorkflowContinuation(
+    parentTaskReference: string,
+    continuationId: string,
+    candidateTaskReference: string,
+  ): Outcome<RunProjection, StubRunError> {
+    const parentResult = this.read(parentTaskReference);
+    if (!parentResult.ok) return parentResult;
+    if (parentResult.value === null) {
+      return err({ kind: 'run_not_found', taskReference: parentTaskReference });
+    }
+    const parent = parentResult.value;
+    if (
+      parent.status !== 'waiting' ||
+      (parent.wait.waitKind !== 'linked_continuation_ready' &&
+        parent.wait.waitKind !== 'linked_continuation_running')
+    ) {
+      return err({ kind: 'run_not_at_workflow_continuation', taskReference: parentTaskReference });
+    }
+
+    const existing = this.read(candidateTaskReference);
+    if (!existing.ok) return existing;
+    const expectedLineage = {
+      kind: 'workflow_continuation',
+      parentTaskReference,
+      parentRunId: parent.runId,
+      continuationId,
+    } as const satisfies RunLineage;
+    let child: RunProjection;
+    if (existing.value === null) {
+      const created = this.createQueuedRun(
+        candidateTaskReference,
+        parent.settings,
+        null,
+        expectedLineage,
+      );
+      if (!created.ok) return created;
+      const persisted = this.persist(created.value, 'LinkedRunQueued', {
+        taskReference: candidateTaskReference,
+        parentTaskReference,
+        parentRunId: parent.runId,
+        continuationId,
+        planApproval: parent.settings.planApproval,
+        planningStrategy: parent.settings.planningStrategy,
+      });
+      if (!persisted.ok) return persisted;
+      child = persisted.value;
+    } else {
+      const lineage = existing.value.lineage;
+      if (
+        lineage.kind !== 'workflow_continuation' ||
+        lineage.parentTaskReference !== expectedLineage.parentTaskReference ||
+        lineage.parentRunId !== expectedLineage.parentRunId ||
+        lineage.continuationId !== expectedLineage.continuationId
+      ) {
+        return err({ kind: 'linked_run_conflict', taskReference: candidateTaskReference });
+      }
+      child = existing.value;
+    }
+
+    const attached = this.markWorkflowContinuationRunning(parentTaskReference, child);
+    if (attached.ok) return ok(child);
+    if (attached.error.kind !== 'ledger_conflict') return attached;
+    const refreshedParent = this.read(parentTaskReference);
+    return refreshedParent.ok &&
+      refreshedParent.value?.status === 'waiting' &&
+      refreshedParent.value.wait.waitKind === 'linked_continuation_running'
+      ? ok(child)
+      : attached;
+  }
+
+  public reconcileLinkedContinuations(): Outcome<readonly RunProjection[], StubRunError> {
+    const listed = this.list();
+    if (!listed.ok) return listed;
+    const reconciled: RunProjection[] = [];
+    for (const child of listed.value) {
+      if (child.lineage.kind !== 'workflow_continuation' || child.status !== 'completed') continue;
+      const parentResult = this.read(child.lineage.parentTaskReference);
+      if (!parentResult.ok) return parentResult;
+      const parent = parentResult.value;
+      if (
+        parent === null ||
+        parent.status === 'completed' ||
+        parent.status !== 'waiting' ||
+        parent.wait.waitKind !== 'linked_continuation_running'
+      ) {
+        continue;
+      }
+      const completed = this.completeLinkedParent(parent, child);
+      if (!completed.ok) {
+        if (completed.error.kind !== 'ledger_conflict') return completed;
+        const refreshedParent = this.read(child.lineage.parentTaskReference);
+        if (!refreshedParent.ok) return refreshedParent;
+        if (refreshedParent.value?.status === 'completed') continue;
+        return completed;
+      }
+      reconciled.push(completed.value);
+    }
+    return ok(reconciled);
+  }
+
   private createQueuedRun(
     taskReference: string,
     settings: RunSettings,
     implementationPlan: ImplementationPlanLink | null,
+    lineage: RunLineage = { kind: 'root' },
   ): Outcome<Extract<RunProjection, { readonly status: 'queued' }>, StubRunError> {
     const workflow = this.workflows.read(taskReference);
     if (!workflow.ok || workflow.value === null) {
@@ -626,6 +738,7 @@ export class DeterministicStubRunService {
       planRevisionRequests: [],
       settings,
       implementationPlan,
+      lineage,
       wait: null,
     });
     if (run.status !== 'queued') throw new Error('New run did not parse as queued');
@@ -1094,6 +1207,14 @@ export class DeterministicStubRunService {
                 ? 'The validated plan will continue automatically unless execution needs operator input.'
                 : 'The run will pause for operator review after producing its validated plan.',
           });
+        case 'LinkedRunQueued':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Linked continuation queued',
+            detail:
+              'The accepted workflow continuation has its own durable cursor under this task history.',
+          });
         case 'RunStarted':
           return OperatorActivityEntrySchema.parse({
             ...common,
@@ -1152,6 +1273,21 @@ export class DeterministicStubRunService {
             title: 'Workflow continuation linked',
             detail:
               'The accepted candidate is linked without modifying the parent graph or completed prefix.',
+          });
+        case 'WorkflowContinuationExecutionStarted':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Linked continuation started',
+            detail: `Execution moved to ${payload.childTaskReference ?? 'the accepted continuation'} while the parent prefix remains immutable.`,
+          });
+        case 'LinkedWorkflowContinuationCompleted':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Linked continuation completed',
+            detail:
+              'The child workflow reached its terminal state and resolved the parent join wait.',
           });
         case 'WaitOpened':
           return OperatorActivityEntrySchema.parse({
@@ -1233,7 +1369,134 @@ export class DeterministicStubRunService {
 
   public taskReferenceFor(event: EventRecord): string | null {
     const parsed = RunEventPayloadSchema.safeParse(event.payload);
-    return parsed.success ? parsed.data.taskReference : null;
+    if (!parsed.success) return null;
+    if (parsed.data.parentTaskReference !== undefined) {
+      return parsed.data.parentTaskReference;
+    }
+    const run = this.read(parsed.data.taskReference);
+    return run.ok && run.value?.lineage.kind === 'workflow_continuation'
+      ? run.value.lineage.parentTaskReference
+      : parsed.data.taskReference;
+  }
+
+  private markWorkflowContinuationRunning(
+    parentTaskReference: string,
+    child: RunProjection,
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(parentTaskReference);
+    if (!current.ok) return current;
+    if (current.value === null)
+      return err({ kind: 'run_not_found', taskReference: parentTaskReference });
+    const parent = current.value;
+    if (parent.status === 'waiting' && parent.wait.waitKind === 'linked_continuation_running') {
+      return ok(parent);
+    }
+    if (parent.status !== 'waiting' || parent.wait.waitKind !== 'linked_continuation_ready') {
+      return err({ kind: 'run_not_at_workflow_continuation', taskReference: parentTaskReference });
+    }
+    if (child.lineage.kind !== 'workflow_continuation') {
+      return err({ kind: 'linked_run_conflict', taskReference: child.taskReference });
+    }
+    const now = this.clock.now();
+    const waitId = `${parent.wait.waitId}:running`;
+    const linked = RunProjectionSchema.parse({
+      ...parent,
+      updatedAt: now,
+      wait: {
+        ...parent.wait,
+        waitId,
+        waitKind: 'linked_continuation_running',
+        openedAt: now,
+      },
+    });
+    return this.persist(
+      linked,
+      'WorkflowContinuationExecutionStarted',
+      {
+        taskReference: parentTaskReference,
+        parentTaskReference,
+        parentRunId: parent.runId,
+        continuationId: child.lineage.continuationId,
+        childTaskReference: child.taskReference,
+        childRunId: child.runId,
+        nodeId: parent.wait.nodeId,
+        waitKind: 'linked_continuation_running',
+        slotPolicy: 'release',
+      },
+      undefined,
+      {
+        signal: {
+          signalId: `signal:${parent.wait.waitId}:child-linked`,
+          signalKind: 'workflow_continuation_execution_started',
+          correlationKey: parent.wait.waitId,
+          payload: {
+            parentTaskReference,
+            childTaskReference: child.taskReference,
+            childRunId: child.runId,
+          },
+          status: 'resolved',
+          resolvedWaitKey: parent.wait.waitId,
+        },
+      },
+    );
+  }
+
+  private completeLinkedParent(
+    parent: Extract<RunProjection, { readonly status: 'waiting' }>,
+    child: Extract<RunProjection, { readonly status: 'completed' }>,
+  ): Outcome<RunProjection, StubRunError> {
+    if (child.lineage.kind !== 'workflow_continuation') {
+      return err({ kind: 'linked_run_conflict', taskReference: child.taskReference });
+    }
+    const now = this.clock.now();
+    const nodeStates = Object.fromEntries(
+      Object.entries(parent.nodeStates).map(([nodeId, status]) => [
+        nodeId,
+        nodeId === parent.wait.nodeId
+          ? 'succeeded'
+          : status === 'succeeded' || status === 'skipped'
+            ? status
+            : 'skipped',
+      ]),
+    );
+    const completed = RunProjectionSchema.parse({
+      ...parent,
+      status: 'completed',
+      updatedAt: now,
+      completedAt: now,
+      cursor: parent.plan.length,
+      nodeStates,
+      lease: null,
+      wait: null,
+    });
+    return this.persist(
+      completed,
+      'LinkedWorkflowContinuationCompleted',
+      {
+        taskReference: parent.taskReference,
+        parentTaskReference: parent.taskReference,
+        parentRunId: parent.runId,
+        continuationId: child.lineage.continuationId,
+        childTaskReference: child.taskReference,
+        childRunId: child.runId,
+        outcome: 'completed',
+      },
+      undefined,
+      {
+        signal: {
+          signalId: `signal:${parent.wait.waitId}:child-completed`,
+          signalKind: 'workflow_continuation_completed',
+          correlationKey: parent.wait.waitId,
+          payload: {
+            parentTaskReference: parent.taskReference,
+            childTaskReference: child.taskReference,
+            childRunId: child.runId,
+          },
+          status: 'resolved',
+          resolvedWaitKey: parent.wait.waitId,
+        },
+      },
+    );
   }
 
   private drive(

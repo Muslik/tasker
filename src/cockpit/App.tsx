@@ -978,14 +978,14 @@ const WorkflowContinuationSurface = ({
             Retry planning
           </Button>
         ) : null}
-        {record.status === 'awaiting_review' ? (
+        {record.status === 'awaiting_review' || record.status === 'accepted' ? (
           <Button size="sm" type="button" disabled={busy} onClick={onAccept}>
             {pendingOperation === 'accepting_continuation' ? (
               <LoaderCircle data-icon="inline-start" className="animate-spin" />
             ) : (
               <CheckCircle2 data-icon="inline-start" />
             )}
-            Accept workflow
+            {record.status === 'accepted' ? 'Start continuation' : 'Accept workflow'}
           </Button>
         ) : null}
       </div>
@@ -998,6 +998,12 @@ const WorkflowContinuationSurface = ({
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {record.status === 'linked' ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Linked run <code>{record.child.runId}</code>
+        </p>
       ) : null}
 
       {record.status === 'awaiting_review' ? (
@@ -2224,7 +2230,9 @@ export const App = () => {
     }
     const record = workflowContinuationState.record;
     if (
-      (decision === 'accept' && record.status !== 'awaiting_review') ||
+      (decision === 'accept' &&
+        record.status !== 'awaiting_review' &&
+        record.status !== 'accepted') ||
       (decision === 'reject' &&
         record.status !== 'awaiting_review' &&
         record.status !== 'rejected_by_operator')

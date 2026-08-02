@@ -284,10 +284,13 @@ test('I can review an immutable workflow continuation without losing the parent 
 
   await page.getByRole('button', { name: 'Accept workflow' }).click();
 
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('accepted');
-  await expect(page.getByTestId('selected-task')).toContainText(
-    'Continuation accepted · linked execution pending',
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('linked');
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('run:continuation-');
+  await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Linked continuation queued',
   );
+  await expect(page.getByTestId('task-activity-timeline')).toContainText('Waiting for code review');
   const parentAfter = await loadWorkflow(page, fixtureId);
   expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
 });

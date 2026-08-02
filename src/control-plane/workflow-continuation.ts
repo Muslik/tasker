@@ -50,6 +50,7 @@ type WorkflowContinuationStoreError =
       readonly issues: readonly string[];
     }
   | { readonly kind: 'continuation_not_reviewable'; readonly parentTaskReference: string }
+  | { readonly kind: 'continuation_not_linkable'; readonly parentTaskReference: string }
   | { readonly kind: 'continuation_not_resolvable'; readonly parentTaskReference: string }
   | { readonly kind: 'continuation_not_retryable'; readonly parentTaskReference: string };
 
@@ -168,7 +169,10 @@ class WorkflowContinuationStore {
     if (current.value !== null && current.value.continuationId !== command.continuationId) {
       return ok(current.value);
     }
-    if (current.value?.status === 'accepted' && command.decision === 'accept') {
+    if (
+      (current.value?.status === 'accepted' || current.value?.status === 'linked') &&
+      command.decision === 'accept'
+    ) {
       return ok(current.value);
     }
     if (
@@ -198,6 +202,34 @@ class WorkflowContinuationStore {
         ? 'WorkflowContinuationAccepted'
         : 'WorkflowContinuationRejectedByOperator',
     );
+  }
+
+  public linkExecution(
+    parentTaskReference: string,
+    child: { readonly taskReference: string; readonly runId: string },
+  ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
+    const current = this.read(parentTaskReference);
+    if (!current.ok) return current;
+    if (
+      current.value?.status === 'linked' &&
+      current.value.child.taskReference === child.taskReference &&
+      current.value.child.runId === child.runId
+    ) {
+      return ok(current.value);
+    }
+    if (
+      current.value?.status !== 'accepted' ||
+      current.value.candidate.taskReference !== child.taskReference
+    ) {
+      return err({ kind: 'continuation_not_linkable', parentTaskReference });
+    }
+    const linked = WorkflowContinuationRecordSchema.parse({
+      ...current.value,
+      status: 'linked',
+      linkedAt: this.clock.now(),
+      child,
+    });
+    return this.save(linked, 'WorkflowContinuationExecutionLinked');
   }
 
   public supersedeWithPlan(
@@ -454,6 +486,14 @@ export class WorkflowContinuationCoordinator {
     return reviewed.ok ? reviewed : err({ kind: 'store', error: reviewed.error });
   }
 
+  public linkExecution(
+    parentTaskReference: string,
+    child: { readonly taskReference: string; readonly runId: string },
+  ): Outcome<WorkflowContinuationRecord, WorkflowContinuationError> {
+    const linked = this.store.linkExecution(parentTaskReference, child);
+    return linked.ok ? linked : err({ kind: 'store', error: linked.error });
+  }
+
   public supersedeWithPlan(
     parentTaskReference: string,
     implementationPlanArtifactId: string,
@@ -513,6 +553,14 @@ export class WorkflowContinuationCoordinator {
           attention: 'none',
           currentStage: 'Continuation accepted · linked execution pending',
           updatedAt: record.reviewedAt,
+        };
+      case 'linked':
+        return {
+          ...task,
+          status: 'waiting',
+          attention: 'none',
+          currentStage: 'Linked continuation executing',
+          updatedAt: record.linkedAt,
         };
       case 'rejected_by_operator':
         return {
@@ -595,6 +643,13 @@ export class WorkflowContinuationCoordinator {
             source: 'operator',
             title: 'Workflow continuation accepted',
             detail: 'The immutable candidate is approved for a linked execution handoff.',
+          });
+        case 'WorkflowContinuationExecutionLinked':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            title: 'Workflow continuation execution linked',
+            detail:
+              'The accepted candidate now has a durable child run scheduled under the parent task.',
           });
         case 'WorkflowContinuationRejectedByOperator':
           return OperatorActivityEntrySchema.parse({

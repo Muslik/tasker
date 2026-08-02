@@ -370,7 +370,7 @@ planner can also open a slot-releasing blocking-clarification wait; exact operat
 answers are persisted and resume the same run at a new planning attempt, including
 after restart and during plan revision. The full gate remains open for heartbeat/outbox
 dispatch, executor-originated clarification, provider capacity pools, quota behavior,
-generalized intervention, workflow continuation, takeover, projection rebuild, and the
+generalized intervention, runtime-originated workflow continuation, takeover, projection rebuild, and the
 complete kill matrix.
 
 - one graph completes on stubs;

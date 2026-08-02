@@ -473,13 +473,15 @@ implemented only for the bounded stub semantics documented there.
    open `human_clarification`, accept an operator answer, and create a new planning
    attempt without losing the repository snapshot or prior plan. This gate applies in
    both approval modes.
-3. **Workflow continuation — planning-origin slice delivered 2026-08-03.** Accept
+3. **Workflow continuation — planning-origin and linked-execution slices delivered 2026-08-03.** Accept
    `workflow_change_required` from planning, compile an immutable linked candidate,
    validate repository/capability lineage, and start in `review_all`. Transient
    repository failures retry against the same parent run. Rejection guidance creates
    planning attempt `N + 1`, which can propose a new candidate, ask a blocking
-   question, or resume the parent with a revised plan. Linked child execution and
-   runtime-originated requests remain.
+   question, or resume the parent with a revised plan. Acceptance now creates a child
+   run with explicit lineage, executes it through the configured scheduler, projects
+   both runs as one task, and resolves the parent join after child completion.
+   Runtime-originated requests remain.
 4. **Write preparation.** Reuse the managed checkout as a pinned read-only planning
    snapshot. M4 allocates a task branch and isolated worktree only after planning,
    clarification, and any required approval are resolved, immediately before the
@@ -490,8 +492,8 @@ Steps 1-3 are implemented and verified for their documented boundaries; see
 shows the actual plan, strategy, provenance, measured tokens, immutable revisions, and
 blocking questions. Answers survive restart and continue the same run. See
 [`m2.2-workflow-continuation.md`](m2.2-workflow-continuation.md) for the candidate review
-and recovery contract. The next checkpoint executes the accepted candidate as a linked
-child run while retaining one causal task history.
+and recovery contract. The next checkpoint prepares the isolated branch/worktree
+boundary before the first write-capable node.
 
 ### Entry criteria
 

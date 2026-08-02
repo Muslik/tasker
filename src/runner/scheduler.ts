@@ -110,6 +110,9 @@ export class DurableStubScheduler {
       if (claimed.value.status === 'executing') executing += 1;
     }
 
+    const reconciled = this.runner.reconcileLinkedContinuations();
+    if (!reconciled.ok) return err({ kind: 'runner', error: reconciled.error });
+
     const final = this.runner.list();
     return final.ok
       ? ok(snapshotFrom(this.configuration.capacity, final.value))

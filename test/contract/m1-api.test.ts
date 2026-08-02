@@ -24,7 +24,7 @@ import { createJiraIssueService } from '../../src/integrations/jira/service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { RepositoryCatalogResponseSchema } from '../../src/repositories/contracts.js';
 import type { RepositoryCatalog } from '../../src/repositories/catalog.js';
-import { RunProjectionSchema } from '../../src/runner/index.js';
+import { DurableStubScheduler, RunProjectionSchema } from '../../src/runner/index.js';
 import {
   DeterministicImplementationPlanner,
   type ImplementationPlanner,
@@ -200,6 +200,7 @@ const setup = (
   jiraPort?: JiraIssuePort,
   implementationPlanner?: ImplementationPlanner,
   repositoryCatalog: RepositoryCatalog = makeRepositoryCatalog(),
+  withScheduler = false,
 ) => {
   const directory = mkdtempSync(join(tmpdir(), 'tasker-m1-api-'));
   const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
@@ -207,6 +208,14 @@ const setup = (
   resources.push({ directory, ledger });
   const service = createM1WorkflowService(ledger.repository, clock);
   const runService = new DeterministicStubRunService(ledger.repository, service, clock);
+  const scheduler = withScheduler
+    ? new DurableStubScheduler(runService, ledger.repository, clock, {
+        capacity: 1,
+        ownerId: 'contract-scheduler',
+        leaseTimeoutMs: 1_000,
+        pollIntervalMs: 10,
+      })
+    : undefined;
   const jiraIssueService =
     jiraPort === undefined
       ? undefined
@@ -243,6 +252,7 @@ const setup = (
       runService,
       ...(implementationPlanning === undefined ? {} : { implementationPlanning }),
       ...(workflowContinuation === undefined ? {} : { workflowContinuation }),
+      ...(scheduler === undefined ? {} : { scheduler }),
       ...(jiraIssueService === undefined ? {} : { jiraIssueService }),
       ...(useWorkflowGenerator
         ? { workflowGenerator: { generate } }
@@ -254,6 +264,7 @@ const setup = (
     ledger,
     service,
     runService,
+    scheduler,
   };
 };
 
@@ -644,8 +655,8 @@ describe('M1 HTTP API', () => {
     await api.close();
   });
 
-  it('links an accepted continuation without rewriting the parent graph', async () => {
-    const { api } = setup(
+  it('executes an accepted continuation as a linked run without rewriting the parent graph', async () => {
+    const { api, runService } = setup(
       false,
       undefined,
       makeWorkflowChangePlanner(['repository.read', 'command.run']),
@@ -673,17 +684,163 @@ describe('M1 HTTP API', () => {
     const run = RunProjectionSchema.parse(
       (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/run` })).json(),
     );
+    const continuation = WorkflowContinuationRecordSchema.parse(response.json());
+    if (continuation.status !== 'linked') throw new Error('Expected a linked continuation');
+    const childRun = RunProjectionSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: `/api/workflows/${continuation.child.taskReference}/run`,
+        })
+      ).json(),
+    );
+    const tasks = OperatorTaskListResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: '/api/operator/tasks' })).json(),
+    );
+    const activity = OperatorActivityResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: `/api/operator/tasks/${fixtureId}/activity`,
+        })
+      ).json(),
+    );
     const parentAfter = WorkflowResponseSchema.parse(
       (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}` })).json(),
     );
     expect(response.statusCode).toBe(200);
-    expect(WorkflowContinuationRecordSchema.parse(response.json()).status).toBe('accepted');
+    expect(continuation.child).toEqual({
+      taskReference: continuation.candidate.taskReference,
+      runId: `run:${continuation.candidate.taskReference}`,
+    });
     expect(run).toMatchObject({
       runId: `run:${fixtureId}`,
       status: 'waiting',
-      wait: { waitKind: 'linked_continuation_ready', slotPolicy: 'release' },
+      wait: { waitKind: 'linked_continuation_running', slotPolicy: 'release' },
     });
+    expect(childRun).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'code_review@1', slotPolicy: 'release' },
+      lineage: {
+        kind: 'workflow_continuation',
+        parentTaskReference: fixtureId,
+        parentRunId: `run:${fixtureId}`,
+        continuationId: continuation.continuationId,
+      },
+    });
+    expect(tasks.tasks.find((task) => task.id === fixtureId)).toMatchObject({
+      status: 'code_review',
+      currentStage: 'Waiting for code review',
+    });
+    expect(activity.entries.map((entry) => entry.title)).toEqual(
+      expect.arrayContaining([
+        'Workflow continuation execution linked',
+        'Linked continuation queued',
+        'Linked continuation started',
+        'Waiting for code review',
+      ]),
+    );
+    expect(
+      runService
+        .listStreamEventsAfter(0)
+        .filter(
+          (event) => event.eventType === 'LinkedRunQueued' || event.eventType === 'RunStarted',
+        )
+        .map((event) => event.fixtureId),
+    ).not.toContain(continuation.child.taskReference);
     expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
+
+    await api.close();
+  });
+
+  it('completes the parent join after the linked continuation finishes', async () => {
+    const { api } = setup(
+      false,
+      undefined,
+      makeWorkflowChangePlanner(['repository.read', 'command.run']),
+    );
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+    const proposed = WorkflowContinuationRecordSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/continuation` })).json(),
+    );
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/continuation/review`,
+      payload: { decision: 'accept', continuationId: proposed.continuationId },
+    });
+
+    const response = await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/resume`,
+    });
+
+    const parentRun = RunProjectionSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/run` })).json(),
+    );
+    const tasks = OperatorTaskListResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: '/api/operator/tasks' })).json(),
+    );
+    expect(response.statusCode).toBe(200);
+    expect(RunProjectionSchema.parse(response.json()).status).toBe('completed');
+    expect(parentRun).toMatchObject({
+      status: 'completed',
+      wait: null,
+      lineage: { kind: 'root' },
+    });
+    expect(tasks.tasks.find((task) => task.id === fixtureId)).toMatchObject({
+      status: 'done',
+      currentStage: 'Workflow completed',
+    });
+
+    await api.close();
+  });
+
+  it('lets the durable scheduler claim a linked continuation', async () => {
+    const { api, scheduler } = setup(
+      false,
+      undefined,
+      makeWorkflowChangePlanner(['repository.read', 'command.run']),
+      makeRepositoryCatalog(),
+      true,
+    );
+    if (scheduler === undefined) throw new Error('Expected a scheduler');
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    await api.inject({
+      method: 'POST',
+      url: `/api/workflows/${fixtureId}/start`,
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'fast' } },
+    });
+    const proposed = WorkflowContinuationRecordSchema.parse(
+      (await api.inject({ method: 'GET', url: `/api/workflows/${fixtureId}/continuation` })).json(),
+    );
+    const accepted = WorkflowContinuationRecordSchema.parse(
+      (
+        await api.inject({
+          method: 'POST',
+          url: `/api/workflows/${fixtureId}/continuation/review`,
+          payload: { decision: 'accept', continuationId: proposed.continuationId },
+        })
+      ).json(),
+    );
+    if (accepted.status !== 'linked') throw new Error('Expected linked execution');
+
+    const result = scheduler.tick();
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        queued: [],
+        executing: [],
+        waiting: [fixtureId, accepted.child.taskReference],
+      },
+    });
 
     await api.close();
   });

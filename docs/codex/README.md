@@ -39,7 +39,7 @@ Read in this order:
     operator plan surface.
 14. [`m2.2-workflow-continuation.md`](m2.2-workflow-continuation.md) — immutable linked
     workflow candidates, deterministic lineage validation, `review_all`, recoverable
-    repository retry, restart recovery, and candidate review in the operator console.
+    repository retry, candidate review, and linked child-run execution projected as one task.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. M2 has started: accepted graphs can now queue and traverse
@@ -49,8 +49,9 @@ restart-safe provider attempt. Blocking planner questions also pause without con
 a slot, persist exact operator answers, and continue the same run. Every accepted graph
 retains the same planning boundary; the start checkbox determines only whether the
 operator must approve the resulting plan. A planning-discovered repository change now
-compiles a separate immutable candidate and pauses for review without rewriting or
-restarting the parent. Corporate integrations remain later milestones.
+compiles a separate immutable candidate, pauses for review, and after acceptance
+executes a durable child cursor through the scheduler without rewriting or restarting
+the parent. Corporate integrations remain later milestones.
 
 M0, M1, M1.5, M1.6, M1.7, M1.8, and the first M2 vertical slice are implemented. The operator
 console has the task queue on the left, persisted activity and workflow rationale in
@@ -58,8 +59,8 @@ the center, and the current graph on the right. It includes validation failures,
 waits, retry bounds, project/global policy decisions, verification rationale,
 capabilities, collapsed template diagnostics, SSE refresh, and JSON download.
 Implementation planning now uses a real subscription Codex CLI provider; accepted
-continuations currently stop at `linked_continuation_ready`, and later graph nodes
-remain deterministic local stubs. Tasker performs no repository, Jira,
+continuations reach their own durable code-review wait and resolve the parent join on
+completion, while graph nodes remain deterministic local stubs. Tasker performs no repository, Jira,
 Bitbucket, or CI mutation. Provider provenance and measured tokens are persisted and
 visible.
 An imported Jira task with a resolved checkout can now be compiled into a workflow.
