@@ -402,6 +402,8 @@ const SelectedTaskHeader = ({
   activity,
   onGenerate,
   onStart,
+  requirePlanApproval,
+  onRequirePlanApprovalChange,
   onSyncJira,
   pendingOperation,
   jiraSync,
@@ -411,6 +413,8 @@ const SelectedTaskHeader = ({
   readonly activity: ActivityLoadState;
   readonly onGenerate: () => void;
   readonly onStart: () => void;
+  readonly requirePlanApproval: boolean;
+  readonly onRequirePlanApprovalChange: (required: boolean) => void;
   readonly onSyncJira: (issueKey: string) => void;
   readonly pendingOperation: TaskOperation | null;
   readonly jiraSync: JiraSyncState;
@@ -462,14 +466,29 @@ const SelectedTaskHeader = ({
             </Button>
           ) : null}
           {canStart ? (
-            <Button size="sm" type="button" onClick={onStart} disabled={starting}>
-              {starting ? (
-                <LoaderCircle data-icon="inline-start" className="animate-spin" />
-              ) : (
-                <Play data-icon="inline-start" />
-              )}
-              {starting ? 'Testing…' : 'Test workflow'}
-            </Button>
+            <>
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  className="size-3.5 accent-primary"
+                  type="checkbox"
+                  aria-label="Review plan before execution"
+                  checked={requirePlanApproval}
+                  disabled={starting}
+                  onChange={(event) => {
+                    onRequirePlanApprovalChange(event.target.checked);
+                  }}
+                />
+                Review plan
+              </label>
+              <Button size="sm" type="button" onClick={onStart} disabled={starting}>
+                {starting ? (
+                  <LoaderCircle data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <Play data-icon="inline-start" />
+                )}
+                {starting ? 'Testing…' : 'Test workflow'}
+              </Button>
+            </>
           ) : null}
           {task.origin.kind === 'jira' ? (
             <>
@@ -1409,6 +1428,9 @@ export const App = () => {
   const [planGuidanceDrafts, setPlanGuidanceDrafts] = useState<ReadonlyMap<string, string>>(
     new Map(),
   );
+  const [planApprovalDrafts, setPlanApprovalDrafts] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
   const streamCursorRef = useRef(0);
 
   const selectedTask = useMemo(
@@ -1629,8 +1651,11 @@ export const App = () => {
   const handleStart = (): void => {
     if (selectedTask === null || selectedTask.status !== 'planned') return;
     const taskReference = selectedTask.id;
+    const requirePlanApproval = planApprovalDrafts.get(taskReference) ?? true;
     setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
-    void startWorkflow(taskReference)
+    void startWorkflow(taskReference, {
+      settings: { planApproval: requirePlanApproval ? 'required' : 'automatic' },
+    })
       .then(async () => {
         await refreshTasks();
         if (selectedIdRef.current === taskReference) {
@@ -1759,6 +1784,12 @@ export const App = () => {
                   activity={activityState}
                   onGenerate={handleGenerate}
                   onStart={handleStart}
+                  requirePlanApproval={planApprovalDrafts.get(selectedTask.id) ?? true}
+                  onRequirePlanApprovalChange={(required) => {
+                    setPlanApprovalDrafts((current) =>
+                      new Map(current).set(selectedTask.id, required),
+                    );
+                  }}
                   onSyncJira={handleJiraSync}
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}

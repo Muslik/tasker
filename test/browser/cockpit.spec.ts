@@ -204,6 +204,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
+  await expect(page.getByRole('checkbox', { name: 'Review plan before execution' })).toBeChecked();
   await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
 
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
@@ -235,11 +236,15 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
+  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
   await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
 
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review');
   await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
   await expect(page.getByTestId('task-activity-timeline')).toContainText('Run started');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Plan review not required',
+  );
   await expect(page.getByTestId('task-activity-timeline')).toContainText('Waiting for code review');
   await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(2);
 });

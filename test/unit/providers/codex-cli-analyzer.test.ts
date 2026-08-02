@@ -127,6 +127,10 @@ describe('Codex CLI workflow analyzer', () => {
     expect(executionRequest?.stdin).toContain('Do not claim facts that require later execution');
     expect(executionRequest?.stdin).toContain('MUST have exactly these top-level keys');
     expect(executionRequest?.stdin).toContain('such as schemaVersion, task, repository, workflow');
+    expect(executionRequest?.stdin).toContain(
+      'task.analyze@1 as the first root-sequence child and a',
+    );
+    expect(executionRequest?.stdin).toContain('plan.approved@1 gate as the second');
     expect(runner.requests[1]?.args).toEqual(
       expect.arrayContaining([
         'exec',

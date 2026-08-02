@@ -249,6 +249,9 @@ The JSON encoded inside sourceJson MUST have exactly these top-level keys:
 Start by copying plannerContext.baseTemplate, then make only justified task-specific changes to its
 id and recursive root nodes. Do not invent an envelope. In particular, NEVER return top-level keys
 such as schemaVersion, task, repository, workflow, steps, or edges inside sourceJson.
+Every task workflow must retain task.analyze@1 as the first root-sequence child and a
+plan.approved@1 gate as the second. Tasker run settings decide whether that gate pauses for a human;
+they never remove the mandatory planning step or its deterministic validation boundary.
 
 Use only node kinds and versioned contracts present in plannerContext. The base template is a
 starting point, not executable authority. Explain every material specialization in

@@ -4,6 +4,7 @@ import {
   findTaskFixture,
   listTaskFixtures,
   planTaskWorkflow,
+  planWorkflowProposal,
 } from '../../../src/planning/index.js';
 
 const fixture = (fixtureId: string) => {
@@ -44,6 +45,39 @@ describe('M1 task workflow planning', () => {
     const results = [planTaskWorkflow(input), planTaskWorkflow(input)];
 
     expect(results[0]).toEqual(results[1]);
+  });
+
+  it('rejects a task workflow that removes the universal planning boundary', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) {
+      throw new Error('Expected the short bug fixture to produce a proposal');
+    }
+    const parsedSource = planned.value.proposal.templateSource;
+    if (parsedSource.root.kind !== 'sequence') {
+      throw new Error('Expected a sequence root');
+    }
+    const withoutPlanGate = {
+      ...planned.value.proposal,
+      source: {
+        ...parsedSource,
+        root: {
+          ...parsedSource.root,
+          children: parsedSource.root.children.filter((child) => child.kind !== 'gate'),
+        },
+      },
+    };
+
+    const result = planWorkflowProposal(withoutPlanGate);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        stage: 'workflow_validation',
+        validatorReport: {
+          issues: [{ code: 'required_planning_boundary_missing' }],
+        },
+      },
+    });
   });
 
   it.each([
@@ -105,6 +139,7 @@ describe('M1 task workflow planning', () => {
     expect(result.value.proposal.assemblyDecisions.map((decision) => decision.id)).toEqual([
       'task-family',
       'bounded-repair',
+      'planning-boundary',
       'cross-repository-component',
       'translation-policy',
       'publication-policy',

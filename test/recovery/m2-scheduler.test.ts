@@ -109,7 +109,7 @@ describe('M2 configurable scheduler', () => {
   it('rejects writes from a runner after its expired lease is replaced', () => {
     const runtime = makeRuntime();
     const firstScheduler = makeScheduler(runtime, 1, 'runner-old');
-    firstScheduler.enqueue('avia-13236-short-bug');
+    firstScheduler.enqueue('avia-13236-short-bug', { planApproval: 'automatic' });
     firstScheduler.tick({ maxNodeTransitionsPerRun: 1 });
     const oldRun = runtime.runner.read('avia-13236-short-bug');
     if (!oldRun.ok || oldRun.value?.status !== 'executing') {
@@ -149,7 +149,7 @@ describe('M2 configurable scheduler', () => {
   it('recovers an executing run through a new scheduler process without replaying receipts', () => {
     const runtime = makeRuntime();
     const firstScheduler = makeScheduler(runtime, 1, 'runner-before-restart');
-    firstScheduler.enqueue('avia-13236-short-bug');
+    firstScheduler.enqueue('avia-13236-short-bug', { planApproval: 'automatic' });
     firstScheduler.tick({ maxNodeTransitionsPerRun: 2 });
     const beforeRestart = runtime.runner.read('avia-13236-short-bug');
     if (!beforeRestart.ok || beforeRestart.value?.status !== 'executing') {

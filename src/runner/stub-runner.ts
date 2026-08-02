@@ -15,13 +15,16 @@ import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, type CompiledWorkflowNode } from '../workflow/schema.js';
 import {
+  DEFAULT_RUN_SETTINGS,
   PlanReviewCommandSchema,
   RunProjectionSchema,
+  RunSettingsSchema,
   type ExecutingRunProjection,
   type PlanReviewCommand,
   type RunNodeStatus,
   type RunOperation,
   type RunProjection,
+  type RunSettings,
 } from './contracts.js';
 
 const RUN_BY_TASK_PROJECTION = 'm2_run_by_task';
@@ -39,6 +42,7 @@ const RunEventPayloadSchema = z
     guidanceArtifactId: z.string().min(1).optional(),
     nextAttempt: z.number().int().positive().optional(),
     targetNodeId: z.string().min(1).optional(),
+    planApproval: z.enum(['required', 'automatic']).optional(),
   })
   .loose();
 
@@ -49,6 +53,7 @@ export type StubRunError =
   | { readonly kind: 'workflow_not_executable'; readonly taskReference: string }
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
   | { readonly kind: 'run_not_waiting'; readonly taskReference: string }
+  | { readonly kind: 'run_settings_conflict'; readonly taskReference: string }
   | { readonly kind: 'run_not_at_plan_review'; readonly taskReference: string }
   | { readonly kind: 'plan_revision_target_not_found'; readonly taskReference: string }
   | { readonly kind: 'projection_corrupt'; readonly projectionId: string }
@@ -174,11 +179,16 @@ export class DeterministicStubRunService {
 
   public start(
     taskReference: string,
+    settingsInput: RunSettings = DEFAULT_RUN_SETTINGS,
     options: DriveOptions = {},
   ): Outcome<RunProjection, StubRunError> {
+    const settings = RunSettingsSchema.parse(settingsInput);
     const existing = this.read(taskReference);
     if (!existing.ok) return existing;
     if (existing.value !== null) {
+      if (existing.value.settings.planApproval !== settings.planApproval) {
+        return err({ kind: 'run_settings_conflict', taskReference });
+      }
       if (existing.value.status === 'executing') return this.drive(existing.value, options);
       if (existing.value.status === 'queued') {
         return this.claim(taskReference, 'direct-stub-runner', options);
@@ -186,14 +196,22 @@ export class DeterministicStubRunService {
       return ok(existing.value);
     }
 
-    const queued = this.enqueue(taskReference);
+    const queued = this.enqueue(taskReference, settings);
     return queued.ok ? this.claim(taskReference, 'direct-stub-runner', options) : queued;
   }
 
-  public enqueue(taskReference: string): Outcome<RunProjection, StubRunError> {
+  public enqueue(
+    taskReference: string,
+    settingsInput: RunSettings = DEFAULT_RUN_SETTINGS,
+  ): Outcome<RunProjection, StubRunError> {
+    const settings = RunSettingsSchema.parse(settingsInput);
     const existing = this.read(taskReference);
     if (!existing.ok) return existing;
-    if (existing.value !== null) return ok(existing.value);
+    if (existing.value !== null) {
+      return existing.value.settings.planApproval === settings.planApproval
+        ? ok(existing.value)
+        : err({ kind: 'run_settings_conflict', taskReference });
+    }
 
     const workflow = this.workflows.read(taskReference);
     if (!workflow.ok || workflow.value === null) {
@@ -229,9 +247,10 @@ export class DeterministicStubRunService {
       nodeStates: initialNodeStates(plan),
       effects: [],
       planRevisionRequests: [],
+      settings,
       wait: null,
     });
-    return this.persist(run, 'RunQueued', { taskReference });
+    return this.persist(run, 'RunQueued', { taskReference, planApproval: settings.planApproval });
   }
 
   public claim(
@@ -539,7 +558,10 @@ export class DeterministicStubRunService {
             ...common,
             source: 'kernel',
             title: 'Run queued',
-            detail: 'The durable scheduler will start this workflow when capacity is available.',
+            detail:
+              payload.planApproval === 'automatic'
+                ? 'The validated plan will continue automatically unless execution needs operator input.'
+                : 'The run will pause for operator review after producing its validated plan.',
           });
         case 'RunStarted':
           return OperatorActivityEntrySchema.parse({
@@ -584,6 +606,13 @@ export class DeterministicStubRunService {
               : 'Operator guidance was persisted as a separate artifact.',
           });
         }
+        case 'PlanReviewAutoContinued':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Plan review not required',
+            detail: 'Immutable run settings allow execution to continue after plan validation.',
+          });
         case 'RunCompleted':
           return OperatorActivityEntrySchema.parse({
             ...common,
@@ -690,6 +719,29 @@ export class DeterministicStubRunService {
       }
       case 'gate':
       case 'wait': {
+        if (
+          operation.kind === 'gate' &&
+          operation.waitKind === 'plan.approved@1' &&
+          run.settings.planApproval === 'automatic'
+        ) {
+          const next = RunProjectionSchema.parse({
+            ...run,
+            updatedAt: now,
+            cursor: run.cursor + 1,
+            nodeStates: { ...run.nodeStates, [operation.nodeId]: 'skipped' },
+          });
+          return this.persist(
+            next,
+            'PlanReviewAutoContinued',
+            {
+              taskReference: run.taskReference,
+              nodeId: operation.nodeId,
+              waitKind: operation.waitKind,
+              planApproval: run.settings.planApproval,
+            },
+            { kind: 'guard', lease: run.lease },
+          );
+        }
         const cycle =
           this.listEvents(run.taskReference).filter(
             (event) =>

@@ -59,7 +59,7 @@ const taskFromJira = (
     translationIntent: 'none',
     ...(isBug
       ? { family: 'short_bugfix', reproduction: 'required', verification: 'targeted' }
-      : { family: 'feature_with_review', planReview: 'on_questions', verification: 'full' }),
+      : { family: 'feature_with_review', verification: 'full' }),
     expected: 'accepted',
     proposalVariant: 'valid',
   });

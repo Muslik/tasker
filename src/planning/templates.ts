@@ -79,12 +79,20 @@ const verificationInput = (task: TaskContext, profile: string) => ({
   taskId: task.taskId,
 });
 
+const planReviewBoundary = (task: TaskContext): WorkflowNodeSource =>
+  gate('review-plan', {
+    reason: 'Every task produces a plan; immutable run settings decide whether a human reviews it.',
+    resumeWhen: 'plan.approved@1',
+    with: { taskId: task.taskId },
+  });
+
 const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
     step('analyze-task', {
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
+    planReviewBoundary(task),
     step('reproduce-bug', {
       uses: 'bug.reproduce@1',
       with: taskInput(task, 'Reproduce the reported behavior and preserve evidence.'),
@@ -115,22 +123,14 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
 
 const featureWithReviewRoot = (
   task: TaskContext & { readonly translationIntent: 'copy_change' | 'none' },
-  options: { readonly includePlanGate: boolean; readonly includeVisualCheck: boolean },
+  options: { readonly includeVisualCheck: boolean },
 ): WorkflowNodeSource =>
   sequence('feature-delivery', [
     step('analyze-task', {
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
-    ...(options.includePlanGate
-      ? [
-          gate('review-plan', {
-            reason: 'This task requests a human-reviewable implementation plan.',
-            resumeWhen: 'plan.approved@1',
-            with: { taskId: task.taskId },
-          }),
-        ]
-      : []),
+    planReviewBoundary(task),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -202,6 +202,7 @@ const sharedComponentRoot = (
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
+    planReviewBoundary(task),
     bounded_loop('component-implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -249,7 +250,6 @@ export const getBaseWorkflowTemplate = (templateId: WorkflowTemplateId): Workflo
         id: 'template-feature-with-review',
         version: 1,
         root: featureWithReviewRoot(templateTask, {
-          includePlanGate: true,
           includeVisualCheck: false,
         }),
       });
@@ -270,7 +270,6 @@ export const materializeTaskWorkflow = (fixture: TaskFixture): WorkflowSource =>
         id: `${fixture.fixtureId}-workflow`,
         version: 1,
         root: featureWithReviewRoot(fixture, {
-          includePlanGate: fixture.planReview === 'always',
           includeVisualCheck: fixture.verification === 'full_with_visual',
         }),
       });

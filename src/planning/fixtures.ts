@@ -27,7 +27,6 @@ const ShortBugfixFixtureSchema = CommonFixtureSchema.extend({
 
 const FeatureWithReviewFixtureSchema = CommonFixtureSchema.extend({
   family: z.literal('feature_with_review'),
-  planReview: z.enum(['always', 'on_questions']),
   verification: z.enum(['full', 'full_with_visual']),
 }).strict();
 
@@ -112,7 +111,6 @@ const fixtureInputs = [
     repository: 'twiket/avia-web',
     translationIntent: 'none',
     family: 'feature_with_review',
-    planReview: 'always',
     verification: 'full_with_visual',
     expected: 'accepted',
     proposalVariant: 'valid',
@@ -138,7 +136,6 @@ const fixtureInputs = [
     repository: 'twiket/avia-web',
     translationIntent: 'copy_change',
     family: 'feature_with_review',
-    planReview: 'on_questions',
     verification: 'full',
     expected: 'accepted',
     proposalVariant: 'valid',

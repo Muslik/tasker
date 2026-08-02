@@ -21,8 +21,10 @@ import {
 import {
   PlanReviewCommandSchema,
   RunProjectionSchema,
+  RunStartCommandSchema,
   type PlanReviewCommand,
   type RunProjection,
+  type RunStartCommand,
 } from '../runner/contracts.js';
 
 type WorkflowLookup =
@@ -169,9 +171,15 @@ export const generateWorkflow = async (fixtureId: string): Promise<WorkflowRespo
   return parsed.data;
 };
 
-export const startWorkflow = async (fixtureId: string): Promise<RunProjection> => {
+export const startWorkflow = async (
+  fixtureId: string,
+  commandInput: RunStartCommand,
+): Promise<RunProjection> => {
+  const command = RunStartCommandSchema.parse(commandInput);
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/start`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(command),
   });
   if (!result.response.ok) throw failureFrom(result);
   const parsed = RunProjectionSchema.safeParse(result.body);

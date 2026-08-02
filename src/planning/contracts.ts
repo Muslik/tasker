@@ -233,7 +233,8 @@ const predicateContracts = [
     id: 'plan.approved',
     version: '1',
     inputSchema: z.object({ taskId: z.string().min(1) }).strict(),
-    description: 'The optional human plan-review gate is resolved.',
+    description:
+      'The universal planning boundary was resolved automatically or by the operator according to immutable run settings.',
   },
 ] satisfies readonly PredicateContract[];
 

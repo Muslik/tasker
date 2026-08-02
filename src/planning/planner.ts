@@ -5,6 +5,8 @@ import {
   compileWorkflow,
   CompiledWorkflowArtifactSchema,
   ValidationReportSchema,
+  type CompiledWorkflow,
+  type ValidationReport,
 } from '../workflow/index.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import { createWorkflowDiff, GraphDiffArtifactSchema, type GraphDiffFailure } from './diff.js';
@@ -103,6 +105,30 @@ const toDiffFailure = (
   stage: 'diff',
 });
 
+const validateRequiredPlanningBoundary = (graph: CompiledWorkflow): ValidationReport => {
+  const first = graph.root.kind === 'sequence' ? graph.root.children[0] : undefined;
+  const second = graph.root.kind === 'sequence' ? graph.root.children[1] : undefined;
+  const valid =
+    first?.kind === 'step' &&
+    first.uses === 'task.analyze@1' &&
+    second?.kind === 'gate' &&
+    second.resumeWhen === 'plan.approved@1';
+
+  return {
+    workflowId: graph.metadata.workflowId,
+    issues: valid
+      ? []
+      : [
+          {
+            code: 'required_planning_boundary_missing',
+            message:
+              'Task workflows must begin with task.analyze@1 followed by the plan.approved@1 gate',
+            path: ['root'],
+          },
+        ],
+  };
+};
+
 export const planTaskWorkflow = (
   fixtureInput: unknown,
 ): Outcome<PlannedWorkflow, PlanningFailure> => {
@@ -131,6 +157,16 @@ const planParsedWorkflowProposal = (
       proposal,
       stage: 'workflow_validation',
       validatorReport: compiledResult.error,
+    });
+  }
+
+  const planningBoundaryReport = validateRequiredPlanningBoundary(compiledResult.value.graph);
+  if (planningBoundaryReport.issues.length > 0) {
+    return err({
+      code: 'workflow_rejected',
+      proposal,
+      stage: 'workflow_validation',
+      validatorReport: planningBoundaryReport,
     });
   }
 

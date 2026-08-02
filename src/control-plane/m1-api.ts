@@ -16,9 +16,11 @@ import {
   type OperatorTaskSummary,
 } from './m1-contracts.js';
 import {
+  DEFAULT_RUN_START_COMMAND,
   type DurableStubScheduler,
   PlanReviewCommandSchema,
   RunProjectionSchema,
+  RunStartCommandSchema,
   type DeterministicStubRunService,
   type RunProjection,
   type StubRunError,
@@ -115,6 +117,10 @@ const sendRunError = (reply: FastifyReply, error: StubRunError): FastifyReply =>
       return reply.code(404).send(apiError(error.kind, 'This workflow has not started'));
     case 'run_not_waiting':
       return reply.code(409).send(apiError(error.kind, 'The run is not waiting for a signal'));
+    case 'run_settings_conflict':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'This run already exists with different immutable settings'));
     case 'run_not_at_plan_review':
       return reply.code(409).send(apiError(error.kind, 'The run is not waiting for plan review'));
     case 'plan_revision_target_not_found':
@@ -463,13 +469,21 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
+    const command = RunStartCommandSchema.safeParse(
+      request.body === undefined || request.body === null
+        ? DEFAULT_RUN_START_COMMAND
+        : request.body,
+    );
+    if (!command.success) {
+      return reply.code(400).send(apiError('invalid_run_settings', 'Run settings are invalid'));
+    }
     if (options.scheduler !== undefined) {
-      const queued = options.scheduler.enqueue(params.data.fixtureId);
+      const queued = options.scheduler.enqueue(params.data.fixtureId, command.data.settings);
       return queued.ok
         ? reply.send(RunProjectionSchema.parse(queued.value))
         : sendRunError(reply, queued.error.error);
     }
-    const started = options.runService.start(params.data.fixtureId);
+    const started = options.runService.start(params.data.fixtureId, command.data.settings);
     return started.ok
       ? reply.send(RunProjectionSchema.parse(started.value))
       : sendRunError(reply, started.error);
@@ -512,7 +526,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (options.scheduler !== undefined) {
       return reply.send(RunProjectionSchema.parse(reviewed.value));
     }
-    const continued = options.runService.start(params.data.fixtureId);
+    const continued = options.runService.claim(params.data.fixtureId, 'direct-stub-runner');
     return continued.ok
       ? reply.send(RunProjectionSchema.parse(continued.value))
       : sendRunError(reply, continued.error);

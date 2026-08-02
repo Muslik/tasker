@@ -445,9 +445,13 @@ The executable path now includes operator **Test workflow**, a durable ordered q
 configurable capacity, per-run leases and fence tokens, immutable graph-to-operation
 plans, per-node transactions and stub receipts, restart-safe cursors, durable
 wait/signals, SSE activity, runtime tree projections, a durable plan-review correction
-loop, and stop at the code-review wait. Plan feedback is stored as an immutable
+loop, immutable per-run `planApproval` settings, a universal planning boundary in
+every accepted graph, and stop at the code-review wait. With approval required, plan
+feedback is stored as an immutable
 operator artifact, creates attempt `N + 1`, survives restart, and rewinds only the
-planning-analysis node instead of restarting the task.
+planning-analysis node instead of restarting the task. With automatic approval, the
+same planning node and validator run, the human gate is recorded as skipped, and
+execution continues. A duplicate start cannot change the original run setting.
 Recovery tests prove that committed steps are not repeated after reopening the database
 and that an expired owner cannot write after lease replacement. See
 [`m2-stub-execution.md`](m2-stub-execution.md).
@@ -456,6 +460,31 @@ This does not close the M2 gate. Step 2 still needs heartbeat and outbox dispatc
 steps 3, 7, 9, 10, and 13 remain. Step 8 is implemented for plan review but still needs
 the generalized mid-execution clarification path. Steps 1, 4-6, 11, and 12 are
 implemented only for the bounded stub semantics documented there.
+
+### Immediate execution order from the current checkpoint
+
+1. **Typed implementation planning.** Replace the `task.analyze@1` stub receipt with a
+   persisted `ImplementationPlan` artifact. Add a deterministic router between a
+   bounded fast planner and the more expensive ralplan strategy, while allowing the
+   operator to force either mode at run start. Planning always occurs; the current
+   checkbox controls only human approval.
+2. **Blocking clarification.** Let either planner return typed blocking questions,
+   open `human_clarification`, accept an operator answer, and create a new planning
+   attempt without losing the repository snapshot or prior plan. This gate applies in
+   both approval modes.
+3. **Workflow continuation.** Accept `workflow_change_required` from planning or later
+   execution, compile an immutable linked continuation, and start in `review_all`.
+   Keep deterministic validation mandatory, then graduate to `auto_safe` and
+   `auto_all_valid` using retrospective evidence.
+4. **Write preparation.** Reuse the managed checkout as a pinned read-only planning
+   snapshot. M4 allocates a task branch and isolated worktree only after planning,
+   clarification, and any required approval are resolved, immediately before the
+   first write-capable node.
+
+The next operator-visible checkpoint is step 1: the center surface shows the actual
+plan, its strategy/provenance/token estimate, and either **Approve / Request changes**
+or an automatic-continuation receipt. Step 2 then makes questions resumable instead of
+forcing the agent to guess.
 
 ### Entry criteria
 

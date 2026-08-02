@@ -255,6 +255,7 @@ describe('M1 HTTP API', () => {
     const startedResponse = await api.inject({
       method: 'POST',
       url: '/api/workflows/avia-13236-short-bug/start',
+      payload: { settings: { planApproval: 'automatic' } },
     });
     const taskResponse = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
     const activityResponse = await api.inject({
@@ -269,6 +270,7 @@ describe('M1 HTTP API', () => {
     expect(startedResponse.statusCode).toBe(200);
     expect(startedResponse.json()).toMatchObject({
       status: 'waiting',
+      settings: { planApproval: 'automatic' },
       wait: { waitKind: 'code_review@1', slotPolicy: 'release' },
     });
     expect(OperatorTaskListResponseSchema.parse(taskResponse.json()).tasks[0]).toMatchObject({
@@ -279,6 +281,7 @@ describe('M1 HTTP API', () => {
     expect(OperatorActivityResponseSchema.parse(activityResponse.json()).entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ title: 'Run started' }),
+        expect.objectContaining({ title: 'Plan review not required' }),
         expect.objectContaining({ title: 'prepare-pr' }),
         expect.objectContaining({ title: 'Waiting for code review' }),
       ]),
@@ -318,6 +321,7 @@ describe('M1 HTTP API', () => {
     expect(reviewResponse.statusCode).toBe(200);
     expect(reviewResponse.json()).toMatchObject({
       status: 'waiting',
+      settings: { planApproval: 'required' },
       wait: {
         waitId: 'wait:run:avia-12536-feature-review:review-plan:cycle-2',
         waitKind: 'plan.approved@1',
@@ -345,6 +349,39 @@ describe('M1 HTTP API', () => {
         }),
       ]),
     );
+
+    await api.close();
+  });
+
+  it('keeps the first run settings when a duplicate start requests a different policy', async () => {
+    const { api } = setup();
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+    });
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/start',
+      payload: { settings: { planApproval: 'required' } },
+    });
+
+    const conflictingStart = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/start',
+      payload: { settings: { planApproval: 'automatic' } },
+    });
+    const persistedRun = await api.inject({
+      method: 'GET',
+      url: '/api/workflows/avia-13236-short-bug/run',
+    });
+
+    expect(conflictingStart.statusCode).toBe(409);
+    expect(conflictingStart.json()).toMatchObject({ error: 'run_settings_conflict' });
+    expect(persistedRun.json()).toMatchObject({
+      status: 'waiting',
+      settings: { planApproval: 'required' },
+      wait: { waitKind: 'plan.approved@1' },
+    });
 
     await api.close();
   });

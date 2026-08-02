@@ -54,9 +54,13 @@ those effects. Retrospective output never changes the harness automatically.
 8. **Dynamic does not mean arbitrary.** An analyzer can propose a graph only from
    registered step types and declared control-flow constructs. A deterministic
    validator rejects unsafe or incomplete graphs before execution.
-9. **Measured and estimated data stay distinct.** Active time, wait time, tokens,
+9. **Planning is universal; human approval is a run policy.** Every task produces and
+   validates an implementation plan. A per-run setting decides whether the operator
+   must approve that plan; it never skips planning, deterministic validation, or a
+   blocking clarification.
+10. **Measured and estimated data stay distinct.** Active time, wait time, tokens,
    provider-reported cost, and API-equivalent shadow cost retain source/confidence.
-10. **Pilot quality cannot waive correctness.** The `>=50%` KPI is separate from the
+11. **Pilot quality cannot waive correctness.** The `>=50%` KPI is separate from the
     deterministic recovery, replay, idempotency, redaction, and state-machine gates.
 
 ## 3. Architecture at a glance
@@ -188,6 +192,37 @@ The snapshot includes:
 The snapshot is never edited. A requeue after manual takeover or fundamental replan
 creates a new `run_id` linked to its predecessor.
 
+### 5.4 Repository lifecycle around planning
+
+Repository availability and write ownership are separate boundaries:
+
+```mermaid
+flowchart LR
+  I["Intake and repository binding"] --> M["Managed checkout"]
+  M --> S["Pinned read-only planning snapshot"]
+  S --> P["Produce and validate implementation plan"]
+  P --> Q{"Blocking questions?"}
+  Q -->|"yes"| H["Human clarification wait"]
+  H --> P
+  Q -->|"no"| A{"Plan approval required?"}
+  A -->|"yes"| R["Human plan review"]
+  A -->|"automatic"| W["Allocate branch and isolated worktree"]
+  R --> W
+  W --> E["First write-capable step"]
+```
+
+The managed repository is cloned or refreshed before planning because the planner
+needs real code evidence. Planning itself runs against a read-only snapshot pinned to
+a base commit. Tasker does not create a task branch or write-capable worktree merely to
+ask questions or wait for plan review.
+
+Immediately before the first write, Tasker verifies that the pinned base is still
+usable, allocates the task branch and isolated worktree, and persists their locator
+and ownership. A recoverable delay keeps the approved plan and planning evidence; it
+does not rerun planning unless repository drift invalidates an explicit plan premise.
+A cross-repository continuation owns a separate managed checkout, branch, and
+worktree, causally linked to the parent run.
+
 ## 6. Stable workflow IR and extension contracts
 
 ### 6.1 First-wave IR
@@ -231,8 +266,8 @@ flowchart LR
   C --> G["Persist graph plus assembly decisions"]
 ```
 
-The family supplies only the stable skeleton: for example a bug starts with
-reproduction, while a feature may have a plan gate. Repository policy supplies
+The family supplies only the stable skeleton: for example a bug adds reproduction,
+while every task starts with the same planning boundary. Repository policy supplies
 project-specific behavior. A copy change in `twiket/ui-kit` can therefore add
 `extract -> translation wait -> pull`, while the same intent in `twiket/avia-web`
 stays inside the implementation step because that project stores copy inline or in
@@ -274,6 +309,28 @@ the cockpit. Later `GraphRevision` support may append a validated suffix at decl
 expansion points, but it cannot rewrite completed nodes. Discovering a shared
 component during `bug.reproduce` or `code.implement` is the canonical scenario for
 this path.
+
+#### Universal planning boundary
+
+Every accepted root sequence begins with:
+
+```text
+task.analyze@1 -> plan.approved@1 gate -> task-specific execution
+```
+
+`task.analyze@1` must materialize a typed `ImplementationPlan` artifact. Deterministic
+code validates its schema, referenced repositories, permitted effects, verification
+requirements, and consistency with the compiled graph. The gate is then resolved in
+one of two ways from immutable run settings:
+
+- `planApproval: required` opens `plan_review` and waits for the operator;
+- `planApproval: automatic` records an automatic continuation and proceeds.
+
+This setting is selected before the run and cannot be changed after it starts. Plan
+feedback creates another planning attempt with immutable guidance; it never edits the
+prior plan. A blocking question always opens `human_clarification`, even in automatic
+mode. “Do not review my plan” is not permission for the agent to invent a missing
+product decision.
 
 Workflow knowledge is resolved from two configuration layers:
 
@@ -399,6 +456,22 @@ checks. Accepted revisions retain parent revision/hash and never rewrite earlier
 graphs. Until this capability exists, cross-repo discovery becomes a preserved gate
 and a new linked run rather than an unsafe graph mutation.
 
+Workflow-change approval is a rollout policy, not a permanent operator obligation.
+Every continuation is always compiled and deterministically validated. The intended
+run policies are:
+
+```text
+review_all -> auto_safe -> auto_all_valid
+```
+
+The pilot starts with `review_all` so rejected and surprising candidates are visible.
+After retrospective evidence establishes stable capability/effect classes,
+`auto_safe` may accept validated, non-escalating changes and pause only for new
+repositories, new effect classes, missing policy, or a blocking question. The target
+mode is `auto_all_valid`: any candidate satisfying the deterministic contract is
+appended automatically. No mode can bypass the validator or rewrite the completed
+prefix.
+
 ## 7. Durable Wait, human steering, and manual takeover
 
 ### 7.1 Wait ABI
@@ -421,6 +494,12 @@ slot_policy, opened_by_event_id, status, deadline_at?, resolved_by_event_id?
 
 A normalized `Signal` resolves a wait only when it matches the wait's correlation key
 and resolution schema. Duplicate signals are audited no-ops.
+
+`human_clarification` is mandatory whenever the planner or executor identifies a
+missing decision that can materially change scope, behavior, repository ownership, or
+an external effect. It is independent from optional plan review. The question,
+available evidence, answer schema, operator answer, and resumed attempt are persisted;
+the runner slot is released while waiting.
 
 ### 7.2 InterventionEvent
 

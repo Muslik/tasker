@@ -130,6 +130,8 @@ Evidence:
 - `external_translation_policy_adds_extract_wait_and_pull`
 - `inline_json_translation_policy_adds_no_translation_nodes`
 - `assembly_decisions_explain_repository_policy_effects`
+- `every_accepted_task_graph_contains_the_universal_planning_boundary`
+- `provider_cannot_remove_or_reorder_the_planning_boundary`
 
 Evidence:
 
@@ -168,6 +170,10 @@ Evidence:
 - `multiple_interventions_preserve_order_and_authorship`
 - `future_prompt_version_change_does_not_mutate_active_or_historical_run`
 - `gate_answer_without_guidance_resumes_declared_path`
+- `required_plan_approval_opens_a_durable_plan_review_wait`
+- `automatic_plan_approval_skips_only_the_human_wait_not_planning`
+- `duplicate_start_cannot_change_immutable_run_settings`
+- `blocking_question_pauses_in_both_plan_approval_modes`
 
 ### R6 — ManualTakeover
 
@@ -352,11 +358,15 @@ capacity `2` admits two independent runs, capacity `1` is reused after a slot-fr
 and a restarted scheduler replaces an expired lease without duplicate receipts. A run
 reaches a persisted plan-review wait; operator feedback creates an immutable guidance
 artifact and planning attempt `2`; reopening SQLite returns to plan review without
-discarding attempt `1`. Another run reaches a slot-releasing code-review wait; API/UI
+discarding attempt `1`. Every accepted graph contains the universal planning boundary;
+an immutable per-run setting either opens that wait or records an automatic continuation
+after the same planning node, and a conflicting duplicate start is rejected. Another
+run reaches a slot-releasing code-review wait; API/UI
 runtime projections update from ledger events; and a forced stop after two committed
 steps resumes from the same cursor. The full gate remains open for heartbeat/outbox
-dispatch, provider capacity pools, quota behavior, generalized intervention, takeover,
-projection rebuild, and the complete kill matrix.
+dispatch, a real typed plan artifact, blocking clarification, provider capacity pools,
+quota behavior, generalized intervention, workflow continuation, takeover, projection
+rebuild, and the complete kill matrix.
 
 - one graph completes on stubs;
 - kill/restart matrix for kernel boundaries green;

@@ -36,10 +36,14 @@ describe('M2 durable stub execution', () => {
 
     const generated = firstWorkflows.generate('avia-13236-short-bug');
     expect(generated.ok).toBe(true);
-    const interrupted = firstRunner.start('avia-13236-short-bug', { maxNodeTransitions: 2 });
+    const interrupted = firstRunner.start(
+      'avia-13236-short-bug',
+      { planApproval: 'automatic' },
+      { maxNodeTransitions: 3 },
+    );
     expect(interrupted).toMatchObject({
       ok: true,
-      value: { status: 'executing', cursor: 2 },
+      value: { status: 'executing', cursor: 3 },
     });
     if (!interrupted.ok) return;
     expect(interrupted.value.effects).toHaveLength(2);
@@ -53,7 +57,9 @@ describe('M2 durable stub execution', () => {
       restartedWorkflows,
       clock,
     );
-    const resumed = restartedRunner.start('avia-13236-short-bug');
+    const resumed = restartedRunner.start('avia-13236-short-bug', {
+      planApproval: 'automatic',
+    });
 
     expect(resumed).toMatchObject({
       ok: true,
@@ -72,10 +78,12 @@ describe('M2 durable stub execution', () => {
         .filter((event) => event.eventType === 'StepStubbed'),
     ).toHaveLength(resumed.value.effects.length);
 
-    const duplicateStart = restartedRunner.start('avia-13236-short-bug');
+    const duplicateStart = restartedRunner.start('avia-13236-short-bug', {
+      planApproval: 'automatic',
+    });
     expect(duplicateStart).toEqual(resumed);
     expect(restartedRunner.listEvents('avia-13236-short-bug')).toHaveLength(
-      3 + resumed.value.effects.length,
+      4 + resumed.value.effects.length,
     );
 
     const completed = restartedRunner.resume('avia-13236-short-bug', 'review_approved');

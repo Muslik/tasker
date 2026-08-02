@@ -302,6 +302,13 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
       reason: 'An unsuccessful implementation attempt must not loop forever.',
       effect: 'The implementation loop is capped at three attempts before intervention.',
     },
+    {
+      id: 'planning-boundary',
+      title: 'Implementation plan required',
+      source: 'global:planning-boundary',
+      reason: 'Every task must produce a validated plan before write-capable execution.',
+      effect: 'Add the universal plan boundary; immutable run settings control human review.',
+    },
   ];
 
   switch (fixture.family) {
@@ -316,16 +323,6 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
       break;
 
     case 'feature_with_review':
-      decisions.push({
-        id: 'plan-review',
-        title: 'Plan review policy evaluated',
-        source: 'task-snapshot',
-        reason: `The task plan-review policy is ${fixture.planReview}.`,
-        effect:
-          fixture.planReview === 'always'
-            ? 'Insert a human plan-approval gate before implementation.'
-            : 'Continue automatically unless the analyzer raises a question.',
-      });
       break;
 
     case 'shared_component':

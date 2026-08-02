@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import type { RunProjection } from './contracts.js';
+import { DEFAULT_RUN_SETTINGS, type RunProjection, type RunSettings } from './contracts.js';
 import type { DeterministicStubRunService, DriveOptions, StubRunError } from './stub-runner.js';
 
 export const StubSchedulerConfigurationSchema = z
@@ -57,8 +57,11 @@ export class DurableStubScheduler {
     this.configuration = StubSchedulerConfigurationSchema.parse(configuration);
   }
 
-  public enqueue(taskReference: string): Outcome<RunProjection, StubSchedulerError> {
-    const result = this.runner.enqueue(taskReference);
+  public enqueue(
+    taskReference: string,
+    settings: RunSettings = DEFAULT_RUN_SETTINGS,
+  ): Outcome<RunProjection, StubSchedulerError> {
+    const result = this.runner.enqueue(taskReference, settings);
     return result.ok ? result : err({ kind: 'runner', error: result.error });
   }
 

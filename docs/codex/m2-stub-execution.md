@@ -10,13 +10,14 @@ incremental M2 slice, not the complete M2 milestone.
 ## Operator path
 
 1. Generate a valid workflow as before.
-2. Press **Test workflow** in the task header. This never starts a real provider or
-   repository operation.
+2. Choose whether **Review plan** is enabled, then press **Test workflow** in the task
+   header. This never starts a real provider or repository operation.
 3. The task becomes `queued`, then `running` when scheduler capacity is available.
 4. Every deterministic stub step appends a ledger event and a unique effect receipt.
-5. A `plan.approved@1` gate changes the task to `plan_review` when the project policy
-   requires review. The operator can approve it or attach guidance for a new planning
-   attempt.
+5. Every graph reaches `task.analyze@1` and then the `plan.approved@1` boundary. With
+   review enabled the task changes to `plan_review`; the operator can approve it or
+   attach guidance for a new planning attempt. With review disabled, Tasker records
+   **Plan review not required** and continues without opening a human wait.
 6. A `code_review@1` node changes the task to `code_review`, marks the workflow rail
    as waiting, and releases the conceptual runner slot.
 7. Reloading Tasker restores the same run, wait, activity, receipts, and graph state.
@@ -24,14 +25,19 @@ incremental M2 slice, not the complete M2 milestone.
 The normal HTTP path is:
 
 - `POST /api/workflows/:taskReference/start` — durably enqueue the one current run;
+  its JSON body is
+  `{ "settings": { "planApproval": "required" | "automatic" } }` and defaults to
+  `required` for old clients;
 - `GET /api/workflows/:taskReference/run` — inspect its durable projection;
 - `POST /api/workflows/:taskReference/plan-review` — approve the current plan gate or
   request a new planning attempt with operator guidance;
 - `POST /api/workflows/:taskReference/resume` — resolve the current wait and continue;
 - `GET /api/runs/:runId` — inspect the lower-level run projection.
 
-`Start` is idempotent. Calling it again while the run is queued, executing, waiting,
-or complete returns the current projection and appends nothing.
+`Start` is idempotent when its settings match. Calling it again while the run is
+queued, executing, waiting, or complete returns the current projection and appends
+nothing. Requesting different settings for that existing run returns `409
+run_settings_conflict`; it cannot retroactively alter approval behavior.
 
 ## Queue, capacity, and ownership
 
@@ -61,6 +67,7 @@ that graph and stores it in a separate run projection together with:
 - per-node runtime states;
 - deterministic effect keys and stub receipts;
 - immutable plan-revision requests and their operator-guidance artifact IDs;
+- immutable run settings, currently `planApproval: required | automatic`;
 - the current wait, including wait kind and slot policy;
 - start, update, and completion timestamps.
 
@@ -94,7 +101,15 @@ current graph or rerunning its completed prefix.
 
 ## Plan review and operator correction
 
-Plan review is a durable wait, not a modal edit of historical state. At that gate:
+Planning is mandatory for every task; plan review is a per-run operator policy. Every
+accepted root workflow must begin with `task.analyze@1` followed by the
+`plan.approved@1` gate. The planner rejects provider proposals that remove or reorder
+this boundary.
+
+When `planApproval` is `automatic`, the runner still executes the planning node and
+crosses the same deterministic boundary, but marks the gate skipped and continues.
+When it is `required`, plan review is a durable wait, not a modal edit of historical
+state. At that gate:
 
 - **Approve plan** atomically resolves the current wait and requeues the run at the
   next cursor;
@@ -108,8 +123,9 @@ Plan review is a durable wait, not a modal edit of historical state. At that gat
 
 The current executor still produces a deterministic planning stub receipt. This slice
 proves the operator interaction, lineage, replay, and restart contracts. Materializing
-the guidance into a real provider-generated revised plan belongs to the provider
-executor milestone.
+the guidance into a real provider-generated typed `ImplementationPlan` is the next
+provider-executor slice. A generic blocking-question wait is also still pending; when
+implemented it will pause in both plan-approval modes.
 
 ## Wait and resume
 
@@ -149,7 +165,7 @@ proves fence `1` cannot write after fence `2` takes ownership.
 
 Verification at delivery:
 
-- 118 Vitest tests across 28 files;
+- 120 Vitest tests across 28 files;
 - two dedicated restart/no-duplicate scenarios, including scheduler ownership change;
 - capacity `1`, capacity `2`, and stale-fence scheduler scenarios;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;

@@ -64,6 +64,27 @@ export const StubEffectReceiptSchema = z
   })
   .strict();
 
+export const RunSettingsSchema = z
+  .object({
+    planApproval: z.enum(['required', 'automatic']),
+  })
+  .strict()
+  .readonly();
+
+export const DEFAULT_RUN_SETTINGS = {
+  planApproval: 'required',
+} as const satisfies z.input<typeof RunSettingsSchema>;
+
+export const RunStartCommandSchema = z
+  .object({
+    settings: RunSettingsSchema,
+  })
+  .strict();
+
+export const DEFAULT_RUN_START_COMMAND = {
+  settings: DEFAULT_RUN_SETTINGS,
+} as const satisfies z.input<typeof RunStartCommandSchema>;
+
 export const PlanReviewCommandSchema = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('approve') }).strict(),
   z
@@ -108,6 +129,7 @@ const runBaseShape = {
   nodeStates: z.record(z.string(), RunNodeStatusSchema),
   effects: z.array(StubEffectReceiptSchema),
   planRevisionRequests: z.array(PlanRevisionRequestSchema).default([]),
+  settings: RunSettingsSchema.default(DEFAULT_RUN_SETTINGS),
 };
 
 export const RunProjectionSchema = z.discriminatedUnion('status', [
@@ -158,3 +180,5 @@ export type RunOperation = z.infer<typeof RunOperationSchema>;
 export type RunProjection = z.infer<typeof RunProjectionSchema>;
 export type ExecutingRunProjection = Extract<RunProjection, { readonly status: 'executing' }>;
 export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;
+export type RunSettings = z.infer<typeof RunSettingsSchema>;
+export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
