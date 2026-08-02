@@ -190,6 +190,39 @@ test('generation progress remains attached to the task that started it', async (
   await expect(page.getByTestId(`task-item-${first.id}`)).toContainText('Backlog');
 });
 
+test('I can send plan feedback and review the new planning attempt', async ({ page }) => {
+  const fixtureId = 'avia-12536-feature-review';
+  const guidance = 'Keep the visual check, but verify the booking summary before the full suite.';
+  const tasks = await loadTasks(page);
+  const candidate = requireTask(
+    tasks.tasks.find((task) => task.id === fixtureId),
+    'Expected the feature-with-review fixture to exist',
+  );
+
+  await page.goto('/');
+  await clickTask(page, fixtureId);
+  if (candidate.status === 'backlog') {
+    await page.getByRole('button', { name: 'Generate workflow' }).click();
+  }
+  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+
+  await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
+  await expect(page.getByTestId('plan-review-controls')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Plan review guidance' }).fill(guidance);
+  await page.getByRole('button', { name: 'Request changes' }).click();
+
+  await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
+  await expect(page.getByTestId('plan-review-controls')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Plan review guidance' })).toHaveValue('');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Plan changes requested · attempt 2',
+  );
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(guidance);
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'task.analyze@1 attempt 2',
+  );
+});
+
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
   const tasks = await loadTasks(page);
   const candidate = requireTask(
@@ -302,13 +335,8 @@ test('a ledger event from another page refreshes the visible task status', async
 }) => {
   const tasks = await loadTasks(page);
   const backlog = requireTask(
-    tasks.tasks.find(
-      (task) =>
-        task.status === 'backlog' &&
-        task.origin.kind === 'fixture' &&
-        task.origin.family !== 'invalid_workflow',
-    ),
-    'Expected a backlog task that can generate a ready graph',
+    tasks.tasks.find((task) => task.status === 'backlog' && task.origin.kind === 'fixture'),
+    'Expected a backlog fixture that can emit a ledger event',
   );
 
   await page.goto('/');

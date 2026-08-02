@@ -38,6 +38,7 @@ import {
   loadJiraIssue,
   loadOperatorActivity,
   loadWorkflow,
+  reviewPlan,
   startWorkflow,
   syncJiraIssue,
 } from './api-client.js';
@@ -82,6 +83,8 @@ type JiraSyncState =
   | { readonly status: 'failed'; readonly message: string };
 
 type ConsoleStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
+
+type TaskOperation = 'generating' | 'starting' | 'approving_plan' | 'requesting_plan_changes';
 
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 
@@ -143,6 +146,7 @@ const statusTone = (status: OperatorTaskSummary['status']): string => {
     case 'workflow_rejected':
       return 'bg-destructive/15 text-destructive';
     case 'needs_attention':
+    case 'plan_review':
     case 'waiting':
       return 'bg-amber-500/12 text-amber-300';
     case 'running':
@@ -241,6 +245,7 @@ const TaskQueue = ({
       'backlog',
       'queued',
       'running',
+      'plan_review',
       'waiting',
       'planned',
       'needs_attention',
@@ -407,7 +412,7 @@ const SelectedTaskHeader = ({
   readonly onGenerate: () => void;
   readonly onStart: () => void;
   readonly onSyncJira: (issueKey: string) => void;
-  readonly pendingOperation: 'generating' | 'starting' | null;
+  readonly pendingOperation: TaskOperation | null;
   readonly jiraSync: JiraSyncState;
 }) => {
   const generating = pendingOperation === 'generating';
@@ -508,6 +513,70 @@ const SelectedTaskHeader = ({
         </div>
       </div>
       {workflow.status === 'failed' ? <InlineError>{workflow.message}</InlineError> : null}
+    </section>
+  );
+};
+
+const PlanReviewControls = ({
+  guidance,
+  pendingOperation,
+  onGuidanceChange,
+  onApprove,
+  onRequestChanges,
+}: {
+  readonly guidance: string;
+  readonly pendingOperation: TaskOperation | null;
+  readonly onGuidanceChange: (guidance: string) => void;
+  readonly onApprove: () => void;
+  readonly onRequestChanges: () => void;
+}) => {
+  const approving = pendingOperation === 'approving_plan';
+  const requestingChanges = pendingOperation === 'requesting_plan_changes';
+  const busy = approving || requestingChanges;
+
+  return (
+    <section
+      className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3"
+      data-testid="plan-review-controls"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <strong className="text-sm">Review the implementation plan</strong>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Approve it, or send guidance for a new immutable planning attempt.
+          </p>
+        </div>
+        <Button size="sm" type="button" disabled={busy} onClick={onApprove}>
+          {approving ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+          {approving ? 'Approving…' : 'Approve plan'}
+        </Button>
+      </div>
+      <div className="mt-2 flex items-end gap-2">
+        <textarea
+          className="min-h-16 flex-1 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+          aria-label="Plan review guidance"
+          placeholder="What should the agent change in the plan?"
+          value={guidance}
+          disabled={busy}
+          onChange={(event) => {
+            onGuidanceChange(event.target.value);
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          disabled={busy || guidance.trim().length === 0}
+          onClick={onRequestChanges}
+        >
+          {requestingChanges ? (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <MessageSquare data-icon="inline-start" />
+          )}
+          {requestingChanges ? 'Sending…' : 'Request changes'}
+        </Button>
+      </div>
     </section>
   );
 };
@@ -1334,9 +1403,12 @@ export const App = () => {
   });
   const [jiraSyncState, setJiraSyncState] = useState<JiraSyncState>({ status: 'idle' });
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
-  const [pendingOperations, setPendingOperations] = useState<
-    ReadonlyMap<string, 'generating' | 'starting'>
-  >(new Map());
+  const [pendingOperations, setPendingOperations] = useState<ReadonlyMap<string, TaskOperation>>(
+    new Map(),
+  );
+  const [planGuidanceDrafts, setPlanGuidanceDrafts] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const streamCursorRef = useRef(0);
 
   const selectedTask = useMemo(
@@ -1583,6 +1655,46 @@ export const App = () => {
       });
   };
 
+  const handlePlanReview = (decision: 'approve' | 'request_changes'): void => {
+    if (selectedTask === null || selectedTask.status !== 'plan_review') return;
+    const taskReference = selectedTask.id;
+    const guidance = planGuidanceDrafts.get(taskReference)?.trim() ?? '';
+    if (decision === 'request_changes' && guidance.length === 0) return;
+    const operation =
+      decision === 'approve' ? ('approving_plan' as const) : ('requesting_plan_changes' as const);
+    setPendingOperations((current) => new Map(current).set(taskReference, operation));
+    void reviewPlan(taskReference, decision === 'approve' ? { decision } : { decision, guidance })
+      .then(async () => {
+        if (decision === 'request_changes') {
+          setPlanGuidanceDrafts((current) => {
+            const next = new Map(current);
+            next.delete(taskReference);
+            return next;
+          });
+        }
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) {
+          await refreshSelection(taskReference);
+        }
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Unexpected plan review failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== operation) return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
   const view = workflowState.status === 'ready' ? workflowState.response.view : null;
 
   return (
@@ -1651,6 +1763,23 @@ export const App = () => {
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
                 />
+                {selectedTask.status === 'plan_review' ? (
+                  <PlanReviewControls
+                    guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
+                    pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
+                    onGuidanceChange={(guidance) => {
+                      setPlanGuidanceDrafts((current) =>
+                        new Map(current).set(selectedTask.id, guidance),
+                      );
+                    }}
+                    onApprove={() => {
+                      handlePlanReview('approve');
+                    }}
+                    onRequestChanges={() => {
+                      handlePlanReview('request_changes');
+                    }}
+                  />
+                ) : null}
                 {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}
                 <JiraPlanningSurface task={selectedTask} />
                 <ScrollArea className="min-h-0 flex-1">

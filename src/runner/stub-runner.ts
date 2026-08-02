@@ -10,13 +10,15 @@ import {
   type WorkflowTreeNode,
 } from '../control-plane/m1-contracts.js';
 import type { LedgerRepository } from '../ledger/repository.js';
-import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
+import type { ArtifactWrite, EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, type CompiledWorkflowNode } from '../workflow/schema.js';
 import {
+  PlanReviewCommandSchema,
   RunProjectionSchema,
   type ExecutingRunProjection,
+  type PlanReviewCommand,
   type RunNodeStatus,
   type RunOperation,
   type RunProjection,
@@ -33,14 +35,22 @@ const RunEventPayloadSchema = z
     waitKind: z.string().min(1).optional(),
     slotPolicy: z.enum(['release', 'retain']).optional(),
     outcome: z.string().min(1).optional(),
+    attempt: z.number().int().positive().optional(),
+    guidanceArtifactId: z.string().min(1).optional(),
+    nextAttempt: z.number().int().positive().optional(),
+    targetNodeId: z.string().min(1).optional(),
   })
   .loose();
+
+const GuidanceArtifactPayloadSchema = z.object({ guidance: z.string().min(1) }).strict();
 
 export type StubRunError =
   | { readonly kind: 'workflow_not_found'; readonly taskReference: string }
   | { readonly kind: 'workflow_not_executable'; readonly taskReference: string }
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
   | { readonly kind: 'run_not_waiting'; readonly taskReference: string }
+  | { readonly kind: 'run_not_at_plan_review'; readonly taskReference: string }
+  | { readonly kind: 'plan_revision_target_not_found'; readonly taskReference: string }
   | { readonly kind: 'projection_corrupt'; readonly projectionId: string }
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict };
 
@@ -53,9 +63,23 @@ type LeaseBoundary =
   | { readonly kind: 'guard'; readonly lease: ExecutingRunProjection['lease'] }
   | { readonly kind: 'release'; readonly lease: ExecutingRunProjection['lease'] };
 
+interface PersistOptions {
+  readonly actor?: string;
+  readonly artifacts?: readonly ArtifactWrite[];
+  readonly signal?: {
+    readonly signalId: string;
+    readonly signalKind: string;
+    readonly correlationKey: string;
+    readonly payload: JsonValue;
+    readonly status: string;
+    readonly resolvedWaitKey: string;
+  };
+}
+
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 const runIdFor = (taskReference: string): string => `run:${taskReference}`;
-const waitIdFor = (runId: string, nodeId: string): string => `wait:${runId}:${nodeId}`;
+const waitIdFor = (runId: string, nodeId: string, cycle: number): string =>
+  `wait:${runId}:${nodeId}:cycle-${String(cycle)}`;
 const leaseKeyFor = (runId: string): string => `runner/${runId}`;
 
 const executionPlan = (root: CompiledWorkflowNode): readonly RunOperation[] => {
@@ -204,6 +228,7 @@ export class DeterministicStubRunService {
       plan,
       nodeStates: initialNodeStates(plan),
       effects: [],
+      planRevisionRequests: [],
       wait: null,
     });
     return this.persist(run, 'RunQueued', { taskReference });
@@ -346,15 +371,119 @@ export class DeterministicStubRunService {
       { taskReference, nodeId: wait.nodeId, waitKind: wait.waitKind },
       undefined,
       {
-        signalId: `signal:${current.value.runId}:${wait.nodeId}`,
-        signalKind,
-        correlationKey: wait.waitId,
-        payload: { taskReference, nodeId: wait.nodeId },
-        status: 'resolved',
-        resolvedWaitKey: wait.waitId,
+        actor: 'operator',
+        signal: {
+          signalId: `signal:${wait.waitId}:resolved`,
+          signalKind,
+          correlationKey: wait.waitId,
+          payload: { taskReference, nodeId: wait.nodeId },
+          status: 'resolved',
+          resolvedWaitKey: wait.waitId,
+        },
       },
     );
     return persisted;
+  }
+
+  public reviewPlan(
+    taskReference: string,
+    commandInput: PlanReviewCommand,
+  ): Outcome<RunProjection, StubRunError> {
+    const command = PlanReviewCommandSchema.parse(commandInput);
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    const run = current.value;
+    if (run.status !== 'waiting' || run.wait.waitKind !== 'plan.approved@1') {
+      return err({ kind: 'run_not_at_plan_review', taskReference });
+    }
+    if (command.decision === 'approve') {
+      return this.resolveWait(taskReference, 'plan_approved');
+    }
+
+    const review = run.wait;
+    const targetIndex = run.plan.findLastIndex(
+      (operation, index) =>
+        index < run.cursor && operation.kind === 'step' && operation.uses === 'task.analyze@1',
+    );
+    const target = run.plan[targetIndex];
+    if (targetIndex < 0 || target?.kind !== 'step') {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+
+    const priorAttempt = run.effects.filter((effect) => effect.nodeId === target.nodeId).length;
+    if (priorAttempt < 1) {
+      return err({ kind: 'plan_revision_target_not_found', taskReference });
+    }
+    const nextAttempt = priorAttempt + 1;
+    const now = this.clock.now();
+    const interventionId = `intervention:${run.runId}:${target.nodeId}:attempt-${String(nextAttempt)}`;
+    const guidanceArtifactId = `guidance:${run.runId}:${target.nodeId}:attempt-${String(nextAttempt)}`;
+    const revised = RunProjectionSchema.parse({
+      ...run,
+      status: 'queued',
+      updatedAt: now,
+      cursor: targetIndex,
+      nodeStates: {
+        ...run.nodeStates,
+        [target.nodeId]: 'planned',
+        [review.nodeId]: 'planned',
+      },
+      lease: null,
+      wait: null,
+      planRevisionRequests: [
+        ...run.planRevisionRequests,
+        {
+          interventionId,
+          reviewNodeId: review.nodeId,
+          targetNodeId: target.nodeId,
+          priorAttempt,
+          nextAttempt,
+          guidanceArtifactId,
+          createdAt: now,
+        },
+      ],
+    });
+    return this.persist(
+      revised,
+      'PlanChangesRequested',
+      {
+        taskReference,
+        nodeId: review.nodeId,
+        targetNodeId: target.nodeId,
+        guidanceArtifactId,
+        attempt: priorAttempt,
+        nextAttempt,
+      },
+      undefined,
+      {
+        actor: 'operator',
+        artifacts: [
+          {
+            artifactId: guidanceArtifactId,
+            artifactKind: 'operator_guidance',
+            storageUri: `ledger://artifacts/${guidanceArtifactId}`,
+            payload: { guidance: command.guidance },
+            metadata: {
+              taskReference,
+              reviewNodeId: review.nodeId,
+              targetNodeId: target.nodeId,
+              priorAttempt,
+              nextAttempt,
+            },
+            createdAt: now,
+          },
+        ],
+        signal: {
+          signalId: `signal:${review.waitId}:changes-requested`,
+          signalKind: 'plan_changes_requested',
+          correlationKey: review.waitId,
+          payload: { taskReference, nodeId: review.nodeId, guidanceArtifactId },
+          status: 'resolved',
+          resolvedWaitKey: review.waitId,
+        },
+      },
+    );
   }
 
   public list(): Outcome<readonly RunProjection[], StubRunError> {
@@ -424,7 +553,7 @@ export class DeterministicStubRunService {
             ...common,
             source: 'agent',
             title: payload.nodeId ?? 'Workflow step completed',
-            detail: `${payload.uses ?? 'step'} produced a durable stub receipt.`,
+            detail: `${payload.uses ?? 'step'} attempt ${String(payload.attempt ?? 1)} produced a durable stub receipt.`,
           });
         case 'WaitOpened':
           return OperatorActivityEntrySchema.parse({
@@ -437,9 +566,24 @@ export class DeterministicStubRunService {
           return OperatorActivityEntrySchema.parse({
             ...common,
             source: 'operator',
-            title: 'Wait resolved',
+            title: payload.waitKind === 'plan.approved@1' ? 'Plan approved' : 'Wait resolved',
             detail: `Execution will continue after ${payload.nodeId ?? 'the persisted wait'}.`,
           });
+        case 'PlanChangesRequested': {
+          const artifact =
+            payload.guidanceArtifactId === undefined
+              ? null
+              : this.ledger.readArtifact(payload.guidanceArtifactId);
+          const guidance = GuidanceArtifactPayloadSchema.safeParse(artifact?.payload);
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'operator',
+            title: `Plan changes requested · attempt ${String(payload.nextAttempt ?? '?')}`,
+            detail: guidance.success
+              ? guidance.data.guidance
+              : 'Operator guidance was persisted as a separate artifact.',
+          });
+        }
         case 'RunCompleted':
           return OperatorActivityEntrySchema.parse({
             ...common,
@@ -513,7 +657,9 @@ export class DeterministicStubRunService {
     const now = this.clock.now();
     switch (operation.kind) {
       case 'step': {
-        const effectKey = `${run.runId}:${operation.nodeId}:attempt-1`;
+        const attempt =
+          run.effects.filter((effect) => effect.nodeId === operation.nodeId).length + 1;
+        const effectKey = `${run.runId}:${operation.nodeId}:attempt-${String(attempt)}`;
         const next = RunProjectionSchema.parse({
           ...run,
           updatedAt: now,
@@ -537,13 +683,20 @@ export class DeterministicStubRunService {
             taskReference: run.taskReference,
             nodeId: operation.nodeId,
             uses: operation.uses,
+            attempt,
           },
           { kind: 'guard', lease: run.lease },
         );
       }
       case 'gate':
       case 'wait': {
-        const waitId = waitIdFor(run.runId, operation.nodeId);
+        const cycle =
+          this.listEvents(run.taskReference).filter(
+            (event) =>
+              event.eventType === 'WaitOpened' &&
+              RunEventPayloadSchema.safeParse(event.payload).data?.nodeId === operation.nodeId,
+          ).length + 1;
+        const waitId = waitIdFor(run.runId, operation.nodeId, cycle);
         const next = RunProjectionSchema.parse({
           ...run,
           status: 'waiting',
@@ -607,14 +760,7 @@ export class DeterministicStubRunService {
     eventType: string,
     payload: JsonValue,
     leaseBoundary?: LeaseBoundary,
-    signal?: {
-      readonly signalId: string;
-      readonly signalKind: string;
-      readonly correlationKey: string;
-      readonly payload: JsonValue;
-      readonly status: string;
-      readonly resolvedWaitKey: string;
-    },
+    options: PersistOptions = {},
   ): Outcome<RunProjection, StubRunError> {
     const head = this.ledger.readAggregateHead(run.runId);
     const expectedVersion = head?.version ?? 0;
@@ -637,7 +783,7 @@ export class DeterministicStubRunService {
             eventType,
             eventSchemaVersion: 1,
             payload,
-            actor: 'm2_deterministic_stub_runner',
+            actor: options.actor ?? 'm2_deterministic_stub_runner',
           },
         ],
       },
@@ -665,7 +811,8 @@ export class DeterministicStubRunService {
             },
           }
         : {}),
-      ...(signal === undefined ? {} : { signals: [signal] }),
+      ...(options.signal === undefined ? {} : { signals: [options.signal] }),
+      ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
       timestamp: run.updatedAt,
     });
     return result.ok ? ok(run) : err({ kind: 'ledger_conflict', conflict: result.error });

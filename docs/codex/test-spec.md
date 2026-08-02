@@ -350,11 +350,13 @@ For every supported boundary, run the test with the process killed:
 Current evidence (incremental vertical slice, 2026-08-02): Start durably queues a run;
 capacity `2` admits two independent runs, capacity `1` is reused after a slot-free wait,
 and a restarted scheduler replaces an expired lease without duplicate receipts. A run
-reaches a persisted slot-releasing code-review wait; API/UI runtime projections update
-from ledger events; and a forced stop after two committed steps resumes from the same
-cursor. The full gate remains open for heartbeat/outbox dispatch, provider capacity
-pools, quota behavior, intervention, takeover, projection rebuild, and the complete
-kill matrix.
+reaches a persisted plan-review wait; operator feedback creates an immutable guidance
+artifact and planning attempt `2`; reopening SQLite returns to plan review without
+discarding attempt `1`. Another run reaches a slot-releasing code-review wait; API/UI
+runtime projections update from ledger events; and a forced stop after two committed
+steps resumes from the same cursor. The full gate remains open for heartbeat/outbox
+dispatch, provider capacity pools, quota behavior, generalized intervention, takeover,
+projection rebuild, and the complete kill matrix.
 
 - one graph completes on stubs;
 - kill/restart matrix for kernel boundaries green;

@@ -290,6 +290,99 @@ describe('M1 HTTP API', () => {
     await api.close();
   });
 
+  it('replans from persisted operator guidance and returns to plan review', async () => {
+    const { api } = setup();
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/generate',
+    });
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/start',
+    });
+
+    const reviewResponse = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/plan-review',
+      payload: {
+        decision: 'request_changes',
+        guidance: 'Add a rollback check before the implementation step.',
+      },
+    });
+    const taskResponse = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
+    const activityResponse = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/avia-12536-feature-review/activity',
+    });
+
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(reviewResponse.json()).toMatchObject({
+      status: 'waiting',
+      wait: {
+        waitId: 'wait:run:avia-12536-feature-review:review-plan:cycle-2',
+        waitKind: 'plan.approved@1',
+      },
+      planRevisionRequests: [{ priorAttempt: 1, nextAttempt: 2 }],
+    });
+    expect(
+      OperatorTaskListResponseSchema.parse(taskResponse.json()).tasks.find(
+        (task) => task.id === 'avia-12536-feature-review',
+      ),
+    ).toMatchObject({
+      status: 'plan_review',
+      attention: 'operator',
+      currentStage: 'Plan review required',
+    });
+    expect(OperatorActivityResponseSchema.parse(activityResponse.json()).entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Plan changes requested · attempt 2',
+          detail: 'Add a rollback check before the implementation step.',
+        }),
+        expect.objectContaining({
+          title: 'analyze-task',
+          detail: 'task.analyze@1 attempt 2 produced a durable stub receipt.',
+        }),
+      ]),
+    );
+
+    await api.close();
+  });
+
+  it('continues an approved plan without creating a revision attempt', async () => {
+    const { api } = setup();
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/generate',
+    });
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/start',
+    });
+
+    const reviewResponse = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/plan-review',
+      payload: { decision: 'approve' },
+    });
+    const activityResponse = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/avia-12536-feature-review/activity',
+    });
+
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(reviewResponse.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'code_review@1' },
+      planRevisionRequests: [],
+    });
+    expect(OperatorActivityResponseSchema.parse(activityResponse.json()).entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: 'Plan approved' })]),
+    );
+
+    await api.close();
+  });
+
   it('returns a structured rejected workflow and refuses graph download', async () => {
     const { api } = setup();
 

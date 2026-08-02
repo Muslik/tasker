@@ -444,14 +444,18 @@ wait, intervention, takeover, replay, and slot semantics.
 The executable path now includes operator **Test workflow**, a durable ordered queue,
 configurable capacity, per-run leases and fence tokens, immutable graph-to-operation
 plans, per-node transactions and stub receipts, restart-safe cursors, durable
-wait/signals, SSE activity, runtime tree projections, and stop at the code-review wait.
+wait/signals, SSE activity, runtime tree projections, a durable plan-review correction
+loop, and stop at the code-review wait. Plan feedback is stored as an immutable
+operator artifact, creates attempt `N + 1`, survives restart, and rewinds only the
+planning-analysis node instead of restarting the task.
 Recovery tests prove that committed steps are not repeated after reopening the database
 and that an expired owner cannot write after lease replacement. See
 [`m2-stub-execution.md`](m2-stub-execution.md).
 
 This does not close the M2 gate. Step 2 still needs heartbeat and outbox dispatch;
-steps 3, 7-10, and 13 remain. Steps 1, 4-6, 11, and 12 are implemented only for the
-bounded stub semantics documented there.
+steps 3, 7, 9, 10, and 13 remain. Step 8 is implemented for plan review but still needs
+the generalized mid-execution clarification path. Steps 1, 4-6, 11, and 12 are
+implemented only for the bounded stub semantics documented there.
 
 ### Entry criteria
 
@@ -472,7 +476,8 @@ bounded stub semantics documented there.
    step cursor resume.
 7. Implement quota wait as a normal slot-free Wait.
 8. Implement human clarification gate and `InterventionEvent -> new Attempt` input
-   materialization.
+   materialization. The plan-review variant now persists guidance and attempt lineage;
+   real provider input materialization and arbitrary execution gates remain.
 9. Accept `workflow_change_required` from a stub step, persist its evidence, preserve
    the cursor/worktree, and compile a linked immutable continuation candidate. The
    current graph cannot be edited in place.

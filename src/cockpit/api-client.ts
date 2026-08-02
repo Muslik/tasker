@@ -18,7 +18,12 @@ import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
 } from '../repositories/contracts.js';
-import { RunProjectionSchema, type RunProjection } from '../runner/contracts.js';
+import {
+  PlanReviewCommandSchema,
+  RunProjectionSchema,
+  type PlanReviewCommand,
+  type RunProjection,
+} from '../runner/contracts.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
@@ -171,6 +176,22 @@ export const startWorkflow = async (fixtureId: string): Promise<RunProjection> =
   if (!result.response.ok) throw failureFrom(result);
   const parsed = RunProjectionSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Run response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const reviewPlan = async (
+  fixtureId: string,
+  commandInput: PlanReviewCommand,
+): Promise<RunProjection> => {
+  const command = PlanReviewCommandSchema.parse(commandInput);
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/plan-review`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(command),
+  });
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = RunProjectionSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Plan review response does not match the cockpit contract');
   return parsed.data;
 };
 

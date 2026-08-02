@@ -7,7 +7,8 @@ M0, M1, and the first M2 execution slice are implemented. A local fixture task n
 then a deterministic validated graph with a stable hash, persisted projections, a
 Fastify API, a CLI tree, and a React operator cockpit. An accepted graph can execute
 deterministic local stub nodes through a bounded queue, survive scheduler restart, and
-stop at a durable code-review wait.
+stop at durable plan-review and code-review waits. At plan review, the operator can
+approve or request changes; guidance is persisted as a new immutable planning attempt.
 It intentionally cannot execute real provider nodes or mutate remote systems yet.
 
 The cockpit is an operator console: task/status queue on the left, persisted realtime

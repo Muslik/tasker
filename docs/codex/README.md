@@ -31,12 +31,14 @@ Read in this order:
     and visible operator graph.
 12. [`m2-stub-execution.md`](m2-stub-execution.md) — durable execution slice: bounded
     queue capacity, fenced ownership, per-node receipts, restart-safe cursor, realtime
-    runtime state, and a slot-releasing code-review wait.
+    runtime state, an immutable plan-review correction loop, and a slot-releasing
+    code-review wait.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. M2 has started: accepted graphs can now queue and traverse
 durable stub steps in parallel up to configured capacity, recover fenced ownership,
-and stop at persisted code-review waits. Corporate integrations remain later milestones.
+stop at persisted plan/code-review waits, and turn operator plan feedback into a new
+restart-safe attempt. Corporate integrations remain later milestones.
 
 M0, M1, M1.5, M1.6, M1.7, M1.8, and the first M2 vertical slice are implemented. The operator
 console has the task queue on the left, persisted activity and workflow rationale in

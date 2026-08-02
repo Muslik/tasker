@@ -64,6 +64,28 @@ export const StubEffectReceiptSchema = z
   })
   .strict();
 
+export const PlanReviewCommandSchema = z.discriminatedUnion('decision', [
+  z.object({ decision: z.literal('approve') }).strict(),
+  z
+    .object({
+      decision: z.literal('request_changes'),
+      guidance: z.string().trim().min(1).max(10_000),
+    })
+    .strict(),
+]);
+
+export const PlanRevisionRequestSchema = z
+  .object({
+    interventionId: z.string().min(1),
+    reviewNodeId: z.string().min(1),
+    targetNodeId: z.string().min(1),
+    priorAttempt: z.number().int().positive(),
+    nextAttempt: z.number().int().positive(),
+    guidanceArtifactId: z.string().min(1),
+    createdAt: z.iso.datetime(),
+  })
+  .strict();
+
 export const RunLeaseSchema = z
   .object({
     leaseKey: z.string().min(1),
@@ -85,6 +107,7 @@ const runBaseShape = {
   plan: z.array(RunOperationSchema).min(1),
   nodeStates: z.record(z.string(), RunNodeStatusSchema),
   effects: z.array(StubEffectReceiptSchema),
+  planRevisionRequests: z.array(PlanRevisionRequestSchema).default([]),
 };
 
 export const RunProjectionSchema = z.discriminatedUnion('status', [
@@ -134,3 +157,4 @@ export type RunNodeStatus = z.infer<typeof RunNodeStatusSchema>;
 export type RunOperation = z.infer<typeof RunOperationSchema>;
 export type RunProjection = z.infer<typeof RunProjectionSchema>;
 export type ExecutingRunProjection = Extract<RunProjection, { readonly status: 'executing' }>;
+export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;

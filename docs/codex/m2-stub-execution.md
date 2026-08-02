@@ -14,14 +14,19 @@ incremental M2 slice, not the complete M2 milestone.
    repository operation.
 3. The task becomes `queued`, then `running` when scheduler capacity is available.
 4. Every deterministic stub step appends a ledger event and a unique effect receipt.
-5. A `code_review@1` node changes the task to `code_review`, marks the workflow rail
+5. A `plan.approved@1` gate changes the task to `plan_review` when the project policy
+   requires review. The operator can approve it or attach guidance for a new planning
+   attempt.
+6. A `code_review@1` node changes the task to `code_review`, marks the workflow rail
    as waiting, and releases the conceptual runner slot.
-6. Reloading Tasker restores the same run, wait, activity, receipts, and graph state.
+7. Reloading Tasker restores the same run, wait, activity, receipts, and graph state.
 
 The normal HTTP path is:
 
 - `POST /api/workflows/:taskReference/start` — durably enqueue the one current run;
 - `GET /api/workflows/:taskReference/run` — inspect its durable projection;
+- `POST /api/workflows/:taskReference/plan-review` — approve the current plan gate or
+  request a new planning attempt with operator guidance;
 - `POST /api/workflows/:taskReference/resume` — resolve the current wait and continue;
 - `GET /api/runs/:runId` — inspect the lower-level run projection.
 
@@ -55,6 +60,7 @@ that graph and stores it in a separate run projection together with:
 - queue time and the active lease owner/fence while executing;
 - per-node runtime states;
 - deterministic effect keys and stub receipts;
+- immutable plan-revision requests and their operator-guidance artifact IDs;
 - the current wait, including wait kind and slot policy;
 - start, update, and completion timestamps.
 
@@ -64,10 +70,11 @@ ledger transaction that appends one event and advances both `m2_run_by_task` and
 the corresponding receipt. This is the key no-lost-work boundary: after a crash the
 runner reads the projection and starts at the first uncommitted node.
 
-Effect keys have the stable form
-`<runId>:<nodeId>:attempt-1`. A restarted process therefore does not invent a new
-identity for completed work. The current stub implementation never invokes remote
-effects, but it exercises the persistence contract later real executors must obey.
+Effect keys have the stable form `<runId>:<nodeId>:attempt-N`. A restart keeps the
+same identity for an existing attempt; an explicit plan-revision request advances
+`N` only for the planning node being retried. The current stub implementation never
+invokes remote effects, but it exercises the persistence contract later real executors
+must obey.
 
 ## Current graph semantics
 
@@ -85,6 +92,25 @@ additional loop attempts, provider retries, and runtime workflow continuations r
 explicit later M2 work. They will advance the same aggregate rather than replacing the
 current graph or rerunning its completed prefix.
 
+## Plan review and operator correction
+
+Plan review is a durable wait, not a modal edit of historical state. At that gate:
+
+- **Approve plan** atomically resolves the current wait and requeues the run at the
+  next cursor;
+- **Request changes** requires non-empty guidance, persists that exact text as an
+  operator-authored artifact, appends `PlanChangesRequested`, and records the
+  prior/next attempt lineage;
+- the run rewinds only to its planning-analysis node, while receipts for the previous
+  attempt remain immutable and inspectable;
+- after attempt `N + 1`, a new wait cycle opens at the same plan-review gate, so the
+  operator can review again without restarting the task.
+
+The current executor still produces a deterministic planning stub receipt. This slice
+proves the operator interaction, lineage, replay, and restart contracts. Materializing
+the guidance into a real provider-generated revised plan belongs to the provider
+executor milestone.
+
 ## Wait and resume
 
 Opening a wait does not advance past its node. The projection records its node ID,
@@ -93,15 +119,17 @@ by this slice use slot-releasing waits. Resolving one writes a signal and `WaitR
 event atomically, marks only that node succeeded, advances one cursor, and requeues the
 run so it cannot bypass configured capacity.
 
-The first UI stops at code review. The resume endpoint exists to exercise the durable
-signal boundary; PR comment ingestion and review dispositions belong to the later
-Bitbucket/CI integration milestone.
+The UI exposes explicit controls for the plan-approval wait and otherwise stops at code
+review. The generic resume endpoint exists to exercise the durable signal boundary; PR
+comment ingestion and review dispositions belong to the later Bitbucket/CI integration
+milestone.
 
 ## Realtime console
 
 Run events share the existing SSE stream. The center activity surface shows queueing,
 run start, each completed step, opened/resolved waits, and completion. The left queue
-derives `queued`, `running`, `waiting`, `code_review`, or `done` from the run projection.
+derives `queued`, `running`, `plan_review`, `waiting`, `code_review`, or `done` from the
+run projection.
 The right graph derives container state from its children and renders planned, running,
 waiting, succeeded, skipped, or failed nodes.
 
@@ -121,11 +149,12 @@ proves fence `1` cannot write after fence `2` takes ownership.
 
 Verification at delivery:
 
-- 114 Vitest tests across 27 files;
+- 118 Vitest tests across 28 files;
 - two dedicated restart/no-duplicate scenarios, including scheduler ownership change;
 - capacity `1`, capacity `2`, and stale-fence scheduler scenarios;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;
-- 8 Playwright operator scenarios, including **Test workflow -> code review wait**;
+- 10 Playwright operator scenarios, including plan correction and **Test workflow ->
+  code review wait**;
 - formatting, server/cockpit typecheck, lint, and production builds green.
 
 ## Still required for the full M2 gate
@@ -135,7 +164,7 @@ Verification at delivery:
 - real predicate evaluation and multi-attempt loops;
 - duplicate signal classification and correlation policies;
 - quota waits and proof that another queued run reuses the slot;
-- intervention as a new attempt with prior-attempt lineage;
+- generalized mid-execution intervention beyond the implemented plan-review correction;
 - `workflow_change_required` as an immutable linked continuation;
 - manual takeover, write freeze, reconciliation, and handoff packet;
 - time/cost aggregation, attempt transcripts, and debug bundle controls;
