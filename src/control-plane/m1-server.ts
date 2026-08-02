@@ -17,7 +17,7 @@ import {
   UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
-import { DeterministicStubRunService } from '../runner/index.js';
+import { DeterministicStubRunService, DurableStubScheduler } from '../runner/index.js';
 import { buildM1Api } from './m1-api.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
@@ -30,6 +30,16 @@ const parsePort = (input: string | undefined): number => {
   return port;
 };
 
+const parsePositiveInteger = (
+  input: string | undefined,
+  fallback: number,
+  name: string,
+): number => {
+  const value = input === undefined ? fallback : Number(input);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${name}: ${input ?? ''}`);
+  return value;
+};
+
 export const startM1Server = async (): Promise<void> => {
   const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/m1-operator.sqlite');
   mkdirSync(dirname(databasePath), { recursive: true });
@@ -37,6 +47,12 @@ export const startM1Server = async (): Promise<void> => {
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const service = createM1WorkflowService(ledger.repository, systemClock);
   const runService = new DeterministicStubRunService(ledger.repository, service, systemClock);
+  const scheduler = new DurableStubScheduler(runService, ledger.repository, systemClock, {
+    capacity: parsePositiveInteger(process.env.TASKER_STUB_CAPACITY, 2, 'TASKER_STUB_CAPACITY'),
+    ownerId: `tasker-${String(process.pid)}`,
+    leaseTimeoutMs: 15_000,
+    pollIntervalMs: 250,
+  });
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
@@ -70,10 +86,12 @@ export const startM1Server = async (): Promise<void> => {
     logger: true,
     workflowGenerator,
     runService,
+    scheduler,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 
   const close = async (): Promise<void> => {
+    scheduler.stop();
     await api.close();
     ledger.close();
   };
@@ -81,6 +99,7 @@ export const startM1Server = async (): Promise<void> => {
   process.once('SIGINT', () => void close());
   process.once('SIGTERM', () => void close());
 
+  scheduler.start();
   await api.listen({ host: '127.0.0.1', port: parsePort(process.env.TASKER_PORT) });
 };
 

@@ -16,6 +16,7 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, type CompiledWorkflowNode } from '../workflow/schema.js';
 import {
   RunProjectionSchema,
+  type ExecutingRunProjection,
   type RunNodeStatus,
   type RunOperation,
   type RunProjection,
@@ -48,9 +49,14 @@ export interface DriveOptions {
   readonly maxNodeTransitions?: number;
 }
 
+type LeaseBoundary =
+  | { readonly kind: 'guard'; readonly lease: ExecutingRunProjection['lease'] }
+  | { readonly kind: 'release'; readonly lease: ExecutingRunProjection['lease'] };
+
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 const runIdFor = (taskReference: string): string => `run:${taskReference}`;
 const waitIdFor = (runId: string, nodeId: string): string => `wait:${runId}:${nodeId}`;
+const leaseKeyFor = (runId: string): string => `runner/${runId}`;
 
 const executionPlan = (root: CompiledWorkflowNode): readonly RunOperation[] => {
   const operations: RunOperation[] = [];
@@ -149,10 +155,21 @@ export class DeterministicStubRunService {
     const existing = this.read(taskReference);
     if (!existing.ok) return existing;
     if (existing.value !== null) {
-      return existing.value.status === 'executing'
-        ? this.drive(existing.value, options)
-        : ok(existing.value);
+      if (existing.value.status === 'executing') return this.drive(existing.value, options);
+      if (existing.value.status === 'queued') {
+        return this.claim(taskReference, 'direct-stub-runner', options);
+      }
+      return ok(existing.value);
     }
+
+    const queued = this.enqueue(taskReference);
+    return queued.ok ? this.claim(taskReference, 'direct-stub-runner', options) : queued;
+  }
+
+  public enqueue(taskReference: string): Outcome<RunProjection, StubRunError> {
+    const existing = this.read(taskReference);
+    if (!existing.ok) return existing;
+    if (existing.value !== null) return ok(existing.value);
 
     const workflow = this.workflows.read(taskReference);
     if (!workflow.ok || workflow.value === null) {
@@ -177,18 +194,119 @@ export class DeterministicStubRunService {
       taskId: workflow.value.view.task.id,
       workflowId: graph.data.metadata.workflowId,
       workflowHash: workflow.value.view.workflow.graphHash,
-      status: 'executing',
-      startedAt: now,
+      status: 'queued',
+      queuedAt: now,
+      startedAt: null,
       updatedAt: now,
       completedAt: null,
+      lease: null,
       cursor: 0,
       plan,
       nodeStates: initialNodeStates(plan),
       effects: [],
       wait: null,
     });
-    const created = this.persist(run, 'RunStarted', { taskReference });
-    return created.ok ? this.drive(created.value, options) : created;
+    return this.persist(run, 'RunQueued', { taskReference });
+  }
+
+  public claim(
+    taskReference: string,
+    ownerId: string,
+    options: DriveOptions = {},
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    if (current.value.status === 'executing') {
+      return current.value.lease.ownerId === ownerId
+        ? this.advanceClaimed(current.value, options)
+        : ok(current.value);
+    }
+    if (current.value.status !== 'queued') return ok(current.value);
+
+    const leaseKey = leaseKeyFor(current.value.runId);
+    const acquired = this.ledger.transact({
+      lease: { kind: 'acquire', leaseKey, ownerId },
+      timestamp: this.clock.now(),
+    });
+    if (!acquired.ok) return err({ kind: 'ledger_conflict', conflict: acquired.error });
+    if (acquired.value.lease === null) {
+      throw new Error('Lease acquisition completed without a lease result');
+    }
+
+    const now = this.clock.now();
+    const lease = {
+      leaseKey,
+      ownerId,
+      fenceToken: acquired.value.lease.fenceToken,
+    } as const;
+    const executing = RunProjectionSchema.parse({
+      ...current.value,
+      status: 'executing',
+      startedAt: current.value.startedAt ?? now,
+      updatedAt: now,
+      lease,
+    });
+    const persisted = this.persist(
+      executing,
+      'RunStarted',
+      { taskReference, ownerId, fenceToken: lease.fenceToken },
+      { kind: 'guard', lease },
+    );
+    if (!persisted.ok) return persisted;
+    if (persisted.value.status !== 'executing') {
+      throw new Error('Claim transition did not persist an executing run');
+    }
+    return this.advanceClaimed(persisted.value, options);
+  }
+
+  public replaceExpiredLease(
+    taskReference: string,
+    ownerId: string,
+    options: DriveOptions = {},
+  ): Outcome<RunProjection, StubRunError> {
+    const current = this.read(taskReference);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
+    if (current.value.status !== 'executing') return ok(current.value);
+
+    const acquired = this.ledger.transact({
+      lease: { kind: 'acquire', leaseKey: current.value.lease.leaseKey, ownerId },
+      timestamp: this.clock.now(),
+    });
+    if (!acquired.ok) return err({ kind: 'ledger_conflict', conflict: acquired.error });
+    if (acquired.value.lease === null) {
+      throw new Error('Lease replacement completed without a lease result');
+    }
+
+    const lease = {
+      leaseKey: current.value.lease.leaseKey,
+      ownerId,
+      fenceToken: acquired.value.lease.fenceToken,
+    } as const;
+    const replaced = RunProjectionSchema.parse({
+      ...current.value,
+      updatedAt: this.clock.now(),
+      lease,
+    });
+    const persisted = this.persist(
+      replaced,
+      'RunLeaseReplaced',
+      { taskReference, ownerId, fenceToken: lease.fenceToken },
+      { kind: 'guard', lease },
+    );
+    if (!persisted.ok) return persisted;
+    if (persisted.value.status !== 'executing') {
+      throw new Error('Lease replacement did not persist an executing run');
+    }
+    return this.advanceClaimed(persisted.value, options);
+  }
+
+  public advanceClaimed(
+    run: ExecutingRunProjection,
+    options: DriveOptions = {},
+  ): Outcome<RunProjection, StubRunError> {
+    return this.drive(run, options);
   }
 
   public resume(
@@ -196,10 +314,18 @@ export class DeterministicStubRunService {
     signalKind = 'operator_continue',
     options: DriveOptions = {},
   ): Outcome<RunProjection, StubRunError> {
+    const resolved = this.resolveWait(taskReference, signalKind);
+    return resolved.ok ? this.claim(taskReference, 'direct-stub-runner', options) : resolved;
+  }
+
+  public resolveWait(
+    taskReference: string,
+    signalKind = 'operator_continue',
+  ): Outcome<RunProjection, StubRunError> {
     const current = this.read(taskReference);
     if (!current.ok) return current;
     if (current.value === null) return err({ kind: 'run_not_found', taskReference });
-    if (current.value.status !== 'waiting' || current.value.wait === null) {
+    if (current.value.status !== 'waiting') {
       return err({ kind: 'run_not_waiting', taskReference });
     }
 
@@ -207,16 +333,18 @@ export class DeterministicStubRunService {
     const wait = current.value.wait;
     const resumed = RunProjectionSchema.parse({
       ...current.value,
-      status: 'executing',
+      status: 'queued',
       updatedAt: now,
       cursor: current.value.cursor + 1,
       nodeStates: { ...current.value.nodeStates, [wait.nodeId]: 'succeeded' },
+      lease: null,
       wait: null,
     });
     const persisted = this.persist(
       resumed,
       'WaitResolved',
       { taskReference, nodeId: wait.nodeId, waitKind: wait.waitKind },
+      undefined,
       {
         signalId: `signal:${current.value.runId}:${wait.nodeId}`,
         signalKind,
@@ -226,7 +354,19 @@ export class DeterministicStubRunService {
         resolvedWaitKey: wait.waitId,
       },
     );
-    return persisted.ok ? this.drive(persisted.value, options) : persisted;
+    return persisted;
+  }
+
+  public list(): Outcome<readonly RunProjection[], StubRunError> {
+    const runs: RunProjection[] = [];
+    for (const projection of this.ledger.listProjections(RUN_BY_TASK_PROJECTION)) {
+      const parsed = RunProjectionSchema.safeParse(projection.payload);
+      if (!parsed.success) {
+        return err({ kind: 'projection_corrupt', projectionId: projection.projectionId });
+      }
+      runs.push(parsed.data);
+    }
+    return ok(runs);
   }
 
   public decorateWorkflow(response: WorkflowResponse): WorkflowResponse {
@@ -265,6 +405,13 @@ export class DeterministicStubRunService {
         level: 'info' as const,
       };
       switch (event.eventType) {
+        case 'RunQueued':
+          return OperatorActivityEntrySchema.parse({
+            ...common,
+            source: 'kernel',
+            title: 'Run queued',
+            detail: 'The durable scheduler will start this workflow when capacity is available.',
+          });
         case 'RunStarted':
           return OperatorActivityEntrySchema.parse({
             ...common,
@@ -360,7 +507,7 @@ export class DeterministicStubRunService {
   }
 
   private executeOperation(
-    run: RunProjection,
+    run: ExecutingRunProjection,
     operation: RunOperation,
   ): Outcome<RunProjection, StubRunError> {
     const now = this.clock.now();
@@ -383,11 +530,16 @@ export class DeterministicStubRunService {
             },
           ],
         });
-        return this.persist(next, 'StepStubbed', {
-          taskReference: run.taskReference,
-          nodeId: operation.nodeId,
-          uses: operation.uses,
-        });
+        return this.persist(
+          next,
+          'StepStubbed',
+          {
+            taskReference: run.taskReference,
+            nodeId: operation.nodeId,
+            uses: operation.uses,
+          },
+          { kind: 'guard', lease: run.lease },
+        );
       }
       case 'gate':
       case 'wait': {
@@ -397,6 +549,7 @@ export class DeterministicStubRunService {
           status: 'waiting',
           updatedAt: now,
           nodeStates: { ...run.nodeStates, [operation.nodeId]: 'waiting' },
+          lease: null,
           wait: {
             waitId,
             nodeId: operation.nodeId,
@@ -405,26 +558,34 @@ export class DeterministicStubRunService {
             openedAt: now,
           },
         });
-        return this.persist(next, 'WaitOpened', {
-          taskReference: run.taskReference,
-          nodeId: operation.nodeId,
-          waitKind: operation.waitKind,
-          slotPolicy: operation.slotPolicy,
-        });
+        return this.persist(
+          next,
+          'WaitOpened',
+          {
+            taskReference: run.taskReference,
+            nodeId: operation.nodeId,
+            waitKind: operation.waitKind,
+            slotPolicy: operation.slotPolicy,
+          },
+          { kind: 'release', lease: run.lease },
+        );
       }
       case 'finalize':
         return this.complete(
-          RunProjectionSchema.parse({
+          {
             ...run,
             cursor: run.cursor + 1,
             nodeStates: { ...run.nodeStates, [operation.nodeId]: 'succeeded' },
-          }),
+          },
           operation.outcome,
         );
     }
   }
 
-  private complete(run: RunProjection, outcome: string): Outcome<RunProjection, StubRunError> {
+  private complete(
+    run: ExecutingRunProjection,
+    outcome: string,
+  ): Outcome<RunProjection, StubRunError> {
     const now = this.clock.now();
     return this.persist(
       RunProjectionSchema.parse({
@@ -432,10 +593,12 @@ export class DeterministicStubRunService {
         status: 'completed',
         updatedAt: now,
         completedAt: now,
+        lease: null,
         wait: null,
       }),
       'RunCompleted',
       { taskReference: run.taskReference, outcome },
+      { kind: 'release', lease: run.lease },
     );
   }
 
@@ -443,6 +606,7 @@ export class DeterministicStubRunService {
     run: RunProjection,
     eventType: string,
     payload: JsonValue,
+    leaseBoundary?: LeaseBoundary,
     signal?: {
       readonly signalId: string;
       readonly signalKind: string;
@@ -455,6 +619,15 @@ export class DeterministicStubRunService {
     const head = this.ledger.readAggregateHead(run.runId);
     const expectedVersion = head?.version ?? 0;
     const result = this.ledger.transact({
+      ...(leaseBoundary === undefined
+        ? {}
+        : {
+            fenceGuard: {
+              leaseKey: leaseBoundary.lease.leaseKey,
+              ownerId: leaseBoundary.lease.ownerId,
+              expectedFenceToken: leaseBoundary.lease.fenceToken,
+            },
+          }),
       aggregate: {
         aggregateId: run.runId,
         expectedVersion,
@@ -482,6 +655,16 @@ export class DeterministicStubRunService {
           payload: asJson(run),
         },
       ],
+      ...(leaseBoundary?.kind === 'release'
+        ? {
+            lease: {
+              kind: 'release' as const,
+              leaseKey: leaseBoundary.lease.leaseKey,
+              ownerId: leaseBoundary.lease.ownerId,
+              expectedFenceToken: leaseBoundary.lease.fenceToken,
+            },
+          }
+        : {}),
       ...(signal === undefined ? {} : { signals: [signal] }),
       timestamp: run.updatedAt,
     });

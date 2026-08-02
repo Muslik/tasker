@@ -16,6 +16,7 @@ import {
   type OperatorTaskSummary,
 } from './m1-contracts.js';
 import {
+  type DurableStubScheduler,
   RunProjectionSchema,
   type DeterministicStubRunService,
   type RunProjection,
@@ -43,6 +44,7 @@ export interface BuildM1ApiOptions {
   readonly workflowGenerator?: WorkflowGenerator | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly runService?: DeterministicStubRunService | undefined;
+  readonly scheduler?: DurableStubScheduler | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -124,6 +126,15 @@ const applyRunToTask = (
   run: RunProjection | null,
 ): OperatorTaskSummary => {
   if (run === null) return task;
+  if (run.status === 'queued') {
+    return OperatorTaskSummarySchema.parse({
+      ...task,
+      status: 'queued',
+      attention: 'none',
+      currentStage: 'Queued for stub capacity',
+      updatedAt: run.updatedAt,
+    });
+  }
   if (run.status === 'executing') {
     return OperatorTaskSummarySchema.parse({
       ...task,
@@ -134,14 +145,14 @@ const applyRunToTask = (
     });
   }
   if (run.status === 'waiting') {
-    const codeReview = run.wait?.waitKind === 'code_review@1';
+    const codeReview = run.wait.waitKind === 'code_review@1';
     return OperatorTaskSummarySchema.parse({
       ...task,
       status: codeReview ? 'code_review' : 'waiting',
       attention: 'operator',
       currentStage: codeReview
         ? 'Waiting for code review'
-        : `Waiting for ${(run.wait?.waitKind ?? 'external signal').replace('@1', '').replaceAll('_', ' ')}`,
+        : `Waiting for ${run.wait.waitKind.replace('@1', '').replaceAll('_', ' ')}`,
       updatedAt: run.updatedAt,
     });
   }
@@ -442,10 +453,16 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
-    const result = options.runService.start(params.data.fixtureId);
-    return result.ok
-      ? reply.send(RunProjectionSchema.parse(result.value))
-      : sendRunError(reply, result.error);
+    if (options.scheduler !== undefined) {
+      const queued = options.scheduler.enqueue(params.data.fixtureId);
+      return queued.ok
+        ? reply.send(RunProjectionSchema.parse(queued.value))
+        : sendRunError(reply, queued.error.error);
+    }
+    const started = options.runService.start(params.data.fixtureId);
+    return started.ok
+      ? reply.send(RunProjectionSchema.parse(started.value))
+      : sendRunError(reply, started.error);
   });
 
   api.post('/api/workflows/:fixtureId/resume', (request, reply) => {
@@ -456,7 +473,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
-    const result = options.runService.resume(params.data.fixtureId);
+    const result =
+      options.scheduler === undefined
+        ? options.runService.resume(params.data.fixtureId)
+        : options.runService.resolveWait(params.data.fixtureId);
     return result.ok
       ? reply.send(RunProjectionSchema.parse(result.value))
       : sendRunError(reply, result.error);

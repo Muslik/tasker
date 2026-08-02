@@ -64,26 +64,73 @@ export const StubEffectReceiptSchema = z
   })
   .strict();
 
-export const RunProjectionSchema = z
+export const RunLeaseSchema = z
   .object({
-    schemaVersion: z.literal(RUN_VIEW_SCHEMA_VERSION),
-    runId: z.string().min(1),
-    taskReference: z.string().min(1),
-    taskId: z.string().min(1),
-    workflowId: z.string().min(1),
-    workflowHash: z.string().min(1),
-    status: z.enum(['executing', 'waiting', 'completed']),
-    startedAt: z.iso.datetime(),
-    updatedAt: z.iso.datetime(),
-    completedAt: z.iso.datetime().nullable(),
-    cursor: z.number().int().nonnegative(),
-    plan: z.array(RunOperationSchema).min(1),
-    nodeStates: z.record(z.string(), RunNodeStatusSchema),
-    effects: z.array(StubEffectReceiptSchema),
-    wait: RunWaitSchema.nullable(),
+    leaseKey: z.string().min(1),
+    ownerId: z.string().min(1),
+    fenceToken: z.number().int().positive(),
   })
   .strict();
+
+const runBaseShape = {
+  schemaVersion: z.literal(RUN_VIEW_SCHEMA_VERSION),
+  runId: z.string().min(1),
+  taskReference: z.string().min(1),
+  taskId: z.string().min(1),
+  workflowId: z.string().min(1),
+  workflowHash: z.string().min(1),
+  queuedAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  cursor: z.number().int().nonnegative(),
+  plan: z.array(RunOperationSchema).min(1),
+  nodeStates: z.record(z.string(), RunNodeStatusSchema),
+  effects: z.array(StubEffectReceiptSchema),
+};
+
+export const RunProjectionSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      ...runBaseShape,
+      status: z.literal('queued'),
+      startedAt: z.iso.datetime().nullable(),
+      completedAt: z.null(),
+      lease: z.null(),
+      wait: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ...runBaseShape,
+      status: z.literal('executing'),
+      startedAt: z.iso.datetime(),
+      completedAt: z.null(),
+      lease: RunLeaseSchema,
+      wait: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ...runBaseShape,
+      status: z.literal('waiting'),
+      startedAt: z.iso.datetime(),
+      completedAt: z.null(),
+      lease: z.null(),
+      wait: RunWaitSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...runBaseShape,
+      status: z.literal('completed'),
+      startedAt: z.iso.datetime(),
+      completedAt: z.iso.datetime(),
+      lease: z.null(),
+      wait: z.null(),
+    })
+    .strict(),
+]);
 
 export type RunNodeStatus = z.infer<typeof RunNodeStatusSchema>;
 export type RunOperation = z.infer<typeof RunOperationSchema>;
 export type RunProjection = z.infer<typeof RunProjectionSchema>;
+export type ExecutingRunProjection = Extract<RunProjection, { readonly status: 'executing' }>;

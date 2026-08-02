@@ -1,17 +1,18 @@
-# M2: durable stub execution — first vertical slice
+# M2: durable stub execution — incremental vertical slice
 
 Status: implemented and verified 2026-08-02
 
-Scope: start an already accepted workflow, persist progress after every executable
-node, recover that cursor after a process restart, and stop at a durable external wait.
-This is the first M2 slice, not the complete M2 milestone.
+Scope: enqueue an already accepted workflow, execute it through a bounded durable
+scheduler, persist progress after every executable node, recover that cursor and its
+fenced lease after a process restart, and stop at a durable external wait. This is an
+incremental M2 slice, not the complete M2 milestone.
 
 ## Operator path
 
 1. Generate a valid workflow as before.
 2. Press **Test workflow** in the task header. This never starts a real provider or
    repository operation.
-3. The task becomes `running` while the run is executable.
+3. The task becomes `queued`, then `running` when scheduler capacity is available.
 4. Every deterministic stub step appends a ledger event and a unique effect receipt.
 5. A `code_review@1` node changes the task to `code_review`, marks the workflow rail
    as waiting, and releases the conceptual runner slot.
@@ -19,13 +20,30 @@ This is the first M2 slice, not the complete M2 milestone.
 
 The normal HTTP path is:
 
-- `POST /api/workflows/:taskReference/start` — create or resume the one current run;
+- `POST /api/workflows/:taskReference/start` — durably enqueue the one current run;
 - `GET /api/workflows/:taskReference/run` — inspect its durable projection;
 - `POST /api/workflows/:taskReference/resume` — resolve the current wait and continue;
 - `GET /api/runs/:runId` — inspect the lower-level run projection.
 
-`Start` is idempotent. Calling it again while the run is waiting or complete returns
-the current projection and appends nothing.
+`Start` is idempotent. Calling it again while the run is queued, executing, waiting,
+or complete returns the current projection and appends nothing.
+
+## Queue, capacity, and ownership
+
+The server owns a background scheduler. `TASKER_STUB_CAPACITY` controls the maximum
+number of executing runs and defaults to `2`. Queue order is stable by persisted
+`queuedAt`, then task reference. Capacity is a runtime setting rather than a property
+of the compiled workflow, so changing it does not rewrite accepted graphs.
+
+Every executing run has its own ledger lease and monotonically increasing fence token.
+The server process owns leases as `tasker-<pid>`. A wait or terminal transition releases
+the lease in the same transaction that persists the new run state. A process starting
+after the 15-second lease timeout can replace the lease; any delayed write from the old
+owner is rejected by the ledger as `stale_fence`.
+
+The scheduler currently has one global stub capacity pool. Provider-specific limits,
+lease heartbeats for long asynchronous work, and outbox dispatch remain part of the
+full M2 gate.
 
 ## What is persisted
 
@@ -34,6 +52,7 @@ that graph and stores it in a separate run projection together with:
 
 - graph ID and hash;
 - current cursor and status;
+- queue time and the active lease owner/fence while executing;
 - per-node runtime states;
 - deterministic effect keys and stub receipts;
 - the current wait, including wait kind and slot policy;
@@ -69,9 +88,10 @@ current graph or rerunning its completed prefix.
 ## Wait and resume
 
 Opening a wait does not advance past its node. The projection records its node ID,
-resolution kind, opened time, and `release|retain` slot policy. Resolving it writes a
-signal and `WaitResolved` event atomically, marks only that node succeeded, advances
-one cursor, and continues.
+resolution kind, opened time, and `release|retain` slot policy. The workflows exercised
+by this slice use slot-releasing waits. Resolving one writes a signal and `WaitResolved`
+event atomically, marks only that node succeeded, advances one cursor, and requeues the
+run so it cannot bypass configured capacity.
 
 The first UI stops at code review. The resume endpoint exists to exercise the durable
 signal boundary; PR comment ingestion and review dispositions belong to the later
@@ -79,31 +99,39 @@ Bitbucket/CI integration milestone.
 
 ## Realtime console
 
-Run events share the existing SSE stream. The center activity surface shows run start,
-each completed step, opened/resolved waits, and completion. The left queue derives
-`running`, `waiting`, `code_review`, or `done` from the run projection. The right graph
-derives container state from its children and renders planned, running, waiting,
-succeeded, skipped, or failed nodes.
+Run events share the existing SSE stream. The center activity surface shows queueing,
+run start, each completed step, opened/resolved waits, and completion. The left queue
+derives `queued`, `running`, `waiting`, `code_review`, or `done` from the run projection.
+The right graph derives container state from its children and renders planned, running,
+waiting, succeeded, skipped, or failed nodes.
 
 ## Verified recovery
 
-The recovery test deliberately stops after two committed steps, closes SQLite, opens
-the same database through new service instances, and calls `Start` again. Execution
-continues from cursor 2, reaches the code-review wait, and produces exactly one receipt
-per stubbed step. A duplicate start at the wait appends no event. Resolving the wait
-then reaches the terminal node and retains the same `m1_run` projection.
+The recovery suite deliberately stops after committed steps, closes SQLite, and opens
+the same database through new service instances. After the lease timeout, a scheduler
+with a new owner replaces the lease, continues from the persisted cursor, reaches the
+code-review wait, and produces exactly one receipt per stubbed step. A duplicate start
+at the wait appends no event. Resolving the wait then reaches the terminal node and
+retains the same `m1_run` projection.
+
+Scheduler tests also prove both configured modes used by the operator demo: capacity
+`2` holds two independent executing runs, while capacity `1` lets the second queued run
+start as soon as the first opens a slot-releasing wait. A separate stale-owner test
+proves fence `1` cannot write after fence `2` takes ownership.
 
 Verification at delivery:
 
-- 110 Vitest tests across 26 files;
-- one dedicated kill/restart/no-duplicate recovery scenario;
+- 114 Vitest tests across 27 files;
+- two dedicated restart/no-duplicate scenarios, including scheduler ownership change;
+- capacity `1`, capacity `2`, and stale-fence scheduler scenarios;
 - one HTTP contract scenario for start, activity, task state, and runtime tree state;
 - 8 Playwright operator scenarios, including **Test workflow -> code review wait**;
 - formatting, server/cockpit typecheck, lint, and production builds green.
 
 ## Still required for the full M2 gate
 
-- queue capacity, leases, fence tokens, heartbeat, and outbox dispatch;
+- lease heartbeat and outbox dispatch;
+- provider-specific capacity pools and proven retained-slot wait semantics;
 - real predicate evaluation and multi-attempt loops;
 - duplicate signal classification and correlation policies;
 - quota waits and proof that another queued run reuses the slot;

@@ -29,6 +29,17 @@ const runService = new control.DeterministicStubRunService(
   service,
   shared.systemClock,
 );
+const scheduler = new control.DurableStubScheduler(
+  runService,
+  ledger.repository,
+  shared.systemClock,
+  {
+    capacity: 2,
+    ownerId: `e2e-${String(process.pid)}`,
+    leaseTimeoutMs: 1_000,
+    pollIntervalMs: 10,
+  },
+);
 const snapshot = jira.JiraIssueSnapshotSchema.parse({
   schemaVersion: 1,
   issueKey: 'AVIA-13235',
@@ -113,13 +124,21 @@ const workflowGenerator = new control.CodexWorkflowGenerator(
   service,
   new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService),
 );
-const api = control.buildM1Api({ service, jiraIssueService, workflowGenerator, runService });
+const api = control.buildM1Api({
+  service,
+  jiraIssueService,
+  workflowGenerator,
+  runService,
+  scheduler,
+});
 
 const close = async () => {
+  scheduler.stop();
   await api.close();
   ledger.close();
 };
 process.once('SIGINT', () => void close());
 process.once('SIGTERM', () => void close());
 
+scheduler.start();
 await api.listen({ host: '127.0.0.1', port: 4311 });

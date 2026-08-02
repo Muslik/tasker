@@ -75,7 +75,7 @@ describe('M2 durable stub execution', () => {
     const duplicateStart = restartedRunner.start('avia-13236-short-bug');
     expect(duplicateStart).toEqual(resumed);
     expect(restartedRunner.listEvents('avia-13236-short-bug')).toHaveLength(
-      2 + resumed.value.effects.length,
+      3 + resumed.value.effects.length,
     );
 
     const completed = restartedRunner.resume('avia-13236-short-bug', 'review_approved');

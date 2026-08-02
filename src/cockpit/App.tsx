@@ -151,6 +151,7 @@ const statusTone = (status: OperatorTaskSummary['status']): string => {
       return 'bg-violet-500/12 text-violet-300';
     case 'backlog':
     case 'planned':
+    case 'queued':
       return 'bg-muted text-muted-foreground';
   }
 };
@@ -236,7 +237,16 @@ const TaskQueue = ({
   }, [tasks]);
 
   const visibleCounts = (
-    ['backlog', 'planned', 'needs_attention', 'code_review', 'done'] as const
+    [
+      'backlog',
+      'queued',
+      'running',
+      'waiting',
+      'planned',
+      'needs_attention',
+      'code_review',
+      'done',
+    ] as const
   ).filter((status) => (counts.get(status) ?? 0) > 0);
 
   return (

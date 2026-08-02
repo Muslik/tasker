@@ -165,6 +165,7 @@ export const OperatorTaskStatusSchema = z.enum([
   'backlog',
   'planned',
   'workflow_rejected',
+  'queued',
   'running',
   'waiting',
   'needs_attention',

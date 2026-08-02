@@ -441,15 +441,17 @@ wait, intervention, takeover, replay, and slot semantics.
 
 ### Delivered vertical slice (2026-08-02)
 
-The first executable path is green: operator **Test workflow**, immutable
-graph-to-operation plan, per-node transactions and stub receipts, restart-safe cursor,
-durable wait/signal, SSE activity, queue/runtime tree projections, and stop at the code-review wait. A
-kill/restart test proves that two committed steps are not repeated after reopening the
-database. See [`m2-stub-execution.md`](m2-stub-execution.md).
+The executable path now includes operator **Test workflow**, a durable ordered queue,
+configurable capacity, per-run leases and fence tokens, immutable graph-to-operation
+plans, per-node transactions and stub receipts, restart-safe cursors, durable
+wait/signals, SSE activity, runtime tree projections, and stop at the code-review wait.
+Recovery tests prove that committed steps are not repeated after reopening the database
+and that an expired owner cannot write after lease replacement. See
+[`m2-stub-execution.md`](m2-stub-execution.md).
 
-This does not close the M2 gate. Steps 2, 3, 7-10, and 13 below remain; steps 1, 4-6,
-11, and 12 are only implemented for the bounded first-slice semantics documented
-there.
+This does not close the M2 gate. Step 2 still needs heartbeat and outbox dispatch;
+steps 3, 7-10, and 13 remain. Steps 1, 4-6, 11, and 12 are implemented only for the
+bounded stub semantics documented there.
 
 ### Entry criteria
 

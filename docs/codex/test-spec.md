@@ -347,11 +347,14 @@ For every supported boundary, run the test with the process killed:
 
 ### M2 gate — durable stub traversal
 
-Current evidence (first vertical slice, 2026-08-02): Start reaches a persisted
-slot-releasing code-review wait; API/UI runtime projections update from ledger events;
-and a forced stop after two committed steps resumes from the same cursor with no
-duplicate receipt. The full gate remains open for queue/lease/outbox, quota slot reuse,
-intervention, takeover, projection rebuild, and the complete kill matrix.
+Current evidence (incremental vertical slice, 2026-08-02): Start durably queues a run;
+capacity `2` admits two independent runs, capacity `1` is reused after a slot-free wait,
+and a restarted scheduler replaces an expired lease without duplicate receipts. A run
+reaches a persisted slot-releasing code-review wait; API/UI runtime projections update
+from ledger events; and a forced stop after two committed steps resumes from the same
+cursor. The full gate remains open for heartbeat/outbox dispatch, provider capacity
+pools, quota behavior, intervention, takeover, projection rebuild, and the complete
+kill matrix.
 
 - one graph completes on stubs;
 - kill/restart matrix for kernel boundaries green;

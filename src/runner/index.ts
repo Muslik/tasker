@@ -4,4 +4,5 @@ export const runnerModuleBoundary = {
   activatesAt: 'M2',
 } as const;
 export * from './contracts.js';
+export * from './scheduler.js';
 export * from './stub-runner.js';
