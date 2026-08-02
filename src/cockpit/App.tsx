@@ -398,8 +398,7 @@ const SelectedTaskHeader = ({
   onGenerate,
   onStart,
   onSyncJira,
-  generating,
-  starting,
+  pendingOperation,
   jiraSync,
 }: {
   readonly task: OperatorTaskSummary;
@@ -408,10 +407,11 @@ const SelectedTaskHeader = ({
   readonly onGenerate: () => void;
   readonly onStart: () => void;
   readonly onSyncJira: (issueKey: string) => void;
-  readonly generating: boolean;
-  readonly starting: boolean;
+  readonly pendingOperation: 'generating' | 'starting' | null;
   readonly jiraSync: JiraSyncState;
 }) => {
+  const generating = pendingOperation === 'generating';
+  const starting = pendingOperation === 'starting';
   const canGenerate =
     (task.status === 'backlog' || task.status === 'workflow_rejected') &&
     task.planning.status === 'available';
@@ -1334,8 +1334,9 @@ export const App = () => {
   });
   const [jiraSyncState, setJiraSyncState] = useState<JiraSyncState>({ status: 'idle' });
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
-  const [generating, setGenerating] = useState(false);
-  const [starting, setStarting] = useState(false);
+  const [pendingOperations, setPendingOperations] = useState<
+    ReadonlyMap<string, 'generating' | 'starting'>
+  >(new Map());
   const streamCursorRef = useRef(0);
 
   const selectedTask = useMemo(
@@ -1526,8 +1527,9 @@ export const App = () => {
       return;
     }
 
-    setGenerating(true);
-    void generateWorkflow(selectedTask.id)
+    const taskReference = selectedTask.id;
+    setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
+    void generateWorkflow(taskReference)
       .then(async () => {
         const nextSelectedId = await refreshTasks();
         if (nextSelectedId !== null) {
@@ -1535,32 +1537,49 @@ export const App = () => {
         }
       })
       .catch((error: unknown) => {
-        setWorkflowState({
-          status: 'failed',
-          message: error instanceof Error ? error.message : 'Unexpected generation failure',
-        });
+        if (selectedIdRef.current === taskReference) {
+          setWorkflowState({
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Unexpected generation failure',
+          });
+        }
       })
       .finally(() => {
-        setGenerating(false);
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'generating') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
       });
   };
 
   const handleStart = (): void => {
     if (selectedTask === null || selectedTask.status !== 'planned') return;
-    setStarting(true);
-    void startWorkflow(selectedTask.id)
+    const taskReference = selectedTask.id;
+    setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
+    void startWorkflow(taskReference)
       .then(async () => {
         await refreshTasks();
-        await refreshSelection(selectedTask.id);
+        if (selectedIdRef.current === taskReference) {
+          await refreshSelection(taskReference);
+        }
       })
       .catch((error: unknown) => {
-        setActivityState({
-          status: 'failed',
-          message: error instanceof Error ? error.message : 'Unexpected run failure',
-        });
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Unexpected run failure',
+          });
+        }
       })
       .finally(() => {
-        setStarting(false);
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'starting') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
       });
   };
 
@@ -1629,8 +1648,7 @@ export const App = () => {
                   onGenerate={handleGenerate}
                   onStart={handleStart}
                   onSyncJira={handleJiraSync}
-                  generating={generating}
-                  starting={starting}
+                  pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
                 />
                 {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}

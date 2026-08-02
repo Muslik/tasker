@@ -4,6 +4,10 @@ import process from 'node:process';
 import { TextEncoder } from 'node:util';
 
 const databasePath = resolve('.tasker/e2e.sqlite');
+const apiPort = Number(process.env.TASKER_E2E_API_PORT ?? '4311');
+if (!Number.isSafeInteger(apiPort) || apiPort < 1 || apiPort > 65_535) {
+  throw new Error(`Invalid TASKER_E2E_API_PORT: ${process.env.TASKER_E2E_API_PORT ?? ''}`);
+}
 mkdirSync(dirname(databasePath), { recursive: true });
 
 for (const filename of [databasePath, `${databasePath}-shm`, `${databasePath}-wal`]) {
@@ -11,7 +15,7 @@ for (const filename of [databasePath, `${databasePath}-shm`, `${databasePath}-wa
 }
 
 process.env.TASKER_DB_PATH = databasePath;
-process.env.TASKER_PORT = '4311';
+process.env.TASKER_PORT = String(apiPort);
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
 const [control, jira, ledgerModule, repositories, shared] = await Promise.all([
@@ -141,4 +145,4 @@ process.once('SIGINT', () => void close());
 process.once('SIGTERM', () => void close());
 
 scheduler.start();
-await api.listen({ host: '127.0.0.1', port: 4311 });
+await api.listen({ host: '127.0.0.1', port: apiPort });

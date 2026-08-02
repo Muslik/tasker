@@ -3,6 +3,12 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 
+const apiOrigin = process.env.TASKER_API_ORIGIN ?? 'http://127.0.0.1:4311';
+const parsedApiOrigin = new URL(apiOrigin);
+if (!['http:', 'https:'].includes(parsedApiOrigin.protocol)) {
+  throw new Error(`Invalid TASKER_API_ORIGIN protocol: ${parsedApiOrigin.protocol}`);
+}
+
 export default defineConfig({
   root: 'src/cockpit',
   plugins: [react(), tailwindcss()],
@@ -21,7 +27,7 @@ export default defineConfig({
     port: 4310,
     strictPort: true,
     proxy: {
-      '/api/': 'http://127.0.0.1:4311',
+      '/api/': parsedApiOrigin.origin,
     },
   },
 });

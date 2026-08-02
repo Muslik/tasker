@@ -153,6 +153,43 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   await expect(page.getByRole('link', { name: 'Download graph JSON' })).toBeVisible();
 });
 
+test('generation progress remains attached to the task that started it', async ({ page }) => {
+  const tasks = await loadTasks(page);
+  const candidates = tasks.tasks.filter(
+    (task) =>
+      task.status === 'backlog' &&
+      task.planning.status === 'available' &&
+      task.origin.kind === 'fixture' &&
+      task.origin.family !== 'invalid_workflow',
+  );
+  const first = requireTask(candidates[0], 'Expected a first backlog task');
+  const second = requireTask(candidates[1], 'Expected a second backlog task');
+  let releaseGeneration = (): void => {
+    throw new Error('Generation request was not intercepted');
+  };
+  const generationGate = new Promise<void>((resolve) => {
+    releaseGeneration = resolve;
+  });
+  await page.route(`**/api/workflows/${first.id}/generate`, async (route) => {
+    await generationGate;
+    await route.abort('failed');
+  });
+
+  await page.goto('/');
+  await clickTask(page, first.id);
+  await page.getByRole('button', { name: 'Generate workflow' }).click();
+  await expect(page.getByRole('button', { name: 'Generating…' })).toBeVisible();
+
+  await clickTask(page, second.id);
+
+  await expect(page.getByTestId('selected-task')).toContainText(second.title);
+  await expect(page.getByRole('button', { name: 'Generate workflow' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Generating…' })).toHaveCount(0);
+
+  releaseGeneration();
+  await expect(page.getByTestId(`task-item-${first.id}`)).toContainText('Backlog');
+});
+
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
   const tasks = await loadTasks(page);
   const candidate = requireTask(
