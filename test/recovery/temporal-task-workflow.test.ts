@@ -260,6 +260,7 @@ describe('Temporal task workflow', () => {
       const stub = await stubTaskWorkflowActivities.planTaskImplementation(input);
       const common = {
         commandId: stub.commandId,
+        transcriptId: stub.transcriptId,
         attempt: stub.attempt,
         artifactId: stub.artifactId,
         requestedStrategy: stub.requestedStrategy,

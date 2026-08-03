@@ -21,6 +21,7 @@ export const TaskWorkflowSettingsSchema = z
 
 const TaskWorkflowPlanningBaseSchema = z.object({
   commandId: z.string().min(1),
+  transcriptId: z.string().min(1),
   attempt: z.number().int().positive(),
   artifactId: z.string().min(1),
   requestedStrategy: PlanningStrategyRequestSchema,

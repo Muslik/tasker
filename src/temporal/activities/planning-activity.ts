@@ -17,6 +17,15 @@ import {
 
 type PlanningOutcome = Outcome<ImplementationPlanningRecord, { readonly kind: string }>;
 
+export interface PlanningTranscriptSink {
+  append(
+    operationId: string,
+    providerAttempt: number,
+    stream: 'stdout' | 'stderr',
+    content: string,
+  ): Outcome<unknown, { readonly kind: string }>;
+}
+
 export interface TemporalImplementationPlanningCoordinator {
   prepare(
     taskReference: string,
@@ -45,10 +54,14 @@ const planningResult = (record: ImplementationPlanningRecord, commandId: string)
   if (record.status === 'failed') {
     throw new Error(record.failure.message);
   }
+  if (record.transcriptId === null) {
+    throw new Error('Temporal planning result has no transcript reference');
+  }
 
   const common = {
     status: record.status,
     commandId,
+    transcriptId: record.transcriptId,
     attempt: record.attempt,
     artifactId: record.artifactId,
     requestedStrategy: record.requestedStrategy,
@@ -117,7 +130,10 @@ export const createPlanningActivity = (
   },
 });
 
-export const createTemporalActivityCommandRunner = (delegate: CommandRunner): CommandRunner => ({
+export const createTemporalActivityCommandRunner = (
+  delegate: CommandRunner,
+  transcripts?: PlanningTranscriptSink,
+): CommandRunner => ({
   run: async (request: CommandRequest) => {
     const context = Context.current();
     let stdoutBytes = 0;
@@ -134,6 +150,17 @@ export const createTemporalActivityCommandRunner = (delegate: CommandRunner): Co
         ...request,
         cancellationSignal: context.cancellationSignal,
         onOutput: (stream, chunk) => {
+          if (request.operationId !== undefined && transcripts !== undefined) {
+            const persisted = transcripts.append(
+              request.operationId,
+              context.info.attempt,
+              stream,
+              chunk,
+            );
+            if (!persisted.ok) {
+              throw new Error(`Planning transcript persistence failed: ${persisted.error.kind}`);
+            }
+          }
           if (stream === 'stdout') stdoutBytes += Buffer.byteLength(chunk, 'utf8');
           else stderrBytes += Buffer.byteLength(chunk, 'utf8');
           request.onOutput?.(stream, chunk);

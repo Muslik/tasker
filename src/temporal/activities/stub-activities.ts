@@ -23,6 +23,7 @@ const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] =
   Promise.resolve({
     status: 'ready',
     commandId: input.commandId,
+    transcriptId: `planning-transcript:${input.commandId}`,
     attempt: 1,
     artifactId: `stub-plan:${input.taskReference}`,
     requestedStrategy: input.requestedStrategy,

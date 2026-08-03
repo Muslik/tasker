@@ -35,6 +35,12 @@ import {
   type OperatorStreamEvent,
   type OperatorTaskSummary,
 } from './m1-contracts.js';
+import {
+  PlanningTranscriptStore,
+  planningTranscriptIdFor,
+  type PlanningTranscriptStoreError,
+  type PlanningTranscriptView,
+} from './planning-transcript.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import type {
   WorkflowGenerationSubject,
@@ -61,6 +67,7 @@ const PlanningRecordBaseSchema = z.object({
   schemaVersion: z.literal(1),
   taskReference: z.string().min(1),
   commandId: z.string().min(1).nullable(),
+  transcriptId: z.string().min(1).nullable(),
   attempt: z.number().int().positive(),
   requestedStrategy: PlanningStrategyRequestSchema,
   selectedStrategy: PlanningStrategySchema,
@@ -285,6 +292,7 @@ export class ImplementationPlanningStore {
       status: 'planning',
       taskReference: input.taskReference,
       commandId: input.commandId,
+      transcriptId: input.commandId === null ? null : planningTranscriptIdFor(input.commandId),
       attempt,
       requestedStrategy: input.requestedStrategy,
       selectedStrategy: input.selectedStrategy,
@@ -539,6 +547,7 @@ export type ImplementationPlanningError =
       readonly taskReference: string;
       readonly issues: readonly string[];
     }
+  | { readonly kind: 'transcript'; readonly error: PlanningTranscriptStoreError }
   | { readonly kind: 'store'; readonly error: ImplementationPlanningStoreError };
 
 const countWorkflowNodes = (value: JsonValue): number => {
@@ -641,6 +650,7 @@ export class ImplementationPlanningCoordinator {
     private readonly subjects: WorkflowGenerationSubjectSource,
     private readonly planner: ImplementationPlanner,
     private readonly harnessPackSource: () => LoadedHarnessPack,
+    private readonly transcripts: PlanningTranscriptStore,
   ) {}
 
   public createRunSnapshot(
@@ -688,6 +698,16 @@ export class ImplementationPlanningCoordinator {
   ): Outcome<ImplementationPlanningRecord | null, ImplementationPlanningError> {
     const record = this.store.read(taskReference);
     return record.ok ? record : err({ kind: 'store', error: record.error });
+  }
+
+  public readTranscript(
+    taskReference: string,
+  ): Outcome<PlanningTranscriptView | null, ImplementationPlanningError> {
+    const planning = this.store.read(taskReference);
+    if (!planning.ok) return err({ kind: 'store', error: planning.error });
+    if (planning.value === null || planning.value.commandId === null) return ok(null);
+    const transcript = this.transcripts.read(planning.value.commandId);
+    return transcript.ok ? transcript : err({ kind: 'transcript', error: transcript.error });
   }
 
   public prepare(
@@ -1039,6 +1059,7 @@ export class ImplementationPlanningCoordinator {
     }
 
     const result = await this.planner.plan({
+      operationId: commandId,
       repositoryPath: planningInput.value.subject.repositoryPath,
       strategy: selection.strategy,
       context: {
@@ -1075,5 +1096,6 @@ export const createImplementationPlanningCoordinator = (input: {
     input.subjects,
     input.planner,
     harnessPackSource,
+    new PlanningTranscriptStore(input.ledger, input.clock),
   );
 };

@@ -8,6 +8,7 @@ import {
   type ImplementationPlanningCoordinator,
   type ImplementationPlanningRecord,
 } from './implementation-planning.js';
+import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 import {
   WorkflowContinuationRecordSchema,
   WorkflowContinuationReviewCommandSchema,
@@ -846,6 +847,29 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           .code(404)
           .send(apiError('implementation_plan_not_found', 'No implementation plan exists'))
       : reply.send(ImplementationPlanningRecordSchema.parse(result.value));
+  });
+
+  api.get('/api/workflows/:fixtureId/planning-transcript', (request, reply) => {
+    if (options.implementationPlanning === undefined) {
+      return reply
+        .code(404)
+        .send(apiError('planning_transcript_not_found', 'No planning transcript exists'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const result = options.implementationPlanning.readTranscript(params.data.fixtureId);
+    if (!result.ok) {
+      return reply
+        .code(500)
+        .send(apiError('planning_transcript_store_failure', 'The transcript is invalid'));
+    }
+    return result.value === null
+      ? reply
+          .code(404)
+          .send(apiError('planning_transcript_not_found', 'No planning transcript exists'))
+      : reply.send(PlanningTranscriptViewSchema.parse(result.value));
   });
 
   api.get('/api/workflows/:fixtureId/continuation', (request, reply) => {

@@ -167,6 +167,7 @@ const collectPlanningEvidence = async (
 };
 
 export interface ImplementationPlannerRequest {
+  readonly operationId: string | null;
   readonly repositoryPath: string;
   readonly strategy: PlanningStrategy;
   readonly context: ImplementationPlannerContext;
@@ -284,6 +285,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         'utf8',
       );
       const execution = await this.runner.run({
+        ...(request.operationId === null ? {} : { operationId: request.operationId }),
         command,
         args: [
           'exec',

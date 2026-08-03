@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import { createImplementationPlanningCoordinator } from '../control-plane/implementation-planning.js';
+import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
 import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
 import {
@@ -65,6 +66,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     jiraIssueService,
   );
   const deterministicProvider = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
+  const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
@@ -72,7 +74,9 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     subjects,
     planner: deterministicProvider
       ? new DeterministicImplementationPlanner()
-      : new CodexCliImplementationPlanner(createTemporalActivityCommandRunner(nodeCommandRunner)),
+      : new CodexCliImplementationPlanner(
+          createTemporalActivityCommandRunner(nodeCommandRunner, planningTranscripts),
+        ),
   });
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 
 export interface CommandRequest {
+  readonly operationId?: string;
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
@@ -71,11 +72,29 @@ export const nodeCommandRunner: CommandRunner = {
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', (chunk: string) => {
         stdout += chunk;
-        request.onOutput?.('stdout', chunk);
+        try {
+          request.onOutput?.('stdout', chunk);
+        } catch (error) {
+          child.kill('SIGTERM');
+          finish({
+            status: 'spawn_failed',
+            message: `Command output observer failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+            durationMs: elapsedMilliseconds(startedAt),
+          });
+        }
       });
       child.stderr.on('data', (chunk: string) => {
         stderr += chunk;
-        request.onOutput?.('stderr', chunk);
+        try {
+          request.onOutput?.('stderr', chunk);
+        } catch (error) {
+          child.kill('SIGTERM');
+          finish({
+            status: 'spawn_failed',
+            message: `Command output observer failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+            durationMs: elapsedMilliseconds(startedAt),
+          });
+        }
       });
       child.once('error', (error) => {
         finish({

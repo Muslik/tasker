@@ -27,6 +27,7 @@ import type {
   WorkflowView,
 } from '../control-plane/m1-contracts.js';
 import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning.js';
+import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
 import type { WorkflowContinuationRecord } from '../control-plane/workflow-continuation-contracts.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
@@ -40,6 +41,7 @@ import {
   listOperatorTasks,
   listRepositories,
   loadImplementationPlan,
+  loadPlanningTranscript,
   loadWorkflowContinuation,
   loadJiraIssue,
   loadOperatorActivity,
@@ -83,6 +85,12 @@ type ImplementationPlanLoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'missing' }
   | { readonly status: 'ready'; readonly record: ImplementationPlanningRecord }
+  | { readonly status: 'failed'; readonly message: string };
+
+type PlanningTranscriptLoadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'missing' }
+  | { readonly status: 'ready'; readonly transcript: PlanningTranscriptView }
   | { readonly status: 'failed'; readonly message: string };
 
 type WorkflowContinuationLoadState =
@@ -1530,6 +1538,56 @@ const ActivityTimeline = ({
   </section>
 );
 
+const PlanningTranscriptSurface = ({
+  transcript,
+  live,
+}: {
+  readonly transcript: PlanningTranscriptLoadState;
+  readonly live: boolean;
+}) => {
+  if (transcript.status === 'missing' || transcript.status === 'loading') return null;
+  if (transcript.status === 'failed') return <InlineError>{transcript.message}</InlineError>;
+  if (transcript.transcript.chunks.length === 0 && !live) return null;
+
+  return (
+    <Collapsible defaultOpen={live}>
+      <section className="border-t border-border" aria-label="Planning agent log">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+          <div className="flex min-w-0 items-center gap-2">
+            <Sparkles className="size-4 text-muted-foreground" />
+            <strong className="text-sm">Agent log</strong>
+            {live ? <StateBadge>Live</StateBadge> : null}
+            <span className="text-[11px] text-muted-foreground">
+              {transcript.transcript.totalBytes.toLocaleString()} B
+              {transcript.transcript.truncated ? ' · truncated' : ''}
+            </span>
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ScrollArea className="max-h-72 border-t border-border/60 bg-black/20">
+            <pre
+              className="min-h-16 whitespace-pre-wrap break-words px-5 py-3 font-mono text-[11px] leading-5 text-muted-foreground"
+              data-testid="planning-transcript"
+            >
+              {transcript.transcript.chunks.length === 0
+                ? 'Waiting for provider output…'
+                : transcript.transcript.chunks.map((chunk) => (
+                    <span
+                      className={chunk.stream === 'stderr' ? 'text-amber-300/90' : undefined}
+                      key={`${String(chunk.providerAttempt)}:${String(chunk.sequence)}`}
+                    >
+                      {chunk.content}
+                    </span>
+                  ))}
+            </pre>
+          </ScrollArea>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+};
+
 const WhyThisWorkflow = ({ view }: { readonly view: WorkflowView }) => (
   <Collapsible>
     <div className="border-t border-border" data-testid="workflow-decisions">
@@ -1784,6 +1842,8 @@ export const App = () => {
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
   const [implementationPlanState, setImplementationPlanState] =
     useState<ImplementationPlanLoadState>({ status: 'missing' });
+  const [planningTranscriptState, setPlanningTranscriptState] =
+    useState<PlanningTranscriptLoadState>({ status: 'missing' });
   const [workflowContinuationState, setWorkflowContinuationState] =
     useState<WorkflowContinuationLoadState>({ status: 'missing' });
   const [continuationWorkflowState, setContinuationWorkflowState] = useState<WorkflowLoadState>({
@@ -1903,6 +1963,26 @@ export const App = () => {
     }
   };
 
+  const refreshSelectedPlanningTranscript = async (
+    fixtureId: string,
+    showLoading = true,
+  ): Promise<void> => {
+    if (showLoading) setPlanningTranscriptState({ status: 'loading' });
+    try {
+      const response = await loadPlanningTranscript(fixtureId);
+      setPlanningTranscriptState(
+        response.status === 'found'
+          ? { status: 'ready', transcript: response.transcript }
+          : { status: 'missing' },
+      );
+    } catch (error) {
+      setPlanningTranscriptState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Unexpected transcript failure',
+      });
+    }
+  };
+
   const refreshSelectedWorkflowContinuation = async (fixtureId: string): Promise<void> => {
     setWorkflowContinuationState({ status: 'loading' });
     setContinuationWorkflowState({ status: 'missing' });
@@ -1961,6 +2041,7 @@ export const App = () => {
       refreshSelectedWorkflow(fixtureId),
       refreshSelectedActivity(fixtureId),
       refreshSelectedImplementationPlan(fixtureId),
+      refreshSelectedPlanningTranscript(fixtureId),
       refreshSelectedWorkflowContinuation(fixtureId),
       refreshSelectedJiraIssue(fixtureId),
     ]);
@@ -1988,6 +2069,20 @@ export const App = () => {
       active = false;
     };
   }, []);
+
+  const planningInProgress =
+    implementationPlanState.status === 'ready' &&
+    implementationPlanState.record.status === 'planning';
+
+  useEffect(() => {
+    if (selectedId.length === 0 || !planningInProgress) return;
+    const poll = window.setInterval(() => {
+      void refreshSelectedPlanningTranscript(selectedId, false);
+    }, 750);
+    return () => {
+      window.clearInterval(poll);
+    };
+  }, [planningInProgress, selectedId]);
 
   useEffect(() => {
     if (selectedId.length === 0) {
@@ -2425,6 +2520,10 @@ export const App = () => {
                 />
                 <ScrollArea className="min-h-0 flex-1">
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
+                  <PlanningTranscriptSurface
+                    transcript={planningTranscriptState}
+                    live={planningInProgress}
+                  />
                   <ImplementationPlanSurface
                     planning={implementationPlanState}
                     answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}

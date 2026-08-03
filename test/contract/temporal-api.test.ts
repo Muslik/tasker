@@ -37,6 +37,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       input.settings.planningStrategy === 'ralplan' ? 'ralplan' : 'fast';
     const common = {
       commandId: `tasker:${input.taskReference}:planning:${String(attempt)}`,
+      transcriptId: `planning-transcript:tasker:${input.taskReference}:planning:${String(attempt)}`,
       attempt,
       artifactId: `plan:${input.taskReference}:${String(attempt)}`,
       requestedStrategy: input.settings.planningStrategy,

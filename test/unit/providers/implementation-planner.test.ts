@@ -79,6 +79,7 @@ class RecordingRunner implements CommandRunner {
 }
 
 const request = (strategy: 'fast' | 'ralplan') => ({
+  operationId: 'tasker:test:planning:1',
   repositoryPath: process.cwd(),
   strategy,
   promptTemplate: '{{strategyInstruction}}\n{{plannerContext}}\n{{repositoryEvidence}}',

@@ -20,6 +20,10 @@ import {
   type ImplementationPlanningRecord,
 } from '../control-plane/implementation-planning.js';
 import {
+  PlanningTranscriptViewSchema,
+  type PlanningTranscriptView,
+} from '../control-plane/planning-transcript.js';
+import {
   WorkflowContinuationRecordSchema,
   WorkflowContinuationReviewCommandSchema,
   type WorkflowContinuationRecord,
@@ -49,6 +53,10 @@ type WorkflowLookup =
 
 type ImplementationPlanLookup =
   | { readonly status: 'found'; readonly record: ImplementationPlanningRecord }
+  | { readonly status: 'missing' };
+
+type PlanningTranscriptLookup =
+  | { readonly status: 'found'; readonly transcript: PlanningTranscriptView }
   | { readonly status: 'missing' };
 
 type WorkflowContinuationLookup =
@@ -189,6 +197,19 @@ export const loadImplementationPlan = async (
   const parsed = ImplementationPlanningRecordSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Implementation plan does not match the cockpit contract');
   return { status: 'found', record: parsed.data };
+};
+
+export const loadPlanningTranscript = async (
+  fixtureId: string,
+): Promise<PlanningTranscriptLookup> => {
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/planning-transcript`,
+  );
+  if (result.response.status === 404) return { status: 'missing' };
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = PlanningTranscriptViewSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Planning transcript does not match the cockpit contract');
+  return { status: 'found', transcript: parsed.data };
 };
 
 export const loadWorkflowContinuation = async (

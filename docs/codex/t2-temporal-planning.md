@@ -1,7 +1,7 @@
 # T2 Temporal implementation planning
 
-Status: core control loop implemented 2026-08-03; transcript and real-provider exit
-evidence remain.
+Status: core control loop and durable operator transcript implemented 2026-08-03;
+real-provider exit evidence remains.
 
 ## Operator-visible behavior
 
@@ -49,6 +49,14 @@ The provider subprocess receives Temporal cancellation and emits heartbeats at s
 every ten seconds, and when stdout/stderr arrives. Workflow cancellation is propagated;
 it is not converted into an operator retry wait.
 
+Provider stdout/stderr is appended before heartbeat progress to bounded SQLite artifact
+chunks. The Temporal state and implementation-plan projection contain only a stable
+transcript ID. A worker retry appends a new provider-attempt number to the same logical
+transcript, so output captured before interruption remains available. If persistence
+fails, the provider process is stopped and the Activity fails recoverably instead of
+continuing with an observability gap. The operator console polls this separate surface
+only while planning is live; transcript chunks never become activity-timeline noise.
+
 ## Runtime ownership
 
 Temporal owns current position, retries, questions, reviews, and waiting. Tasker SQLite
@@ -74,16 +82,18 @@ Temporal interpreter.
 - graph-hash mismatch stops before provider invocation;
 - typed HTTP commands reject generic or malformed wait resolutions;
 - independent tasks do not share planning/review state.
+- bounded stdout/stderr chunks survive ledger restart and preserve retry order;
+- transcript overflow is marked and capped instead of growing without limit;
+- persistence failure stops the provider attempt;
+- the transcript API and operator console expose live and completed provider output
+  separately from durable business activity.
 
 ## Remaining T2 exit work
 
-1. Persist bounded live transcript chunks outside Temporal history, then link the full
-   transcript artifact to the planning attempt. Heartbeat byte counters are not a
-   substitute for the operator transcript.
-2. Run a subscription-authenticated Codex planning smoke through the real Temporal
+1. Run a subscription-authenticated Codex planning smoke through the real Temporal
    worker, including worker interruption and recovery.
-3. Show the snapshot reference and transcript/artifact link in compact diagnostics.
+2. Show the immutable planning-snapshot reference in compact diagnostics. The
+   transcript is already linked and rendered by the dedicated agent-log surface.
 
 Repository mutation remains disabled until these are complete and T3 introduces the
 managed worktree boundary.
-

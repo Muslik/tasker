@@ -14,6 +14,8 @@ import {
   ImplementationPlanningRecordSchema,
   OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
+  PlanningTranscriptStore,
+  PlanningTranscriptViewSchema,
   WorkflowResponseSchema,
   WorkflowGenerationSubjectSource,
   WorkflowContinuationRecordSchema,
@@ -262,6 +264,8 @@ const setup = (
     }),
     generate,
     ledger,
+    clock,
+    implementationPlanning,
     service,
     runService,
     scheduler,
@@ -586,6 +590,58 @@ describe('M1 HTTP API', () => {
       selectedStrategy: 'ralplan',
     });
     expect(automaticPlan.selectionReason).toContain('repository/publication boundaries');
+
+    await api.close();
+  });
+
+  it('serves the bounded provider transcript separately from operator activity', async () => {
+    const { api, clock, implementationPlanning, ledger } = setup(
+      false,
+      undefined,
+      new DeterministicImplementationPlanner(),
+    );
+    if (implementationPlanning === undefined) throw new Error('Expected planning coordinator');
+    const fixtureId = 'avia-13236-short-bug';
+    await api.inject({ method: 'POST', url: `/api/workflows/${fixtureId}/generate` });
+    const commandId = `tasker:${fixtureId}:planning:1`;
+    const planned = await implementationPlanning.prepare(fixtureId, 'fast', null, commandId);
+    expect(planned.ok).toBe(true);
+    const plan = ImplementationPlanningRecordSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: `/api/workflows/${fixtureId}/implementation-plan`,
+        })
+      ).json(),
+    );
+    expect(plan.commandId).toBe(commandId);
+    const transcripts = new PlanningTranscriptStore(ledger.repository, clock);
+    expect(transcripts.append(commandId, 1, 'stdout', 'provider output\n').ok).toBe(true);
+    expect(transcripts.append(commandId, 1, 'stderr', 'provider warning\n').ok).toBe(true);
+
+    const response = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${fixtureId}/planning-transcript`,
+    });
+    const transcript = PlanningTranscriptViewSchema.parse(response.json());
+    const activity = OperatorActivityResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: `/api/operator/tasks/${fixtureId}/activity`,
+        })
+      ).json(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(transcript.operationId).toBe(plan.commandId);
+    expect(transcript.chunks.map((chunk) => [chunk.stream, chunk.content])).toEqual([
+      ['stdout', 'provider output\n'],
+      ['stderr', 'provider warning\n'],
+    ]);
+    expect(activity.entries).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: 'provider output' })]),
+    );
 
     await api.close();
   });
