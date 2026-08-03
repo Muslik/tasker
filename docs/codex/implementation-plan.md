@@ -50,6 +50,12 @@ Exit gate:
 
 This is the next code milestone and the first point at which the new runtime is useful.
 
+Implementation status on 2026-08-03: the executable skeleton, API runtime selection,
+product run registry, parallel wait/resume, Activity retry, worker replay, and local
+CLI restart demo are complete. Stub transcript projection, richer worker health, and
+the real-service subprocess test harness remain before the full T1 gate is closed; see
+`t1-temporal-walking-skeleton.md`.
+
 ### 4.1 Dependencies and local service
 
 1. Pin compatible Temporal TypeScript SDK packages and document the selected version.

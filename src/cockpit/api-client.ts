@@ -1,5 +1,6 @@
 import {
   ApiErrorResponseSchema,
+  ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
@@ -12,6 +13,7 @@ import type {
   OperatorTaskListResponse,
   FixtureSummary,
   WorkflowResponse,
+  ExecutionRunView,
 } from '../control-plane/m1-contracts.js';
 import {
   ImplementationPlanningRecordSchema,
@@ -252,7 +254,7 @@ export const generateWorkflow = async (fixtureId: string): Promise<WorkflowRespo
 export const startWorkflow = async (
   fixtureId: string,
   commandInput: RunStartCommand,
-): Promise<RunProjection> => {
+): Promise<ExecutionRunView> => {
   const command = RunStartCommandSchema.parse(commandInput);
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/start`, {
     method: 'POST',
@@ -260,7 +262,7 @@ export const startWorkflow = async (
     body: JSON.stringify(command),
   });
   if (!result.response.ok) throw failureFrom(result);
-  const parsed = RunProjectionSchema.safeParse(result.body);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Run response does not match the cockpit contract');
   return parsed.data;
 };
@@ -268,7 +270,7 @@ export const startWorkflow = async (
 export const reviewPlan = async (
   fixtureId: string,
   commandInput: PlanReviewCommand,
-): Promise<RunProjection> => {
+): Promise<ExecutionRunView> => {
   const command = PlanReviewCommandSchema.parse(commandInput);
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/plan-review`, {
     method: 'POST',
@@ -276,7 +278,7 @@ export const reviewPlan = async (
     body: JSON.stringify(command),
   });
   if (!result.response.ok) throw failureFrom(result);
-  const parsed = RunProjectionSchema.safeParse(result.body);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Plan review response does not match the cockpit contract');
   return parsed.data;
 };

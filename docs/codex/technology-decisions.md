@@ -21,9 +21,11 @@ invariants live in [`architecture.md`](architecture.md); sequencing lives in
 | Tests | Vitest, fast-check where useful, Playwright | Unit/property/integration/operator acceptance |
 | Logs | Pino with redaction | Operational diagnostics separate from task activity |
 
-Temporal SDK and server versions are pinned together when the first migration slice is
-implemented. This document intentionally does not invent a version before the package
-change is reviewed against current official compatibility guidance.
+The T1 slice pins `@temporalio/client`, `@temporalio/worker`,
+`@temporalio/workflow`, and `@temporalio/testing` at `1.21.1`. The local acceptance
+demo was verified with Temporal CLI `1.8.2`, embedded Temporal Server `1.31.2`, and UI
+`2.50.1`. Upgrades require Workflow replay/recovery tests before changing the worker
+version used for existing histories.
 
 ## 2. Temporal topology
 

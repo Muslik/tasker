@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
+import { RunProjectionSchema } from '../runner/contracts.js';
+import { TaskWorkflowPublicStateSchema } from '../temporal/public-state.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
 export const M1_VIEW_SCHEMA_VERSION = 3;
@@ -150,6 +152,8 @@ export const ApiErrorResponseSchema = z
   })
   .strict();
 
+export const ExecutionRunViewSchema = z.union([RunProjectionSchema, TaskWorkflowPublicStateSchema]);
+
 export const OperatorTaskStatusSchema = z.enum([
   'backlog',
   'planned',
@@ -255,6 +259,7 @@ export type FixtureSummary = z.infer<typeof FixtureSummarySchema>;
 export type WorkflowTreeNode = z.infer<typeof WorkflowTreeNodeSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
+export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
 export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;
 export type OperatorActivityResponse = z.infer<typeof OperatorActivityResponseSchema>;

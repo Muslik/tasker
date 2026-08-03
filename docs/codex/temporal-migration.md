@@ -159,7 +159,7 @@ features, not prerequisites for proving the kernel boundary.
 
 ## Cutover checklist
 
-- [ ] Temporal SDK/server versions pinned and documented.
+- [x] Temporal SDK versions pinned and tested CLI/server versions documented.
 - [ ] Workflow module dependency isolation enforced.
 - [ ] T1–T5 milestone gates pass.
 - [ ] Representative histories replay against release worker.

@@ -23,10 +23,13 @@ import {
 import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
 import {
   ApiErrorResponseSchema,
+  ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
   OperatorTaskSummarySchema,
   WorkflowResponseSchema,
   type OperatorTaskSummary,
+  type WorkflowResponse,
+  type WorkflowTreeNode,
 } from './m1-contracts.js';
 import {
   DEFAULT_RUN_START_COMMAND,
@@ -40,6 +43,12 @@ import {
 } from '../runner/index.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
+import {
+  type TaskTemporalRunService,
+  type TaskWorkflowPublicState,
+  type TemporalRunError,
+} from '../temporal/index.js';
+import { CompiledWorkflowSchema } from '../workflow/index.js';
 
 const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
 const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
@@ -53,7 +62,7 @@ const StreamQuerySchema = z
   .object({ after: z.coerce.number().int().nonnegative().optional() })
   .strict();
 
-export interface BuildM1ApiOptions {
+interface BuildM1ApiCommonOptions {
   readonly service: M1WorkflowService;
   readonly cockpitDirectory?: string | undefined;
   readonly logger?: boolean | undefined;
@@ -61,9 +70,26 @@ export interface BuildM1ApiOptions {
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly workflowContinuation?: WorkflowContinuationCoordinator | undefined;
-  readonly runService?: DeterministicStubRunService | undefined;
-  readonly scheduler?: DurableStubScheduler | undefined;
 }
+
+type ExecutionRuntimeOptions =
+  | {
+      readonly runService?: undefined;
+      readonly scheduler?: undefined;
+      readonly temporalRunService?: undefined;
+    }
+  | {
+      readonly runService: DeterministicStubRunService;
+      readonly scheduler?: DurableStubScheduler | undefined;
+      readonly temporalRunService?: undefined;
+    }
+  | {
+      readonly runService?: undefined;
+      readonly scheduler?: undefined;
+      readonly temporalRunService: TaskTemporalRunService;
+    };
+
+export type BuildM1ApiOptions = BuildM1ApiCommonOptions & ExecutionRuntimeOptions;
 
 const apiError = (error: string, message: string) =>
   ApiErrorResponseSchema.parse({ error, message });
@@ -161,6 +187,19 @@ const sendRunError = (reply: FastifyReply, error: StubRunError): FastifyReply =>
   }
 };
 
+const sendTemporalRunError = (reply: FastifyReply, error: TemporalRunError): FastifyReply => {
+  switch (error.kind) {
+    case 'run_not_found':
+      return reply.code(404).send(apiError(error.kind, 'This workflow has not started'));
+    case 'run_settings_conflict':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'This run already exists with different immutable settings'));
+    case 'runtime_unavailable':
+      return reply.code(503).send(apiError(error.kind, error.message));
+  }
+};
+
 const sendContinuationError = (
   reply: FastifyReply,
   error: WorkflowContinuationError,
@@ -235,6 +274,79 @@ const applyRunToTask = (
   });
 };
 
+const applyTemporalRunToTask = (
+  task: OperatorTaskSummary,
+  run: TaskWorkflowPublicState | null,
+): OperatorTaskSummary => {
+  if (run === null) return task;
+
+  switch (run.status) {
+    case 'running':
+      return OperatorTaskSummarySchema.parse({
+        ...task,
+        status: 'running',
+        attention: 'none',
+        currentStage:
+          run.currentNodeId === null ? 'Temporal workflow running' : `Running ${run.currentNodeId}`,
+      });
+    case 'waiting': {
+      const codeReview = run.wait.waitKind === 'code_review@1';
+      const planReview = run.wait.waitKind === 'plan.approved@1';
+      return OperatorTaskSummarySchema.parse({
+        ...task,
+        status: codeReview ? 'code_review' : planReview ? 'plan_review' : 'waiting',
+        attention: 'operator',
+        currentStage: codeReview
+          ? 'Waiting for code review'
+          : planReview
+            ? 'Plan review required'
+            : `Waiting for ${run.wait.waitKind.replace('@1', '').replaceAll('_', ' ')}`,
+      });
+    }
+    case 'completed':
+      return OperatorTaskSummarySchema.parse({
+        ...task,
+        status: 'done',
+        attention: 'none',
+        currentStage: `Workflow completed · ${run.outcome}`,
+      });
+    case 'unavailable':
+      return OperatorTaskSummarySchema.parse({
+        ...task,
+        status: 'needs_attention',
+        attention: 'operator',
+        currentStage: 'Temporal runtime unavailable',
+      });
+  }
+};
+
+const decorateTreeWithTemporalState = (
+  node: WorkflowTreeNode,
+  run: TaskWorkflowPublicState,
+): WorkflowTreeNode => ({
+  ...node,
+  status: run.nodeStates[node.id] ?? node.status,
+  children: node.children.map((child) => decorateTreeWithTemporalState(child, run)),
+});
+
+const decorateWorkflowWithTemporalState = (
+  workflow: WorkflowResponse,
+  run: TaskWorkflowPublicState | null,
+): WorkflowResponse => {
+  if (run === null || workflow.view.workflow.tree === null) return workflow;
+
+  return WorkflowResponseSchema.parse({
+    ...workflow,
+    view: {
+      ...workflow.view,
+      workflow: {
+        ...workflow.view.workflow,
+        tree: decorateTreeWithTemporalState(workflow.view.workflow.tree, run),
+      },
+    },
+  });
+};
+
 const contentType = (filename: string): string => {
   switch (extname(filename)) {
     case '.css':
@@ -260,6 +372,12 @@ const resolveCockpitAsset = (directory: string, asset: string): string | null =>
 
 export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   const api = Fastify({ logger: options.logger ?? false });
+  const executionRuntime =
+    options.temporalRunService !== undefined
+      ? 'temporal'
+      : options.runService !== undefined
+        ? 'legacy_stub'
+        : 'disabled';
 
   const readContinuation = (taskReference: string): WorkflowContinuationRecord | null => {
     const result = options.workflowContinuation?.read(taskReference);
@@ -396,7 +514,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     return reply.send(WorkflowContinuationRecordSchema.parse(superseded.value));
   };
 
-  api.get('/api/health', () => ({ status: 'ok', milestone: 'm1' }));
+  api.get('/api/health', () => ({ status: 'ok', milestone: 'm1', executionRuntime }));
 
   api.get('/api/fixtures', () => options.service.listFixtures());
 
@@ -411,11 +529,23 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     );
   });
 
-  api.get('/api/operator/tasks', (_request, reply) => {
+  api.get('/api/operator/tasks', async (_request, reply) => {
     const result = options.service.listOperatorTasks();
     if (!result.ok) return sendServiceError(reply, result.error);
-    const withRunState = (task: OperatorTaskSummary): OperatorTaskSummary => {
+    const withRunState = async (task: OperatorTaskSummary): Promise<OperatorTaskSummary> => {
       const withPlanning = options.implementationPlanning?.decorateTask(task) ?? task;
+      if (options.temporalRunService !== undefined) {
+        const run = await options.temporalRunService.read(task.id);
+        if (!run.ok) {
+          return OperatorTaskSummarySchema.parse({
+            ...withPlanning,
+            status: 'needs_attention',
+            attention: 'operator',
+            currentStage: 'Temporal runtime unavailable',
+          });
+        }
+        return applyTemporalRunToTask(withPlanning, run.value);
+      }
       if (options.runService === undefined) {
         return options.workflowContinuation?.decorateTask(withPlanning) ?? withPlanning;
       }
@@ -440,7 +570,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (options.jiraIssueService === undefined) {
       return reply.send({
         ...result.value,
-        tasks: result.value.tasks.map(withRunState),
+        tasks: await Promise.all(result.value.tasks.map(withRunState)),
       });
     }
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
@@ -450,7 +580,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       const workflow = options.service.read(task.id);
       if (!workflow.ok) return sendServiceError(reply, workflow.error);
       hydratedJiraTasks.push(
-        withRunState(
+        await withRunState(
           workflow.value === null
             ? task
             : OperatorTaskSummarySchema.parse({
@@ -467,7 +597,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       );
     }
     return reply.send({
-      tasks: [...hydratedJiraTasks, ...result.value.tasks.map(withRunState)],
+      tasks: [...hydratedJiraTasks, ...(await Promise.all(result.value.tasks.map(withRunState)))],
       streamCursor: result.value.streamCursor,
     });
   });
@@ -654,6 +784,15 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
     }
 
+    if (options.temporalRunService !== undefined) {
+      const run = await options.temporalRunService.read(params.data.fixtureId);
+      return reply.send(
+        WorkflowResponseSchema.parse(
+          run.ok ? decorateWorkflowWithTemporalState(result.value, run.value) : result.value,
+        ),
+      );
+    }
+
     return reply.send(
       WorkflowResponseSchema.parse(
         options.runService?.decorateWorkflow(result.value) ?? result.value,
@@ -661,14 +800,22 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     );
   });
 
-  api.get('/api/workflows/:fixtureId/run', (request, reply) => {
-    if (options.runService === undefined) {
+  api.get('/api/workflows/:fixtureId/run', async (request, reply) => {
+    if (options.runService === undefined && options.temporalRunService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
     }
     const params = FixtureParamsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
+    if (options.temporalRunService !== undefined) {
+      const result = await options.temporalRunService.read(params.data.fixtureId);
+      if (!result.ok) return sendTemporalRunError(reply, result.error);
+      return result.value === null
+        ? reply.code(404).send(apiError('run_not_found', 'This workflow has not started'))
+        : reply.send(ExecutionRunViewSchema.parse(result.value));
+    }
+
     const result = options.runService.read(params.data.fixtureId);
     if (!result.ok) return sendRunError(reply, result.error);
     return result.value === null
@@ -791,7 +938,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   });
 
   api.post('/api/workflows/:fixtureId/start', async (request, reply) => {
-    if (options.runService === undefined) {
+    if (options.runService === undefined && options.temporalRunService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
     }
     const params = FixtureParamsSchema.safeParse(request.params);
@@ -806,6 +953,36 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!command.success) {
       return reply.code(400).send(apiError('invalid_run_settings', 'Run settings are invalid'));
     }
+
+    if (options.temporalRunService !== undefined) {
+      const workflow = options.service.read(params.data.fixtureId);
+      if (!workflow.ok) return sendServiceError(reply, workflow.error);
+      if (workflow.value === null) {
+        return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
+      }
+      if (workflow.value.status !== 'ready') {
+        return reply
+          .code(409)
+          .send(apiError('workflow_not_executable', 'Only a valid compiled workflow can start'));
+      }
+      const graph = CompiledWorkflowSchema.safeParse(workflow.value.view.workflow.graph);
+      const workflowHash = workflow.value.view.workflow.graphHash;
+      if (!graph.success || workflowHash === null) {
+        return reply
+          .code(500)
+          .send(apiError('workflow_projection_corrupt', 'Compiled workflow graph is invalid'));
+      }
+      const started = await options.temporalRunService.start({
+        taskReference: params.data.fixtureId,
+        workflowHash,
+        graph: graph.data,
+        settings: { planApproval: command.data.settings.planApproval },
+      });
+      return started.ok
+        ? reply.send(ExecutionRunViewSchema.parse(started.value))
+        : sendTemporalRunError(reply, started.error);
+    }
+
     const existingRun = options.runService.read(params.data.fixtureId);
     if (!existingRun.ok) return sendRunError(reply, existingRun.error);
     let implementationPlan = existingRun.value?.implementationPlan ?? null;
@@ -872,13 +1049,36 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : sendRunError(reply, started.error);
   });
 
-  api.post('/api/workflows/:fixtureId/resume', (request, reply) => {
-    if (options.runService === undefined) {
+  api.post('/api/workflows/:fixtureId/resume', async (request, reply) => {
+    if (options.runService === undefined && options.temporalRunService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
     }
     const params = FixtureParamsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    if (options.temporalRunService !== undefined) {
+      const current = await options.temporalRunService.read(params.data.fixtureId);
+      if (!current.ok) return sendTemporalRunError(reply, current.error);
+      if (current.value === null) {
+        return sendTemporalRunError(reply, {
+          kind: 'run_not_found',
+          taskReference: params.data.fixtureId,
+        });
+      }
+      if (current.value.status !== 'waiting') {
+        return reply
+          .code(409)
+          .send(apiError('run_not_waiting', 'The run is not waiting for an operator command'));
+      }
+      const resumed = await options.temporalRunService.resolveWait(params.data.fixtureId, {
+        nodeId: current.value.wait.nodeId,
+        waitKind: current.value.wait.waitKind,
+        resolution: { decision: 'resume' },
+      });
+      return resumed.ok
+        ? reply.send(ExecutionRunViewSchema.parse(resumed.value))
+        : sendTemporalRunError(reply, resumed.error);
     }
     const continuation = readContinuation(params.data.fixtureId);
     const runTaskReference =
@@ -897,7 +1097,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   });
 
   api.post('/api/workflows/:fixtureId/plan-review', async (request, reply) => {
-    if (options.runService === undefined) {
+    if (options.runService === undefined && options.temporalRunService === undefined) {
       return reply.code(503).send(apiError('runner_not_configured', 'M2 runner is disabled'));
     }
     const params = FixtureParamsSchema.safeParse(request.params);
@@ -909,6 +1109,38 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply
         .code(400)
         .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan guidance'));
+    }
+
+    if (options.temporalRunService !== undefined) {
+      if (command.data.decision === 'request_changes') {
+        return reply
+          .code(409)
+          .send(
+            apiError(
+              'temporal_plan_revision_not_migrated',
+              'Plan revision remains on the legacy runtime until the planning Activities migrate',
+            ),
+          );
+      }
+      const current = await options.temporalRunService.read(params.data.fixtureId);
+      if (!current.ok) return sendTemporalRunError(reply, current.error);
+      if (
+        current.value === null ||
+        current.value.status !== 'waiting' ||
+        current.value.wait.waitKind !== 'plan.approved@1'
+      ) {
+        return reply
+          .code(409)
+          .send(apiError('run_not_at_plan_review', 'The run is not waiting for plan review'));
+      }
+      const reviewed = await options.temporalRunService.resolveWait(params.data.fixtureId, {
+        nodeId: current.value.wait.nodeId,
+        waitKind: current.value.wait.waitKind,
+        resolution: { decision: 'approve' },
+      });
+      return reviewed.ok
+        ? reply.send(ExecutionRunViewSchema.parse(reviewed.value))
+        : sendTemporalRunError(reply, reviewed.error);
     }
 
     if (

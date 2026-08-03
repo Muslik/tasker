@@ -2334,7 +2334,7 @@ export const App = () => {
               />
               SSE
             </span>
-            <StateBadge>M2 · stub execution</StateBadge>
+            <StateBadge>Execution</StateBadge>
           </div>
         </header>
 

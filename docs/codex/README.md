@@ -13,17 +13,19 @@ Read these for decisions and future implementation:
    parity matrix, data transition, cutover, and rollback.
 3. [`implementation-plan.md`](implementation-plan.md) — T0–T7 delivery ladder and the
    next Temporal walking-skeleton milestone.
-4. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
+4. [`t1-temporal-walking-skeleton.md`](t1-temporal-walking-skeleton.md) — implemented
+   runtime boundary, local commands, recovery evidence, and deliberate limits.
+5. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
    acceptance gates.
-5. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
+6. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
    contracts, messages, Activities, persistence, retry, and dependency decisions.
-6. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
+7. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
    prompts, policies, providers, trackers, repositories, and company packs without
    rewriting the runtime.
-7. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
+8. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
    correction.
 
-These seven files are the source of truth. Older `.omx` plans are audit history only.
+These eight files are the source of truth. Older `.omx` plans are audit history only.
 
 ## Current code versus target
 
@@ -42,9 +44,10 @@ history, waits, retries, recovery, and parent/child coordination. It does not re
 Tasker's analyzer, IR, compiler, validator, block catalog, policies, integrations,
 worktree management, operator console, artifacts, costs, or retrospective.
 
-No real repository/Jira/Bitbucket/Jenkins mutation is enabled in the legacy stub
-runtime. That is deliberate: the next implementation milestone is the Temporal walking
-skeleton, followed by real Activities with idempotency/reconciliation.
+The opt-in T1 Temporal walking skeleton is now implemented. It runs compiled graphs,
+durable waits, validated Updates, and stub Activities, while real
+repository/Jira/Bitbucket/Jenkins mutation remains disabled. T2 moves implementation
+planning into a real Activity before mutation Activities are enabled.
 
 ## Historical implementation records
 
@@ -68,8 +71,6 @@ Temporal public recovery/integration tests after parity.
 
 ## Immediate implementation target
 
-T1 proves the new boundary with two independently running dynamically assembled fixture
-graphs. They must survive worker/API restart, stop at different durable waits, resume
-only the selected task, and render live state in the existing console. Real coding,
-remote mutation, CI, and cross-repository continuation follow only after this kernel
-slice is green.
+Close the remaining T1 observability/health items, then implement T2 real planning as a
+Temporal Activity. Real coding, remote mutation, CI, and cross-repository continuation
+follow only after the corresponding safety gates are green.
