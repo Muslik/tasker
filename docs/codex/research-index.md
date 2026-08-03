@@ -1,6 +1,14 @@
 # Research index: Task-Adaptive Agent Harness
 
-Date: 2026-08-01
+Date: 2026-08-03
+
+> **Decision correction (2026-08-03).** The original research selected a narrow custom
+> ledger/scheduler for the first proof. M0–M2 supplied that proof and also demonstrated
+> that queueing, leases, cursors, timers, waits, and recovery are non-differentiating
+> infrastructure. Temporal is now the selected execution kernel. The old conclusion is
+> retained below only as research provenance; canonical decisions are in
+> [`architecture.md`](architecture.md) and
+> [`temporal-migration.md`](temporal-migration.md).
 
 This index is the evidence map behind:
 
@@ -24,8 +32,9 @@ supporting evidence, not runtime dependencies.
    - `.omx/research/workflow-engines.md`
    - Compares Temporal, LangGraph, custom event-ledger orchestration, Hatchet,
      Inngest, Prefect, and Dagster.
-   - Decision impact: narrow custom ledger/reducer/outbox MVP with an engine
-     migration seam; no generic workflow platform in Phase 1.
+   - Original decision impact: narrow custom ledger/reducer proof with an engine
+     migration seam. Current decision impact: exercise that seam now and move execution
+     to Temporal before enabling real repository/remote mutation.
 
 3. **Enterprise integrations and security**
    - `.omx/research/integrations-security.md`
@@ -39,9 +48,9 @@ supporting evidence, not runtime dependencies.
    - `.omx/research/observability-cost-evals.md`
    - Compares OpenTelemetry GenAI conventions, Langfuse, Phoenix, MLflow,
      Braintrust, PostgreSQL JSONB, and ClickHouse.
-   - Decision impact: canonical domain ledger stays independent; OTel-compatible
-     export is optional; external trace/eval products are deferred until the
-     vertical slice proves their operating value.
+   - Decision impact: Temporal Event History is canonical for execution. Tasker keeps
+     product/artifact/effect/cost/retrospective data outside it; OTel-compatible export
+     remains optional.
 
 5. **Existing coding harnesses and runner substrates**
    - `.omx/research/coding-harnesses-runners.md`
@@ -55,20 +64,18 @@ supporting evidence, not runtime dependencies.
    - Maps `/Users/dzhabrail/Projects/work/harness`, its bootstrap/layering model,
      existing skills, REST scripts, environment loading, and current workflow
      handoffs.
-   - Decision impact: preserve working connector/skill assets behind new typed
-     adapters; treat the existing repository as brownfield input, not as the
-     durable runtime.
+   - Decision impact: preserve working connector/skill assets behind typed Temporal
+     Activities; treat the existing repository as brownfield input, not as the runtime.
 
 7. **Concrete implementation libraries**
    - [`docs/codex/technology-decisions.md`](technology-decisions.md)
    - Selects the workflow authoring/compiled representations, runtime dependencies,
      error/recovery taxonomy, persistence driver, subprocess/API/logging boundaries,
      graph renderer timing, and deterministic test harness.
-   - Decision impact: TypeScript data DSL + JSON IR, Zod, `better-sqlite3`, Execa,
-     Fastify/Pino, and Vitest/fast-check/Playwright. LangGraph, XState, Effect,
-     neverthrow, ts-pattern, and other domain control-flow runtimes are rejected;
-     ORM/queue/retry libraries, React Flow, and Testcontainers are also excluded from
-     the first wave.
+   - Decision impact: TypeScript data DSL + JSON IR, Temporal TypeScript SDK, Zod,
+     `better-sqlite3` for product data, Execa, Fastify/Pino, and
+     Vitest/Temporal-test-environment/Playwright. LangGraph, XState, Effect, BullMQ,
+     `p-queue`, and nested generic retry runtimes remain unnecessary.
 
 ## Requirements provenance
 
@@ -98,9 +105,12 @@ actions, immutable active-run snapshots, human-approved retrospectives, and the
 - Critic v2 (`APPROVE`):
   `.omx/drafts/critic-review-task-adaptive-agent-harness-v2.md`
 
-The accepted v2 changes lock TypeScript/Node.js and specify transactional
+The accepted v2 changes locked TypeScript/Node.js and specified transactional
 outbox/CAS/fencing, unknown-outcome reconciliation, provider-attempt lifecycle,
-event/snapshot schema evolution, artifact lineage, and deterministic readiness.
+event/snapshot schema evolution, artifact lineage, and deterministic readiness. The
+2026-08-03 architecture keeps external-effect reconciliation, provider attempts, and
+artifact lineage, while replacing custom scheduling/CAS/fencing/readiness with
+Temporal.
 
 ## Primary official reference groups
 
@@ -115,6 +125,12 @@ Provider automation:
 Durable execution and agent graphs:
 
 - [Temporal documentation](https://docs.temporal.io/)
+- [Workflow determinism](https://docs.temporal.io/workflow-definition)
+- [Activities](https://docs.temporal.io/activities)
+- [TypeScript message passing](https://docs.temporal.io/develop/typescript/workflows/message-passing)
+- [Child Workflow guidance](https://docs.temporal.io/child-workflows)
+- [TypeScript testing suite](https://docs.temporal.io/develop/typescript/best-practices/testing-suite)
+- [Worker Versioning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning)
 - [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
 - [Inngest durable execution](https://www.inngest.com/docs/learn/how-functions-are-executed)

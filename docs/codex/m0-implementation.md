@@ -1,5 +1,9 @@
 # M0 implementation — contracts and runnable skeleton
 
+> **Historical pre-Temporal record.** This file describes the custom kernel actually
+> implemented in M0. Its ledger/lease/outbox execution mechanisms are migration evidence,
+> not target architecture. See [`temporal-migration.md`](temporal-migration.md).
+
 Status: **implemented and verified**, 2026-08-01.
 
 M0 is the deterministic kernel boundary. It can validate and compile a workflow,

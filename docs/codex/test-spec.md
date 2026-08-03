@@ -1,459 +1,313 @@
-# Tasker: canonical test specification
+# Tasker Temporal test specification
 
-Status: approved by Planner -> Architect -> Critic consensus, v3  
-Date: 2026-08-01  
-Architecture: [`architecture.md`](architecture.md)  
-Delivery order: [`implementation-plan.md`](implementation-plan.md)
+Status: canonical acceptance and recovery specification, 2026-08-03
 
-## 1. Testing principles
+## 1. Test strategy
 
-1. Assert behavior at public domain/port boundaries, not implementation details.
-2. One act per test: compile, transition, dispatch, reconcile, resume, or hand off.
-3. Every real adapter first passes the same deterministic contract suite as its fake.
-4. Process-kill tests are required evidence, not optional chaos polish.
-5. Replay reconstructs facts and projections; it never reissues side effects.
-6. Every remote-write test distinguishes `applied`, `not_applied`, and
-   `unknown_outcome`.
-7. Deterministic readiness and the nondeterministic `>=50%` pilot KPI are reported
-   separately.
+The tests prove Tasker behavior, Temporal integration, and external-effect safety. They
+do not re-test Temporal internals or preserve legacy queue/lease implementation details.
 
-## 2. Test layers
+Use four layers:
 
-### Unit/reducer
+1. pure unit/property tests for IR, compiler, validator, interpreter helpers, policies,
+   schemas, and cost calculations;
+2. Temporal time-skipping integration tests with mocked Activities for Workflow state,
+   messages, timers, retries, graph revisions, and child coordination;
+3. real local Temporal service tests for client/worker/API restart, task routing, and
+   replay/deployment compatibility;
+4. adapter/process/Playwright tests for worktrees, providers, Jira/Bitbucket/Jenkins,
+   artifacts, and the operator journey.
 
-- IR and ABI validators;
-- aggregate reducers and impossible-state rejection;
-- predicate and verification-policy decisions;
-- resume cursor, retry budget, and readiness policy;
-- cost and duration calculations.
+Assertions target public state, emitted artifacts/effects, and operator behavior. Avoid
+asserting exact internal Event History sequences unless required by a replay or
+duplicate-effect invariant.
 
-### Repository/transaction
+## 2. Universal invariants
 
-- SQLite migrations and version gates;
-- atomic event/projection/outbox/lease write order;
-- CAS and fencing;
-- dedupe constraints and artifact lineage.
+Every accepted implementation must prove:
 
-### Adapter contract
+- a generated graph is rejected until its IR, ABI, capabilities, effects, bounds, and
+  semantic obligations validate;
+- every initial graph is assembled for its task, not selected from a base template;
+- Temporal is the only authority for execution position, waits, timers, and retries;
+- Workflow code is deterministic and imports no I/O/provider/database/process modules;
+- worker/API/process restart never restarts task intake or completed nodes;
+- human waits consume no Activity worker slot;
+- duplicate messages and Activity delivery do not duplicate remote effects;
+- blocking uncertainty pauses for an answer regardless of plan-review preference;
+- graph/plan/prompt/policy revisions are immutable and provenance-bearing;
+- large artifacts and secrets do not enter Workflow payloads, Search Attributes, or
+  logs;
+- two task states are independent;
+- manual guidance resumes from the blocked boundary;
+- retrospective changes require human approval.
 
-- provider subprocess lifecycle;
-- Jira/Confluence/Bitbucket/Jenkins/Allure/Loop/Git wrappers;
-- signal normalization;
-- receipt/probe/reconcile classification.
+## 3. Pure domain tests
 
-### Recovery/replay
+### 3.1 Workflow compiler and validator
 
-- kill at transaction, dispatch, wait, lease, effect, takeover, and join boundaries;
-- rebuild projections from empty projection tables;
-- stale runner and duplicate delivery behavior.
+Required scenarios:
 
-### E2E/operator
+- `task_specific_source_compiles_to_stable_hash`
+- `same_semantics_with_different_object_order_has_same_hash`
+- `unknown_step_version_is_rejected`
+- `unbounded_loop_is_rejected`
+- `terminal_path_without_terminal_or_wait_is_rejected`
+- `step_without_required_capability_is_rejected`
+- `effect_without_reconciliation_contract_is_rejected`
+- `bug_without_before_reproduction_is_rejected`
+- `bug_without_after_reproduction_is_rejected`
+- `write_path_without_verification_is_rejected`
+- `pr_path_without_ci_and_code_review_is_rejected`
+- `compiler_does_not_silently_insert_missing_obligation`
+- `company_or_vendor_payload_is_absent_from_workflow_domain`
 
-- visible generated workflow;
-- durable stub traversal;
-- real provider/worktree traversal;
-- Jira/PR/CI/review/revise;
-- translation wait;
-- cross-repo child run;
-- retrospective/readiness/pilot reports.
+### 3.2 Interpreter
 
-### Selected test tooling
+- `sequence_advances_only_after_recorded_step_result`
+- `branch_uses_recorded_typed_predicate_input`
+- `loop_stops_at_bound_and_exposes_exhaustion`
+- `completed_node_is_not_selected_after_resume`
+- `wait_consumes_matching_message_once`
+- `wrong_wait_payload_is_rejected_without_state_change`
+- `question_opens_in_reviewed_and_unreviewed_plan_modes`
+- `graph_revision_preserves_completed_node_set`
+- `terminal_state_cannot_return_to_runnable`
 
-- Vitest projects: `unit`, `property`, `repository`, `contract`, `recovery`, and
-  `operator`;
-- fast-check only for stateful sequences and invariants where generated cases can
-  find a defect that examples may miss;
-- Playwright for real-browser cockpit/operator behavior and traces;
-- MSW from the first HTTP integration onward for ordinary response contracts;
-- a repository-owned Node HTTP/TCP scenario server for `unknown_outcome` wire cases;
-- real temporary file-backed SQLite databases, repositories, worktrees, and
-  subprocesses for transaction and recovery evidence.
+Property tests generate bounded valid/invalid graphs and check stable canonicalization,
+terminal-path safety, monotonic completion, and no step selection outside the graph.
 
-The dependency timing, suite layout, and required test drivers are specified in
-[`technology-decisions.md`](technology-decisions.md#7-test-libraries-and-suite-shape).
+### 3.3 Policies and schemas
 
-## 3. Canonical fixtures
+- repository precedence: explicit selection -> field -> description marker -> blocked;
+- `repo:<name>` does not guess among ambiguous repositories;
+- project translation policy applies only to its project/repository;
+- global package policy does not imply an external publish without task evidence;
+- plan-size routing selects consensus only for configured evidence/operator choice;
+- prompt/harness edit changes future snapshot hash, not active run input;
+- shadow price table version is stored with calculated cost;
+- secret-bearing fields fail or redact before persistence.
 
-### Task families
+## 4. Temporal Workflow integration tests
 
-- `short_bugfix` based on AVIA-13236/AVIA-13235 characteristics;
-- `long_feature_review` based on AVIA-12536 characteristics;
-- `translation_wait`;
-- `shared_component_parent` and `shared_component_child`;
-- `not_agent_eligible`;
-- `visual_change` and `build_only_change`.
+Run these with the TypeScript time-skipping test environment and mocked Activities.
 
-### Failure fixtures
+### 4.1 Basic traversal
 
-- Jira definite `400`;
-- provider quota exhaustion;
-- provider session lost after dispatch;
-- process kill at every persistence/effect boundary;
-- Bitbucket push definite `403`;
-- Bitbucket push ambiguous connection loss;
-- duplicate PR/review/webhook/signal delivery;
-- CI ours/flaky/external/infrastructure;
-- stale lease completion;
-- secret-bearing provider/tool output;
-- unsupported event/snapshot/step ABI version.
+- `accepted_graph_reaches_first_activity_and_terminal`
+- `two_workflows_advance_independently`
+- `activity_retry_preserves_node_identity_and_attempt_count`
+- `non_retryable_error_opens_failure_or_attention_state`
+- `timer_backoff_survives_worker_unavailability`
+- `query_returns_bounded_public_state`
+- `cancellation_stops_future_nodes_and_records_reason`
 
-## 4. Requirement-to-scenario catalog
+### 4.2 Plan and questions
 
-### R1 — Intake and eligibility
+- `plan_review_false_proceeds_after_valid_plan`
+- `plan_review_true_waits_for_approval`
+- `plan_feedback_creates_new_plan_attempt`
+- `blocking_question_waits_even_when_plan_review_is_false`
+- `answer_update_validates_question_and_payload_identity`
+- `duplicate_answer_is_idempotent_or_rejected_without_reexecution`
+- `answer_for_another_run_cannot_resume_selected_run`
 
-- `jira_400_persists_intake_failure_without_task_run_or_worktree`
-- `intake_repair_retries_fetch_only`
-- `not_eligible_is_terminal_routing_decision_with_reasons`
-- `eligible_intake_creates_exactly_one_task_and_snapshot`
-- `duplicate_intake_submission_is_idempotent`
-- `linked_context_failure_obeys_declared_policy`
+### 4.3 Human/external waits
 
-Evidence:
+- `code_review_wait_consumes_no_activity_slot`
+- `translation_signal_resumes_only_matching_wait`
+- `final_publish_update_requires_exact_version_payload`
+- `ci_webhook_duplicate_is_ignored`
+- `poll_observation_and_webhook_for_same_ci_build_collapse_to_one_event`
+- `wait_timeout_opens_configured_escalation_not_task_restart`
 
-- IntakeRequest event history;
-- absence/presence queries for Task/Run/worktree;
-- normalized source snapshot and provenance hashes.
+### 4.4 Workflow change
 
-### R2 — Workflow compilation and visibility
-
-- `same_snapshot_and_policy_produce_same_graph_hash`
-- `different_task_families_produce_distinct_graphs`
-- `graph_tree_renders_from_persisted_projection_after_restart`
-- `analyzer_context_contains_no_base_workflow`
-- `reject_pr_path_without_ci_and_review`
-- `reject_bug_without_before_and_after_reproduction`
-- `reject_unknown_step_type`
-- `reject_unbounded_loop`
-- `reject_missing_terminal_path`
-- `reject_unmet_capability`
-- `reject_effect_without_idempotency_or_reconcile_policy`
-- `reject_wait_without_resolution_contract`
-- `verification_rationale_is_visible_before_execution`
-- `external_translation_policy_adds_extract_wait_and_pull`
-- `inline_json_translation_policy_adds_no_translation_nodes`
-- `assembly_decisions_explain_repository_policy_effects`
-- `every_accepted_task_graph_contains_the_universal_planning_boundary`
-- `provider_cannot_remove_or_reorder_the_planning_boundary`
-
-Evidence:
-
-- snapshot/graph/validator artifacts;
-- cockpit and CLI render captures;
-- rejection debug bundle.
-
-### R3 — Transaction, CAS, fencing, and replay
-
-- `append_projection_outbox_and_lease_change_commit_atomically`
-- `cas_conflict_exposes_no_outbox_command`
-- `lease_replacement_increments_fence_before_work_visibility`
-- `stale_fence_completion_is_rejected_without_mutation`
-- `projection_rebuild_matches_live_projection_checksum`
-- `unsupported_event_version_quarantines_run_fail_closed`
-- `unsupported_snapshot_or_step_abi_quarantines_run_fail_closed`
-- `replay_never_dispatches_effects`
-
-### R4 — Durable Wait and Signal
-
-- `quota_exhaustion_opens_quota_wait_not_provider_failure`
-- `open_wait_releases_slot_when_policy_is_slot_free`
-- `matching_signal_resolves_wait_and_resumes_exact_cursor`
-- `duplicate_signal_is_audited_noop`
-- `stale_or_wrong_correlation_signal_does_not_resume`
-- `restart_during_wait_preserves_cursor_and_slot_state`
-- `ci_translation_review_and_human_waits_share_wait_abi`
-- `each_wait_kind_enforces_its_own_resolution_schema`
-
-### R5 — Intervention and immutable prompts
-
-- `course_correction_appends_intervention_event`
-- `intervention_creates_new_attempt_in_same_run`
-- `next_attempt_input_contains_intervention_overlay`
-- `historical_prompt_hash_and_transcript_remain_unchanged`
-- `multiple_interventions_preserve_order_and_authorship`
-- `future_prompt_version_change_does_not_mutate_active_or_historical_run`
-- `gate_answer_without_guidance_resumes_declared_path`
-- `required_plan_approval_opens_a_durable_plan_review_wait`
-- `automatic_plan_approval_skips_only_the_human_wait_not_planning`
-- `duplicate_start_cannot_change_immutable_run_settings`
-- `blocking_question_pauses_in_both_plan_approval_modes`
-
-### R6 — ManualTakeover
-
-- `manual_takeover_is_not_encoded_as_wait`
-- `takeover_reconciles_inflight_effect_before_transfer`
-- `takeover_releases_fenced_runner_lease`
-- `takeover_freezes_all_automation_writes_to_worktree`
-- `stale_runner_write_after_takeover_is_rejected`
-- `handoff_packet_contains_cwd_branch_sha_diff_cursor_effects_waits_and_tests`
-- `human_edit_defaults_to_new_linked_run_on_reentry`
-- `same_run_reentry_requires_proof_of_no_material_human_write`
-- `takeover_and_new_run_preserve_task_history_linkage`
-
-### R7 — Provider capability and lifecycle
-
-- `provider_probe_records_installed_version_and_capabilities`
-- `provider_selection_uses_persisted_compatibility_report`
-- `provider_start_stream_complete_reconcile_lifecycle_is_normalized`
-- `provider_quota_signature_maps_to_quota_wait`
-- `provider_resume_unavailable_starts_new_attempt_from_durable_artifacts`
-- `kill_after_provider_dispatch_reconciles_before_new_attempt`
-- `provider_cost_records_preserve_measured_vs_estimated_source`
-- `unsupported_provider_is_disabled_with_reason`
-
-### R8 — Worktree and smallest-safe resume
-
-- `one_active_run_owns_one_isolated_worktree`
-- `worktree_metadata_and_diff_survive_restart`
-- `succeeded_steps_are_not_reexecuted_after_downstream_failure`
-- `definite_push_403_is_not_applied_and_blocks_push_step_only`
-- `vpn_repair_resumes_new_push_attempt_only`
-- `unknown_push_outcome_requires_remote_ref_probe_before_retry`
-- `remote_ref_contains_commit_classifies_push_applied`
-- `remote_ref_absent_classifies_push_not_applied`
-- `ambiguous_probe_blocks_or_hands_off_without_duplicate_push`
-
-### R9 — Change-aware verification
-
-- `narrow_compile_change_selects_build_only_when_policy_allows`
-- `local_behavior_change_selects_targeted_tests`
-- `shared_package_change_upgrades_to_full_or_composed_suite`
-- `rendered_ui_change_selects_visual_compare`
-- `snapshot_change_requires_snapshot_update_evidence`
-- `repository_mandated_check_cannot_be_silently_downgraded`
-- `verification_rationale_inputs_and_result_are_persisted`
-- `revision_invalidates_only_affected_verification_nodes`
-
-### R10 — Bitbucket review conversation
-
-- `review_comment_ingest_is_deduplicated_by_remote_identity`
-- `accepted_thread_creates_exactly_one_revision_item`
-- `question_thread_posts_reply_without_code_revision`
-- `disagree_with_evidence_posts_evidence_without_code_revision`
-- `already_addressed_thread_does_not_duplicate_fix`
-- `blocked_thread_opens_gate_or_recoverable_blocker`
-- `human_reply_wakes_correlated_review_wait`
-- `agent_does_not_resolve_human_thread_without_policy`
-- `pr_is_canonical_review_channel_but_not_universal_gate_channel`
-
-### R11 — Concurrent CI and review
-
-- `pr_creation_starts_ci_watch_and_review_ingest_concurrently`
-- `ci_ours_opens_bounded_fix_reverify_loop`
-- `ci_flaky_uses_bounded_rerun_budget`
-- `ci_external_waits_without_invalidating_completed_work`
-- `ci_infrastructure_opens_recoverable_environment_wait`
-- `ci_green_satisfies_ci_readiness_projection`
-- `review_before_ci_and_ci_before_review_converge_to_same_projection`
-- `waiting_for_review_requires_no_agent_actionable_ci_or_review_work`
-- `waiting_for_review_holds_no_runner_slot`
-
-### R12 — Translation wait
-
-- `translation_upload_opens_correlated_slot_free_wait`
-- `loop_signal_resolves_matching_translation_wait`
-- `manual_signal_uses_same_resolution_schema_as_loop_signal`
-- `translation_signal_resumes_pull_node_only`
-- `duplicate_translation_signal_is_noop`
-- `restart_during_translation_wait_preserves_batch_and_worktree`
-- `translation_wait_time_is_separate_from_active_agent_time`
-
-### R13 — Later graph expansion and child runs
-
-- `first_wave_run_uses_one_immutable_compiled_graph`
-- `runtime_discovery_returns_typed_workflow_change_required`
-- `workflow_change_request_preserves_cursor_worktree_and_evidence`
-- `first_wave_replan_compiles_linked_immutable_continuation`
-- `rejected_continuation_leaves_parent_recoverably_blocked`
-- `unsupported_first_wave_expansion_opens_preserved_replan_gate`
-- `graph_revision_only_applies_at_declared_expansion_point`
-- `graph_revision_preserves_parent_hash_and_node_lineage`
-- `graph_revision_rejects_unknown_or_unsafe_step`
-- `child_request_creates_separate_task_run_and_worktree`
-- `parent_and_child_histories_replay_independently`
-- `child_dev_publish_emits_exact_version_artifact_once`
-- `dev_version_resolves_parent_join_and_triggers_integration_verify`
-- `final_publish_requires_human_gate`
+- `workflow_change_required_stops_original_suffix`
+- `invalid_revision_is_rejected_and_visible`
+- `pilot_policy_waits_for_revision_review`
+- `accepted_same_repo_revision_appends_suffix_without_replaying_prefix`
+- `independent_repo_revision_starts_child_workflow`
+- `parent_waits_without_worker_slot_until_child_result`
+- `child_failure_or_question_projects_to_parent_attention`
+- `released_version_resumes_parent_consumer_step`
 - `wrong_or_stale_release_version_does_not_resume_parent`
-- `kill_after_publish_before_receipt_reconciles_registry_before_retry`
-- `manual_child_result_fallback_satisfies_same_typed_contract`
 
-### R14 — Observability, cost, and debug bundle
+### 4.5 Replay and versioning
 
-- `attempt_step_run_cost_rollups_match_call_records`
-- `active_wall_and_wait_time_are_distinct`
-- `pricing_snapshot_reproduces_historical_shadow_cost`
-- `cockpit_active_cursor_matches_projection_after_restart`
-- `debug_bundle_contains_snapshot_graph_events_checksum_lineage_waits_receipts_and_artifacts`
-- `debug_bundle_redacts_secret_bearing_content`
-- `branch_retry_wait_provider_and_verification_decisions_have_visible_rationale`
-- `external_otel_export_toggle_does_not_change_ledger_behavior`
+- capture representative histories for sequence, wait/update, Activity retry, graph
+  revision, and child workflow;
+- replay them against the candidate worker build before release;
+- verify old IR/block versions are either supported by the worker or fail deployment
+  compatibility before new work is routed there.
 
-### R15 — Retrospective and future-only change
+## 5. Real Temporal service recovery tests
 
-- `retrospective_compares_planned_and_actual_graph_path`
-- `retrospective_attributes_retries_waits_interventions_and_takeover`
-- `proposal_requires_human_approval`
-- `approved_proposal_creates_new_future_version_with_rollback`
-- `proposal_never_changes_active_or_historical_snapshot`
-- `readiness_report_is_independent_of_pilot_percentage`
-- `only_eligible_replay_safe_classified_runs_count_in_pilot`
+These tests use a real local Temporal Service and real worker subprocesses.
 
-### R16 — Redaction and secret safety
+### 5.1 Process boundaries
 
-- `secret_is_redacted_or_blocked_before_event_commit`
-- `blocked_raw_payload_is_not_readable_through_manifest_lineage`
-- `provider_and_integration_credentials_never_enter_snapshot`
-- `artifact_derivative_retains_safe_lineage`
-- `exporter_runs_second_redaction_pass`
+1. Start a Workflow and block a controlled Activity.
+2. Kill the worker process.
+3. Start a replacement worker.
+4. Assert only the pending Activity is redelivered and completed nodes remain complete.
 
-### R17 — Error normalization and recovery action
+Repeat with:
 
-- `third_party_throw_is_caught_once_and_normalized_at_adapter_boundary`
-- `expected_domain_rejection_is_returned_without_exception_control_flow`
-- `applied_effect_requires_receipt`
-- `unknown_outcome_requires_versioned_probe_contract`
-- `access_denied_maps_to_gate_not_hidden_retry`
-- `quota_failure_requires_reset_evidence_and_maps_to_slot_free_wait`
-- `transient_not_applied_retry_respects_persisted_budget`
-- `contract_violation_quarantines_and_exposes_no_new_command`
-- `selected_recovery_action_is_persisted_before_dispatch`
-- `http_and_subprocess_layers_do_not_retry_outside_durable_policy`
-- `raw_exception_and_diagnostic_are_redacted_before_persistence`
+- API/control-plane restart during an open wait;
+- cockpit disconnect/reconnect;
+- worker restart after heartbeat;
+- Temporal service restart using the chosen persistent development configuration;
+- cancellation while a child process is active.
 
-## 5. Kill/restart matrix
+### 5.2 Concurrency
 
-For every supported boundary, run the test with the process killed:
+- start at least two tasks with worker capacity >1 and observe overlap;
+- constrain provider Activity capacity to 1 and verify non-provider work/waits remain
+  independent;
+- one task in plan review does not set another task to generating/review;
+- one task's failure/retry budget does not alter another task;
+- Task Queue routing sends filesystem work only to a capable worker.
+
+### 5.3 Payload and history audit
+
+For a representative run, inspect Event History and Search Attributes:
+
+- no credentials/tokens;
+- no full prompt/transcript/source/Jira description;
+- no screenshot/video bodies;
+- payload sizes stay within the documented budget;
+- artifact IDs/hashes resolve in Tasker storage;
+- Query response is bounded.
+
+## 6. Activity and adapter contract tests
+
+### 6.1 Provider/process execution
+
+- provider Activity streams transcript to artifact storage and returns a bounded result;
+- measured token usage and price-table version produce shadow cost;
+- heartbeat records attempt/session/artifact progress, not raw logs;
+- cancellation terminates the subprocess or reports unconfirmed termination;
+- provider session resume failure starts a new attempt from persisted context;
+- process exit classification distinguishes task failure, infra failure, and cancellation;
+- no nested generic retry multiplies Temporal Activity attempts.
+
+### 6.2 Worktree recovery
+
+- managed clone is created only in Tasker application data;
+- existing `~/Projects/work` clone is never mutated;
+- retry reuses the same task branch/worktree;
+- harness bootstrap is invoked once or reconciled by receipt;
+- kill after file write/before Activity completion preserves change and does not apply it
+  twice;
+- dirty/conflicting state opens typed attention instead of destructive reset;
+- deleting/recreating API process does not lose worktree locator.
+
+### 6.3 Jira
+
+- sync success only updates snapshot and `syncedAt`, not activity history;
+- VPN/403 sync failure updates health without erasing cached task;
+- Jira 400 on take-into-work is classified and does not start code Activity;
+- non-agent task policy prevents assignment/status mutation;
+- repeated comment/attachment Activity reconciles existing remote result;
+- before-reproduction media attaches only when explicit policy permits it.
+
+### 6.4 Bitbucket
+
+- push retry reconciles remote ref after response loss;
+- PR creation reuses matching open PR;
+- unresolved review threads become one revision input with provenance;
+- reply/resolve operations are idempotent or reconciled;
+- no automatic merge occurs.
+
+### 6.5 Jenkins/Allure
+
+- build success signals code-review readiness;
+- likely flaky failure uses flaky budget, not implementation budget;
+- attributable failure returns to revision;
+- unknown failure runs diagnostic Activity then opens guidance after its bound;
+- webhook loss is recovered by polling;
+- Allure artifacts remain outside Temporal history and resolve in the console.
+
+### 6.6 External-effect crash matrix
+
+For each mutation adapter, inject process termination:
 
 | Boundary | Required recovery |
 |---|---|
-| before event transaction commit | command may be retried; no visible partial state |
-| after event append before projection | impossible under atomic transaction |
-| after outbox visibility before dispatch | one dispatch with current fence |
-| after dispatch before receipt | reconcile; never blind retry |
-| during provider stream | resume if supported, otherwise new attempt from artifacts |
-| after Wait open | wait remains open and slot remains released |
-| after matching Signal ingest | idempotent resolution and one resume command |
-| during takeover | either runner-owned or human-owned, never both |
-| after push send before response | remote-ref probe before retry |
-| after dev publish before local receipt | registry/version probe before publish retry |
-| during review/CI concurrent events | deterministic projection independent of arrival order |
+| before prepare receipt | operation may start cleanly |
+| after prepare, before request | reconcile sees not applied and executes once |
+| after request, before response | reconcile remote state before retry |
+| after response, before applied receipt | reconcile returns applied receipt |
+| remote state cannot prove outcome | open `external_effect_unknown`; never blind retry |
 
-## 6. Milestone gates
+## 7. Operator UI tests
 
-### M0 gate — contracts
+Playwright acceptance scenarios:
 
-- schema/version/CAS/fence/redaction tests green;
-- IntakeRequest can fail without Task/Run;
-- IR and ABI fixtures validate/reject deterministically.
+1. task list shows per-task state, attention, elapsed time, and cost independently;
+2. selecting a task shows its agent/process stream in the center and active graph on the
+   right;
+3. start form includes optional repository and plan-review checkbox;
+4. plan review accepts feedback and visibly creates a new attempt;
+5. blocking question shows evidence/options and accepts an answer;
+6. VPN/403 displays compact sync/infra health without activity-log spam;
+7. stopping/reopening the cockpit restores selected task state;
+8. PR review comments enter revise and return to CI/review;
+9. late graph revision shows rationale/diff and preserves completed nodes;
+10. Jira task details are readable/editable through the integration boundary;
+11. raw Temporal diagnostics are available on demand, not mixed with task activity;
+12. minimal layout remains usable at the supported desktop viewport.
 
-### M1 gate — visible workflow
+## 8. Milestone gates
 
-- at least three task fixtures render distinct persisted graphs;
-- graph hash survives restart;
-- invalid graphs are visibly rejected;
-- cockpit demo recorded.
+### T1 gate
 
-### M2 gate — durable stub traversal
+- two dynamic fixture graphs run independently;
+- worker and API restart pass;
+- separate durable waits resume only their own runs;
+- Workflow code dependency isolation passes;
+- no payload/secret violation.
 
-Current evidence (incremental vertical slice, 2026-08-02): Start durably queues a run;
-capacity `2` admits two independent runs, capacity `1` is reused after a slot-free wait,
-and a restarted scheduler replaces an expired lease without duplicate receipts. A run
-reaches a persisted plan-review wait; operator feedback creates an immutable guidance
-artifact and planning attempt `2`; reopening SQLite returns to plan review without
-discarding attempt `1`. Every accepted graph contains the universal planning boundary;
-an immutable per-run setting either opens that wait or records an automatic continuation
-after the same planning node, and a conflicting duplicate start is rejected. Another
-run reaches a slot-releasing code-review wait; API/UI
-runtime projections update from ledger events; and a forced stop after two committed
-steps resumes from the same cursor. A real typed implementation plan now runs through
-subscription Codex CLI (or an explicit deterministic test provider), persists its
-strategy/provenance/token receipt, and survives operator-guided attempt revision. The
-planner can also open a slot-releasing blocking-clarification wait; exact operator
-answers are persisted and resume the same run at a new planning attempt, including
-after restart and during plan revision. The full gate remains open for heartbeat/outbox
-dispatch, executor-originated clarification, provider capacity pools, quota behavior,
-generalized intervention, runtime-originated workflow continuation, takeover, projection rebuild, and the
-complete kill matrix.
+### T2 gate
 
-- one graph completes on stubs;
-- kill/restart matrix for kernel boundaries green;
-- quota wait, intervention, takeover, and slot reuse demonstrated;
-- projection rebuild checksum matches.
+- real subscription planning Activity passes plan approval/revision/question flows;
+- attempts, time, tokens, and shadow cost are visible;
+- provider interruption resumes from the planning boundary.
 
-### M3 gate — first provider
+### T3 gate
 
-- compatibility report exists;
-- first provider selected from evidence;
-- one real read-only node and provider recovery case pass.
+- disposable repository change/build survives worker kill without duplicate mutation;
+- worktree/bootstrap paths and recovery rules pass;
+- no remote mutation capability is enabled.
 
-### M4 gate — real worktree/recovery
+### T4 gate
 
-- real isolated diff/commit evidence;
-- wrong-direction intervention path;
-- definite `403` push-only resume;
-- unknown push reconciliation;
-- manual takeover/new linked run.
+- allowed Jira task reaches PR code review;
+- 403 during push resumes only push/reconciliation;
+- CI classifications and PR revise loop pass;
+- external-effect crash matrix is green for enabled mutations.
 
-### M5 gate — real intake
+### T5 gate
 
-- Jira 400, not-eligible, and eligible paths pass;
-- real eligible snapshot compiles through the M1 path.
+- translation and cross-repository continuation demos pass;
+- completed parent work never restarts;
+- invalid/stale graph and publish messages cannot resume work.
 
-### M6 gate — real Jira/PR/CI/review
+### T6 deletion gate
 
-- one end-to-end eligible fixture reaches `waiting_for_review`;
-- CI classifications and mixed review dispositions pass;
-- duplicate delivery and restart tests pass;
-- no unresolved unknown effect exists.
+- all preceding gates are green on Temporal;
+- representative legacy behavior has an equivalent public Temporal test;
+- no new run can select legacy runtime;
+- code search finds no runtime dependency on legacy ready-set/lease/fence/cursor/wait
+  tables;
+- current legacy fixtures are exported or deliberately discarded with documented scope;
+- lint, typecheck, unit, integration, replay, e2e, and dead-code checks pass.
 
-### M7 gate — translation
+### Pilot gate
 
-- upload/wait/signal/pull path survives restart and frees slot.
-
-### M8 gate — cross-repo child
-
-- validated expansion, linked child, dev version, parent verification, human final
-  publish, and resume path pass without duplicate publish.
-
-### M9 gate — readiness/pilot
-
-- all deterministic gates through implemented scope green;
-- retrospective future-only rules green;
-- pilot report separate and cohort eligibility auditable.
-
-## 7. Deterministic execution-readiness gate
-
-Tasker is not execution-ready merely because a demo reaches a PR. Readiness requires:
-
-1. zero unsupported schema versions in active runs;
-2. projection rebuild parity from the canonical ledger;
-3. process-kill evidence for implemented effect/wait boundaries;
-4. no stale lease mutation;
-5. no blind retry of unknown remote outcome;
-6. source-side redaction before persistence;
-7. operator-visible graph, cursor, rationale, waits, receipts, and worktree state;
-8. classified recovery/handoff path for every non-success outcome;
-9. milestone-specific tests and operator demo complete.
-
-## 8. Pilot KPI
-
-After deterministic readiness:
-
-- define an eligible cohort before running it;
-- count optional plan review, genuine questions, and normal PR review separately from
-  unexpected mandatory intervention;
-- report at least the percentage reaching `waiting_for_review`, failure taxonomy,
-  active/wait/human time, attempts, and shadow cost;
-- `>=50%` is success for the pilot but can never waive a failed deterministic gate.
-
-## 9. Exit criteria for implementation handoff
-
-- architecture, plan, and this spec use the same state/ABI vocabulary;
-- every M0-M2 requirement has a named scenario and evidence type;
-- later milestones have dependency gates and explicit fallback/containment;
-- provider-first is not hardcoded;
-- PR is scoped to code review, not all human communication;
-- ManualTakeover defaults to a new linked run after human edits;
-- persisted GraphRevision is staged after first-wave immutable graph/replay;
-- no executor must invent the 403, Jira 400, intervention, translation, CI, review,
-  verification, or child-run behavior.
+- >=50% of selected in-scope tasks reach useful code review;
+- zero lost or duplicated remote effects;
+- every recovery resumes from the correct boundary;
+- operator interventions, time, and cost are measurable;
+- retrospective changes are proposed and manually approved, never self-applied.

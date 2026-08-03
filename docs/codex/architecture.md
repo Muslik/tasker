@@ -1,835 +1,390 @@
-# Tasker: canonical architecture
+# Tasker architecture
 
-Status: approved by Planner -> Architect -> Critic consensus, v3  
-Date: 2026-08-01  
-Audience: owner, reviewer, implementation agents
+Status: canonical target architecture, Temporal revision, 2026-08-03
 
-This document is the canonical product and system architecture for the personal
-task-adaptive agent harness. The detailed delivery order lives in
-[`implementation-plan.md`](implementation-plan.md); executable acceptance scenarios
-live in [`test-spec.md`](test-spec.md).
+## 1. Product boundary
 
-## 1. Outcome and scope
+Tasker is a personal operator console and task-adaptive coding harness. It is not a
+general durable-execution platform. Temporal provides durable execution; Tasker adds
+the domain that makes a Jira task become a reviewable coding workflow.
 
-Tasker accepts a human-selected, frontend-safe work item, assembles an inspectable
-workflow for that item, runs it through subscription-backed coding CLIs, and normally
-advances it to an open pull request in `waiting_for_review`.
+The target user journey is:
 
-The pilot succeeds when at least 50% of a declared eligible cohort reaches
-`waiting_for_review` without mandatory intervention other than:
+```text
+backlog -> intake -> repository checkout -> workflow assembly -> implementation plan
+        -> execution/recovery -> CI -> human code review -> revise -> waiting/done
+```
 
-- optional plan review;
-- answers to genuine questions;
-- normal pull-request discussion.
+The operator normally intervenes only to:
 
-This is a personal, single-user, local-first system. Local execution is implemented
-first; the runner protocol keeps a later VPS worker possible. Merge, deploy, final
-package publish, and production mutation are outside autonomous scope.
+1. answer a genuinely blocking question;
+2. approve or revise the implementation plan when plan review was requested;
+3. guide an agent that explicitly asks for help after bounded recovery;
+4. review the PR and send comments back for revision;
+5. complete a human-only gate such as translation or final package publication.
 
-The harness may create branches, commits, pull requests, CI runs, review replies,
-linked child tasks, and dev publishes only when the active repository policy permits
-those effects. Retrospective output never changes the harness automatically.
+No task is silently discarded because a process, worker, laptop, VPN, provider, or
+remote API failed. Resumption continues from the failed boundary and keeps the
+worktree, completed activities, artifacts, and operator decisions.
 
-## 2. Product invariants
+## 2. Ownership model
 
-1. **No lost work.** A provider error, process kill, Jira error, CI failure, missing
-   VPN, quota limit, or human wait must end in a persisted, inspectable state. It must
-   not silently terminate the workflow or discard the worktree.
-2. **Resume at the smallest safe boundary.** Previously successful nodes are facts.
-   A definite push `403` resumes the push node after the environment is repaired; it
-   does not redo analysis, implementation, commit, or verification.
-3. **Unknown effects are reconciled, never guessed.** A timeout after a remote write
-   becomes `unknown_outcome`. Tasker probes the remote system before any retry.
-4. **Run history is immutable.** The initial snapshot, graph, prompts, attempts, tool
-   events, interventions, and graph revisions are append-only facts.
-5. **Human steering is allowed.** Guidance such as "делаешь не то, лучше вот так"
-   creates a new attempt in the same run with an immutable intervention overlay. It
-   does not rewrite the old prompt or shared harness.
-6. **Manual ownership is exclusive.** When the human takes a worktree, automation
-   releases its lease and performs no more writes. Returning to automation creates a
-   new linked run by default.
-7. **Waiting does not consume execution capacity.** Quota, CI, review, translation,
-   external artifact, and human-answer waits release the runner slot unless a step
-   contract explicitly proves it must retain one.
-8. **Dynamic does not mean arbitrary.** An analyzer can propose a graph only from
-   registered step types and declared control-flow constructs. A deterministic
-   validator rejects unsafe or incomplete graphs before execution.
-9. **Planning is universal; human approval is a run policy.** Every task produces and
-   validates an implementation plan. A per-run setting decides whether the operator
-   must approve that plan; it never skips planning, deterministic validation, or a
-   blocking clarification.
-10. **Measured and estimated data stay distinct.** Active time, wait time, tokens,
-   provider-reported cost, and API-equivalent shadow cost retain source/confidence.
-11. **Pilot quality cannot waive correctness.** The `>=50%` KPI is separate from the
-    deterministic recovery, replay, idempotency, redaction, and state-machine gates.
+### Tasker owns
 
-## 3. Architecture at a glance
+- normalized task, repository, and linked-context intake;
+- the versioned workflow IR and block catalog;
+- company/project policy, prompts, skills, and mandatory obligations;
+- read-only analyzer input and untrusted graph proposal generation;
+- deterministic graph validation;
+- provider selection and subscription-CLI invocation;
+- worktree lifecycle and all Jira/Bitbucket/Jenkins/Confluence adapters;
+- external-effect safety, idempotency keys, reconciliation, and receipts;
+- operator projections, transcripts, artifacts, measured usage, shadow cost, and
+  retrospective data.
+
+### Temporal owns
+
+- canonical execution history and current workflow position;
+- task queues and worker delivery;
+- timers, retry scheduling, cancellation, and timeout state;
+- crash/restart recovery and activity heartbeats;
+- durable waits, signals, synchronous operator updates, and workflow queries;
+- workflow/child-workflow coordination;
+- worker deployment compatibility and replay safety.
+
+Tasker must not rebuild Temporal's ready set, runner leases, fence tokens, execution
+cursor, wait table, retry timer, or scheduler. SQLite remains a product store, not a
+second execution authority.
+
+## 3. System shape
 
 ```mermaid
 flowchart LR
-    O["Operator / local cockpit"] --> C["Control plane"]
-    J["Jira / Confluence / Loop"] --> I["Ingress adapters"]
-    I --> C
-    C --> L["SQLite/WAL domain ledger"]
-    L --> P["Projections + outbox"]
-    P --> Q["Queue / scheduler"]
-    Q --> R["Local runner"]
-    R --> W["Isolated git worktree"]
-    R --> A["Provider adapter"]
-    A --> X["Claude / Codex / Antigravity CLI"]
-    P --> E["Effect adapters"]
-    E --> B["Bitbucket / Jenkins / Allure / package registry"]
-    L --> D["Workflow tree, transcript, cost, debug bundle"]
-    D --> O
-    R -. "same protocol later" .-> V["VPS runner"]
+  U["Operator console"] --> API["Tasker API / control plane"]
+  API --> DB["Tasker product store"]
+  API --> TC["Temporal Client"]
+  TC --> TS["Temporal Service"]
+  TS --> TW["Tasker Temporal Worker"]
+  TW --> WF["Generic graph-interpreter Workflow"]
+  WF --> ACT["Typed Activities"]
+  ACT --> AG["Codex / Claude / Antigravity adapters"]
+  ACT --> WT["Managed worktrees and processes"]
+  ACT --> EXT["Jira / Bitbucket / Jenkins / Confluence"]
+  ACT --> DB
+  TS --> API
 ```
 
-### Canonical truth
+The Temporal Service may run locally for the personal workflow or on a VPS. A worker
+runs where it can access the relevant managed checkout. Task queues express worker
+capability and location; they are not project-specific business logic.
 
-SQLite/WAL is the single-instance system of record. JSONL transcripts, OpenTelemetry,
-Phoenix/Langfuse, UI state, and reports are projections or artifacts, never competing
-histories.
+## 4. Task admission and repository binding
 
-One transaction performs, in fixed order:
+Jira is the default task source, not a hard-coded kernel dependency. A tracker adapter
+produces a normalized immutable task snapshot. Repository resolution follows this
+precedence:
 
-1. compare aggregate `expected_version` values;
-2. append domain events;
-3. update projections;
-4. insert outbox commands;
-5. acquire, renew, or release the fenced runner lease.
+1. an explicit repository chosen while creating/importing the Tasker task;
+2. a future dedicated Jira repository field;
+3. `repo:<repository-name>` in the Jira description;
+4. otherwise `repository_mapping_required` and no workflow generation.
 
-No network or provider side effect occurs inside this transaction.
+Repositories are cloned into Tasker's application-data directory, never into
+`~/Projects/work`. Existing operator clones may be discovered for naming help but are
+not mutated. Before planning, Tasker creates a managed branch/worktree and runs the
+configured external harness bootstrap. Its locator and bootstrap receipt are product
+artifacts referenced by workflow input.
 
-## 4. Deterministic and agentic boundaries
+Repeated Jira synchronization updates the cached snapshot and `syncedAt`; it does not
+append activity-log noise. A VPN/403/network failure changes sync health only. It does
+not invalidate the cached task, delete a workflow, or restart completed work.
 
-| Concern | Deterministic code owns | Agent may propose |
-|---|---|---|
-| Intake | fetch/result classification, eligibility schema, no-partial-run rule | eligibility evidence and task-type hypothesis |
-| Workflow | IR parsing, obligations, capability/effect checks, loop bounds | the complete task-specific graph, branches, step parameters, expansion proposal |
-| Scheduling | ready-set calculation, slots, leases, fencing, wakeups | provider preference within policy |
-| Effects | intent, idempotency key, receipt, reconciliation | payload content within step contract |
-| Recovery | legal transitions and resume cursor | changed hypothesis or course correction |
-| Verification | allowed profiles and required evidence | impact classification and recommended profile |
-| Review | thread state machine and idempotent replies | disposition and response text with evidence |
-| Retrospective | versioning and approval policy | future-only prompt/workflow/skill diff |
+## 5. Per-task workflow assembly
 
-LLM output is always untrusted input at a typed boundary. The engine never executes an
-unvalidated graph, effect, predicate, or state transition.
+Every task receives a newly assembled graph. There is no default bugfix, feature,
+translation, or PR template.
 
-## 5. Core domain model
+Assembly input is a bounded, provenance-bearing planner context:
 
-### 5.1 IntakeRequest
+- normalized task snapshot, comments, attachment metadata, and linked context;
+- repository identity, bounded read-only repository evidence, and worktree locator;
+- global company policy and project-specific workflow policy;
+- registered block catalog with typed input/output/effect contracts;
+- mandatory obligations and safety constraints;
+- exact prompt, skill, policy, and analyzer versions/hashes.
 
-`IntakeRequest` exists before `Task`. This prevents a Jira `400` or an ineligible item
-from creating a partially running task.
+The analyzer emits untrusted `WorkflowSource` JSON. A deterministic compiler parses,
+canonicalizes, validates, and hashes it. The compiler may reject a graph but never
+silently insert missing nodes; otherwise the UI's “why this workflow” provenance would
+be false.
 
-States:
+Examples of deterministic obligations:
+
+- bug paths contain before and after reproduction evidence;
+- a write path verifies after implementation;
+- a PR path observes CI and reaches human code review;
+- every loop and retry budget is bounded;
+- every effect has the required capability and reconciliation policy;
+- terminal paths end in an allowed final state or explicit durable wait.
+
+The accepted compiled graph, run policy, and hashes become immutable Temporal Workflow
+input. Large prompts, repository snapshots, transcripts, videos, and screenshots stay
+in the Tasker artifact store; history contains stable IDs, hashes, metadata, and bounded
+summaries. Secrets never enter Workflow input or Event History.
+
+## 6. Generic Temporal graph interpreter
+
+Tasker does not generate and deploy TypeScript Workflow code per Jira task. One stable,
+versioned Temporal Workflow interprets the compiled graph:
 
 ```text
-received -> fetching_context -> ready_for_task_creation
-                         \----> waiting_for_intake_repair -> fetching_context
-                         \----> not_eligible
-                         \----> failed_terminal
+TaskWorkflow(compiledGraph, runPolicy, artifactReferences)
 ```
 
-Rules:
+The interpreter is deterministic. It may inspect only its input, prior Activity
+results, messages, and Workflow state. It must not read the filesystem, call an LLM,
+query Jira, access a database, use wall-clock APIs outside Temporal, or generate random
+values outside Temporal primitives.
 
-- a definite Jira `400` records the response, classification, and repair action only
-  on `IntakeRequest`;
-- no `Task`, `Run`, worktree, or provider attempt exists before
-  `ready_for_task_creation`;
-- `not_eligible` is a normal routing decision with reasons, not an execution failure;
-- the operator may correct input/credentials and retry only the intake operation.
+Node mapping:
 
-### 5.2 Task, Run, Step, Attempt
+| Tasker graph concept | Temporal implementation |
+|---|---|
+| `agent` step | Activity using a provider adapter and versioned prompt/skills |
+| `process` step | Activity using a registered command executor |
+| `integration` step | prepare/execute/reconcile Activities |
+| sequence | deterministic interpreter transition |
+| branch | deterministic predicate over recorded data |
+| bounded loop | deterministic interpreter counter and condition |
+| retry/backoff | Activity Retry Policy or explicit Workflow timer when domain decisions are required |
+| blocking question | Workflow Update/Signal plus `condition` |
+| plan approval/revision | validated Workflow Update plus `condition` |
+| CI/review/translation event | Signal; poll Activity is recovery fallback |
+| long human wait | `condition` with optional durable timer/escalation |
+| independent linked work | Child Workflow where it has its own repo/resource/lifecycle |
 
-`Task` is the long-lived work item. `Run` is one immutable execution snapshot.
-`Step` is a node instance in a workflow. `Attempt` is one invocation of that node.
+Queries expose the current public interpreter state to the console. Updates are used
+when the operator needs immediate accepted/rejected feedback. Signals are used for
+asynchronous notifications where a caller does not need a synchronous result.
 
-Task states:
+## 7. Activities and block contracts
+
+A registered block has a stable versioned reference and one execution kind:
+
+- `agent`: a prompt, logical skills, allowed tools, structured input/output, and
+  provider policy;
+- `process`: a policy-owned command or process adapter, never arbitrary shell from the
+  generated graph;
+- `integration`: a typed external adapter with prepare/execute/reconcile behavior.
+
+Each block declares:
+
+- Zod input/output schemas;
+- required capabilities and permitted effects;
+- timeout, heartbeat, cancellation, and retry policy;
+- idempotency/reconciliation behavior;
+- produced artifact kinds;
+- permitted outcomes, including `question`, `workflow_change_required`, `blocked`, and
+  `completed`.
+
+Activities may be non-deterministic. They must be independently retryable at their
+declared boundary and persist useful evidence before returning. Long CLI calls
+heartbeat with a stable attempt/artifact reference. Cancellation requests terminate
+the managed subprocess where possible and record whether termination was confirmed.
+
+Temporal delivery does not make a Jira comment, git push, package publish, or PR update
+exactly once. External mutations use a Tasker idempotency key and this protocol:
 
 ```text
-backlog | queued | running | plan_review | waiting_for_review | revise |
-blocked | handed_to_human | cancelled | done
+prepare intent -> inspect/reconcile prior state -> execute if safe -> persist receipt
 ```
 
-Run states:
-
-```text
-created | leased | executing | waiting | blocked_recoverable |
-completed | handed_off | quarantined | cancelled
-```
-
-Step states:
-
-```text
-pending | ready | in_progress | waiting | retry_ready |
-succeeded | blocked | skipped | cancelled
-```
-
-Attempt outcomes:
-
-```text
-succeeded | retryable | needs_human | wait_requested |
-not_applied | unknown_outcome | fatal
-```
-
-`fatal` is reserved for unrecoverable contract/schema/security violations. Ordinary
-provider, integration, environment, and CI errors are classified into resumable or
-handoff paths and retain their evidence.
-
-### 5.3 Immutable RunSnapshot
-
-The snapshot includes:
-
-- task/context snapshot and base SHA;
-- compiled workflow graph and validator report;
-- prompt, skill, step-type, policy, and pricing versions/hashes;
-- provider capability requirements and routing policy;
-- permissions, retry budgets, redaction/retention policy;
-- initial artifact manifest.
-
-The snapshot is never edited. A requeue after manual takeover or fundamental replan
-creates a new `run_id` linked to its predecessor.
-
-### 5.4 Repository lifecycle around planning
-
-Repository availability and write ownership are separate boundaries:
-
-```mermaid
-flowchart LR
-  I["Intake and repository binding"] --> M["Managed checkout"]
-  M --> S["Pinned read-only planning snapshot"]
-  S --> P["Produce and validate implementation plan"]
-  P --> Q{"Blocking questions?"}
-  Q -->|"yes"| H["Human clarification wait"]
-  H --> P
-  Q -->|"no"| A{"Plan approval required?"}
-  A -->|"yes"| R["Human plan review"]
-  A -->|"automatic"| W["Allocate branch and isolated worktree"]
-  R --> W
-  W --> E["First write-capable step"]
-```
-
-The managed repository is cloned or refreshed before planning because the planner
-needs real code evidence. Planning itself runs against a read-only snapshot pinned to
-a base commit. Tasker does not create a task branch or write-capable worktree merely to
-ask questions or wait for plan review.
-
-Immediately before the first write, Tasker verifies that the pinned base is still
-usable, allocates the task branch and isolated worktree, and persists their locator
-and ownership. A recoverable delay keeps the approved plan and planning evidence; it
-does not rerun planning unless repository drift invalidates an explicit plan premise.
-A cross-repository continuation owns a separate managed checkout, branch, and
-worktree, causally linked to the parent run.
-
-## 6. Stable workflow IR and extension contracts
-
-### 6.1 First-wave IR
-
-The initial kernel supports:
-
-```text
-sequence | step | branch | bounded_loop | wait | gate | finalize
-```
-
-Later milestones add:
-
-```text
-parallel | spawn_child_run | join_child_run | declared_expansion
-```
-
-The first-wave graph is one immutable compiled artifact per run. Persisted in-run
-`GraphRevision` is deliberately deferred until the kernel, intervention, and replay
-contracts are proven. Before that milestone, discovery of an unsupported graph shape
-opens a gate and produces a replan/new-run proposal without losing the worktree.
-
-The kernel exposes a typed TypeScript catalog of node, step, predicate, wait, policy,
-and executor contracts. The analyzer produces a complete JSON IR proposal from an
-empty graph; the deterministic compiler emits the only persisted executable graph.
-There is no base workflow, family skeleton, or semantic node insertion in the
-compiler. Agents never generate or import TypeScript code. Zod is the runtime schema
-source for untyped boundaries. The exact API and library decision are specified in
-[`technology-decisions.md`](technology-decisions.md#3-workflow-description).
-
-#### How a task becomes a workflow
-
-Every workflow belongs to one task. The assembly pipeline is:
-
-```mermaid
-flowchart LR
-  T["Task snapshot + linked context"] --> A["Read-only repository analysis"]
-  B["Node and step catalog"] --> P["Agent assembles complete proposal"]
-  O["Company/project policy + obligations"] --> P
-  A --> P
-  P --> C["Parse, compile, and validate"]
-  C -->|"rejected"| R["Visible issues / bounded re-plan"]
-  C -->|"accepted"| G["Persist graph plus assembly decisions"]
-```
-
-Task classification is evidence, not a template selector. For example, a bug obligates
-the proposal to include before/after reproduction; a write path obligates verification
-and PR preparation; and a PR path obligates CI observation and code review. Repository policy supplies project-specific
-behavior. A copy change in `twiket/ui-kit` can therefore add
-`extract -> translation wait -> pull`, while the same intent in `twiket/avia-web`
-stays inside the implementation step because that project stores copy inline or in
-locale JSON. An unknown repository receives the conservative simple policy and does
-not accidentally inherit external waits or publication effects.
-
-#### Initial assembly is not omniscient
-
-The initial analyzer may read the normalized task, linked context, repository workflow
-policy, and repository in a read-only sandbox. It can inspect code and configuration,
-but it cannot claim facts that only execution can produce. A reproduction result,
-runtime failure, generated diff, or newly discovered dependency is therefore not a
-missing input that the initial planner must hallucinate.
-
-Assembly has two horizons:
-
-```mermaid
-flowchart LR
-  I["Initial snapshot + read-only repository inspection"] --> G1["Validated workflow v1"]
-  G1 --> E["Execute until a new fact is discovered"]
-  E --> O{"Typed step outcome"}
-  O -->|"completed"| N["Continue current graph"]
-  O -->|"workflow_change_required"| P["Preserve cursor, worktree, and evidence"]
-  P --> A["Assemble and validate continuation candidate"]
-  A --> R{"Policy / operator review"}
-  R -->|"accepted"| G2["Linked immutable continuation v2"]
-  R -->|"rejected + guidance"| P2["Planning attempt N + 1"]
-  P2 -->|"new graph required"| A
-  P2 -->|"blocking question"| H["human_clarification"]
-  H --> P2
-  P2 -->|"parent plan is sufficient"| N["Resume parent run"]
-```
-
-Every agent/tool step returns a typed outcome. `workflow_change_required` contains a
-persisted evidence artifact, the node where the fact appeared, the requested scope
-change, and the repositories or external dependencies involved. The executor cannot
-edit a graph. It hands the request back to the planner, which produces another
-untrusted proposal for the compiler and validator.
-
-The first implementation uses an immutable linked continuation/new run. This keeps
-the completed prefix and its hash intact while presenting one causal task history in
-the cockpit. Later `GraphRevision` support may append a validated suffix at declared
-expansion points, but it cannot rewrite completed nodes. Discovering a shared
-component during `bug.reproduce` or `code.implement` is the canonical scenario for
-this path.
-
-Rejecting a candidate does not reject the task. The exact operator guidance becomes
-immutable input to planning attempt `N + 1`. The old candidate stays addressable for
-audit while the new attempt either proposes another immutable candidate, asks a
-blocking question, or proves that execution can continue inside the accepted parent
-graph. No branch edits the completed prefix or discards the existing run.
-
-#### Universal planning boundary
-
-Every accepted root sequence begins with:
-
-```text
-task.analyze@1 -> plan.approved@1 gate -> task-specific execution
-```
-
-`task.analyze@1` must materialize a typed `ImplementationPlan` artifact. Deterministic
-code validates its schema, referenced repositories, permitted effects, verification
-requirements, and consistency with the compiled graph. The gate is then resolved in
-one of two ways from immutable run settings:
-
-- `planApproval: required` opens `plan_review` and waits for the operator;
-- `planApproval: automatic` records an automatic continuation and proceeds.
-
-This setting is selected before the run and cannot be changed after it starts. Plan
-feedback creates another planning attempt with immutable guidance; it never edits the
-prior plan. A blocking question always opens `human_clarification`, even in automatic
-mode. “Do not review my plan” is not permission for the agent to invent a missing
-product decision.
-
-The planning strategy is another immutable run setting: `fast`, `ralplan`, or `auto`.
-Explicit operator selection wins. `auto` is a deterministic policy decision whose
-selected strategy and reason are persisted. Fast planning receives a bounded immutable
-repository evidence bundle; ralplan receives the repository through a read-only
-consensus-planning boundary. Both must return the same validated decision contract.
-
-Workflow knowledge is resolved from two configuration layers:
-
-```yaml
-global:
-  repositoryKinds:
-    frontend:
-      packageRules:
-        - id: frontend-ott-package
-          pathPrefix: packages/@ott/
-          devPublish: pnpm component:publish-dev
-          finalPublish: human
-
-projects:
-  twiket/avia-web:
-    repositoryKind: frontend
-    translations: inline_json
-    verification:
-      rules:
-        - when: { changedPaths: [src/locales/**] }
-          run: [build]
-        - when: { changedPaths: [src/pages/**, src/features/**] }
-          run: [a, b, c, build, d]
-
-  twiket/ui-kit:
-    repositoryKind: frontend
-    translations:
-      kind: external
-      extract: pnpm translations:extract
-      pull: pnpm translations:pull
-```
-
-The current pack stores readable company/project policy as validated JSON plus optional
-Markdown guidance, while executable step contracts and bindings are typed TypeScript.
-YAML above only illustrates the ownership. Global policy contains reusable workflow conventions such
-as where frontend `@ott` packages live and how they are published. A project profile
-contains only workflow-specific facts: translation mode, verification matrix,
-commands, repository links, and permitted effects. Code architecture, FSD, reducer
-style, and implementation conventions remain agent skills/instructions and are not
-duplicated here.
-
-The source layout is explicit:
-
-```text
-harness/company.json
-harness/projects/twiket-avia-web/project.json
-harness/projects/twiket-avia-web/workflow.md
-src/harness/step-definitions.ts
-```
-
-A profile may link a short Markdown note for human context, but prose alone cannot
-grant effects or create graph nodes. Only the validated typed fields participate in
-deterministic assembly. This keeps the files pleasant to review while preventing an
-agent interpretation of documentation from silently changing the workflow.
-
-Resolution precedence is explicit and recorded: hard safety/repository-mandatory
-checks cannot be downgraded; a project rule may specialize a matching global default;
-the analyzer recommendation fills only fields left open by policy. For example the
-shared-component fixture matches the project translation profile and independently
-matches the global `frontend-ott-package` publication rule. Both matches appear as
-separate assembly decisions.
-
-The compiler persists an ordered `assemblyDecisions` artifact alongside the graph.
-Each entry contains structured source provenance, the input fact, selected policy,
-and visible graph effect. The cockpit renders this as **Why this workflow**. Diagnostics
-show proposal identity, graph hash, validation issues, and provenance; there is no
-meaningless comparison against a base template.
-
-This boundary is deliberately mixed:
-
-- classification, graph construction, and recommended parameters are agentic;
-- policy lookup, mandatory obligations, loop limits, capability checks, effect safety,
-  terminal paths, and persistence are deterministic;
-- changing a repository policy affects only future runs because every current run
-  keeps its immutable policy snapshot and graph hash.
-
-### 6.2 StepType ABI
-
-Every registered step type declares:
-
-```yaml
-id: string
-version: semver
-input_schema: schema_ref
-output_schema: schema_ref
-allowed_effects: [effect_kind]
-required_capabilities: [capability]
-resume_boundary: none | attempt | step
-idempotency: none | key | probe
-retry_policy: policy_ref
-wait_kinds: [wait_kind]
-artifact_contracts: [artifact_kind]
-redaction_policy: policy_ref
-```
-
-The runtime invokes step types through the same `prepare -> execute -> reconcile ->
-finalize` protocol. Existing scripts/skills in `/Users/dzhabrail/Projects/work/harness`
-are wrapped behind this ABI rather than rewritten.
-
-### 6.3 Predicate ABI
-
-Branch predicates are pure, versioned functions over persisted projection fields and
-artifact metadata. Their inputs and result are recorded. They cannot read the network,
-current wall clock, or mutable filesystem state directly.
-
-### 6.4 Workflow validation
-
-The validator rejects:
-
-- unknown or incompatible step versions;
-- missing terminal paths;
-- unbounded cycles;
-- predicates with undeclared inputs;
-- unmet provider/tool capabilities;
-- an effect without idempotency or reconciliation policy;
-- wait nodes without a resolution contract;
-- a child join without a declared child result;
-- an execution path that can strand a worktree without recovery/handoff.
-
-### 6.5 Later graph expansion
-
-After the first-wave kernel is proven, a declared expansion point may produce an
-append-only `GraphRevisionProposed`. The validator applies the same rules plus lineage
-checks. Accepted revisions retain parent revision/hash and never rewrite earlier
-graphs. Until this capability exists, cross-repo discovery becomes a preserved gate
-and a new linked run rather than an unsafe graph mutation.
-
-Workflow-change approval is a rollout policy, not a permanent operator obligation.
-Every continuation is always compiled and deterministically validated. The intended
-run policies are:
-
-```text
-review_all -> auto_safe -> auto_all_valid
-```
-
-The pilot starts with `review_all` so rejected and surprising candidates are visible.
-After retrospective evidence establishes stable capability/effect classes,
-`auto_safe` may accept validated, non-escalating changes and pause only for new
-repositories, new effect classes, missing policy, or a blocking question. The target
-mode is `auto_all_valid`: any candidate satisfying the deterministic contract is
-appended automatically. No mode can bypass the validator or rewrite the completed
-prefix.
-
-## 7. Durable Wait, human steering, and manual takeover
-
-### 7.1 Wait ABI
-
-`Wait` is only a resumable condition while the harness retains ownership.
-
-Kinds:
-
-```text
-quota_reset | human_clarification | ci_build | review_event |
-translation_ready | external_artifact | retry_backoff | provider_resume_ready
-```
-
-Fields:
-
-```text
-wait_id, scope, kind, resume_cursor, resolution_schema,
-slot_policy, opened_by_event_id, status, deadline_at?, resolved_by_event_id?
-```
-
-A normalized `Signal` resolves a wait only when it matches the wait's correlation key
-and resolution schema. Duplicate signals are audited no-ops.
-
-`human_clarification` is mandatory whenever the planner or executor identifies a
-missing decision that can materially change scope, behavior, repository ownership, or
-an external effect. It is independent from optional plan review. The question,
-available evidence, answer schema, operator answer, and resumed attempt are persisted;
-the runner slot is released while waiting.
-
-### 7.2 InterventionEvent
-
-When a run asks for help or the operator sees a wrong direction, the operator submits
-run-specific guidance through the cockpit. Tasker appends:
-
-```text
-InterventionEvent {
-  run_id, step_id, prior_attempt_id,
-  kind, guidance_artifact_id, author, created_at
-}
-```
-
-The next attempt input is materialized as:
-
-```text
-immutable snapshot baseline
-+ durable artifacts from succeeded steps
-+ resolved gate answers
-+ approved intervention events since the prior attempt
-```
-
-The prior prompt/hash/transcript remains unchanged. A later correction to the shared
-harness is a separate versioned change and affects only future runs.
-
-### 7.3 ManualTakeover
-
-Manual takeover is not a wait. It transfers write authority.
-
-Protocol:
-
-1. persist takeover request and current cursor;
-2. stop dispatch and reconcile any in-flight effect;
-3. checkpoint artifacts/transcript/worktree state;
-4. release the fenced runner lease;
-5. mark automation ownership closed;
-6. create a handoff packet with cwd, branch, base/head SHA, diff, last safe step,
-   pending effects, open waits, test evidence, and recommended next action;
-7. grant the human exclusive worktree ownership.
-
-The default return path is a new linked run after Tasker reconciles the human-edited
-worktree and remote state. Same-run re-entry is allowed only when Tasker proves that no
-material human write occurred.
-
-## 8. Recovery and external effects
-
-Every outward effect follows:
-
-```text
-intent persisted -> dispatch -> receipt/probe -> classification -> state transition
-```
-
-Classifications:
-
-- `applied`: desired remote state is proven;
-- `not_applied`: remote system proves it did not happen; safe step-local retry;
-- `unknown_outcome`: the system cannot prove either result; retry is blocked pending
-  reconciliation.
-
-### Concrete `403 / VPN` contract
-
-A definite Bitbucket push `403` before application is `not_applied`. The local commit,
-diff, verification evidence, and worktree remain. Tasker opens a recoverable
-infrastructure wait/gate at the push step. After the operator enables VPN and the
-preflight probe succeeds, Tasker creates a new push attempt only.
-
-A connection loss after sending the push is `unknown_outcome`. Tasker compares remote
-refs and commit SHA before deciding whether to finalize as `applied` or retry as
-`not_applied`.
-
-The same rules cover PR creation/update, comments, builds, Jira writes, provider
-start/resume/cancel, dev publish, and final artifact detection.
-
-Expected domain rejection and operational failure are typed values rather than thrown
-control flow. Adapters normalize third-party exceptions at their boundary; a pure,
-exhaustive policy maps the result to `retry | wait | reconcile | gate | fail |
-quarantine`. Mutating adapters return only `applied`, `not_applied`, or
-`unknown_outcome` variants whose required receipt/probe fields make invalid
-combinations unrepresentable. The full taxonomy is in
-[`technology-decisions.md`](technology-decisions.md#4-domain-error-and-recovery-model).
-
-## 9. Provider and runner contracts
-
-Provider choice is not hardcoded. A local compatibility spike evaluates installed
-Claude Code, Codex, and Antigravity versions for:
-
-- non-interactive subprocess behavior;
-- structured event completeness;
-- resume after kill;
-- permission/approval behavior;
-- quota error classification;
-- token/cost fields;
-- installed-version stability.
-
-The first adapter is selected from that report. The common adapter supports
-`probe/start/resume/cancel/reconcile` and exposes a capability map. Provider session
-resume is an optimization; if unavailable, a new attempt consumes persisted artifacts
-without restarting the entire workflow.
-
-The runner protocol contains only task/run identifiers, snapshot hash, worktree
-locator, fence token, commands, heartbeats, events, and artifact references. Local and
-future VPS runners implement the same protocol. No HA or multi-user scheduler is built
-for v1.
-
-## 10. Required dynamic workflow families
-
-### 10.1 CI and review run concurrently
-
-After a shareable PR exists, CI watching and human discussion may proceed in parallel.
-Readiness is a deterministic policy over independent projections:
-
-```text
-PR exists
-AND no accepted/actionable review work is pending
-AND CI has no agent-actionable failure
-AND no unresolved unsafe external effect exists
-```
-
-CI classification:
-
-- `ours`: bounded analyze/fix/verify/push loop;
-- `flaky`: bounded rerun with evidence and retry budget;
-- `external`: wait/escalate without invalidating completed work;
-- `infrastructure`: recoverable wait/gate;
-- `green`: satisfy CI readiness.
-
-### 10.2 PR is the canonical code-review conversation channel
-
-The cockpit mirrors thread state, but review-specific questions and replies are written
-to the Bitbucket PR. PR is not the universal channel for plan, translation, intake, or
-infrastructure decisions.
-
-Every review thread has a disposition:
-
-```text
-unclassified -> accepted | question | disagree_with_evidence |
-                already_addressed | blocked | resolved
-```
-
-Only `accepted` creates code-revision work automatically. Other dispositions post an
-idempotent PR reply and may open a clarification gate. Tasker does not resolve a human
-thread unless repository policy explicitly permits it.
-
-### 10.3 Project-specific translation policy
-
-Project workflow policy is an operational contract for the harness, not a substitute
-for repository architecture documentation. It records workflow-only facts such as
-translation handling, verification obligations, required human gates, and external
-signals that can pause/resume a run.
-
-Translation orchestration is conditional on both task intent and repository policy.
-For an external-translation project, the workflow changes source text, runs
-extraction/upload, opens a slot-free `translation_ready` wait, consumes a correlated
-Loop/manual/external signal, runs the pull/sync command, and resumes at the following
-node. A process restart during the wait changes nothing.
-
-For a project whose copy is maintained inline or in locale JSON, those nodes do not
-exist. The code-change step edits the project-owned source and verification continues
-normally. This is absence by policy, not a skipped translation wait.
-
-### 10.4 Cross-repository shared component
-
-The eventual composition contract is:
-
-1. parent produces a typed `ChildRunRequest` with repository, requested outcome,
-   policy, and result schema;
-2. a separate child task/run/worktree is created and causally linked;
-3. child performs the component change and automated dev publish;
-4. child emits a versioned `DevArtifactPublished` result;
-5. parent join/wait consumes that version and runs integration verification;
-6. final publish is a human gate;
-7. an exact released version or registry probe resolves the gate and resumes parent.
-
-Parent and child ledgers remain separately replayable. If automatic child composition
-is not yet implemented, the same contract can be satisfied by a manually created child
-and operator-supplied typed result without losing parent work.
-
-### 10.5 Change-aware verification
-
-The analyzer emits a `VerificationPlan` artifact with rationale. Allowed profiles:
-
-```text
-build_only | targeted_tests | full_suite | visual_compare |
-snapshot_update | composed
-```
-
-Inputs include changed paths, dependency impact, shared-package use, rendered UI
-impact, task acceptance criteria, repository rules, and prior failures. The compiler
-materializes the selected verification subgraph; policy may upgrade but never silently
-downgrade repository-mandated checks.
-
-## 11. Observability and debugging
-
-The cockpit must expose:
-
-- intake, task, run, step, attempt, wait, review, and child-run state;
-- the exact graph and active cursor;
-- prompt/input pack and run-specific intervention diff;
-- typed event transcript and effect receipts;
-- active time, wall time, wait time, tokens, and shadow cost per attempt/step/run;
-- worktree diff and artifact lineage;
-- why a branch, verification profile, provider, retry, wait, or escalation was chosen.
-
-Each paused, blocked, handed-off, or terminal run can produce a `DebugBundle`:
-
-```text
-snapshot + graph + validator report + ordered events + projection checksum +
-step/attempt lineage + wait/signal history + effect intents/receipts/probes +
-provider/version metadata + redacted transcript + artifact manifest + worktree status
-```
-
-Replay reconstructs projections only; it never reissues effects.
-
-## 12. Security, retention, and redaction
-
-Secrets are removed before durable persistence. Every event/artifact records
-`clean | redacted | blocked`. Raw blocked material is not made readable through lineage
-metadata. Provider/integration credentials remain in local or runner-specific secret
-stores, never in snapshots.
-
-Unsupported event, snapshot, step ABI, or graph schema versions quarantine the run and
-make no new commands visible. Upcasters are explicit and tested.
-
-## 13. Retrospective loop
-
-For completed, blocked, cancelled, or handed-off runs, retrospective output records:
-
-- planned versus actual path;
-- failure/retry/wait/intervention causes;
-- cost and time hotspots;
-- avoidable human interventions;
-- workflow/step/prompt improvement proposals;
-- hypothesis, expected metric, rollback rule, and affected future versions.
-
-Proposal states are `draft -> approved/rejected -> applied_to_future_version`.
-
-## 14. Recommended implementation stack
-
-- Node.js 24 LTS, ESM, pnpm, and strict TypeScript;
-- Zod as the only runtime schema system and JSON-Schema projection source;
-- `better-sqlite3` in WAL mode with explicit SQL migrations and transaction
-  boundaries; no ORM/query builder in the first wave;
-- Fastify local API plus a native server-sent event stream for the cockpit;
-- React + Vite and a semantic workflow tree; React Flow is deferred until graph
-  complexity proves it necessary;
-- Execa behind a Tasker-owned subprocess port around provider CLIs and existing
-  harness skills/scripts;
-- Pino for redacted operational diagnostics, separate from the canonical ledger;
-- Vitest + fast-check for reducers/contracts/recovery and Playwright for cockpit/E2E;
-- no third-party workflow, state-machine, error-runtime, Result-monad, or pattern-
-  matching library in the domain/control-flow layer;
-- optional OpenTelemetry export only after ledger/replay readiness is green.
-
-The dependency timing, rejected alternatives, test fixture architecture, and upgrade
-rules are canonical in [`technology-decisions.md`](technology-decisions.md).
-
-The implementation should remain a modular monolith:
-
-```text
-src/
-  domain/        # aggregates, commands, events, reducers, policies
-  ledger/        # sqlite, migrations, projections, outbox, snapshots
-  workflow/      # IR, step registry, compiler, validator, predicates
-  queue/         # ready set, slots, leases, waits, wakeups
-  runner/        # protocol, local runner, worktree ownership
-  providers/     # probes and CLI adapters
-  integrations/  # thin wrappers around Jira/Bitbucket/Jenkins/Allure/Loop/Git
-  review/        # review cycles and thread dispositions
-  observability/ # cockpit projections, cost, debug bundles, optional exports
-  retrospective/
-  app/           # CLI, local API, React cockpit
-```
-
-## 15. Architecture decision record
-
-### Decision
-
-Build a custom ledger-first modular monolith on TypeScript/Node.js and SQLite/WAL.
-Use a stable workflow IR, typed resumable waits, separate manual ownership transfer,
-immutable intervention events, explicit external-effect reconciliation, and later
-child-run/declared-expansion composition.
-
-### Drivers
-
-1. Work and external effects must survive real interruptions without restarting the
-   task or duplicating mutations.
-2. Dynamic workflows need inspectable, validated contracts rather than arbitrary
-   agent-generated scripts.
-3. The system is personal/local-first and must show value before adding platform ops.
-
-### Alternatives considered
-
-- Temporal/Hatchet as the primary runtime: strong waits, but still requires the same
-  custom domain ledger and adds a second history/ops surface too early.
-- LangGraph/checkpointer: duplicates graph/cursor/replay ownership and remains a poor
-  fit for worktree ownership, review lifecycle, and effect reconciliation, including
-  when nested inside agent steps.
-- JSONL-only journal: simple, but insufficient for atomic projections/outbox/leases
-  and safe concurrent recovery.
-
-### Consequences
-
-- More custom kernel code and a higher correctness burden.
-- Very early demos must remain small to avoid building a platform before proving use.
-- Rich graph revisions, child orchestration, provider trio, VPS, and external tracing
-  are staged behind kernel readiness rather than built together.
-
-### Follow-ups
-
-- implement and verify the milestone ladder in `implementation-plan.md`;
-- select the first provider only after the compatibility spike;
-- reassess an external durable scheduler if multiple hosts must compete for work or
-  custom wakeup/lease defects cause repeated duplicate-effect incidents.
+If an Activity crashes after a request but before its receipt, the next attempt
+reconciles the remote system before deciding whether to repeat. `unknown` is a durable
+operator-visible state, not permission to retry blindly.
+
+## 8. Planning and questions
+
+An implementation plan is always created after graph assembly and early repository
+analysis. `planReviewRequired` is chosen when starting the task:
+
+- `false`: an accepted plan proceeds automatically;
+- `true`: the Workflow waits for operator approval or revision.
+
+Both modes stop for a blocking question. “No plan review” does not authorize the agent
+to invent a product decision it says it cannot make safely. A question carries the
+decision needed, evidence, options, recommendation, impact of no answer, and whether a
+safe default exists.
+
+Plan size is selected by deterministic heuristics plus planner evidence:
+
+- small plan for bounded, local, low-risk changes;
+- normal plan for multi-surface or uncertain work;
+- consensus/`ralplan` only for high ambiguity, cross-repo/publication work, or explicit
+  operator choice.
+
+The operator may send plan feedback. That creates a new immutable planning Activity
+attempt; it does not edit previous history. Harness/prompt edits affect later attempts
+only when explicitly selected and otherwise affect future runs.
+
+## 9. Runtime discovery and graph evolution
+
+Initial assembly cannot know everything. Reproduction or implementation may discover
+a shared component in another repository, an external translation process, new visual
+verification, or a missing human publication gate.
+
+A step returns typed `workflow_change_required` with evidence and proposed intent. It
+does not mutate the accepted graph. The parent Workflow:
+
+1. preserves completed history and artifacts;
+2. calls a planning Activity for a continuation proposal;
+3. validates and hashes the proposed revision;
+4. automatically accepts it when policy allows, or waits for review during the pilot;
+5. appends a same-run suffix for bounded work, or starts a Child Workflow for work with
+   an independent repository/resource/lifecycle;
+6. resumes the parent only from the join boundary.
+
+During stabilization, every graph revision is operator-reviewable. Once retrospective
+evidence shows a class is reliable, policy may auto-accept that class. The validator is
+always mandatory.
+
+Completed nodes never re-run merely because the graph changed. A 403 during push, a
+sleeping laptop, a worker restart, or a missing translation signal resumes the pending
+Activity/wait, not the Jira task from intake.
+
+## 10. Human and external waits
+
+Waits are first-class domain states projected from Temporal history:
+
+- `clarification_required`;
+- `plan_review`;
+- `agent_guidance_required` after bounded recovery;
+- `translation_pending`;
+- `dev_publish_pending` or `final_publish_pending`;
+- `ci_pending`;
+- `code_review_pending`;
+- `infrastructure_blocked`;
+- `external_effect_unknown`.
+
+Every wait declares the expected message, optional timeout/escalation, and resume
+payload schema. The Workflow consumes a message once and records the decision in
+history. Duplicate webhook/poll results are deduplicated by stable external identity.
+
+PR conversation is the primary review channel: Tasker imports unresolved Bitbucket
+threads, starts a revision Activity, posts or resolves only through the integration
+adapter, waits for CI again when needed, and returns to code review. The cockpit may
+also submit operator guidance, but it must preserve the same conversation provenance.
+
+## 11. CI and evidence
+
+CI is part of every PR workflow. After push/PR preparation, Tasker observes Jenkins and
+classifies failures:
+
+- success -> code review wait;
+- likely flaky/infrastructure -> bounded retry or operator-visible infra wait;
+- attributable to the change -> revision loop;
+- unknown -> diagnostic Activity, then question or guidance wait after its budget.
+
+Verification scope is task-specific. Project policy and changed-surface evidence may
+select build-only, targeted tests, full validation, Allure inspection, before/after
+reproduction, or screenshot snapshot updates. A bug without usable Jira reproduction
+must attempt reproduction; successful “before” video/screenshots become linked Tasker
+artifacts and may be attached/commented to Jira only through explicit effect policy.
+
+## 12. Operator console and observability
+
+The console remains a three-pane operational surface:
+
+- left: tasks, lifecycle state, attention/wait indicator, elapsed time, and shadow cost;
+- center: selected Activity/agent stream, decisions, artifacts, plan, Jira details,
+  questions, review comments, and compact errors;
+- right: the current graph/revision, active node, retry/loop budget, waits, child runs,
+  and completion state.
+
+The UI is a projection, never execution authority. Runtime status comes from Temporal
+Workflow state/history and Search Attributes. Tasker SQLite stores product metadata,
+cached Jira data, graph rationale, transcripts, artifacts, usage, shadow cost,
+retrospective annotations, and UI-friendly indexes.
+
+Routine sync successes and failures do not grow the activity timeline. Operational
+logs are redacted, bounded, and separate from agent/task activity. Temporal Event
+History is not used as a transcript store.
+
+Time and cost are attributed per Activity attempt:
+
+- queue delay, execution time, wait time, and operator time;
+- measured provider tokens when available;
+- provider/model and a versioned API price table for hypothetical cost;
+- process/integration duration and retry count.
+
+## 13. Deployment and concurrency
+
+The first supported topology is single-user:
+
+- Temporal development/self-hosted service on the laptop for local evaluation;
+- Tasker API/cockpit and one or more workers;
+- application data and managed repositories under an OS-standard Tasker data path.
+
+A VPS deployment moves the Temporal Service/control plane and eligible workers without
+changing Workflow semantics. Filesystem Activities must run on a worker that owns or
+can access the checkout. Multiple Jira tasks execute concurrently according to Worker
+concurrency, Task Queue routing, and provider quota policy; they never share a global
+UI “generating” flag.
+
+`temporal server start-dev` is acceptable for development, not a production durability
+claim. Before relying on unattended VPS execution, the deployment must use a supported
+persistent Temporal topology or Temporal Cloud, backups, TLS/authentication, and a
+tested worker deployment strategy.
+
+## 14. Versioning and security
+
+The compiled graph has an IR ABI version; each block and prompt has its own version/hash.
+Temporal Workflow changes use Worker Versioning and replay-compatibility tests. An old
+run remains executable by a compatible worker build until it reaches a safe boundary.
+
+Secrets exist only in worker process configuration and Activity adapters. They are
+redacted before Tasker persistence and never passed in Workflow arguments, results,
+Search Attributes, logs, or artifact metadata. Integration capabilities are
+fail-closed; an analyzer cannot grant itself a Jira/Bitbucket/publish capability.
+
+## 15. Architectural invariants
+
+1. Every initial graph is assembled specifically for its task.
+2. Generated graph data is untrusted until deterministic validation succeeds.
+3. Temporal is the only execution-history authority.
+4. Tasker product storage never decides which node executes next.
+5. Workflow code is deterministic; all I/O and LLM work occurs in Activities.
+6. Completed work survives worker/process/host interruption.
+7. External mutations are idempotent or reconciled before retry.
+8. Human waits consume no worker slot.
+9. Blocking uncertainty becomes a question, not an invented decision.
+10. Active graphs and plans are immutable; revisions create recorded new versions.
+11. Prompts, skills, blocks, policies, providers, and integrations are readable and
+    replaceable without rewriting the interpreter.
+12. Company-specific names and vendor payloads do not enter the Workflow domain.
+13. Large/sensitive artifacts stay outside Temporal history.
+14. Retrospective recommendations never modify the harness automatically.
+
+## 16. Decision record
+
+Decision: use Temporal as Tasker's durable execution kernel and retain Tasker's dynamic
+graph compiler/interpreter and product control plane.
+
+Why: durable waits, restart recovery, retry timers, messaging, task queues, workflow
+coordination, and worker versioning are established infrastructure. Reimplementing them
+does not differentiate Tasker and creates correctness/maintenance risk.
+
+Rejected:
+
+- continue the custom SQLite scheduler/lease/cursor kernel: already proven useful for
+  discovery, but its infrastructure burden grows faster than product behavior;
+- generate TypeScript Workflow code for each task: deployment/versioning overhead and
+  unsafe dynamic code; a generic interpreter preserves task-specific graphs as data;
+- use both Temporal and the custom ledger as execution authorities: ambiguous recovery
+  and double-history bugs;
+- put LLM planning inside Workflow code: non-deterministic and unreplayable;
+- adopt Effect/LangGraph as another control-flow runtime: they do not replace Temporal
+  durability and are unnecessary for the current block/IR boundary.
+
+Migration and deletion gates are defined in
+[`temporal-migration.md`](temporal-migration.md).

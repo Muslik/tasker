@@ -1,173 +1,244 @@
-# Customizing Tasker without changing the kernel
+# Customizing Tasker
 
-Status: canonical extension guide, 2026-08-03
+Status: canonical extension guide, Temporal revision, 2026-08-03
 
-Tasker has no reusable workflow templates. Every initial workflow and every linked
-continuation is assembled for one task from an empty graph. Reuse happens below the
-graph level: versioned node kinds, steps, predicates, waits, policies, prompts, skills,
-and deterministic obligations.
+Tasker has no reusable workflow templates. Every initial workflow is assembled from an
+empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
+waits, prompts, skills, policies, obligations, and adapters.
 
-## Ownership boundaries
+Temporal is replaceable infrastructure at the execution boundary, not the place where
+company workflow knowledge is encoded. Most customization must not touch Temporal
+Workflow code.
 
-| Surface | Current location | What changes here |
+## 1. Ownership boundaries
+
+| Surface | Target/current location | Change it for |
 |---|---|---|
-| Workflow domain and compiler | `src/workflow/` | Generic IR parsing, canonicalization, hashes, terminal-path and ABI validation |
-| Company step catalog | `src/harness/step-definitions.ts` | Typed input/output contracts, effects, capabilities, retries, artifacts, and executor binding |
-| Agent prompts | `harness/prompts/` | Readable task analyzer, implementation planner, and agent-step instructions |
-| Company policy | `harness/company.json` | Capabilities and reusable package/process rules |
-| Project workflow policy | `harness/projects/*/project.json` | Repository-specific translation and validation facts |
-| Project guidance | `harness/projects/*/workflow.md` | Short human-readable workflow context; never effect authority |
-| Mandatory graph obligations | `src/planning/obligations.ts` | Deterministic semantic checks that an analyzer cannot waive |
-| Task/integration adapters | `src/integrations/`, `src/repositories/` | Jira/Bitbucket/Jenkins today; another tracker or SCM later |
+| Workflow IR/compiler/validator | `src/workflow/` | generic graph syntax, hashes, ABI, deterministic invariants |
+| Temporal interpreter | `src/temporal/workflows/` (target) | genuinely new generic control-flow semantics only |
+| Block catalog | `src/harness/step-definitions.ts` today | versioned task capabilities and Activity bindings |
+| Activities/executors | `src/temporal/activities/` (target) | provider, process, or integration execution |
+| Agent prompts | `harness/prompts/` | readable analyzer/planner/step instructions |
+| Company policy | `harness/company.json` | reusable organization-wide workflow facts |
+| Project workflow policy | `harness/projects/*/project.json` | repository-specific translation/test/publication facts |
+| Project guidance | `harness/projects/*/workflow.md` | short human-readable workflow context, never effect authority |
+| Mandatory obligations | `src/planning/obligations.ts` | safety/semantic rules an analyzer cannot waive |
+| Integrations/repositories | `src/integrations/`, `src/repositories/` | Jira/Bitbucket/Jenkins today, alternatives later |
+| Operator UI/API | `src/control-plane/` and UI modules | presentation and operator commands |
 
-The compiler knows none of Twiket, Jira, translations, Bitbucket, Jenkins, or `@ott`.
-It accepts registered contracts and an untrusted workflow source. Company behavior is
-outside that kernel.
+The compiler and Temporal Workflow know none of Twiket, Jira, Bitbucket, Jenkins,
+translations, or `@ott`. Vendor payloads terminate at adapters. Company policy affects
+analyzer input and block availability, not interpreter code.
 
-## How a workflow is assembled
+## 2. Assembly versus execution
 
 ```text
-task snapshot + linked context + read-only repository evidence
-                  +
-company/project policy + building-block catalog + obligations
-                  |
-                  v
-       analyzer emits complete WorkflowSource JSON
-                  |
-                  v
-      parse -> ABI/effect/capability validation
-            -> semantic obligation validation
-                  |
-          rejected or immutable graph
+task + linked context + bounded repository evidence
+      + company/project policy + block catalog + obligations
+                         |
+                         v
+              analyzer proposes complete graph
+                         |
+                         v
+       parse -> ABI/effect/capability/semantic validation
+                         |
+                  accepted graph hash
+                         |
+                         v
+     generic Temporal Workflow interprets the graph
+                         |
+                         v
+       registered Activities execute individual blocks
 ```
 
-The analyzer is free to omit irrelevant blocks and add relevant registered blocks. It
-is not free to violate invariants. Examples currently checked deterministically:
+The analyzer chooses relevant blocks and order. The validator decides whether the
+proposal is safe and complete. The interpreter records progress. Activities perform
+I/O. Keeping these roles separate is what lets a new company or process replace one
+layer without rewriting the application.
 
-- every task starts with analysis and the plan boundary;
-- a write-capable path contains later verification and PR preparation;
-- a PR path contains later CI observation and code review;
-- a bug contains `bug.reproduce@1` for both `phase=before` and `phase=after`.
+## 3. Add a workflow block
 
-The compiler never silently adds a missing CI, reproduction, verification, or review
-node. A bad proposal is visible and can be regenerated; changing it behind the
-analyzer would make provenance and debugging dishonest.
+A block has a stable reference such as `test_ops.fill_plan@1` and exactly one execution
+kind:
 
-## Step definitions and execution bindings
+- `agent`: invokes a provider with a versioned prompt and logical skills;
+- `process`: invokes a registered policy-owned command/process adapter;
+- `integration`: invokes a typed adapter with external-effect reconciliation.
 
-A step definition combines a stable workflow contract with exactly one execution kind:
+Waits and gates are graph nodes/messages, not fake executors.
 
-- `agent`: prompt plus logical skills; a provider adapter executes it;
-- `process`: a registered local process executor that resolves a policy-owned command;
-  arbitrary shell text never enters workflow IR;
-- `integration`: a prepare/execute/reconcile adapter such as Bitbucket or Jenkins.
+To add `fill-test-ops-plan`:
 
-`wait` and `gate` are workflow nodes, not pretend executors. There is intentionally no
-vague `system` execution kind.
+1. register a versioned block definition;
+2. define Zod input/output schemas;
+3. declare capabilities, effects, artifacts, timeout, heartbeat, retry, cancellation,
+   idempotency/reconciliation, and allowed outcomes;
+4. add/reuse a readable prompt for an agent block, or bind a registered
+   process/integration Activity;
+5. expose the block to the relevant company/project policy;
+6. add a public test proving a task graph can contain it and invalid use is rejected;
+7. add an Activity contract test for execution/recovery;
+8. rebuild the worker/application.
 
-Input and output are real Zod schemas in the TypeScript registration. JSON such as
-`inputKind: "task"` is insufficient: it loses field-level validation and cannot make
-executor output safe for later nodes.
+This must not require changes to the generic interpreter, task queue, Temporal Client,
+operator layout, or another block. If it does, first prove that the behavior is a new
+generic control-flow concept rather than an ordinary task step.
 
-### Add `fill-test-ops-plan`
+### Block outcome contract
 
-The current example is registered as `fill-test-ops-plan@1` in
-`src/harness/step-definitions.ts` and reads
-`harness/prompts/steps/fill-test-ops-plan.md`.
+Every executing block returns one typed result:
 
-Adding another company step requires:
+- `completed` with small structured output and artifact references;
+- `retryable` with a classified reason/evidence;
+- `question` with the exact human decision needed;
+- `blocked` with a resumable external/infrastructure condition;
+- `workflow_change_required` with discovery evidence and proposed intent;
+- `failed` with a non-retryable diagnostic reference.
 
-1. add one typed definition with a new versioned reference;
-2. choose `agent`, `process`, or `integration` explicitly;
-3. declare input/output schemas, effects, capabilities, retry/reconciliation behavior,
-   artifacts, and allowed workflow-change outcomes;
-4. add or reuse a readable prompt for an agent binding;
-5. add a public behavior test that compiles a graph containing the new step;
-6. rebuild Tasker.
+Arbitrary natural-language text cannot secretly alter the graph or grant effects.
 
-It must not require a compiler, scheduler, ledger, API, or cockpit rewrite. If it does,
-the new behavior is probably a new workflow-domain concept rather than a step.
+## 4. Prompts and skills
 
-## Project policy
+Prompts remain ordinary Markdown so the operator can inspect and change them. Each
+planning/execution Activity receives an immutable snapshot reference and content hash.
+A file edit affects future attempts/runs according to explicit run policy; it never
+rewrites a completed Activity result or accepted history.
 
-Project policy describes workflow peculiarities, not code architecture. Appropriate
-facts include:
+Logical skill names are provider-neutral. An adapter maps them to Codex skills, Claude
+instructions, or another subscription CLI surface. The graph must not contain
+provider-specific command syntax.
 
-- translations are inline JSON or an external extract/wait/pull process;
-- which validation commands apply to which changed surface;
-- a human owns final publication;
-- repository/package relationships and permitted effects.
+Use prompts for judgment and implementation guidance. Use deterministic obligations
+for requirements that must always hold, such as CI before PR review or before/after
+reproduction for a bug.
 
-FSD rules, reducers, styling conventions, and implementation advice belong in skills
-or repository instructions. They may guide an agent step but cannot grant an effect or
-create a graph node.
+## 5. Project policy
 
-Unknown projects receive conservative defaults. An external translation wait or
-package publish must never be guessed from a similarly named repository.
+Project policy describes workflow peculiarities, not source architecture. Good facts:
 
-## Prompts and skills
+- translations are inline JSON, or require extract -> external translation wait -> pull;
+- changed CSS/visual surfaces require screenshot verification;
+- changes in a specific package require build A and tests B/C;
+- final publication is human-owned;
+- a repository consumes packages from another repository;
+- permitted dev-publish and remote-effect capabilities.
 
-Prompts remain normal Markdown so the operator can read and edit them. The loader
-records content hashes; a run snapshot must retain the exact prompt/skill/policy
-versions it used. An edit affects future planning or attempts, never an already
-persisted graph.
+FSD, reducer patterns, React conventions, and implementation style belong in repository
+instructions or skills. They guide an agent Activity but do not create graph nodes or
+grant permissions.
 
-Logical skill names are provider-neutral. A provider adapter maps them to the provider's
-actual mechanism (Codex skills, Claude instructions, or another subscription CLI).
-Provider-specific syntax must not leak into the graph contract.
+Unknown projects receive conservative defaults. Tasker never guesses an external
+translation/publish process from a repository name alone.
 
-## Worktree harness bootstrap
+## 6. Company-global policy
 
-Tasker must not invent `harness/work` and copy it into every project. The existing
-developer harness at `/Users/dzhabrail/Projects/harness/work` already owns global,
-shared, and project profiles and exposes `work/bootstrap init <profile>`.
+Use global policy for reusable workflow knowledge, for example:
 
-When real worktrees are enabled, `WorktreePort` should:
+- frontend `@ott` packages live in a known repository family;
+- dev publish may be automatic while final publish is human-only;
+- every PR observes Jenkins and human Bitbucket review;
+- provider/concurrency quotas;
+- default effect restrictions and retrospective thresholds.
 
-1. allocate the managed task worktree;
-2. invoke that external bootstrap/profile adapter;
-3. persist its profile, version, receipt, and resulting instruction/skill hashes;
-4. retry only bootstrap if it fails;
-5. keep the worktree and completed evidence intact.
+Do not encode a full graph in company policy. It contributes facts, block availability,
+and obligations; the task analyzer still assembles the graph specifically for the task.
 
-Tasker stores the receipt and locator, not a duplicate overlay tree. Replacing the
-external harness later changes one bootstrap adapter, not the workflow kernel.
+## 7. Worktree harness bootstrap
 
-## A new company or toolchain
+Tasker must not copy `/Users/dzhabrail/Projects/harness/work` or create nested `work`
+overlays inside each project. The existing external harness owns global/shared/project
+profiles and exposes its bootstrap command.
 
-Moving from Twiket to a company that uses GitLab Issues instead of Jira should replace
-configuration and adapters, not orchestration semantics:
+The repository Activity:
 
-- add a task-tracker adapter producing the same normalized task snapshot;
-- add SCM/CI adapters and bind integration steps to them;
-- provide company/project policy and prompts;
-- register company step definitions and obligations;
-- leave workflow IR, ledger, scheduler, recovery, waits, interventions, and cockpit
-  projections intact.
+1. allocates a managed task worktree under Tasker's application-data path;
+2. invokes the configured external bootstrap/profile adapter;
+3. persists profile/version/receipt and resulting instruction/skill hashes;
+4. reconciles the receipt on Activity retry;
+5. keeps the same worktree across questions, waits, worker restarts, and plan revisions.
 
-If company names or vendor response shapes appear inside `src/workflow/`, the boundary
-has been broken.
+Replacing the bootstrap tool changes one Activity adapter. It does not change the graph
+interpreter or workflow history model.
 
-## Late discoveries
+## 8. Add or replace an integration
 
-Initial assembly is intentionally not omniscient. Reproduction or implementation may
-discover a shared component, another repository, a translation process, or a different
-verification surface. A step returns typed `workflow_change_required`; Tasker preserves
-the cursor, worktree, receipts, and evidence, then asks the analyzer for a complete
-linked continuation graph. The same compiler and obligations validate it.
+An integration adapter has read and mutation surfaces. Read-only intake normalizes
+vendor data. Mutation Activities additionally implement prepare/execute/reconcile and
+stable operation IDs.
 
-Neither the running agent nor the operator edits the accepted graph in place. Operator
-guidance creates a new immutable planning attempt. Harness edits still affect only
-future attempts/runs.
+Moving to GitLab Issues and GitLab CI should require:
 
-## Extension checklist
+1. a tracker adapter that produces the normalized task snapshot;
+2. SCM/CI adapters bound to existing integration block contracts or new versioned
+   blocks where behavior truly differs;
+3. company/project policy and prompts;
+4. mapping remote events to the existing typed Signal/Update contracts;
+5. adapter and effect crash-matrix tests.
 
-Before accepting a customization:
+It should not require changing the Temporal interpreter, Workflow messaging model,
+generic IR, plan/question semantics, or retrospective model. If `JiraIssue` or a
+Bitbucket response shape appears in Workflow input, the boundary is broken.
 
-- is it a building block/policy/adapter rather than a hidden base workflow?
+## 9. Add another agent provider
+
+Implement the provider Activity binding:
+
+- capability discovery and subscription authentication;
+- non-interactive invocation and structured output;
+- streaming/transcript capture;
+- timeout, heartbeat, cancellation, and session-resume hint;
+- usage measurement and shadow cost evidence;
+- mapping of logical skills/tools;
+- error classification.
+
+Provider session resumption is an optimization. Temporal Activity/workflow state plus
+Tasker artifacts are the durable recovery source. A provider that cannot resume starts
+a new attempt with bounded persisted context.
+
+## 10. Late discoveries
+
+Reproduction or implementation may discover a shared component, translation process,
+or additional verification requirement. The Activity returns
+`workflow_change_required`; it does not edit Workflow state itself.
+
+Tasker asks the analyzer for a validated continuation:
+
+- same repository and lifecycle: append a bounded graph revision in the same Workflow;
+- separate repository/worktree/publication lifecycle: start a Child Workflow and wait
+  on a typed join.
+
+During the pilot every revision is reviewable. Later known low-risk classes may be
+auto-accepted by policy, but deterministic validation never becomes optional.
+
+## 11. When interpreter changes are justified
+
+Change the generic interpreter only for a new domain-independent control-flow semantic,
+for example a formally specified parallel join mode that cannot be represented by
+existing sequence/branch/loop/wait/child concepts.
+
+Do not change it to add:
+
+- a Jira field;
+- another prompt or skill;
+- a build command;
+- translation policy;
+- a provider;
+- a repository family;
+- a CI classifier;
+- a new agent task such as filling TestOps.
+
+Those are blocks, policies, adapters, or obligations.
+
+## 12. Extension checklist
+
+Before accepting customization:
+
+- is it a block/policy/adapter/obligation instead of a hidden workflow template?
 - is every untyped boundary validated?
-- are effects, idempotency, reconciliation, and retries explicit?
-- can the operator read the prompt and see why the graph contains the step?
-- does failure resume from the failed boundary without discarding earlier work?
-- does the change affect only future immutable snapshots?
-- can another company replace the adapter/config without modifying the kernel?
+- are effects, idempotency, reconciliation, retries, timeouts, and cancellation explicit?
+- can the operator read the prompt and see why the graph contains the block?
+- does Temporal history stay small and secret-free?
+- does recovery resume the failed boundary without discarding earlier work?
+- does the change affect only future immutable snapshots/attempts?
+- can another company replace vendor adapters/config without interpreter changes?
+- did tests cover worker failure and duplicate external delivery where relevant?

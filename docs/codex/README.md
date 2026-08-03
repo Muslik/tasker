@@ -1,76 +1,75 @@
 # Tasker design package
 
-Status: **approved by Planner -> Architect -> Critic consensus**, v3, 2026-08-01.
+Status: **Temporal target architecture approved**, 2026-08-03.
 
-Read in this order:
+## Canonical documents
 
-1. [`architecture.md`](architecture.md) — canonical product/system model and all
-   determinism, failure, wait, intervention, review, CI, translation, and cross-repo
-   contracts.
-2. [`implementation-plan.md`](implementation-plan.md) — dependency-ordered delivery
-   ladder, operator demo at every milestone, estimates, rollback, and staffing.
-3. [`test-spec.md`](test-spec.md) — named acceptance and recovery scenarios plus
-   milestone/readiness gates.
-4. [`technology-decisions.md`](technology-decisions.md) — concrete workflow DSL,
-   dependency, error/recovery, persistence, rendering, and test-harness decisions.
-5. [`research-index.md`](research-index.md) — source and decision trail.
-6. [`m0-implementation.md`](m0-implementation.md) — implemented kernel contracts,
-   commands, demo artifacts, and the exact boundary before M1.
-7. [`m1-implementation.md`](m1-implementation.md) — the working task-to-workflow
-   planner, durable projections, local API/CLI, cockpit, and operator demo.
-8. [`m1.5-implementation.md`](m1.5-implementation.md) — real subscription-CLI
-   workflow assembly, provider isolation, provenance, token evidence, and runtime
-   discovery boundary.
-9. [`m1.6-jira-task-surface.md`](m1.6-jira-task-surface.md) — persisted read-only Jira
-   intake, operator task details, attachment proxy, and VPN/403 recovery semantics.
-10. [`m1.7-repository-binding.md`](m1.7-repository-binding.md) — explicit Jira task to
-    managed Bitbucket checkout resolution without project-name guessing or touching
-    operator working clones.
-11. [`m1.8-jira-workflow-generation.md`](m1.8-jira-workflow-generation.md) — real Jira
-    snapshot plus managed checkout through the subscription analyzer, validator, ledger,
-    and visible operator graph.
-12. [`m2-stub-execution.md`](m2-stub-execution.md) — durable execution slice: bounded
-    queue capacity, fenced ownership, per-node receipts, restart-safe cursor, realtime
-    runtime state, mandatory planning with immutable per-run human-approval policy, an
-    immutable plan-review correction loop, and a slot-releasing code-review wait.
-13. [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md) — real typed
-    implementation plans through subscription Codex CLI, deterministic fast/ralplan
-    routing, persisted provenance/usage, plan revision, blocking clarification, and the
-    operator plan surface.
-14. [`m2.2-workflow-continuation.md`](m2.2-workflow-continuation.md) — immutable linked
-    workflow candidates, deterministic lineage validation, `review_all`, recoverable
-    repository retry, candidate review, and linked child-run execution projected as one task.
-15. [`customization-guide.md`](customization-guide.md) — operator/developer extension
-    contract, prompt and harness pack layout, step registration, provider-neutral
-    execution bindings, tracker adapter boundaries, project harness bootstrap, and
-    task-specific assembly rules.
+Read these for decisions and future implementation:
 
-The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
-subscription CLI provider. M2 has started: accepted graphs can now queue and traverse
-durable stub steps in parallel up to configured capacity, recover fenced ownership,
-stop at persisted plan/code-review waits, and turn operator plan feedback into a new
-restart-safe provider attempt. Blocking planner questions also pause without consuming
-a slot, persist exact operator answers, and continue the same run. Every accepted graph
-retains the same planning boundary; the start checkbox determines only whether the
-operator must approve the resulting plan. A planning-discovered repository change now
-compiles a separate immutable candidate, pauses for review, and after acceptance
-executes a durable child cursor through the scheduler without rewriting or restarting
-the parent. Corporate integrations remain later milestones.
+1. [`architecture.md`](architecture.md) — product/runtime boundary, dynamic graph
+   assembly, Activities, messages, graph evolution, operator UI, security, and
+   invariants.
+2. [`temporal-migration.md`](temporal-migration.md) — preserve/replace/delete map,
+   parity matrix, data transition, cutover, and rollback.
+3. [`implementation-plan.md`](implementation-plan.md) — T0–T7 delivery ladder and the
+   next Temporal walking-skeleton milestone.
+4. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
+   acceptance gates.
+5. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
+   contracts, messages, Activities, persistence, retry, and dependency decisions.
+6. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
+   prompts, policies, providers, trackers, repositories, and company packs without
+   rewriting the runtime.
+7. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
+   correction.
 
-M0, M1, M1.5, M1.6, M1.7, M1.8, and the first M2 vertical slice are implemented. The operator
-console has the task queue on the left, persisted activity and workflow rationale in
-the center, and the current graph on the right. It includes validation failures,
-waits, retry bounds, project/global policy decisions, verification rationale,
-capabilities, assembly provenance, SSE refresh, and JSON download.
-Implementation planning now uses a real subscription Codex CLI provider; accepted
-continuations reach their own durable code-review wait and resolve the parent join on
-completion, while graph nodes remain deterministic local stubs. Tasker performs no repository, Jira,
-Bitbucket, or CI mutation. Provider provenance and measured tokens are persisted and
-visible.
-An imported Jira task with a resolved checkout can now be compiled into a workflow.
-Admission supplies normalized task facts; the analyzer receives the full Jira snapshot,
-bounded repository evidence, policies, obligations, and the building-block catalog,
-then constructs the complete graph from scratch.
+These seven files are the source of truth. Older `.omx` plans are audit history only.
 
-Older July 30 versions remain under `.omx/plans/` for audit history; they are not the
-current implementation source of truth.
+## Current code versus target
+
+The codebase has working pre-Temporal M0–M2 slices:
+
+- dynamic task-specific workflow generation from Jira/repository/policy evidence;
+- deterministic IR validation and stable rationale/provenance;
+- subscription-Codex task and implementation planning;
+- Jira task surface and explicit repository binding;
+- operator console with task list, live activity, plan/question/review surfaces, and
+  workflow tree;
+- a custom durable stub runner with queue, leases, cursor, waits, and continuation.
+
+The last bullet is now legacy migration code. Temporal will replace its scheduling,
+history, waits, retries, recovery, and parent/child coordination. It does not replace
+Tasker's analyzer, IR, compiler, validator, block catalog, policies, integrations,
+worktree management, operator console, artifacts, costs, or retrospective.
+
+No real repository/Jira/Bitbucket/Jenkins mutation is enabled in the legacy stub
+runtime. That is deliberate: the next implementation milestone is the Temporal walking
+skeleton, followed by real Activities with idempotency/reconciliation.
+
+## Historical implementation records
+
+The following files describe what was built before the Temporal decision. They remain
+useful for behavior parity and audit, but their custom runtime mechanisms are not target
+architecture:
+
+- [`m0-implementation.md`](m0-implementation.md)
+- [`m1-implementation.md`](m1-implementation.md)
+- [`m1.5-implementation.md`](m1.5-implementation.md)
+- [`m1.6-jira-task-surface.md`](m1.6-jira-task-surface.md)
+- [`m1.7-repository-binding.md`](m1.7-repository-binding.md)
+- [`m1.8-jira-workflow-generation.md`](m1.8-jira-workflow-generation.md)
+- [`m2-stub-execution.md`](m2-stub-execution.md)
+- [`m2.1-implementation-planning.md`](m2.1-implementation-planning.md)
+- [`m2.2-workflow-continuation.md`](m2.2-workflow-continuation.md)
+
+Historical behavior survives only when it is still a product requirement. Tests for
+custom ready sets, leases, fence tokens, cursors, and wait tables are replaced by
+Temporal public recovery/integration tests after parity.
+
+## Immediate implementation target
+
+T1 proves the new boundary with two independently running dynamically assembled fixture
+graphs. They must survive worker/API restart, stop at different durable waits, resume
+only the selected task, and render live state in the existing console. Real coding,
+remote mutation, CI, and cross-repository continuation follow only after this kernel
+slice is green.

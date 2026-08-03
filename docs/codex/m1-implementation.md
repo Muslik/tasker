@@ -1,5 +1,9 @@
 # M1 implementation — visible task-to-workflow slice
 
+> **Historical pre-Temporal record.** This file describes M1 as shipped. Custom
+> execution-persistence references are not target architecture. See
+> [`temporal-migration.md`](temporal-migration.md).
+
 Status: **implemented and verified**, 2026-08-01.
 
 M1 is the first operator-visible vertical slice. A local fixture task is converted to

@@ -1,5 +1,8 @@
 # Схема работы harness
 
+> **Историческая схема до решения о Temporal.** Пользовательские сценарии полезны как
+> требования, но durable execution теперь реализуется Temporal.
+
 Пять видов на одну систему. Отражает решения из [spec.md](spec.md) и [research-landscape.md](research-landscape.md).
 
 Интерактивная версия с той же схемой: https://claude.ai/code/artifact/4619f394-eb96-486c-93ad-e1ca9250bc11 — приватная, открывается только после шаринга.

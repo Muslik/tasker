@@ -1,5 +1,9 @@
 # Deep Interview Spec: Agent Harness («tasker»)
 
+> **Историческая спецификация до решения о Temporal.** Требования остаются источником
+> контекста; технологические/runtime-выводы заменены каноническими документами в
+> `docs/codex`.
+
 ## Metadata
 - Interview ID: `di-tasker-harness-001`
 - Rounds: 10 (+ Round 0 topology gate)

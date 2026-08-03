@@ -1,5 +1,9 @@
 # M2: durable stub execution — incremental vertical slice
 
+> **Superseded runtime record.** This custom scheduler/lease/cursor implementation is
+> retained only as Temporal parity evidence and will be deleted after the migration
+> gates pass. See [`temporal-migration.md`](temporal-migration.md).
+
 Status: implemented and verified 2026-08-02
 
 Scope: enqueue an already accepted workflow, execute it through a bounded durable

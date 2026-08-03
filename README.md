@@ -1,31 +1,43 @@
 # Tasker
 
-Personal, local-first task-adaptive agent harness. The canonical design and delivery
-status are under [`docs/codex`](docs/codex/README.md).
+Personal, local-first operator console for task-adaptive coding-agent workflows.
+Tasker turns a Jira task and repository evidence into a validated workflow assembled
+specifically for that task, runs it through Temporal, and lets the operator intervene
+without losing completed work.
 
-Prompts, company policy, and project workflow guidance are editable under
-[`harness`](harness); typed step contracts and executor bindings live in
-[`src/harness/step-definitions.ts`](src/harness/step-definitions.ts). There are no
-base workflow templates: each graph is assembled for one task from the registered
-catalog and then rejected or accepted by deterministic validation. See the
-[`customization guide`](docs/codex/customization-guide.md) before adding a step or
-using a separate company pack.
+Temporal is the execution kernel. Tasker owns the product-specific layers around it:
 
-M0, M1, and the first M2 execution slices are implemented. A local fixture task now becomes an untrusted proposal,
-then a deterministic validated graph with a stable hash, persisted projections, a
-Fastify API, a CLI tree, and a React operator cockpit. An accepted graph can execute
-deterministic local stub nodes through a bounded queue, survive scheduler restart, and
-stop at durable plan-review and code-review waits. At plan review, the operator can
-approve or request changes; guidance is persisted as a new immutable provider planning
-attempt. Planning uses subscription Codex CLI with operator-selectable `auto`, `fast`,
-or `ralplan` strategy. Later workflow nodes remain deterministic stubs, and Tasker
-cannot mutate repositories or remote systems yet.
+- task and repository analysis;
+- versioned workflow blocks, prompts, skills, policies, and deterministic validation;
+- dynamic per-task graph assembly and late graph revisions;
+- Jira, Bitbucket, Jenkins/Allure, Confluence, provider, process, and worktree adapters;
+- operator UI, artifacts, transcripts, shadow API cost, elapsed time, and retrospective.
 
-The cockpit is an operator console: task/status queue on the left, persisted realtime
-activity and workflow rationale in the center, and the selected workflow tree on the
-right. Project profiles contribute repository-specific workflow facts such as
-translation handling, verification shape, and manual gates; reusable rules such as
-frontend `@ott` package publication live in global workflow policy.
+There are no base workflow templates. The analyzer starts from an empty graph and uses
+registered building blocks plus company/project policy. The accepted graph is immutable
+input to a generic Temporal graph interpreter. Agent calls, shell commands, filesystem
+work, and remote APIs run only in Temporal Activities; review, clarification,
+translation, publication, CI, and infrastructure pauses use durable Temporal messages
+and conditions.
+
+Read the canonical design in [`docs/codex`](docs/codex/README.md), the migration and
+deletion plan in
+[`docs/codex/temporal-migration.md`](docs/codex/temporal-migration.md), and the extension
+contract in
+[`docs/codex/customization-guide.md`](docs/codex/customization-guide.md).
+
+Prompts and company/project workflow guidance are editable under [`harness`](harness).
+Typed step contracts currently live in
+[`src/harness/step-definitions.ts`](src/harness/step-definitions.ts).
+
+## Current implementation state
+
+M0–M2 proved task intake, dynamic graph assembly, deterministic validation, the
+three-pane operator console, plan review, workflow continuation, and restart-safe stub
+execution. That execution slice predates the Temporal decision and still contains a
+custom queue, cursor, lease, wait, and recovery implementation. It is not the target
+runtime and will be removed after Temporal parity tests pass. Repository and remote
+system mutation remain disabled until the Temporal activity boundary is in place.
 
 ```bash
 fnm exec --using=24.16.0 /usr/local/bin/pnpm verify
@@ -34,7 +46,7 @@ fnm exec --using=24.16.0 /usr/local/bin/pnpm test:e2e
 fnm exec --using=24.16.0 /usr/local/bin/pnpm demo:m1
 ```
 
-After `demo:m1`, open `http://127.0.0.1:4311`. The default ledger is
-`.tasker/m1-operator.sqlite`; set `TASKER_DB_PATH` to run an isolated demo database.
-Stub execution admits two runs by default; set `TASKER_STUB_CAPACITY=1` (or another
-positive integer) to test a different scheduler capacity.
+The current cockpit is available at `http://127.0.0.1:4311` after `demo:m1`. These
+commands exercise the pre-Temporal implementation until the migration milestone
+replaces them; they are retained so migration behavior can be compared rather than
+silently changed.
