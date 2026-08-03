@@ -1,7 +1,8 @@
 # T3 managed work execution
 
-Status: managed workspace, target-aware bootstrap protocol, and Temporal preparation
-Activity implemented 2026-08-03; executable blocks and mutation recovery smoke remain.
+Status: managed workspace, target-aware bootstrap protocol, Temporal preparation
+Activity, executable block boundary, and browser E2E parity implemented 2026-08-03;
+the external bootstrap adapter and real local mutation response-loss smoke remain.
 
 ## Boundary
 
@@ -71,11 +72,25 @@ registered blocks. It is unrelated to workspace allocation and Temporal durabili
   state, never as independently nullable fields;
 - infrastructure failure opens a recoverable `workspace.retry@1` wait and resumes in
   the same Workflow Run after worker replacement.
+- registered `agent` and `process` blocks now execute through one Temporal Activity
+  that reads immutable step bindings from the accepted planning snapshot rather than
+  from project-specific step-name logic;
+- agent execution runs Codex inside the managed worktree, streams bounded transcript
+  chunks into product storage, persists full stdout/stderr as artifacts, validates the
+  structured output contract, and can return a typed `workflow_change_required`
+  request;
+- process execution accepts only the snapshotted command line, rejects unsupported
+  shell syntax, persists full output, and blocks cross-repository or unregistered
+  execution instead of guessing how to continue;
+- execution-time `blocked` and `workflow_change_required` outcomes reopen durable waits
+  on the same node, so the run can resume after operator guidance instead of restarting
+  the task.
 
 ## Remaining T3 sequence
 
 1. Provide or adapt the external company harness executable to the target-aware
    `inspect`/`apply` protocol and configure it locally.
-2. Replace stub execution with provider-neutral agent/process block Activities.
-3. Prove a disposable file change and build survive worker replacement after mutation
+2. Prove a disposable file change and build survive worker replacement after mutation
    but before Activity completion without applying the change twice.
+3. Pilot the configured adapter and mutation recovery against a disposable managed
+   repository; Temporal-only browser E2E coverage already passes.

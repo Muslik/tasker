@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { AbiIdSchema, AbiVersionSchema, SlotPolicySchema, WaitReferenceSchema } from './schema.js';
+import { AbiIdSchema, AbiVersionSchema, WaitReferenceSchema } from './schema.js';
 import { WorkflowChangeKindSchema } from './execution-result.js';
 
 const RuntimeSchemaSchema = z.custom<z.ZodType>(
@@ -47,7 +47,6 @@ export const WaitContractSchema = z.object({
   id: AbiIdSchema,
   version: AbiVersionSchema,
   resolutionSchema: RuntimeSchemaSchema.optional(),
-  slotPolicy: SlotPolicySchema.optional(),
   description: z.string().min(1).optional(),
 });
 

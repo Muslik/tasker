@@ -4,6 +4,7 @@ import {
   isCancellation,
   proxyActivities,
   setHandler,
+  startChild,
   workflowInfo,
 } from '@temporalio/workflow';
 
@@ -18,16 +19,24 @@ import type {
   TaskWorkflowResult,
   TaskWaitResolution,
   TemporalNodeStatus,
+  WorkflowContinuationAcceptance,
 } from '../contracts.js';
 import { resolveTaskWaitUpdate, taskWorkflowStateQuery } from './messages.js';
 
-const activities = proxyActivities<
-  Pick<TaskWorkflowActivities, 'executeStep' | 'evaluatePredicate'>
->({
+const predicateActivities = proxyActivities<Pick<TaskWorkflowActivities, 'evaluatePredicate'>>({
   startToCloseTimeout: '1 minute',
   retry: {
     initialInterval: '100 milliseconds',
     maximumAttempts: 2,
+  },
+});
+
+const executionActivities = proxyActivities<Pick<TaskWorkflowActivities, 'executeStep'>>({
+  startToCloseTimeout: '35 minutes',
+  scheduleToCloseTimeout: '2 hours',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    maximumAttempts: 1,
   },
 });
 
@@ -51,6 +60,13 @@ const workspaceActivities = proxyActivities<Pick<TaskWorkflowActivities, 'prepar
     maximumInterval: '30 seconds',
     maximumAttempts: 3,
   },
+});
+
+const continuationActivities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'linkWorkflowContinuation'>
+>({
+  startToCloseTimeout: '1 minute',
+  retry: { maximumAttempts: 3 },
 });
 
 type MutableNodeStates = Record<string, TemporalNodeStatus>;
@@ -106,6 +122,35 @@ const planReviewFrom = (
 
 const retryResolution = (resolution: TaskWaitResolution): boolean =>
   isRecord(resolution) && resolution.decision === 'resume';
+
+const operatorGuidanceFrom = (resolution: TaskWaitResolution): string | null =>
+  isRecord(resolution) &&
+  typeof resolution.guidance === 'string' &&
+  resolution.guidance.trim().length > 0
+    ? resolution.guidance.trim()
+    : null;
+
+const continuationAcceptanceFrom = (
+  resolution: TaskWaitResolution,
+): WorkflowContinuationAcceptance | null => {
+  if (
+    !isRecord(resolution) ||
+    resolution.decision !== 'accept' ||
+    typeof resolution.continuationId !== 'string' ||
+    typeof resolution.taskReference !== 'string' ||
+    typeof resolution.workflowHash !== 'string' ||
+    !isRecord(resolution.graph) ||
+    !isRecord(resolution.settings) ||
+    (resolution.settings.planApproval !== 'required' &&
+      resolution.settings.planApproval !== 'automatic') ||
+    (resolution.settings.planningStrategy !== 'auto' &&
+      resolution.settings.planningStrategy !== 'fast' &&
+      resolution.settings.planningStrategy !== 'ralplan')
+  ) {
+    return null;
+  }
+  return resolution as unknown as WorkflowContinuationAcceptance;
+};
 
 const collectNodeIds = (node: CompiledWorkflowNode, ids: string[]): void => {
   ids.push(node.id);
@@ -180,6 +225,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     settings: input.settings,
     executionContext: { status: 'preparing' },
     planning: null,
+    workflowChange: null,
     status: 'running',
     currentNodeId: null,
     wait: null,
@@ -218,7 +264,10 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       }
       if (state.wait.waitKind === 'workflow_change.review@1') {
         const review = planReviewFrom(command.resolution);
-        return review?.decision === 'request_changes';
+        return (
+          review?.decision === 'request_changes' ||
+          continuationAcceptanceFrom(command.resolution) !== null
+        );
       }
       return true;
     })();
@@ -274,10 +323,44 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     return resolution;
   };
 
+  const executeContinuation = async (
+    nodeId: string,
+    continuation: WorkflowContinuationAcceptance,
+  ): Promise<Traversal> => {
+    markRunning(nodeId);
+    const childMemo = {
+      schemaVersion: input.schemaVersion,
+      taskReference: continuation.taskReference,
+      workflowHash: continuation.workflowHash,
+      settings: continuation.settings,
+    } as const;
+    const child = await startChild(taskWorkflow, {
+      workflowId: `tasker:${continuation.taskReference}`,
+      args: [
+        {
+          schemaVersion: input.schemaVersion,
+          taskReference: continuation.taskReference,
+          workflowHash: continuation.workflowHash,
+          graph: continuation.graph,
+          settings: continuation.settings,
+        },
+      ],
+      memo: { tasker: childMemo },
+    });
+    await continuationActivities.linkWorkflowContinuation({
+      parentTaskReference: input.taskReference,
+      childTaskReference: continuation.taskReference,
+      childRunId: child.firstExecutionRunId,
+    });
+    const result = await child.result();
+    nodeStates[nodeId] = 'succeeded';
+    return { kind: 'finalized', outcome: result.outcome };
+  };
+
   const executePlanning = async (
     node: PlanningStepNode,
     initialCommand: PlanningActivityCommand,
-  ): Promise<void> => {
+  ): Promise<Traversal> => {
     if (state.executionContext.status !== 'ready') {
       throw ApplicationFailure.nonRetryable('Planning has no prepared execution context');
     }
@@ -313,8 +396,9 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
 
       state = { ...state, planning: result };
       if (result.status === 'ready') {
+        state = { ...state, workflowChange: null };
         nodeStates[node.id] = 'succeeded';
-        return;
+        return { kind: 'continue' };
       }
       if (result.status === 'needs_clarification') {
         const resolution = await openWait(node.id, 'human_clarification');
@@ -326,11 +410,25 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         continue;
       }
 
+      state = {
+        ...state,
+        workflowChange: {
+          nodeId: node.id,
+          attempt: result.attempt,
+          artifactId: result.artifactId,
+          request: result.request,
+        },
+      };
       const resolution = await openWait(node.id, 'workflow_change.review@1');
+      const continuation = continuationAcceptanceFrom(resolution);
+      if (continuation !== null) {
+        return executeContinuation(node.id, continuation);
+      }
       const review = planReviewFrom(resolution);
       if (review?.decision !== 'request_changes') {
         throw ApplicationFailure.nonRetryable('Workflow change requires revision guidance');
       }
+      state = { ...state, workflowChange: null };
       command = {
         kind: 'revision',
         sourceAttempt: result.attempt,
@@ -375,7 +473,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     const known = predicateFacts[reference];
     if (known !== undefined) return known;
 
-    return activities.evaluatePredicate({
+    return predicateActivities.evaluatePredicate({
       taskReference: input.taskReference,
       reference,
       facts: { ...predicateFacts },
@@ -401,19 +499,72 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         if (node.uses === 'task.analyze@1') {
           planningNode = node;
           await ensureExecutionContext(node.id);
-          await executePlanning(node, { kind: 'initial' });
-          return { kind: 'continue' };
+          return executePlanning(node, { kind: 'initial' });
         }
-        attempts[node.id] = (attempts[node.id] ?? 0) + 1;
-        const result = await activities.executeStep({
-          taskReference: input.taskReference,
-          nodeId: node.id,
-          uses: node.uses,
-          input: node.with,
-        });
-        Object.assign(predicateFacts, result.predicateResults);
-        nodeStates[node.id] = 'succeeded';
-        return { kind: 'continue' };
+        await ensureExecutionContext(node.id);
+        if (state.executionContext.status !== 'ready') {
+          throw ApplicationFailure.nonRetryable('Execution step has no prepared execution context');
+        }
+        let operatorGuidance: string | null = null;
+        for (;;) {
+          const readyContext = state.executionContext;
+          if (readyContext.status !== 'ready') {
+            throw ApplicationFailure.nonRetryable(
+              'Execution step lost its prepared execution context',
+            );
+          }
+          attempts[node.id] = (attempts[node.id] ?? 0) + 1;
+          const result = await executionActivities.executeStep({
+            taskReference: input.taskReference,
+            workflowId: execution.workflowId,
+            workflowRunId: execution.runId,
+            workflowHash: input.workflowHash,
+            nodeId: node.id,
+            stepAttempt: attempts[node.id] ?? 1,
+            uses: node.uses,
+            workspace: readyContext.workspace,
+            planningSnapshot: readyContext.planningSnapshot,
+            operatorGuidance,
+            input: node.with,
+          });
+          if (result.status === 'completed') {
+            Object.assign(predicateFacts, result.predicateResults);
+            nodeStates[node.id] = 'succeeded';
+            return { kind: 'continue' };
+          }
+          if (result.status === 'workflow_change_required') {
+            const artifactId = result.artifactIds[0];
+            if (artifactId === undefined) {
+              throw ApplicationFailure.nonRetryable(
+                'Workflow change request has no durable evidence artifact',
+              );
+            }
+            state = {
+              ...state,
+              workflowChange: {
+                nodeId: node.id,
+                attempt: attempts[node.id] ?? 1,
+                artifactId,
+                request: result.request,
+              },
+            };
+            const resolution = await openWait(node.id, 'workflow_change.review@1');
+            const continuation = continuationAcceptanceFrom(resolution);
+            if (continuation !== null) return executeContinuation(node.id, continuation);
+            const review = planReviewFrom(resolution);
+            if (review?.decision !== 'request_changes') {
+              throw ApplicationFailure.nonRetryable(
+                'Workflow change requires continuation acceptance or revision guidance',
+              );
+            }
+            operatorGuidance = review.guidance;
+            state = { ...state, workflowChange: null };
+          } else {
+            const resolution = await openWait(node.id, result.waitKind);
+            operatorGuidance = operatorGuidanceFrom(resolution);
+          }
+          markRunning(node.id);
+        }
       }
       case 'branch': {
         const takeThen = await evaluate(node.when);
@@ -462,11 +613,12 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             throw ApplicationFailure.nonRetryable('Plan review payload is invalid');
           }
           if (review.decision === 'approve') return { kind: 'continue' };
-          await executePlanning(planningNode, {
+          const traversal = await executePlanning(planningNode, {
             kind: 'revision',
             sourceAttempt: state.planning.attempt,
             guidance: review.guidance,
           });
+          if (traversal.kind === 'finalized') return traversal;
           markRunning(node.id);
         }
       }

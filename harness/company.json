@@ -10,6 +10,9 @@
     "repository.read",
     "workspace.write"
   ],
+  "processCommands": {
+    "component.dev-publish@1": "pnpm component:publish-dev"
+  },
   "systemPrompts": {
     "implementationPlanner": "prompts/implementation-planner.md",
     "workflowAnalyzer": "prompts/workflow-analyzer.md"

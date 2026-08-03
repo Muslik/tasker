@@ -1,14 +1,12 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 
-import { loadHarnessPack, type LoadedHarnessPack, type LoadedPrompt } from '../harness/index.js';
+import { loadHarnessPack } from '../harness/index.js';
+import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import {
-  ImplementationPlanningDecisionSchema,
   ImplementationPlanLinkSchema,
   PlanningClarificationAnswerCommandSchema,
-  PlanningStrategyRequestSchema,
-  PlanningStrategySchema,
   type PlanningStrategy,
   type PlanningStrategyRequest,
   type PlanningQuestionAnswer,
@@ -25,7 +23,6 @@ import type {
   ImplementationPlanner,
   ImplementationPlannerFailure,
 } from '../providers/implementation-planner.js';
-import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../workflow/schema.js';
@@ -36,6 +33,12 @@ import {
   type OperatorStreamEvent,
   type OperatorTaskSummary,
 } from './m1-contracts.js';
+import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
+import type {
+  PlanningFailureViewSchema,
+  ImplementationPlanningRecord,
+  ReadyImplementationPlanningRecord,
+} from './implementation-planning-contracts.js';
 import {
   PlanningTranscriptStore,
   planningTranscriptIdFor,
@@ -49,74 +52,14 @@ import type {
 } from './workflow-generator.js';
 
 export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_task';
-
-const PlanningFailureViewSchema = z
-  .object({
-    kind: z.enum([
-      'provider_unavailable',
-      'provider_timed_out',
-      'provider_failed',
-      'invalid_event_stream',
-      'invalid_planner_output',
-    ]),
-    message: z.string().min(1),
-    retryable: z.boolean(),
-  })
-  .strict();
-
-const PlanningRecordBaseSchema = z.object({
-  schemaVersion: z.literal(1),
-  taskReference: z.string().min(1),
-  commandId: z.string().min(1).nullable(),
-  transcriptId: z.string().min(1).nullable(),
-  planningSnapshot: PlanningSnapshotReferenceSchema.nullable(),
-  attempt: z.number().int().positive(),
-  requestedStrategy: PlanningStrategyRequestSchema,
-  selectedStrategy: PlanningStrategySchema,
-  selectionReason: z.string().min(1),
-  startedAt: z.iso.datetime(),
-  operatorGuidance: z.string().min(1).max(10_000).nullable(),
-});
-
-export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status', [
-  PlanningRecordBaseSchema.extend({ status: z.literal('planning') }).strict(),
-  PlanningRecordBaseSchema.extend({
-    status: z.literal('ready'),
-    completedAt: z.iso.datetime(),
-    artifactId: z.string().min(1),
-    decision: ImplementationPlanningDecisionSchema.and(z.object({ status: z.literal('ready') })),
-    receipt: ImplementationPlannerReceiptSchema,
-  }).strict(),
-  PlanningRecordBaseSchema.extend({
-    status: z.literal('needs_clarification'),
-    completedAt: z.iso.datetime(),
-    artifactId: z.string().min(1),
-    decision: ImplementationPlanningDecisionSchema.and(
-      z.object({ status: z.literal('needs_clarification') }),
-    ),
-    receipt: ImplementationPlannerReceiptSchema,
-  }).strict(),
-  PlanningRecordBaseSchema.extend({
-    status: z.literal('workflow_change_required'),
-    completedAt: z.iso.datetime(),
-    artifactId: z.string().min(1),
-    decision: ImplementationPlanningDecisionSchema.and(
-      z.object({ status: z.literal('workflow_change_required') }),
-    ),
-    receipt: ImplementationPlannerReceiptSchema,
-  }).strict(),
-  PlanningRecordBaseSchema.extend({
-    status: z.literal('failed'),
-    completedAt: z.iso.datetime(),
-    failure: PlanningFailureViewSchema,
-  }).strict(),
-]);
-
-export type ImplementationPlanningRecord = z.infer<typeof ImplementationPlanningRecordSchema>;
-export type ReadyImplementationPlanningRecord = Extract<
+export {
+  ImplementationPlanningRecordSchema,
+  PlanningFailureViewSchema,
+} from './implementation-planning-contracts.js';
+export type {
   ImplementationPlanningRecord,
-  { readonly status: 'ready' }
->;
+  ReadyImplementationPlanningRecord,
+} from './implementation-planning-contracts.js';
 
 export type ImplementationPlanningStoreError =
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict }
@@ -584,6 +527,7 @@ const snapshotHarness = (
   workflowGraph: JsonValue,
 ) => {
   const graph = CompiledWorkflowSchema.parse(workflowGraph);
+  const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
   const referencedSteps = new Set(graph.metadata.references.stepTypes);
   const steps = pack.steps
     .filter((step) => referencedSteps.has(step.reference))
@@ -605,11 +549,14 @@ const snapshotHarness = (
         reference: step.reference,
         execution:
           step.execution.kind === 'process'
-            ? { kind: 'process' as const, executor: step.execution.executor }
+            ? {
+                kind: 'process' as const,
+                executor: step.execution.executor,
+                command: resolveSnapshottedProcessCommand(step.execution.executor, pack, project),
+              }
             : { kind: 'integration' as const, adapter: step.execution.adapter },
       };
     });
-  const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
   const snapshottedProject = (() => {
     if (project === undefined) return null;
     const { guidance, ...manifest } = project;
@@ -625,6 +572,16 @@ const snapshotHarness = (
     implementationPlannerPrompt: snapshotPrompt(pack.prompts.implementationPlanner),
     steps,
   };
+};
+
+const resolveSnapshottedProcessCommand = (
+  executor: string,
+  pack: LoadedHarnessPack,
+  project: LoadedHarnessPack['projects'][number] | undefined,
+): string => {
+  const command = project?.processCommands[executor] ?? pack.company.processCommands[executor];
+  if (command === undefined) throw new Error(`Unconfigured process executor ${executor}`);
+  return command;
 };
 
 const selectStrategy = (
@@ -1021,6 +978,7 @@ export class ImplementationPlanningCoordinator {
         }
         return ok({
           subject: {
+            schemaVersion: 1 as const,
             repositoryPath: loaded.value.repository.path,
             task: loaded.value.task,
             taskSnapshot: loaded.value.taskSnapshot,

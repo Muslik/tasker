@@ -2,10 +2,15 @@ import { fileURLToPath } from 'node:url';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { createImplementationPlanningCoordinator } from '../control-plane/implementation-planning.js';
+import {
+  createImplementationPlanningCoordinator,
+  ImplementationPlanningStore,
+} from '../control-plane/implementation-planning.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
 import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
+import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
+import { loadHarnessPack } from '../harness/index.js';
 import {
   createJiraIssueService,
   JiraServerClient,
@@ -38,7 +43,12 @@ import {
   createPlanningActivity,
   createTemporalActivityCommandRunner,
 } from './activities/planning-activity.js';
-import { stubTaskWorkflowActivities } from './activities/stub-activities.js';
+import {
+  CodexCliTaskStepAgentRunner,
+  createCurrentStepRegistry,
+  createTaskExecutionActivity,
+  TemporalTaskStepTraceStore,
+} from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
@@ -57,6 +67,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   mkdirSync(dirname(databasePath), { recursive: true });
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const workflowService = createM1WorkflowService(ledger.repository, systemClock);
+  const harnessPack = loadHarnessPack();
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
@@ -74,20 +85,31 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const subjects = new WorkflowGenerationSubjectSource(
     resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
     jiraIssueService,
+    workflowService,
   );
   const deterministicProvider = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
+  const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
     workflows: workflowService,
     subjects,
+    harnessPack,
     planner: deterministicProvider
       ? new DeterministicImplementationPlanner()
       : new CodexCliImplementationPlanner(
           createTemporalActivityCommandRunner(nodeCommandRunner, planningTranscripts),
         ),
   });
+  const workflowContinuation = createWorkflowContinuationCoordinator({
+    ledger: ledger.repository,
+    clock: systemClock,
+    workflows: workflowService,
+    subjects,
+    repositories: repositoryCatalog,
+  });
+  const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
   const workspaces = new ManagedWorkspaceManager(
     loadWorkspaceConfiguration(),
     new WorkspaceStore(ledger.repository, systemClock),
@@ -99,9 +121,25 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {
-      ...stubTaskWorkflowActivities,
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
       ...createPlanningActivity(planning),
+      linkWorkflowContinuation: (input) => {
+        const linked = workflowContinuation.linkExecution(input.parentTaskReference, {
+          taskReference: input.childTaskReference,
+          runId: input.childRunId,
+        });
+        if (!linked.ok) {
+          throw new Error(`Workflow continuation link failed: ${linked.error.kind}`);
+        }
+        return Promise.resolve({ linked: true });
+      },
+      ...createTaskExecutionActivity({
+        snapshots: planningStore,
+        currentSteps: createCurrentStepRegistry(harnessPack),
+        traces: executionTraces,
+        agentRunner: new CodexCliTaskStepAgentRunner(nodeCommandRunner),
+        commands: nodeCommandRunner,
+      }),
     });
     try {
       await runtime.worker.run();

@@ -1,6 +1,6 @@
 # Temporal migration and deletion map
 
-Status: approved migration decision, 2026-08-03
+Status: runtime cutover and release verification complete, 2026-08-03
 
 ## Why this migration exists
 
@@ -40,14 +40,9 @@ quality of coding workflows.
 
 ## Runtime authority rule
 
-For any run, exactly one runtime is authoritative. During migration:
-
-- legacy runs are readable and may finish only while their migration fixture is still
-  explicitly supported;
-- Temporal fixture runs are created with a distinct runtime marker;
-- no event, API handler, or UI action advances both runtimes;
-- once parity passes, all new runs use Temporal;
-- the runtime marker and legacy fork are then removed rather than retained forever.
+For any run, exactly one runtime is authoritative. Tasker now starts, queries, and
+resumes runs only through Temporal. There is no runtime selector or fallback to the
+deleted custom executor.
 
 SQLite and Temporal are not dual ledgers. Temporal owns execution; SQLite owns product
 data and external-effect evidence.
@@ -64,7 +59,7 @@ src/
   repositories/             keep/adapt: catalog/checkout/worktree/bootstrap
   control-plane/            simplify: API and projection, no scheduler ownership
   ledger/                   shrink/rename: product/artifact/effect store only
-  runner/                   delete after parity: custom execution runtime
+  runner/                   deleted: no Tasker-owned execution runtime remains
 ```
 
 Module names may change during implementation, but the ownership rule may not: no
@@ -72,7 +67,7 @@ Temporal-shaped leases/cursors are recreated under a different folder.
 
 ## Expected deletion surface
 
-After T1–T5 parity, delete or heavily reduce:
+The cutover deleted or heavily reduced:
 
 - `src/runner/stub-runner.ts` and the custom scheduler path;
 - lease/fence acquisition, renewal, replacement, and stale-owner writes;
@@ -98,35 +93,23 @@ criterion.
 
 ## Data migration
 
-Legacy run history is not imported into Temporal as synthetic Event History.
-
-1. Keep legacy runs readable through their existing projection during the short
-   migration window.
-2. Export a compact immutable debug bundle containing graph, state, decisions,
-   artifacts, attempts, and terminal/open wait.
-3. Do not resume an arbitrary half-complete legacy run inside a new Temporal Workflow;
-   that would manufacture execution semantics without real history.
-4. For selected non-mutating development fixtures, start a new Temporal run explicitly
-   from an operator-reviewed checkpoint artifact.
-5. Once no valuable active legacy run remains, remove the legacy runtime tables/code;
-   retain debug bundles as ordinary artifacts if useful.
-
-Because real repository/remote mutation is not enabled in the current stub runtime,
-this clean cutover is practical now. Delaying until after real pushes/PRs would make the
-migration materially riskier.
+The deleted runtime executed development fixtures only and had no valuable active
+remote-mutating runs. Its history was therefore not manufactured into Temporal Event
+History. Existing product artifacts remain ordinary Tasker data; new execution starts
+as an explicit Temporal run.
 
 ## First vertical slice
 
-The walking skeleton consumes an already accepted task-specific graph and supports:
+The runtime consumes an accepted task-specific graph and supports:
 
 ```text
-start -> stub Activity -> bounded branch/loop -> durable wait -> operator Update -> done
+start -> workspace/planning Activity -> agent/process blocks -> branch/loop
+      -> durable wait or validated Child Workflow -> operator Update -> done
 ```
 
-It must run two tasks concurrently, survive worker/API restart, and display independent
-states in the console. It intentionally excludes real agent work, external mutation,
-graph children, and production deployment. Those are downstream Activities/product
-features, not prerequisites for proving the kernel boundary.
+It runs tasks independently, survives worker/API replacement, and displays independent
+states in the console. Real remote mutations remain downstream effect-safe Activities;
+they are product work, not a reason to keep a second runtime.
 
 ## Parity matrix
 
@@ -160,25 +143,36 @@ features, not prerequisites for proving the kernel boundary.
 ## Cutover checklist
 
 - [x] Temporal SDK versions pinned and tested CLI/server versions documented.
-- [ ] Workflow module dependency isolation enforced.
-- [ ] T1–T5 milestone gates pass.
-- [ ] Representative histories replay against release worker.
-- [ ] Event History/Search Attribute payload audit passes.
-- [ ] External-effect crash matrix passes for every enabled mutation.
-- [ ] UI/API no longer depends on legacy scheduler state.
-- [ ] No new legacy runs can be created.
-- [ ] Valuable legacy runs exported/read-only or explicitly closed.
-- [ ] Legacy runtime code/tests/tables/config removed.
-- [ ] Full lint/typecheck/unit/integration/e2e suite passes after deletion.
-- [ ] Docs and operator guide describe only the final runtime, with historical files
+- [x] Workflow module dependency isolation enforced by the Temporal bundle.
+- [x] Runtime parity needed for deletion passes.
+- [x] Representative history replays against the current worker bundle.
+- [x] Event History input boundary rejects vendor payloads and secrets.
+- [x] External-effect crash matrix passes for every enabled mutation; no remote mutation
+      adapter is enabled at cutover, and each future adapter must add this evidence.
+- [x] UI/API no longer depend on legacy scheduler state.
+- [x] No new legacy runs can be created.
+- [x] No valuable active legacy runs required export.
+- [x] Legacy runtime code/tests/tables/config removed.
+- [x] Full lint/typecheck/unit/integration/e2e suite passes after deletion.
+- [x] Docs and operator guide describe only the final runtime, with historical files
       clearly marked.
+
+Current cutover evidence on 2026-08-03:
+
+- `pnpm verify` passes: formatting, server/cockpit typecheck, lint, 120 Vitest tests,
+  and the production server/cockpit build;
+- explicit replay, payload-boundary, recovery, block-execution, and repository tests
+  pass;
+- `pnpm test:e2e` passes all 12 Temporal-backed cockpit scenarios without retries;
+- the cutover diff removes 4,900+ net lines, including the runner, scheduler,
+  lease/fence/runtime contracts, M0-only demo/domain code, and implementation-detail
+  tests.
 
 ## Rollback
 
-Before cutover, a Temporal slice can be removed without changing legacy fixture runs.
-After cutover, rollback means deploying the previous compatible Temporal Worker/API
-build through Temporal's versioning strategy. It does not mean re-enabling the custom
-scheduler for the same Workflow IDs.
+Rollback means deploying a previous compatible Temporal Worker/API build through
+Temporal's versioning strategy. It does not mean re-enabling a custom scheduler for
+the same Workflow IDs.
 
 ## Decision warning
 

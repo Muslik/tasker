@@ -60,11 +60,7 @@ const Node = ({ node }: { readonly node: WorkflowTreeNode }) => {
         <TooltipContent side="left" align="center">
           <span className="font-mono">{node.id}</span>
           <span className="text-background/60">· {node.kind}</span>
-          {node.waitKind === undefined ? null : (
-            <span>
-              · {node.waitKind} / {node.slotPolicy}
-            </span>
-          )}
+          {node.waitKind === undefined ? null : <span>· {node.waitKind}</span>}
         </TooltipContent>
       </Tooltip>
       {node.children.length === 0 ? null : (

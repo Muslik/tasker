@@ -4,10 +4,11 @@ import {
   PlanningQuestionSchema,
   PlanningStrategyRequestSchema,
   PlanningStrategySchema,
-  WorkflowChangeRequestSchema,
+  WorkflowChangeRequestSchema as PlanningWorkflowChangeRequestSchema,
 } from '../planning/implementation-plan.js';
 import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapshot.js';
+import { WorkflowChangeRequestSchema as ExecutionWorkflowChangeRequestSchema } from '../workflow/execution-result.js';
 import {
   WorkspaceBootstrapReceiptSchema,
   WorkspaceLocatorSchema,
@@ -42,7 +43,7 @@ export const TaskWorkflowPlanningStateSchema = z.discriminatedUnion('status', [
   }).strict(),
   TaskWorkflowPlanningBaseSchema.extend({
     status: z.literal('workflow_change_required'),
-    request: WorkflowChangeRequestSchema,
+    request: PlanningWorkflowChangeRequestSchema,
   }).strict(),
 ]);
 
@@ -78,6 +79,19 @@ const TaskWorkflowStateBaseSchema = z
     settings: TaskWorkflowSettingsSchema,
     executionContext: TaskWorkflowExecutionContextSchema,
     planning: TaskWorkflowPlanningStateSchema.nullable(),
+    workflowChange: z
+      .object({
+        nodeId: z.string().min(1),
+        attempt: z.number().int().positive(),
+        artifactId: z.string().min(1),
+        request: z.union([
+          PlanningWorkflowChangeRequestSchema,
+          ExecutionWorkflowChangeRequestSchema,
+        ]),
+      })
+      .strict()
+      .readonly()
+      .nullable(),
     nodeStates: z.record(z.string(), TemporalNodeStatusSchema),
     attempts: z.record(z.string(), z.number().int().nonnegative()),
   })
@@ -124,4 +138,5 @@ export type TaskWorkflowExecutionContext = z.infer<typeof TaskWorkflowExecutionC
 export type TaskWorkflowPlanningState = z.infer<typeof TaskWorkflowPlanningStateSchema>;
 export type TemporalNodeStatus = z.infer<typeof TemporalNodeStatusSchema>;
 export type TaskWorkflowWait = z.infer<typeof TaskWorkflowWaitSchema>;
+export type TaskWorkflowChange = TaskWorkflowPublicState['workflowChange'];
 export type TaskWorkflowPublicState = z.infer<typeof TaskWorkflowPublicStateSchema>;

@@ -39,7 +39,6 @@ export interface WaitNodeSource {
   readonly kind: 'wait';
   readonly id: string;
   readonly for: string;
-  readonly slotPolicy?: 'release' | 'retain' | undefined;
   readonly resumeAt?: string | undefined;
 }
 
@@ -130,7 +129,6 @@ export interface CompiledWaitNode {
   readonly kind: 'wait';
   readonly id: string;
   readonly for: string;
-  readonly slotPolicy: 'release' | 'retain';
   readonly resumeAt?: string | undefined;
 }
 
@@ -200,7 +198,6 @@ export const AbiReferenceSchema = z
 export const StepTypeReferenceSchema = AbiReferenceSchema;
 export const PredicateReferenceSchema = AbiReferenceSchema;
 export const WaitReferenceSchema = AbiReferenceSchema;
-export const SlotPolicySchema = z.enum(['retain', 'release']);
 
 export const SequenceNodeSourceSchema = z
   .object({
@@ -244,7 +241,6 @@ export const WaitNodeSourceSchema = z
     kind: z.literal('wait'),
     id: NodeIdSchema,
     for: WaitReferenceSchema,
-    slotPolicy: SlotPolicySchema.optional(),
     resumeAt: z.string().min(1).optional(),
   })
   .strict();
@@ -348,7 +344,6 @@ const CompiledWaitNodeSchema = z.object({
   kind: z.literal('wait'),
   id: NodeIdSchema,
   for: WaitReferenceSchema,
-  slotPolicy: SlotPolicySchema,
   resumeAt: z.string().min(1).optional(),
 });
 

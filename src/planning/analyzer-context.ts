@@ -103,7 +103,6 @@ export const createWorkflowAnalyzerContext = (
             ? {}
             : { resolutionSchema: inputContract(contract.resolutionSchema) }),
           ...(contract.description === undefined ? {} : { description: contract.description }),
-          ...(contract.slotPolicy === undefined ? {} : { slotPolicy: contract.slotPolicy }),
         })),
       },
     }),

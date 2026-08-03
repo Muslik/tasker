@@ -1,7 +1,11 @@
+import { Buffer } from 'node:buffer';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { TextEncoder } from 'node:util';
+
+import { TestWorkflowEnvironment } from '@temporalio/testing';
+import { Worker } from '@temporalio/worker';
 
 const databasePath = resolve('.tasker/e2e.sqlite');
 const apiPort = Number(process.env.TASKER_E2E_API_PORT ?? '4311');
@@ -18,33 +22,18 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = String(apiPort);
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const [control, jira, ledgerModule, providers, repositories, shared] = await Promise.all([
+const [control, jira, ledgerModule, providers, repositories, shared, temporal] = await Promise.all([
   import('../dist/control-plane/index.js'),
   import('../dist/integrations/index.js'),
   import('../dist/ledger/index.js'),
   import('../dist/providers/index.js'),
   import('../dist/repositories/index.js'),
   import('../dist/shared/index.js'),
+  import('../dist/temporal/index.js'),
 ]);
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
 const service = control.createM1WorkflowService(ledger.repository, shared.systemClock);
-const runService = new control.DeterministicStubRunService(
-  ledger.repository,
-  service,
-  shared.systemClock,
-);
-const scheduler = new control.DurableStubScheduler(
-  runService,
-  ledger.repository,
-  shared.systemClock,
-  {
-    capacity: 2,
-    ownerId: `e2e-${String(process.pid)}`,
-    leaseTimeoutMs: 1_000,
-    pollIntervalMs: 10,
-  },
-);
 const snapshot = jira.JiraIssueSnapshotSchema.parse({
   schemaVersion: 1,
   issueKey: 'AVIA-13235',
@@ -133,7 +122,11 @@ const jiraIssueService = jira.createJiraIssueService(
     repositoryCatalog,
   },
 );
-const subjects = new control.WorkflowGenerationSubjectSource(resolve('.'), jiraIssueService);
+const subjects = new control.WorkflowGenerationSubjectSource(
+  resolve('.'),
+  jiraIssueService,
+  service,
+);
 const workflowGenerator = new control.CodexWorkflowGenerator(service, subjects);
 const deterministicPlanner = new providers.DeterministicImplementationPlanner();
 const e2ePlanner = {
@@ -199,23 +192,124 @@ const workflowContinuation = control.createWorkflowContinuationCoordinator({
   subjects,
   repositories: repositoryCatalog,
 });
+
+const taskQueue = `tasker-e2e-${String(process.pid)}`;
+const temporalEnvironment = await TestWorkflowEnvironment.createTimeSkipping();
+const runRegistry = new temporal.LedgerTemporalRunRegistry(ledger.repository);
+const temporalRunService = new temporal.TemporalTaskRunService(
+  temporalEnvironment.client,
+  {
+    address: 'e2e-test-server',
+    namespace: 'default',
+    taskQueue,
+    queryTimeoutMs: 5_000,
+    updateTimeoutMs: 5_000,
+  },
+  runRegistry,
+);
+const workflowsPath = resolve('dist/temporal/workflows/task-workflow.js');
+const planningActivity = temporal.createPlanningActivity(implementationPlanning);
+
+const workspaceIdFor = (taskReference) =>
+  Buffer.from(taskReference).toString('hex').slice(0, 24).padEnd(24, '0');
+
+const workflowActivities = {
+  ...planningActivity,
+  prepareTaskWorkspace: async (input) => {
+    const subject = subjects.resolve(input.taskReference);
+    if (!subject.ok) {
+      throw new Error(`missing subject for ${input.taskReference}`);
+    }
+    const workspaceId = workspaceIdFor(input.taskReference);
+    const workspace = {
+      schemaVersion: 1,
+      workspaceId,
+      taskReference: input.taskReference,
+      workflowId: input.workflowId,
+      workflowRunId: input.workflowRunId,
+      workflowHash: input.workflowHash,
+      repository: {
+        reference: subject.value.task.repository,
+        sourcePath: subject.value.repositoryPath,
+        baseCommit: '0'.repeat(40),
+      },
+      runnerId: 'temporal-e2e',
+      path: resolve('.tasker/e2e-workspaces', input.taskReference),
+      branch: `tasker/${input.taskReference}`,
+      preparedAt: '2026-08-03T00:00:00.000Z',
+    };
+    const planningSnapshot = implementationPlanning.createRunSnapshot(
+      input.taskReference,
+      input.workflowHash,
+      {
+        workspaceId,
+        reference: subject.value.task.repository,
+        path: workspace.path,
+      },
+    );
+    if (!planningSnapshot.ok) {
+      throw new Error(`planning snapshot failed: ${planningSnapshot.error.kind}`);
+    }
+    return {
+      workspace,
+      bootstrap: {
+        schemaVersion: 1,
+        operationId: `workspace:${workspaceId}:bootstrap@1`,
+        workspaceId,
+        adapterId: 'temporal-e2e',
+        adapterVersion: '1',
+        profile: 'fixture',
+        files: [],
+        completedAt: '2026-08-03T00:00:00.000Z',
+      },
+      planningSnapshot: planningSnapshot.value,
+    };
+  },
+  executeStep: async (input) => ({
+    status: 'completed',
+    summary: `${input.uses} completed`,
+    predicateResults: { 'attempt.succeeded@1': true },
+    artifactIds: [],
+    transcriptId: null,
+  }),
+  evaluatePredicate: async (input) => input.facts[input.reference] ?? true,
+  linkWorkflowContinuation: async (input) => {
+    const linked = workflowContinuation.linkExecution(input.parentTaskReference, {
+      taskReference: input.childTaskReference,
+      runId: input.childRunId,
+    });
+    if (!linked.ok) {
+      throw new Error(`continuation link failed: ${linked.error.kind}`);
+    }
+    return { linked: true };
+  },
+};
+const worker = await Worker.create({
+  connection: temporalEnvironment.nativeConnection,
+  taskQueue,
+  workflowsPath,
+  activities: workflowActivities,
+  maxCachedWorkflows: 0,
+});
+const workerRun = worker.run();
+
 const api = control.buildM1Api({
   service,
   jiraIssueService,
   workflowGenerator,
   implementationPlanning,
   workflowContinuation,
-  runService,
-  scheduler,
+  temporalRunService,
 });
 
 const close = async () => {
-  scheduler.stop();
+  worker.shutdown();
+  await workerRun;
+  await temporalEnvironment.teardown();
   await api.close();
   ledger.close();
 };
 process.once('SIGINT', () => void close());
 process.once('SIGTERM', () => void close());
 
-scheduler.start();
 await api.listen({ host: '127.0.0.1', port: apiPort });

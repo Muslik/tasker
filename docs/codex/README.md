@@ -1,6 +1,6 @@
 # Tasker design package
 
-Status: **Temporal target architecture approved**, 2026-08-03.
+Status: **Temporal-only runtime cutover implemented**, 2026-08-03.
 
 ## Canonical documents
 
@@ -12,7 +12,7 @@ Read these for decisions and future implementation:
 2. [`temporal-migration.md`](temporal-migration.md) — preserve/replace/delete map,
    parity matrix, data transition, cutover, and rollback.
 3. [`implementation-plan.md`](implementation-plan.md) — T0–T7 delivery ladder and the
-   next Temporal walking-skeleton milestone.
+   delivered Temporal runtime and the remaining product milestones.
 4. [`t1-temporal-walking-skeleton.md`](t1-temporal-walking-skeleton.md) — implemented
    runtime boundary, local commands, recovery evidence, and deliberate limits.
 5. [`t2-temporal-planning.md`](t2-temporal-planning.md) — real planning Activity,
@@ -31,25 +31,21 @@ These eight files are the source of truth. Older `.omx` plans are audit history 
 
 ## Current code versus target
 
-The codebase has working pre-Temporal M0–M2 slices:
+The codebase preserves these product slices:
 
 - dynamic task-specific workflow generation from Jira/repository/policy evidence;
 - deterministic IR validation and stable rationale/provenance;
 - subscription-Codex task and implementation planning;
 - Jira task surface and explicit repository binding;
-- operator console with task list, live activity, plan/question/review surfaces, and
-  workflow tree;
-- a custom durable stub runner with queue, leases, cursor, waits, and continuation.
+- operator console with task list, live activity, plan/question/review/intervention
+  surfaces, and workflow tree.
 
-The last bullet is now legacy migration code. Temporal will replace its scheduling,
-history, waits, retries, recovery, and parent/child coordination. It does not replace
-Tasker's analyzer, IR, compiler, validator, block catalog, policies, integrations,
-worktree management, operator console, artifacts, costs, or retrospective.
-
-The opt-in Temporal runtime now runs compiled graphs, durable waits, validated Updates,
-and a real implementation-planning Activity. Planning questions, plan review/revision,
-provider retry, and immutable run inputs have recovery coverage. Repository,
-Jira/Bitbucket/Jenkins mutation remains disabled.
+The Temporal runtime is now the only execution runtime in the codepath for new runs.
+Compiled graphs, durable waits, validated Updates, implementation planning, managed
+workspace preparation, and registered agent/process step execution all run through
+Temporal. Planning questions, plan review/revision, provider retry, workspace retry,
+execution-time workflow change review, and child-workflow continuation have recovery
+coverage. Jira/Bitbucket/Jenkins mutation remains disabled.
 
 ## Historical implementation records
 
@@ -73,8 +69,8 @@ Temporal public recovery/integration tests after parity.
 
 ## Immediate implementation target
 
-T2 planning is complete in
-[`t2-temporal-planning.md`](t2-temporal-planning.md). Implement the T3 managed
-workspace and provider-neutral block boundary tracked in
-[`t3-managed-execution.md`](t3-managed-execution.md). Remote mutation, CI, and
-cross-repository continuation follow only after their safety gates are green.
+T3 managed execution is now implemented in
+[`t3-managed-execution.md`](t3-managed-execution.md). The next runtime milestone is
+T4: real external integrations and PR/CI lifecycle behind explicit effect and recovery
+contracts. The Temporal cutover, full release verification, and browser parity are
+complete; future work must not reintroduce a second runtime.

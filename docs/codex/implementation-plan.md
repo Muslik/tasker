@@ -4,18 +4,16 @@ Status: canonical execution plan, 2026-08-03
 
 ## 1. Goal and sequencing rule
 
-Move Tasker from the proven custom M2 stub runtime to Temporal without losing the
+Tasker has moved from the proven custom M2 stub runtime to Temporal without losing the
 working product surfaces: Jira intake, repository binding, dynamic per-task graph
 assembly, deterministic validation, plan review, graph continuation, and the operator
 console.
 
-We do not build the final real coding-agent workflow on the legacy runner and migrate
-it later. The next vertical slice establishes Temporal first, then real Activities are
-added behind stable block contracts.
+New product behavior is now added only as blocks and Activities behind stable
+contracts. The deleted legacy runner is not a compatibility target.
 
-At no point may both the custom scheduler and Temporal be authoritative for the same
-run. Legacy runs remain readable. New migration-fixture runs select one runtime at
-creation; after parity, new runs are Temporal-only and the legacy executor is deleted.
+Temporal is the only execution authority. No runtime selector, legacy-run creation, or
+fallback scheduler remains.
 
 ## 2. Milestone map
 
@@ -48,12 +46,11 @@ Exit gate:
 
 ## 4. T1 — Temporal walking skeleton
 
-This is the next code milestone and the first point at which the new runtime is useful.
+This milestone established the runtime boundary.
 
-Implementation status on 2026-08-03: the executable skeleton, API runtime selection,
-product run registry, parallel wait/resume, Activity retry, worker replay, and local
-CLI restart demo are complete. Stub transcript projection, richer worker health, and
-the real-service subprocess test harness remain before the full T1 gate is closed; see
+Implementation status on 2026-08-03: the executable skeleton, product run registry,
+parallel wait/resume, Activity retry, history replay, and local CLI restart demo are
+complete. The browser real-service harness is part of final cutover verification; see
 `t1-temporal-walking-skeleton.md`.
 
 ### 4.1 Dependencies and local service
@@ -165,8 +162,10 @@ Build the first real repository-changing vertical slice without remote mutation.
 Implementation status on 2026-08-03: deterministic application-data worktrees,
 durable locator/bootstrap receipts, target-aware `inspect`/`apply` bootstrap protocol,
 the heartbeat-enabled Temporal preparation Activity, worktree-based immutable planning
-snapshot, and recoverable `workspace.retry@1` wait are complete. A compatible external
-company bootstrap executable and real agent/process block execution remain.
+snapshot, recoverable `workspace.retry@1` wait, and registered agent/process block
+execution are complete. Temporal-backed browser parity, dependency isolation/replay,
+and final deletion cleanup pass. A real target-aware company bootstrap adapter and the
+first local mutation response-loss smoke remain product work within T3.
 
 ### 6.1 Repository lifecycle
 
@@ -267,8 +266,8 @@ Implement graph evolution after the main single-repository path is stable.
    exact project/global policies.
 3. Deterministic validation remains mandatory.
 4. Pilot policy opens graph-revision review with rationale and diff.
-5. Same-repository bounded suffixes continue in the parent Workflow.
-6. Independent repository/worktree/publication work starts a Child Workflow.
+5. Every accepted continuation starts as a Child Workflow with immutable graph input.
+6. Independent repository/worktree/publication work also receives its own workspace lifecycle.
 7. Parent waits on a typed join and retains all completed state.
 8. Child may dev-publish automatically only if policy grants that effect.
 9. Human final publish remains a wait; resume payload includes the released version.
@@ -284,17 +283,21 @@ After enough reviewed runs, allow policy to auto-accept known low-risk revision 
 
 ## 9. T6 — cutover and code deletion
 
+Implementation status on 2026-08-03: complete. Temporal is the only runtime, the
+release suite and 12 Temporal-backed browser scenarios pass, and the cutover removes
+more than 6,400 net lines.
+
 Cutover only after the parity matrix in
 [`temporal-migration.md`](temporal-migration.md) passes. Then:
 
 1. stop creating legacy runs;
-2. leave a read-only legacy-run projection/export path for an explicit short period;
+2. confirm there are no valuable active legacy fixture runs to export;
 3. remove the legacy scheduler, lease/fence, cursor, custom wait/signal, retry timer,
    and duplicate execution-state code;
 4. collapse ledger repository methods/tables to product metadata/artifacts/effects;
 5. replace legacy runtime tests with Temporal integration/replay tests;
 6. rename/remove `stub` runtime configuration and docs;
-7. remove feature flags and the runtime fork after legacy fixtures are exported;
+7. remove feature flags and the runtime fork;
 8. run dead-code/dependency analysis and simplify API/UI projections.
 
 The code-reduction claim is evaluated here from the actual diff. We expect substantial
@@ -347,8 +350,8 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-Implement T1 only. Do not add real Jira/Bitbucket mutation, cross-repository
-continuations, or Effect/LangGraph while establishing the Temporal walking skeleton.
-The acceptance demo is concrete: two dynamically assembled fixture graphs execute
-independently, survive worker/API restart, stop at separate durable waits, and resume
-only the selected task.
+Finish browser/full-suite cutover verification, then implement T4 one external effect
+family at a time. The first real pilot path is Jira intake -> managed worktree -> agent
+implementation -> targeted verification -> safe push/PR -> Jenkins classification ->
+human review/revision. Every remote mutation needs an idempotency/reconciliation
+contract before Temporal retries are enabled.

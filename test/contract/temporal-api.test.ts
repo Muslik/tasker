@@ -2,14 +2,18 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildM1Api,
   createM1WorkflowService,
+  ExecutionRunViewSchema,
+  OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/index.js';
+import type { JiraIssuePort } from '../../src/integrations/index.js';
+import { createJiraIssueService } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import {
@@ -20,11 +24,14 @@ import {
   type TaskWorkflowPublicState,
 } from '../../src/temporal/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
+import { makeJiraSnapshot } from '../helpers/jira.js';
+import { makeRepositoryCatalog } from '../helpers/repositories.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
 class ContractTemporalRunService implements TaskTemporalRunService {
   private readonly runs = new Map<string, TaskWorkflowPublicState>();
+  public readonly resolutions: { taskReference: string; command: ResolveTaskWaitCommand }[] = [];
 
   public constructor(private readonly startsWithQuestion = false) {}
 
@@ -135,6 +142,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       settings: input.settings,
       executionContext: this.executionContext(input),
       planning: this.startsWithQuestion ? this.planning(input, 'needs_clarification', 1) : null,
+      workflowChange: null,
       status: 'waiting',
       currentNodeId: wait.nodeId,
       wait,
@@ -151,6 +159,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
   }
 
   public resolveWait(taskReference: string, command: ResolveTaskWaitCommand) {
+    this.resolutions.push({ taskReference, command });
     const current = this.runs.get(taskReference);
     if (current === undefined) {
       return Promise.resolve(err({ kind: 'run_not_found' as const, taskReference }));
@@ -246,10 +255,14 @@ describe('Temporal HTTP boundary', () => {
     const workflows = createM1WorkflowService(ledger.repository, clock);
     workflows.generate('avia-13236-short-bug');
     workflows.generate('avia-12536-feature-review');
+    const temporal = new ContractTemporalRunService();
     const api = buildM1Api({
       service: workflows,
-      temporalRunService: new ContractTemporalRunService(),
+      temporalRunService: temporal,
     });
+
+    const health = await api.inject({ method: 'GET', url: '/api/health' });
+    expect(health.json()).toMatchObject({ executionRuntime: 'temporal' });
 
     const featureStart = await api.inject({
       method: 'POST',
@@ -261,6 +274,8 @@ describe('Temporal HTTP boundary', () => {
       url: '/api/workflows/avia-13236-short-bug/start',
       payload: { settings: { planApproval: 'automatic', planningStrategy: 'auto' } },
     });
+    ExecutionRunViewSchema.parse(featureStart.json());
+    ExecutionRunViewSchema.parse(bugStart.json());
 
     expect(featureStart.json()).toMatchObject({
       status: 'waiting',
@@ -299,6 +314,7 @@ describe('Temporal HTTP boundary', () => {
       url: '/api/workflows/avia-12536-feature-review/plan-review',
       payload: { decision: 'approve' },
     });
+    ExecutionRunViewSchema.parse(approved.json());
     expect(approved.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'code_review@1' },
@@ -307,13 +323,20 @@ describe('Temporal HTTP boundary', () => {
     const completedBug = await api.inject({
       method: 'POST',
       url: '/api/workflows/avia-13236-short-bug/resume',
+      payload: { guidance: 'VPN is enabled; retry the preserved step.' },
     });
+    ExecutionRunViewSchema.parse(completedBug.json());
     expect(completedBug.json()).toMatchObject({ status: 'completed' });
+    expect(temporal.resolutions.at(-1)?.command.resolution).toEqual({
+      decision: 'resume',
+      guidance: 'VPN is enabled; retry the preserved step.',
+    });
 
     const featureRun = await api.inject({
       method: 'GET',
       url: '/api/workflows/avia-12536-feature-review/run',
     });
+    ExecutionRunViewSchema.parse(featureRun.json());
     expect(featureRun.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'code_review@1' },
@@ -339,6 +362,7 @@ describe('Temporal HTTP boundary', () => {
       url: '/api/workflows/avia-12536-feature-review/start',
       payload: { settings: { planApproval: 'required', planningStrategy: 'ralplan' } },
     });
+    ExecutionRunViewSchema.parse(started.json());
     expect(started.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'human_clarification' },
@@ -364,6 +388,7 @@ describe('Temporal HTTP boundary', () => {
       url: '/api/workflows/avia-12536-feature-review/planning-clarification',
       payload: { answers: [{ questionId: 'target-browser', answer: 'Chrome and Safari' }] },
     });
+    ExecutionRunViewSchema.parse(answered.json());
     expect(answered.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'plan.approved@1' },
@@ -378,6 +403,7 @@ describe('Temporal HTTP boundary', () => {
         guidance: 'Add the rollback verification before implementation.',
       },
     });
+    ExecutionRunViewSchema.parse(revised.json());
     expect(revised.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'plan.approved@1' },
@@ -389,10 +415,118 @@ describe('Temporal HTTP boundary', () => {
       url: '/api/workflows/avia-12536-feature-review/plan-review',
       payload: { decision: 'approve' },
     });
+    ExecutionRunViewSchema.parse(approved.json());
     expect(approved.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'code_review@1' },
     });
+
+    await api.close();
+  });
+
+  it('keeps workflow generation and operator projections independent of the runtime', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-temporal-product-api-'));
+    const clock = makeAdjustableClock('2026-08-03T10:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const workflows = createM1WorkflowService(ledger.repository, clock);
+    const api = buildM1Api({
+      service: workflows,
+      temporalRunService: new ContractTemporalRunService(),
+    });
+
+    const missing = await api.inject({
+      method: 'GET',
+      url: '/api/workflows/avia-13236-short-bug',
+    });
+    const generatedResponse = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+    });
+    const rejectedResponse = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/invalid-unmet-capability/generate',
+    });
+    const graph = await api.inject({
+      method: 'GET',
+      url: '/api/workflows/avia-13236-short-bug/graph.json',
+    });
+    const rejectedGraph = await api.inject({
+      method: 'GET',
+      url: '/api/workflows/invalid-unmet-capability/graph.json',
+    });
+    const tasks = OperatorTaskListResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: '/api/operator/tasks' })).json(),
+    );
+    const activity = OperatorActivityResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: '/api/operator/tasks/avia-13236-short-bug/activity',
+        })
+      ).json(),
+    );
+
+    expect(missing.statusCode).toBe(404);
+    expect(WorkflowResponseSchema.parse(generatedResponse.json()).status).toBe('ready');
+    expect(WorkflowResponseSchema.parse(rejectedResponse.json()).status).toBe('rejected');
+    expect(graph.statusCode).toBe(200);
+    expect(rejectedGraph.statusCode).toBe(409);
+    expect(tasks.tasks.find((task) => task.id === 'avia-13236-short-bug')).toMatchObject({
+      status: 'planned',
+    });
+    expect(activity.entries.map((entry) => entry.title)).toEqual([
+      'Intake accepted',
+      'Task created',
+      'Workflow compiled and persisted',
+    ]);
+
+    await api.close();
+  });
+
+  it('updates Jira sync health without appending routine timeline noise', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-temporal-jira-api-'));
+    const clock = makeAdjustableClock('2026-08-03T10:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const workflows = createM1WorkflowService(ledger.repository, clock);
+    const jiraPort: JiraIssuePort = {
+      fetchIssue: vi.fn(() => Promise.resolve(ok(makeJiraSnapshot()))),
+      fetchAttachment: vi.fn(),
+    };
+    const jiraIssueService = createJiraIssueService(ledger.repository, clock, jiraPort, {
+      repositoryCatalog: makeRepositoryCatalog(),
+    });
+    const api = buildM1Api({
+      service: workflows,
+      jiraIssueService,
+      temporalRunService: new ContractTemporalRunService(),
+    });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const synced = await api.inject({
+        method: 'POST',
+        url: '/api/jira/issues/AVIA-13235/sync',
+        ...(attempt === 0 ? { payload: { repository: 'front-avia' } } : {}),
+      });
+      expect(synced.statusCode).toBe(200);
+    }
+    const activity = OperatorActivityResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'GET',
+          url: '/api/operator/tasks/jira%3AAVIA-13235/activity',
+        })
+      ).json(),
+    );
+
+    expect(
+      ledger.repository.listEvents('intake:jira:AVIA-13235').map(({ eventType }) => eventType),
+    ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
+    expect(activity.entries.map(({ title }) => title)).toEqual([
+      'Jira issue imported',
+      'Repository mapped',
+    ]);
 
     await api.close();
   });

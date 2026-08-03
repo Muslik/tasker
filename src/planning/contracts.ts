@@ -41,21 +41,18 @@ const waitContracts = [
         reviewId: z.string().min(1),
       })
       .strict(),
-    slotPolicy: 'release',
     description: 'Wait for a human review decision or actionable PR comments.',
   },
   {
     id: 'translation_complete',
     version: '1',
     resolutionSchema: z.object({ translationRevision: z.string().min(1) }).strict(),
-    slotPolicy: 'release',
     description: 'Wait for the translator to finish external work.',
   },
   {
     id: 'final_publish',
     version: '1',
     resolutionSchema: z.object({ version: z.string().min(1) }).strict(),
-    slotPolicy: 'release',
     description: 'Wait for a human-owned final package publication.',
   },
 ] satisfies readonly WaitContract[];

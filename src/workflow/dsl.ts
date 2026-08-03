@@ -57,14 +57,12 @@ export const wait = (
   id: string,
   definition: {
     readonly for: string;
-    readonly slotPolicy?: 'release' | 'retain';
     readonly resumeAt?: string;
   },
 ): WorkflowNodeSource => ({
   kind: 'wait',
   id,
   for: definition.for,
-  ...(definition.slotPolicy === undefined ? {} : { slotPolicy: definition.slotPolicy }),
   ...(definition.resumeAt === undefined ? {} : { resumeAt: definition.resumeAt }),
 });
 

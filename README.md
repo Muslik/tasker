@@ -32,28 +32,26 @@ Typed step contracts currently live in
 
 ## Current implementation state
 
-M0–M2 proved task intake, dynamic graph assembly, deterministic validation, the
-three-pane operator console, plan review, workflow continuation, and restart-safe stub
-execution. That execution slice predates the Temporal decision and still contains a
-custom queue, cursor, lease, wait, and recovery implementation. It is not the target
-runtime and will be removed after Temporal parity tests pass. Repository and remote
-system mutation remain disabled until the Temporal activity boundary is in place.
+Temporal is the only runtime. The custom queue, scheduler, cursor, lease/fence, wait
+table, and stub runner have been deleted. The generic Workflow interprets an immutable
+task graph; typed Activities execute snapshotted agent and process blocks; Updates
+handle plan review, clarification, code review, and operator guidance; late discoveries
+start validated Child Workflows without rewriting the accepted parent graph.
 
-T1 now provides an opt-in Temporal walking skeleton: a generic compiled-graph
-interpreter, typed Query/Update contracts, Activity retry, independent durable waits,
-worker replay, Tasker run-ID indexing, and control-plane/cockpit projection. See
+The current vertical slice covers dynamic graph generation, managed workspace setup,
+implementation planning/revision, durable waits, recovery/replay, parallel task runs,
+and the three-pane operator console. Real Jira/Bitbucket/Jenkins mutation Activities
+and their effect-reconciliation crash matrix are the next product milestone. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
-for the exact boundary and current limitations.
+for the runtime boundary and recovery evidence.
 
 ```bash
 fnm exec --using=24.16.0 /usr/local/bin/pnpm verify
-fnm exec --using=24.16.0 /usr/local/bin/pnpm demo:m0
 fnm exec --using=24.16.0 /usr/local/bin/pnpm test:e2e
 fnm exec --using=24.16.0 /usr/local/bin/pnpm demo:m1
 ```
 
-The legacy comparison runtime remains available through `demo:m1`. To exercise the
-Temporal slice, install Temporal CLI and run `pnpm temporal:dev`,
+To exercise Tasker, install Temporal CLI and run `pnpm temporal:dev`,
 `pnpm temporal:worker`, `pnpm temporal:api`, and `pnpm dev:cockpit` in separate
 terminals. The cockpit is then available at `http://127.0.0.1:4311`, with Temporal UI
 at `http://127.0.0.1:8233`.

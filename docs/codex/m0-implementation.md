@@ -4,24 +4,18 @@
 > implemented in M0. Its ledger/lease/outbox execution mechanisms are migration evidence,
 > not target architecture. See [`temporal-migration.md`](temporal-migration.md).
 
-Status: **implemented and verified**, 2026-08-01.
+Status: **historical evidence; executable M0-only code removed at Temporal cutover**,
+2026-08-03.
 
 M0 is the deterministic kernel boundary. It can validate and compile a workflow,
 persist append-only contract events and artifacts, enforce CAS/fencing, redact source
 data, and create a DebugBundle. It cannot invoke an agent or create a remote command.
 
-## Run it
+## Archived evidence
 
-The repository pins Node 24 and pnpm 10.13.1.
-
-```bash
-fnm exec --using=24.16.0 /usr/local/bin/pnpm install
-fnm exec --using=24.16.0 /usr/local/bin/pnpm verify
-fnm exec --using=24.16.0 /usr/local/bin/pnpm demo:m0
-```
-
-`demo:m0` creates a new temporary directory on every run and prints its absolute path.
-It does not overwrite an earlier run. The directory contains:
+The M0-only domain contracts, capability marker, demo command, and implementation-detail
+tests were deleted after equivalent public behavior was covered by Temporal integration,
+replay, repository, and browser tests. Before deletion, `demo:m0` produced:
 
 ```text
 m0-ledger.sqlite     durable SQLite/WAL ledger

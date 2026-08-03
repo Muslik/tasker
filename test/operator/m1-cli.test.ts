@@ -36,6 +36,6 @@ describe('M1 CLI fallback', () => {
     expect(showExit).toBe(0);
     expect(restored).toEqual(generated);
     expect(generated.join('\n')).toContain('bounded_loop: implementation-loop');
-    expect(generated.join('\n')).toContain('wait=code_review@1 · slot=release');
+    expect(generated.join('\n')).toContain('wait=code_review@1');
   });
 });

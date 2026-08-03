@@ -26,7 +26,7 @@ import type {
   WorkflowResponse,
   WorkflowView,
 } from '../control-plane/m1-contracts.js';
-import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning.js';
+import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning-contracts.js';
 import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
 import type { WorkflowContinuationRecord } from '../control-plane/workflow-continuation-contracts.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
@@ -48,6 +48,7 @@ import {
   loadWorkflow,
   reviewPlan,
   reviewWorkflowContinuation,
+  resumeWorkflow,
   retryWorkflowContinuation,
   startWorkflow,
   syncJiraIssue,
@@ -118,6 +119,7 @@ type TaskOperation =
   | 'approving_plan'
   | 'requesting_plan_changes'
   | 'answering_questions'
+  | 'resuming'
   | 'accepting_continuation'
   | 'rejecting_continuation'
   | 'retrying_continuation';
@@ -656,6 +658,43 @@ const PlanReviewControls = ({
   );
 };
 
+const OperatorIntervention = ({
+  stage,
+  guidance,
+  pending,
+  onGuidanceChange,
+  onResume,
+}: {
+  readonly stage: string;
+  readonly guidance: string;
+  readonly pending: boolean;
+  readonly onGuidanceChange: (guidance: string) => void;
+  readonly onResume: () => void;
+}) => (
+  <section className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3">
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <strong className="text-sm">Operator intervention</strong>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{stage}</p>
+      </div>
+      <Button size="sm" type="button" disabled={pending} onClick={onResume}>
+        {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+        {pending ? 'Resuming…' : 'Resume'}
+      </Button>
+    </div>
+    <textarea
+      className="mt-2 min-h-16 w-full resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+      aria-label="Operator guidance"
+      placeholder="Optional guidance for the next attempt: what changed or what should the agent do differently?"
+      value={guidance}
+      disabled={pending}
+      onChange={(event) => {
+        onGuidanceChange(event.target.value);
+      }}
+    />
+  </section>
+);
+
 const ValidationSurface = ({
   task,
   view,
@@ -1005,14 +1044,14 @@ const WorkflowContinuationSurface = ({
             Retry planning
           </Button>
         ) : null}
-        {record.status === 'awaiting_review' || record.status === 'accepted' ? (
+        {record.status === 'awaiting_review' ? (
           <Button size="sm" type="button" disabled={busy} onClick={onAccept}>
             {pendingOperation === 'accepting_continuation' ? (
               <LoaderCircle data-icon="inline-start" className="animate-spin" />
             ) : (
               <CheckCircle2 data-icon="inline-start" />
             )}
-            {record.status === 'accepted' ? 'Start continuation' : 'Accept workflow'}
+            Accept workflow
           </Button>
         ) : null}
       </div>
@@ -1884,6 +1923,9 @@ export const App = () => {
   const [continuationGuidanceDrafts, setContinuationGuidanceDrafts] = useState<
     ReadonlyMap<string, string>
   >(new Map());
+  const [interventionGuidanceDrafts, setInterventionGuidanceDrafts] = useState<
+    ReadonlyMap<string, string>
+  >(new Map());
   const [planningAnswerDrafts, setPlanningAnswerDrafts] = useState<
     ReadonlyMap<string, ReadonlyMap<string, string>>
   >(new Map());
@@ -2323,15 +2365,46 @@ export const App = () => {
       });
   };
 
+  const handleResume = (): void => {
+    if (selectedTask === null || selectedTask.status !== 'waiting') return;
+    const taskReference = selectedTask.id;
+    const guidance = interventionGuidanceDrafts.get(taskReference)?.trim() ?? '';
+    setPendingOperations((current) => new Map(current).set(taskReference, 'resuming'));
+    void resumeWorkflow(taskReference, guidance.length === 0 ? {} : { guidance })
+      .then(async () => {
+        setInterventionGuidanceDrafts((current) => {
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) await refreshSelection(taskReference);
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Unexpected resume failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'resuming') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
   const handleWorkflowContinuationReview = (decision: 'accept' | 'reject'): void => {
     if (selectedTask === null || workflowContinuationState.status !== 'ready') {
       return;
     }
     const record = workflowContinuationState.record;
     if (
-      (decision === 'accept' &&
-        record.status !== 'awaiting_review' &&
-        record.status !== 'accepted') ||
+      (decision === 'accept' && record.status !== 'awaiting_review') ||
       (decision === 'reject' &&
         record.status !== 'awaiting_review' &&
         record.status !== 'rejected_by_operator')
@@ -2511,6 +2584,29 @@ export const App = () => {
                     onRequestChanges={() => {
                       handlePlanReview('request_changes');
                     }}
+                  />
+                ) : null}
+                {selectedTask.status === 'waiting' &&
+                !(
+                  implementationPlanState.status === 'ready' &&
+                  implementationPlanState.record.status === 'needs_clarification'
+                ) &&
+                !(
+                  workflowContinuationState.status === 'ready' &&
+                  (workflowContinuationState.record.status === 'awaiting_review' ||
+                    workflowContinuationState.record.status === 'accepted' ||
+                    workflowContinuationState.record.status === 'rejected_by_operator')
+                ) ? (
+                  <OperatorIntervention
+                    stage={selectedTask.currentStage}
+                    guidance={interventionGuidanceDrafts.get(selectedTask.id) ?? ''}
+                    pending={pendingOperations.get(selectedTask.id) === 'resuming'}
+                    onGuidanceChange={(guidance) => {
+                      setInterventionGuidanceDrafts((current) =>
+                        new Map(current).set(selectedTask.id, guidance),
+                      );
+                    }}
+                    onResume={handleResume}
                   />
                 ) : null}
                 {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}

@@ -14,14 +14,8 @@ run started through the Temporal runtime. SQLite stores only the Tasker product 
 that links a task reference to its Temporal Workflow ID, Run ID, workflow hash, and
 immutable start settings. It does not independently advance Temporal nodes.
 
-The control plane accepts exactly one execution port:
-
-- `legacy_stub` keeps existing pre-Temporal runs readable during migration;
-- `temporal` starts and controls only Temporal runs;
-- the TypeScript API options make configuring both runtimes together invalid.
-
-There is no fallback from Temporal to the legacy scheduler when Temporal or a worker is
-unavailable.
+The control plane accepts exactly one execution port: Temporal. There is no runtime
+selector and no fallback scheduler when Temporal or a worker is unavailable.
 
 ## Local topology
 
@@ -79,19 +73,15 @@ A real local Temporal CLI service was also exercised with two fixture workflows.
 both API and worker restart, both tasks returned to their existing `code_review` waits;
 resuming one completed only that run.
 
-## Deliberate T1 limits
+## Current boundary after cutover
 
-This is the durable execution skeleton, not the real coding agent yet:
+Later slices replaced the original deterministic T1 Activities with snapshotted agent
+and process block execution, managed workspaces, plan revision and clarification,
+operator guidance, and validated Child Workflows. The walking skeleton remains the
+runtime contract, not a second implementation.
 
-- T1 Activities return deterministic stub results and perform no repository or remote
-  mutation;
-- plan `request_changes`, agent questions, workflow revisions, worktrees, provider
-  transcripts/cost, Jira/Bitbucket/Jenkins effects, and retrospective data migrate in
-  T2–T5;
-- Temporal mode therefore supports plan approval but rejects plan revision explicitly;
-- the legacy runtime remains the default until those behaviors have Temporal parity;
-- worker availability is visible through per-task Query failure, while richer Task
-  Queue health and bounded projection streaming remain follow-up work.
-
-These limits are migration gates, not permanent dual-runtime architecture. New
-features must target Temporal; the custom scheduler is deleted after parity.
+The remaining product boundary is external mutation: Jira transitions/comments,
+Bitbucket PR lifecycle, Jenkins/Allure observation, and publication must run through
+effect-safe Activities with intent, receipt, and reconciliation evidence. Task Queue
+health, richer cost/retrospective views, and production Worker deployment are also
+follow-up work. None requires restoring a custom scheduler.

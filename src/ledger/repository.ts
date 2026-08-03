@@ -14,33 +14,11 @@ import type {
   LedgerCommitResult,
   LedgerConflict,
   LedgerTransaction,
-  LeaseMutation,
-  LeaseRecord,
   OutboxRecord,
   ProjectionRecord,
   SnapshotRecord,
   SnapshotWrite,
-  TransactionFenceGuard,
 } from './types.js';
-
-interface LeaseRow {
-  readonly lease_key: string;
-  readonly owner_id: string;
-  readonly fence_token: number;
-  readonly status: 'active' | 'released';
-  readonly acquired_at: string;
-  readonly renewed_at: string;
-  readonly released_at: string | null;
-  readonly metadata_json: string;
-}
-
-interface LeasePlan {
-  readonly mutation: LeaseMutation;
-  readonly fenceToken: number;
-  readonly status: 'active' | 'released';
-  readonly previousLease: LeaseRow | null;
-  readonly metadataJson: string;
-}
 
 class ConflictSignal extends Error {
   public readonly conflict: LedgerConflict;
@@ -424,8 +402,6 @@ export class LedgerRepository {
           headers_json: string;
           created_at: string;
           visible_at: string;
-          lease_key: string | null;
-          lease_fence_token: number | null;
           dispatched_at: string | null;
           attempts: number;
         }
@@ -438,8 +414,6 @@ export class LedgerRepository {
             headers_json,
             created_at,
             visible_at,
-            lease_key,
-            lease_fence_token,
             dispatched_at,
             attempts
           FROM outbox
@@ -454,20 +428,9 @@ export class LedgerRepository {
         headers: parseJson(row.headers_json),
         createdAt: row.created_at,
         visibleAt: row.visible_at,
-        leaseKey: row.lease_key,
-        leaseFenceToken: row.lease_fence_token,
         dispatchedAt: row.dispatched_at,
         attempts: row.attempts,
       }));
-  }
-
-  public readLease(leaseKey: string): LeaseRecord | null {
-    const row = this.readLeaseRow(leaseKey);
-    if (row === null) {
-      return null;
-    }
-
-    return this.toLeaseRecord(row);
   }
 
   private commitTransaction(transaction: LedgerTransaction): LedgerCommitResult {
@@ -484,11 +447,6 @@ export class LedgerRepository {
     if (duplicateCommandId !== null) {
       raiseConflict({ kind: 'duplicate_outbox_command_id', commandId: duplicateCommandId });
     }
-
-    const fenceGuard =
-      transaction.fenceGuard === undefined ? null : this.verifyFenceGuard(transaction.fenceGuard);
-    const leasePlan =
-      transaction.lease === undefined ? null : this.planLeaseMutation(transaction.lease);
 
     const aggregate = transaction.aggregate;
     let aggregateVersion: number | null = null;
@@ -587,15 +545,9 @@ export class LedgerRepository {
     this.insertSignals(transaction.signals ?? [], now);
 
     for (const command of transaction.outbox ?? []) {
-      const effectiveFenceToken = this.resolveFenceTokenForOutbox(
-        command.leaseKey,
-        fenceGuard,
-        leasePlan,
-      );
-
       try {
         this.database
-          .prepare<[string, string, string, string, string, string, string | null, number | null]>(
+          .prepare<[string, string, string, string, string, string]>(
             `
               INSERT INTO outbox (
                 command_id,
@@ -603,11 +555,9 @@ export class LedgerRepository {
                 payload_json,
                 headers_json,
                 created_at,
-                visible_at,
-                lease_key,
-                lease_fence_token
+                visible_at
               )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              VALUES (?, ?, ?, ?, ?, ?)
             `,
           )
           .run(
@@ -617,16 +567,10 @@ export class LedgerRepository {
             toJsonText(command.headers),
             now,
             command.visibleAt ?? now,
-            command.leaseKey ?? leasePlan?.mutation.leaseKey ?? null,
-            effectiveFenceToken,
           );
       } catch (error) {
         this.handleOutboxInsertError(error, command.commandId);
       }
-    }
-
-    if (leasePlan !== null) {
-      this.applyLeasePlan(leasePlan, now);
     }
 
     return {
@@ -635,15 +579,6 @@ export class LedgerRepository {
       appendedEventCount: aggregate?.events.length ?? 0,
       lastEventSequence,
       outboxCount: transaction.outbox?.length ?? 0,
-      lease:
-        leasePlan === null
-          ? null
-          : {
-              leaseKey: leasePlan.mutation.leaseKey,
-              ownerId: leasePlan.mutation.ownerId,
-              fenceToken: leasePlan.fenceToken,
-              status: leasePlan.status,
-            },
     };
   }
 
@@ -826,221 +761,6 @@ export class LedgerRepository {
           artifact.parentArtifactId ?? null,
         );
     }
-  }
-
-  private verifyFenceGuard(fenceGuard: TransactionFenceGuard): TransactionFenceGuard {
-    const existing = this.readLeaseRow(fenceGuard.leaseKey);
-    if (
-      existing === null ||
-      existing.fence_token !== fenceGuard.expectedFenceToken ||
-      existing.owner_id !== fenceGuard.ownerId ||
-      existing.status !== 'active'
-    ) {
-      raiseConflict({
-        kind: 'stale_fence',
-        leaseKey: fenceGuard.leaseKey,
-        expectedFenceToken: fenceGuard.expectedFenceToken,
-        actualFenceToken: existing?.fence_token ?? null,
-        actualOwnerId: existing?.owner_id ?? null,
-        actualStatus: existing?.status ?? null,
-      });
-    }
-
-    return fenceGuard;
-  }
-
-  private planLeaseMutation(mutation: LeaseMutation): LeasePlan {
-    const existing = this.readLeaseRow(mutation.leaseKey);
-    const metadataJson = toJsonText(mutation.metadata);
-
-    if (mutation.kind === 'acquire') {
-      return {
-        mutation,
-        fenceToken: (existing?.fence_token ?? 0) + 1,
-        status: 'active',
-        previousLease: existing,
-        metadataJson,
-      };
-    }
-
-    if (
-      existing === null ||
-      existing.fence_token !== mutation.expectedFenceToken ||
-      existing.owner_id !== mutation.ownerId ||
-      existing.status !== 'active'
-    ) {
-      raiseConflict({
-        kind: 'stale_fence',
-        leaseKey: mutation.leaseKey,
-        expectedFenceToken: mutation.expectedFenceToken,
-        actualFenceToken: existing?.fence_token ?? null,
-        actualOwnerId: existing?.owner_id ?? null,
-        actualStatus: existing?.status ?? null,
-      });
-    }
-
-    return {
-      mutation,
-      fenceToken: mutation.expectedFenceToken,
-      status: mutation.kind === 'release' ? 'released' : 'active',
-      previousLease: existing,
-      metadataJson,
-    };
-  }
-
-  private resolveFenceTokenForOutbox(
-    leaseKey: string | undefined,
-    fenceGuard: TransactionFenceGuard | null,
-    leasePlan: LeasePlan | null,
-  ): number | null {
-    if (leaseKey === undefined) {
-      return leasePlan?.fenceToken ?? null;
-    }
-
-    if (leasePlan?.mutation.leaseKey === leaseKey) {
-      return leasePlan.fenceToken;
-    }
-
-    if (fenceGuard?.leaseKey === leaseKey) {
-      return fenceGuard.expectedFenceToken;
-    }
-
-    raiseConflict({
-      kind: 'missing_fence_guard',
-      leaseKey,
-    });
-
-    throw new Error('unreachable');
-  }
-
-  private applyLeasePlan(plan: LeasePlan, now: string): void {
-    if (plan.mutation.kind === 'acquire') {
-      this.database
-        .prepare<[string, string, number, string, string, string, string | null, string]>(
-          `
-            INSERT INTO leases (
-              lease_key,
-              owner_id,
-              fence_token,
-              status,
-              acquired_at,
-              renewed_at,
-              released_at,
-              metadata_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(lease_key)
-            DO UPDATE SET
-              owner_id = excluded.owner_id,
-              fence_token = excluded.fence_token,
-              status = excluded.status,
-              acquired_at = excluded.acquired_at,
-              renewed_at = excluded.renewed_at,
-              released_at = excluded.released_at,
-              metadata_json = excluded.metadata_json
-          `,
-        )
-        .run(
-          plan.mutation.leaseKey,
-          plan.mutation.ownerId,
-          plan.fenceToken,
-          'active',
-          now,
-          now,
-          null,
-          plan.metadataJson,
-        );
-      return;
-    }
-
-    if (plan.mutation.kind === 'renew') {
-      this.database
-        .prepare<[string, string, string, string, number]>(
-          `
-            UPDATE leases
-            SET owner_id = ?, renewed_at = ?, metadata_json = ?
-            WHERE lease_key = ?
-              AND fence_token = ?
-          `,
-        )
-        .run(
-          plan.mutation.ownerId,
-          now,
-          plan.metadataJson,
-          plan.mutation.leaseKey,
-          plan.fenceToken,
-        );
-      return;
-    }
-
-    this.database
-      .prepare<[string, string, string | null, string, string, number]>(
-        `
-          UPDATE leases
-          SET owner_id = ?,
-              status = 'released',
-              released_at = ?,
-              renewed_at = ?,
-              metadata_json = ?
-          WHERE lease_key = ?
-            AND fence_token = ?
-        `,
-      )
-      .run(
-        plan.mutation.ownerId,
-        now,
-        now,
-        plan.metadataJson,
-        plan.mutation.leaseKey,
-        plan.fenceToken,
-      );
-  }
-
-  private readLeaseRow(leaseKey: string): LeaseRow | null {
-    const row = this.database
-      .prepare<
-        [{ readonly leaseKey: string }],
-        {
-          lease_key: string;
-          owner_id: string;
-          fence_token: number;
-          status: 'active' | 'released';
-          acquired_at: string;
-          renewed_at: string;
-          released_at: string | null;
-          metadata_json: string;
-        }
-      >(
-        `
-          SELECT
-            lease_key,
-            owner_id,
-            fence_token,
-            status,
-            acquired_at,
-            renewed_at,
-            released_at,
-            metadata_json
-          FROM leases
-          WHERE lease_key = @leaseKey
-        `,
-      )
-      .get({ leaseKey });
-
-    return row ?? null;
-  }
-
-  private toLeaseRecord(row: LeaseRow): LeaseRecord {
-    return {
-      leaseKey: row.lease_key,
-      ownerId: row.owner_id,
-      fenceToken: row.fence_token,
-      status: row.status,
-      acquiredAt: row.acquired_at,
-      renewedAt: row.renewed_at,
-      releasedAt: row.released_at,
-      metadata: parseJson(row.metadata_json),
-    };
   }
 
   private handleEventInsertError(

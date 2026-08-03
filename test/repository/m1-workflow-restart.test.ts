@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createM1WorkflowService } from '../../src/control-plane/index.js';
+import {
+  createM1WorkflowService,
+  WorkflowGenerationSubjectSource,
+} from '../../src/control-plane/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
 import {
   analyzeTaskFixture,
@@ -154,6 +157,63 @@ describe('M1 persisted workflow', () => {
       restartedLedger.repository.readProjection('m1_analyzer', fixture.fixtureId)?.payload,
     ).toMatchObject({ sessionId: 'thread-first' });
     expect(restartedLedger.repository.listEvents(`intake:${fixture.fixtureId}`)).toHaveLength(4);
+
+    restartedLedger.close();
+  });
+
+  it('restores an immutable dynamic continuation subject after restart', () => {
+    const filename = databasePath();
+    const clock = makeAdjustableClock('2026-08-03T12:00:00.000Z');
+    const fixture = findTaskFixture('avia-13236-short-bug');
+    if (fixture === undefined) throw new Error('Expected workflow fixture');
+    const taskReference = 'continuation-avia-13236-short-bug-1';
+    const subject = {
+      schemaVersion: 1 as const,
+      repositoryPath: '/managed/twiket-ui-kit',
+      task: {
+        ...fixture,
+        fixtureId: taskReference,
+        repository: 'twiket/ui-kit',
+      },
+      taskSnapshot: {
+        origin: 'workflow_continuation',
+        parentTaskReference: fixture.fixtureId,
+      },
+    };
+    const firstLedger = openSqliteLedger({ filename, clock });
+    const firstService = createM1WorkflowService(firstLedger.repository, clock);
+
+    expect(firstService.saveGenerationSubject(taskReference, subject)).toEqual({
+      ok: true,
+      value: subject,
+    });
+    expect(firstService.saveGenerationSubject(taskReference, subject)).toEqual({
+      ok: true,
+      value: subject,
+    });
+    firstLedger.close();
+
+    const restartedLedger = openSqliteLedger({ filename, clock });
+    const restartedService = createM1WorkflowService(restartedLedger.repository, clock);
+    const restartedSource = new WorkflowGenerationSubjectSource(
+      '/fixture-repository',
+      undefined,
+      restartedService,
+    );
+
+    expect(restartedSource.resolve(taskReference)).toEqual({ ok: true, value: subject });
+    expect(
+      restartedService.saveGenerationSubject(taskReference, {
+        ...subject,
+        repositoryPath: '/different-checkout',
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        kind: 'store_failure',
+        error: { kind: 'generation_subject_conflict', taskReference },
+      },
+    });
 
     restartedLedger.close();
   });

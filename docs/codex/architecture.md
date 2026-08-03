@@ -179,6 +179,12 @@ A registered block has a stable versioned reference and one execution kind:
   generated graph;
 - `integration`: a typed external adapter with prepare/execute/reconcile behavior.
 
+Process commands are policy data, not interpreter branches. Company-wide commands live
+in `harness/company.json`; repository-specific overrides live in
+`harness/projects/*/project.json`. The resolved command, executor, and harness checksum
+are copied into the immutable planning snapshot before execution. Adding translations,
+a build, or `fill-test-ops-plan` does not add a `switch` to Temporal Workflow code.
+
 Each block declares:
 
 - Zod input/output schemas;
@@ -242,8 +248,8 @@ does not mutate the accepted graph. The parent Workflow:
 2. calls a planning Activity for a continuation proposal;
 3. validates and hashes the proposed revision;
 4. automatically accepts it when policy allows, or waits for review during the pilot;
-5. appends a same-run suffix for bounded work, or starts a Child Workflow for work with
-   an independent repository/resource/lifecycle;
+5. starts the accepted continuation as a Child Workflow with its own immutable graph,
+   even when it shares a repository, so the accepted parent graph never mutates;
 6. resumes the parent only from the join boundary.
 
 During stabilization, every graph revision is operator-reviewable. Once retrospective
@@ -275,7 +281,9 @@ history. Duplicate webhook/poll results are deduplicated by stable external iden
 PR conversation is the primary review channel: Tasker imports unresolved Bitbucket
 threads, starts a revision Activity, posts or resolves only through the integration
 adapter, waits for CI again when needed, and returns to code review. The cockpit may
-also submit operator guidance, but it must preserve the same conversation provenance.
+also submit operator guidance. For an infrastructure or agent block, that guidance
+resumes the same durable wait and is included in the next attempt; the completed
+prefix, worktree, artifacts, and conversation provenance remain intact.
 
 ## 11. CI and evidence
 

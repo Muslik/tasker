@@ -54,7 +54,6 @@ const WaitPresentationNodeSchema = z
     ...BasePresentationShape,
     kind: z.literal('wait'),
     resumeAt: z.string().min(1).optional(),
-    slotPolicy: z.enum(['release', 'retain']),
     waitKind: z.string().min(1),
   })
   .strict();
@@ -171,7 +170,6 @@ export const createWorkflowPresentation = (
           kind: 'wait',
           label: node.id,
           ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
-          slotPolicy: node.slotPolicy,
           status: 'planned',
           waitKind: node.for,
         };

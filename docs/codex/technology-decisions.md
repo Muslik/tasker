@@ -16,7 +16,7 @@ invariants live in [`architecture.md`](architecture.md); sequencing lives in
 | Boundary validation | Zod | Existing schemas, runtime validation, JSON Schema export |
 | Product store | SQLite/WAL with `better-sqlite3` initially | Local-first metadata/artifacts/indexes; not execution authority |
 | HTTP/control plane | Fastify | Existing typed local API and SSE-compatible surface |
-| Process execution | Execa | Cancellation, streaming, subprocess lifecycle |
+| Process execution | Node `child_process.spawn` behind `CommandRunner` | Existing cancellable streaming boundary; no extra runtime dependency |
 | UI | React, Vite, shadcn-style primitives | Minimal operator console, no graph-editor requirement |
 | Tests | Vitest, fast-check where useful, Playwright | Unit/property/integration/operator acceptance |
 | Logs | Pino with redaction | Operational diagnostics separate from task activity |
@@ -53,12 +53,11 @@ Do not create one queue per task or repository.
 
 ## 3. Workflow contracts
 
-Register one stable Workflow entry point for a task run and a small number of explicit
-child types only when their lifecycle differs:
+Register one stable Workflow entry point. A validated continuation starts the same
+entry point as a Child Workflow with a new immutable input:
 
 ```ts
 TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkflowResult>
-LinkedRepositoryWorkflow(input: LinkedRepositoryInput): Promise<LinkedRepositoryResult>
 ```
 
 `TaskWorkflowInput` contains only bounded, immutable, non-secret data:
@@ -156,7 +155,7 @@ classification is typed:
 | external effect outcome unknown | reconcile; if unresolved, operator-visible wait |
 | programmer/schema/invariant error | non-retryable failure with diagnostic bundle |
 
-Do not stack Execa/HTTP retry libraries under Temporal retries. Adapter calls make one
+Do not stack process/HTTP retry libraries under Temporal retries. Adapter calls make one
 attempt unless the adapter's protocol explicitly requires an internal poll. Temporal or
 the Workflow domain owns retry decisions.
 
@@ -208,10 +207,10 @@ state, attention state, repository key, and graph revision.
 An Activity may return `workflow_change_required`. A planning Activity produces a new
 compiled continuation artifact. The Workflow records its hash and decision.
 
-Use a same-Workflow revision when the continuation is bounded and shares the same
-worktree/lifecycle. Use a Child Workflow when it owns a different repository/worktree,
-publication lifecycle, independently observable task, or history large enough to
-partition. Do not create a Child Workflow merely because the graph has a branch.
+An accepted continuation starts as a Child Workflow and the parent waits for its typed
+result. This preserves the accepted parent graph and its completed prefix without
+teaching the interpreter how to mutate graph input. Ordinary branches inside an
+accepted graph remain interpreter nodes and do not create Child Workflows.
 
 During the pilot, a run-policy flag requires operator approval for graph revisions.
 Later, validator-approved low-risk classes can auto-apply. Validation cannot be

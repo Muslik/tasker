@@ -30,6 +30,7 @@ import {
   type OperatorActivityResponse,
   type OperatorStreamEvent,
   type WorkflowResponse,
+  type WorkflowGenerationSubject,
   type WorkflowTreeNode,
   type WorkflowView,
 } from './m1-contracts.js';
@@ -175,7 +176,7 @@ const toTree = (presentation: WorkflowPresentationTree): WorkflowTreeNode => {
       label: nodeLabel(node),
       status: node.status,
       retryBudget,
-      ...(node.kind === 'wait' ? { waitKind: node.waitKind, slotPolicy: node.slotPolicy } : {}),
+      ...(node.kind === 'wait' ? { waitKind: node.waitKind } : {}),
       children: childrenFor(node).map((childId) => visit(childId, nextAncestors)),
     });
   };
@@ -228,7 +229,6 @@ const baseWorkflowView = (
     waits: proposal.waits.map((wait) => ({
       nodeId: wait.nodeId,
       waitKind: wait.waitKind,
-      slotPolicy: wait.slotPolicy,
     })),
     expectedArtifacts: [
       ...new Set(proposal.expectedArtifacts.map((artifact) => artifact.kind)),
@@ -535,10 +535,25 @@ export class M1WorkflowService {
   }
 
   public readProjection(
-    projectionType: 'm1_analyzer' | 'm1_intake' | 'm1_run' | 'm1_task',
+    projectionType: 'm1_analyzer' | 'm1_intake' | 'm1_task',
     projectionId: string,
   ): JsonValue | null {
     return this.store.readProjection(projectionType, projectionId);
+  }
+
+  public readGenerationSubject(
+    taskReference: string,
+  ): Outcome<WorkflowGenerationSubject | null, M1ServiceError> {
+    const subject = this.store.readGenerationSubject(taskReference);
+    return subject.ok ? subject : err({ kind: 'store_failure', error: subject.error });
+  }
+
+  public saveGenerationSubject(
+    taskReference: string,
+    subject: WorkflowGenerationSubject,
+  ): Outcome<WorkflowGenerationSubject, M1ServiceError> {
+    const saved = this.store.saveGenerationSubject(taskReference, subject);
+    return saved.ok ? ok(saved.value.subject) : err({ kind: 'store_failure', error: saved.error });
   }
 
   public generate(fixtureId: string): Outcome<WorkflowResponse, M1ServiceError> {

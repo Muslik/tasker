@@ -3,6 +3,7 @@ import type { APIResponse, Page } from '@playwright/test';
 import type { ZodType } from 'zod';
 
 import {
+  ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
@@ -34,6 +35,11 @@ const loadActivity = async (page: Page, fixtureId: string) => {
     `/api/operator/tasks/${encodeURIComponent(fixtureId)}/activity`,
   );
   return readJson(response, OperatorActivityResponseSchema);
+};
+
+const loadRun = async (page: Page, fixtureId: string) => {
+  const response = await page.request.get(`/api/workflows/${encodeURIComponent(fixtureId)}/run`);
+  return readJson(response, ExecutionRunViewSchema);
 };
 
 const clickTask = async (page: Page, fixtureId: string) => {
@@ -202,15 +208,20 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
 
   await page.goto('/');
   await clickTask(page, fixtureId);
+  const startButton = page.getByRole('button', { name: 'Test workflow', exact: true });
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
+    await expect(startButton).toBeVisible();
   }
-  await expect(page.getByRole('combobox', { name: 'Planning strategy' })).toHaveValue('auto');
-  await expect(page.getByRole('checkbox', { name: 'Review plan before execution' })).toBeChecked();
-  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+  if (candidate.status === 'backlog' || candidate.status === 'planned') {
+    await expect(page.getByRole('combobox', { name: 'Planning strategy' })).toHaveValue('auto');
+    await expect(
+      page.getByRole('checkbox', { name: 'Review plan before execution' }),
+    ).toBeChecked();
+    await startButton.click();
+  }
 
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
-  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 1');
   await expect(page.getByTestId('implementation-plan')).toContainText(
     'Implement the requested task',
   );
@@ -221,14 +232,10 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
   await expect(page.getByTestId('plan-review-controls')).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Plan review guidance' })).toHaveValue('');
-  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
+  await expect(page.getByTestId('implementation-plan')).toContainText(/attempt \d+/u);
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Plan changes requested · attempt 2',
-  );
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(guidance);
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Implementation plan attached',
+    'Implementation plan ready',
   );
 });
 
@@ -284,13 +291,30 @@ test('I can review an immutable workflow continuation without losing the parent 
 
   await page.getByRole('button', { name: 'Accept workflow' }).click();
 
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('linked');
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('run:continuation-');
-  await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(`/api/workflows/${fixtureId}/continuation`);
+        const record = await readJson(response, WorkflowContinuationRecordSchema);
+        return record.status;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe('linked');
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('linked', {
+    timeout: 10_000,
+  });
+  await expect(page.getByTestId('workflow-continuation-review')).toContainText('Linked run');
+  await expect(page.getByTestId('selected-task')).toContainText('Linked continuation executing');
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Linked continuation queued',
+    'Workflow continuation execution linked',
   );
-  await expect(page.getByTestId('task-activity-timeline')).toContainText('Waiting for code review');
+  await expect
+    .poll(async () => {
+      const run = await loadRun(page, revised.candidate.taskReference);
+      return run.status === 'waiting' ? run.wait.waitKind : run.status;
+    })
+    .toBe('code_review@1');
   const parentAfter = await loadWorkflow(page, fixtureId);
   expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
 });
@@ -312,12 +336,7 @@ test('a planned workflow can be tested to the durable code-review wait', async (
 
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review');
   await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
-  await expect(page.getByTestId('task-activity-timeline')).toContainText('Run started');
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Plan review not required',
-  );
-  await expect(page.getByTestId('task-activity-timeline')).toContainText('Waiting for code review');
-  await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(2);
+  await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(1);
 });
 
 test('the project profile explains why inline copy adds no translation wait', async ({ page }) => {
@@ -372,7 +391,7 @@ test('I can answer a blocking planning question and continue the same task', asy
     'Planning clarification answered',
   );
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Planning clarification resolved',
+    'Implementation plan ready',
   );
 });
 

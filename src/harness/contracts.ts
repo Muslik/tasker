@@ -9,6 +9,7 @@ const RelativePathSchema = z
   .refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), {
     message: 'Expected a path relative to the harness pack',
   });
+const ProcessCommandsSchema = z.record(VersionedReferenceSchema, z.string().trim().min(1));
 
 export type HarnessExecutionBinding =
   | {
@@ -51,6 +52,7 @@ export const HarnessProjectManifestSchema = z
     repository: z.string().min(1),
     repositoryKind: z.enum(['frontend', 'generic']),
     translations: TranslationPolicySchema,
+    processCommands: ProcessCommandsSchema,
     workflowGuidance: RelativePathSchema.optional(),
   })
   .strict();
@@ -75,6 +77,7 @@ export const HarnessCompanyManifestSchema = z
     id: z.string().min(1),
     version: z.string().min(1),
     availableCapabilities: z.array(z.string().min(1)).min(1),
+    processCommands: ProcessCommandsSchema,
     systemPrompts: z
       .object({
         implementationPlanner: RelativePathSchema,

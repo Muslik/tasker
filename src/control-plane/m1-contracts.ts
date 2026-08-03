@@ -1,13 +1,27 @@
 import { z } from 'zod';
 
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
+import { TaskFixtureSchema } from '../planning/fixtures.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
-import { RunProjectionSchema } from '../runner/contracts.js';
-import { TaskWorkflowPublicStateSchema } from '../temporal/public-state.js';
+import {
+  TaskWorkflowPublicStateSchema,
+  TaskWorkflowSettingsSchema,
+} from '../temporal/public-state.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
 export const M1_VIEW_SCHEMA_VERSION = 3;
+
+export const WorkflowGenerationSubjectSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    repositoryPath: z.string().min(1),
+    task: TaskFixtureSchema,
+    taskSnapshot: JsonValueSchema,
+  })
+  .strict();
+
+export type WorkflowGenerationSubject = z.infer<typeof WorkflowGenerationSubjectSchema>;
 
 export const FixtureFamilySchema = z.enum([
   'short_bugfix',
@@ -51,7 +65,6 @@ export const WorkflowTreeNodeSchema: z.ZodType<{
   readonly status: 'planned' | 'running' | 'waiting' | 'succeeded' | 'skipped' | 'failed';
   readonly retryBudget: number | null;
   readonly waitKind?: string | undefined;
-  readonly slotPolicy?: 'release' | 'retain' | undefined;
   readonly children: readonly z.infer<typeof WorkflowTreeNodeSchema>[];
 }> = z.lazy(() =>
   z
@@ -62,7 +75,6 @@ export const WorkflowTreeNodeSchema: z.ZodType<{
       status: z.enum(['planned', 'running', 'waiting', 'succeeded', 'skipped', 'failed']),
       retryBudget: z.number().int().nonnegative().nullable(),
       waitKind: z.string().min(1).optional(),
-      slotPolicy: z.enum(['release', 'retain']).optional(),
       children: z.array(WorkflowTreeNodeSchema),
     })
     .strict(),
@@ -116,7 +128,6 @@ export const WorkflowViewSchema = z
             .object({
               nodeId: z.string().min(1),
               waitKind: z.string().min(1),
-              slotPolicy: z.enum(['release', 'retain']),
             })
             .strict(),
         ),
@@ -152,7 +163,36 @@ export const ApiErrorResponseSchema = z
   })
   .strict();
 
-export const ExecutionRunViewSchema = z.union([RunProjectionSchema, TaskWorkflowPublicStateSchema]);
+export const ExecutionRunViewSchema = TaskWorkflowPublicStateSchema;
+
+export const RunStartCommandSchema = z
+  .object({
+    settings: TaskWorkflowSettingsSchema,
+  })
+  .strict();
+
+export const DEFAULT_RUN_START_COMMAND = {
+  settings: {
+    planApproval: 'required',
+    planningStrategy: 'auto',
+  },
+} as const satisfies z.input<typeof RunStartCommandSchema>;
+
+export const PlanReviewCommandSchema = z.discriminatedUnion('decision', [
+  z.object({ decision: z.literal('approve') }).strict(),
+  z
+    .object({
+      decision: z.literal('request_changes'),
+      guidance: z.string().trim().min(1).max(10_000),
+    })
+    .strict(),
+]);
+
+export const ResumeRunCommandSchema = z
+  .object({
+    guidance: z.string().trim().min(1).max(10_000).optional(),
+  })
+  .strict();
 
 export const OperatorTaskStatusSchema = z.enum([
   'backlog',
@@ -260,6 +300,9 @@ export type WorkflowTreeNode = z.infer<typeof WorkflowTreeNodeSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
+export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
+export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;
+export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
 export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
 export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;
 export type OperatorActivityResponse = z.infer<typeof OperatorActivityResponseSchema>;

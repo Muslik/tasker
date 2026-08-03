@@ -13,10 +13,16 @@ import {
   WorkflowAnalyzerReceiptSchema,
   type WorkflowAnalyzerReceipt,
 } from '../providers/contracts.js';
-import { WorkflowViewSchema, type WorkflowView } from './m1-contracts.js';
+import {
+  WorkflowGenerationSubjectSchema,
+  WorkflowViewSchema,
+  type WorkflowGenerationSubject,
+  type WorkflowView,
+} from './m1-contracts.js';
 
 export const M1_WORKFLOW_PROJECTION = 'm1_workflow';
 export const M1_ANALYZER_PROJECTION = 'm1_analyzer';
+export const M1_GENERATION_SUBJECT_PROJECTION = 'm1_generation_subject';
 
 export interface M1WorkflowArtifacts {
   readonly analyzerVersion: string;
@@ -34,11 +40,20 @@ export type M1StoreError =
       readonly kind: 'projection_corrupt';
       readonly fixtureId: string;
       readonly issues: readonly string[];
+    }
+  | {
+      readonly kind: 'generation_subject_conflict';
+      readonly taskReference: string;
     };
 
 export interface M1StoreResult {
   readonly disposition: 'already_exists' | 'saved';
   readonly view: WorkflowView;
+}
+
+export interface M1GenerationSubjectSaveResult {
+  readonly disposition: 'already_exists' | 'saved';
+  readonly subject: WorkflowGenerationSubject;
 }
 
 const asJson = (value: unknown): JsonValue => value as JsonValue;
@@ -74,10 +89,85 @@ export class M1WorkflowStore {
   }
 
   public readProjection(
-    projectionType: 'm1_analyzer' | 'm1_intake' | 'm1_run' | 'm1_task',
+    projectionType: 'm1_analyzer' | 'm1_intake' | 'm1_task',
     projectionId: string,
   ): JsonValue | null {
     return this.ledger.readProjection(projectionType, projectionId)?.payload ?? null;
+  }
+
+  public readGenerationSubject(
+    taskReference: string,
+  ): Outcome<WorkflowGenerationSubject | null, M1StoreError> {
+    const projection = this.ledger.readProjection(M1_GENERATION_SUBJECT_PROJECTION, taskReference);
+    if (projection === null) return ok(null);
+
+    const parsed = WorkflowGenerationSubjectSchema.safeParse(projection.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({
+          kind: 'projection_corrupt',
+          fixtureId: taskReference,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  public saveGenerationSubject(
+    taskReference: string,
+    subjectInput: WorkflowGenerationSubject,
+  ): Outcome<M1GenerationSubjectSaveResult, M1StoreError> {
+    const subject = WorkflowGenerationSubjectSchema.parse(subjectInput);
+    const existing = this.readGenerationSubject(taskReference);
+    if (!existing.ok) return existing;
+    if (existing.value !== null) {
+      return JSON.stringify(existing.value) === JSON.stringify(subject)
+        ? ok({ disposition: 'already_exists', subject: existing.value })
+        : err({ kind: 'generation_subject_conflict', taskReference });
+    }
+
+    const aggregateId = `workflow-subject:${taskReference}`;
+    const saved = this.ledger.transact({
+      aggregate: {
+        aggregateId,
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: `event:workflow-subject:${taskReference}`,
+            eventType: 'WorkflowGenerationSubjectSaved',
+            eventSchemaVersion: 1,
+            payload: asJson({ taskReference, repository: subject.task.repository }),
+            actor: 'workflow_continuation_planner',
+          },
+        ],
+      },
+      projections: [
+        {
+          kind: 'upsert',
+          projectionType: M1_GENERATION_SUBJECT_PROJECTION,
+          projectionId: taskReference,
+          payload: asJson(subject),
+        },
+      ],
+      timestamp: this.clock.now(),
+    });
+    if (saved.ok) return ok({ disposition: 'saved', subject });
+
+    if (saved.error.kind === 'version_conflict') {
+      const concurrent = this.readGenerationSubject(taskReference);
+      if (
+        concurrent.ok &&
+        concurrent.value !== null &&
+        JSON.stringify(concurrent.value) === JSON.stringify(subject)
+      ) {
+        return ok({ disposition: 'already_exists', subject: concurrent.value });
+      }
+      if (concurrent.ok && concurrent.value !== null) {
+        return err({ kind: 'generation_subject_conflict', taskReference });
+      }
+    }
+
+    return err({ kind: 'ledger_conflict', conflict: saved.error });
   }
 
   public listEvents(fixtureId?: string): readonly EventRecord[] {

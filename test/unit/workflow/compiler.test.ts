@@ -96,7 +96,6 @@ const baseContracts = () => ({
       resolutionSchema: z.object({
         reviewId: z.string().min(1),
       }),
-      slotPolicy: 'release',
     },
   ]),
 });
@@ -147,7 +146,6 @@ describe('workflow compiler', () => {
         }),
         wait('code-review', {
           for: 'review_event@1',
-          slotPolicy: 'release',
           resumeAt: 'waiting-for-review',
         }),
         finalize('waiting-for-review', {
@@ -458,47 +456,6 @@ describe('workflow compiler', () => {
         expect.objectContaining({ code: 'wait_without_resolution_contract' }),
       ]),
     );
-  });
-
-  it('inherits wait slot policy from the registered wait contract when omitted in source', () => {
-    const result = compileWorkflow({
-      contracts: baseContracts(),
-      source: defineWorkflow({
-        id: 'wait-slot-policy',
-        version: 1,
-        root: sequence('delivery', [
-          wait('code-review', {
-            for: 'review_event@1',
-          }),
-          finalize('done', {
-            outcome: 'waiting_for_review',
-          }),
-        ]),
-      }),
-    });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      return;
-    }
-
-    expect(result.value.graph.root).toEqual({
-      kind: 'sequence',
-      id: 'delivery',
-      children: [
-        {
-          kind: 'wait',
-          id: 'code-review',
-          for: 'review_event@1',
-          slotPolicy: 'release',
-        },
-        {
-          kind: 'finalize',
-          id: 'done',
-          outcome: 'waiting_for_review',
-        },
-      ],
-    });
   });
 
   it('rejects a wait resume cursor that does not reference a graph node', () => {

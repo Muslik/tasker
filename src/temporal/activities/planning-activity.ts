@@ -1,6 +1,6 @@
 import { Context } from '@temporalio/activity';
 
-import type { ImplementationPlanningRecord } from '../../control-plane/implementation-planning.js';
+import type { ImplementationPlanningRecord } from '../../control-plane/implementation-planning-contracts.js';
 import type {
   PlanningQuestionAnswer,
   PlanningSnapshotReference,

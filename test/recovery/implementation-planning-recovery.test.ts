@@ -7,7 +7,6 @@ import { describe, expect, it } from 'vitest';
 import {
   createImplementationPlanningCoordinator,
   createM1WorkflowService,
-  DeterministicStubRunService,
   WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import { loadHarnessPack, type LoadedHarnessPack } from '../../src/harness/index.js';
@@ -345,7 +344,7 @@ describe('implementation planning recovery', () => {
     }
   });
 
-  it('restores a slot-releasing clarification wait without rerunning the provider', async () => {
+  it('restores a persisted clarification decision without rerunning the provider', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-question-recovery-'));
     const databasePath = join(directory, 'ledger.sqlite');
     const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
@@ -386,17 +385,6 @@ describe('implementation planning recovery', () => {
     if (!planned.ok || planned.value.status !== 'needs_clarification') {
       throw new Error('Expected planning to require clarification');
     }
-    const firstRunService = new DeterministicStubRunService(
-      firstLedger.repository,
-      firstService,
-      clock,
-    );
-    const waiting = firstRunService.openPlanningClarification(
-      'avia-13236-short-bug',
-      { planApproval: 'automatic', planningStrategy: 'fast' },
-      { attempt: planned.value.attempt, artifactId: planned.value.artifactId },
-    );
-    if (!waiting.ok) throw new Error('Expected a durable clarification wait');
     firstLedger.close();
 
     let providerCalls = 0;
@@ -409,11 +397,6 @@ describe('implementation planning recovery', () => {
     const restartedLedger = openSqliteLedger({ filename: databasePath, clock });
     try {
       const restartedService = createM1WorkflowService(restartedLedger.repository, clock);
-      const restartedRunService = new DeterministicStubRunService(
-        restartedLedger.repository,
-        restartedService,
-        clock,
-      );
       const restartedCoordinator = createImplementationPlanningCoordinator({
         ledger: restartedLedger.repository,
         clock,
@@ -422,19 +405,8 @@ describe('implementation planning recovery', () => {
         planner: providerThatMustNotRun,
       });
 
-      const restoredRun = restartedRunService.read('avia-13236-short-bug');
       const restoredPlanning = restartedCoordinator.read('avia-13236-short-bug');
 
-      expect(restoredRun).toMatchObject({
-        ok: true,
-        value: {
-          runId: 'run:avia-13236-short-bug',
-          status: 'waiting',
-          wait: { waitKind: 'human_clarification', slotPolicy: 'release' },
-          lease: null,
-          effects: [],
-        },
-      });
       expect(restoredPlanning).toMatchObject({
         ok: true,
         value: { status: 'needs_clarification', attempt: 1 },

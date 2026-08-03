@@ -52,13 +52,6 @@ export interface OutboxWrite {
   readonly payload: JsonValue;
   readonly headers?: JsonValue;
   readonly visibleAt?: string;
-  readonly leaseKey?: string;
-}
-
-export interface TransactionFenceGuard {
-  readonly leaseKey: string;
-  readonly ownerId: string;
-  readonly expectedFenceToken: number;
 }
 
 export interface SignalWrite {
@@ -81,37 +74,13 @@ export interface ArtifactWrite {
   readonly parentArtifactId?: string;
 }
 
-export type LeaseMutation =
-  | {
-      readonly kind: 'acquire';
-      readonly leaseKey: string;
-      readonly ownerId: string;
-      readonly metadata?: JsonValue;
-    }
-  | {
-      readonly kind: 'renew';
-      readonly leaseKey: string;
-      readonly ownerId: string;
-      readonly expectedFenceToken: number;
-      readonly metadata?: JsonValue;
-    }
-  | {
-      readonly kind: 'release';
-      readonly leaseKey: string;
-      readonly ownerId: string;
-      readonly expectedFenceToken: number;
-      readonly metadata?: JsonValue;
-    };
-
 export interface LedgerTransaction {
-  readonly fenceGuard?: TransactionFenceGuard;
   readonly aggregate?: AggregateWrite;
   readonly snapshots?: readonly SnapshotWrite[];
   readonly projections?: readonly ProjectionMutation[];
   readonly outbox?: readonly OutboxWrite[];
   readonly signals?: readonly SignalWrite[];
   readonly artifacts?: readonly ArtifactWrite[];
-  readonly lease?: LeaseMutation;
   readonly timestamp?: string;
 }
 
@@ -180,21 +149,8 @@ export interface OutboxRecord {
   readonly headers: JsonValue;
   readonly createdAt: string;
   readonly visibleAt: string;
-  readonly leaseKey: string | null;
-  readonly leaseFenceToken: number | null;
   readonly dispatchedAt: string | null;
   readonly attempts: number;
-}
-
-export interface LeaseRecord {
-  readonly leaseKey: string;
-  readonly ownerId: string;
-  readonly fenceToken: number;
-  readonly status: 'active' | 'released';
-  readonly acquiredAt: string;
-  readonly renewedAt: string;
-  readonly releasedAt: string | null;
-  readonly metadata: JsonValue;
 }
 
 export type LedgerConflict =
@@ -213,31 +169,12 @@ export type LedgerConflict =
       readonly commandId: string;
     }
   | {
-      readonly kind: 'missing_fence_guard';
-      readonly leaseKey: string;
-    }
-  | {
       readonly kind: 'unsupported_schema_version';
       readonly schemaKind: 'event' | 'snapshot';
       readonly receivedVersion: number;
       readonly supportedVersion: 1;
       readonly recovery: 'quarantine';
-    }
-  | {
-      readonly kind: 'stale_fence';
-      readonly leaseKey: string;
-      readonly expectedFenceToken: number;
-      readonly actualFenceToken: number | null;
-      readonly actualOwnerId: string | null;
-      readonly actualStatus: 'active' | 'released' | null;
     };
-
-export interface LeaseMutationResult {
-  readonly leaseKey: string;
-  readonly ownerId: string;
-  readonly fenceToken: number;
-  readonly status: 'active' | 'released';
-}
 
 export interface LedgerCommitResult {
   readonly aggregateId: string | null;
@@ -245,5 +182,4 @@ export interface LedgerCommitResult {
   readonly appendedEventCount: number;
   readonly lastEventSequence: number | null;
   readonly outboxCount: number;
-  readonly lease: LeaseMutationResult | null;
 }

@@ -3,7 +3,6 @@ import {
   createWorkflowAnalyzerContext,
   findTaskFixture,
   TaskFixtureSchema,
-  type TaskFixture,
 } from '../planning/index.js';
 import type {
   CodexWorkflowAnalyzerFailure,
@@ -11,9 +10,15 @@ import type {
   CodexWorkflowAnalyzerSuccess,
 } from '../providers/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema, type JsonValue } from '../workflow/index.js';
-import type { WorkflowResponse } from './m1-contracts.js';
+import { JsonValueSchema } from '../workflow/index.js';
+import {
+  WorkflowGenerationSubjectSchema,
+  type WorkflowGenerationSubject,
+  type WorkflowResponse,
+} from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
+
+export type { WorkflowGenerationSubject } from './m1-contracts.js';
 
 export type WorkflowGenerationResult = Outcome<WorkflowResponse, M1ServiceError>;
 
@@ -25,12 +30,6 @@ export interface WorkflowAnalyzer {
   analyze(
     request: CodexWorkflowAnalyzerRequest,
   ): Promise<Outcome<CodexWorkflowAnalyzerSuccess, CodexWorkflowAnalyzerFailure>>;
-}
-
-export interface WorkflowGenerationSubject {
-  readonly repositoryPath: string;
-  readonly task: TaskFixture;
-  readonly taskSnapshot: JsonValue;
 }
 
 const qualifiedRepositoryReference = (aliases: readonly string[]): string | null =>
@@ -65,6 +64,7 @@ const taskFromJira = (
   });
 
   return ok({
+    schemaVersion: 1,
     repositoryPath: issue.binding.repository.checkout.path,
     task,
     taskSnapshot: JsonValueSchema.parse({
@@ -87,16 +87,24 @@ export class WorkflowGenerationSubjectSource {
   public constructor(
     private readonly fixtureRepositoryPath: string,
     private readonly jiraIssueService?: JiraIssueService,
+    private readonly dynamicSubjects?: Pick<M1WorkflowService, 'readGenerationSubject'>,
   ) {}
 
   public resolve(taskReference: string): Outcome<WorkflowGenerationSubject, M1ServiceError> {
     const fixture = findTaskFixture(taskReference);
     if (fixture !== undefined) {
       return ok({
+        schemaVersion: 1,
         repositoryPath: this.fixtureRepositoryPath,
         task: fixture,
         taskSnapshot: JsonValueSchema.parse(fixture),
       });
+    }
+
+    const dynamic = this.dynamicSubjects?.readGenerationSubject(taskReference);
+    if (dynamic !== undefined) {
+      if (!dynamic.ok) return dynamic;
+      if (dynamic.value !== null) return ok(WorkflowGenerationSubjectSchema.parse(dynamic.value));
     }
 
     if (!taskReference.startsWith('jira:') || this.jiraIssueService === undefined) {

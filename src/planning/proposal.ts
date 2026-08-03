@@ -57,7 +57,6 @@ export const WaitMetadataSchema = z
   .object({
     nodeId: z.string().min(1),
     resumeAt: z.string().min(1).optional(),
-    slotPolicy: z.enum(['release', 'retain']),
     waitKind: z.string().min(1),
   })
   .strict();
@@ -191,11 +190,9 @@ const collectProposalMetadata = (source: WorkflowSource): ProposalMetadata => {
       }
 
       case 'wait': {
-        const contract = M1_WORKFLOW_CONTRACTS.waits.get(node.for);
         waits.push({
           nodeId: node.id,
           ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
-          slotPolicy: node.slotPolicy ?? contract?.slotPolicy ?? 'retain',
           waitKind: node.for,
         });
         return;
@@ -338,8 +335,7 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
             title: 'External translation policy applied',
             source: `project:${targetRepository}`,
             reason: `${targetRepository} is configured to synchronize copy through an external translator.`,
-            effect:
-              'Add extract and pull commands with a durable translation wait that releases the runner slot.',
+            effect: 'Add extract and pull commands with a durable Temporal translation wait.',
           }
         : {
             id: 'translation-policy',

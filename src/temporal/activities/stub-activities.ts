@@ -48,11 +48,13 @@ const prepareTaskWorkspace = (
 
 const executeStep = (input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult> =>
   Promise.resolve({
+    status: 'completed',
     summary: `${input.uses} completed by the T1 Temporal stub Activity`,
     predicateResults: {
       'attempt.succeeded@1': true,
     },
     artifactIds: [],
+    transcriptId: null,
   });
 
 const evaluatePredicate = (input: EvaluatePredicateInput): Promise<boolean> =>
@@ -88,9 +90,13 @@ const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] =
     },
   });
 
+const linkWorkflowContinuation: TaskWorkflowActivities['linkWorkflowContinuation'] = () =>
+  Promise.resolve({ linked: true });
+
 export const stubTaskWorkflowActivities = {
   prepareTaskWorkspace,
   executeStep,
   evaluatePredicate,
   planTaskImplementation,
+  linkWorkflowContinuation,
 } satisfies TaskWorkflowActivities;

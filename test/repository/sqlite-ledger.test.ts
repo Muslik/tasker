@@ -275,7 +275,6 @@ describe('LedgerRepository', () => {
         appendedEventCount: 1,
         lastEventSequence: 1,
         outboxCount: 1,
-        lease: null,
       },
     });
 
@@ -388,7 +387,7 @@ describe('LedgerRepository', () => {
     ledger.close();
   });
 
-  it('commits event, projection, outbox, and lease state atomically with the new fence token', () => {
+  it('commits event, projection, and outbox state atomically', () => {
     const ledger = openSqliteLedger({
       filename: withDatabasePath(),
       clock: { now: () => FIXED_NOW },
@@ -421,14 +420,8 @@ describe('LedgerRepository', () => {
           commandId: 'cmd-3',
           topic: 'dispatch',
           payload: { taskId: 'task-3' },
-          leaseKey: 'runner/task-3',
         },
       ],
-      lease: {
-        kind: 'acquire',
-        leaseKey: 'runner/task-3',
-        ownerId: 'runner-a',
-      },
     });
 
     expect(result).toEqual({
@@ -439,12 +432,6 @@ describe('LedgerRepository', () => {
         appendedEventCount: 1,
         lastEventSequence: 1,
         outboxCount: 1,
-        lease: {
-          leaseKey: 'runner/task-3',
-          ownerId: 'runner-a',
-          fenceToken: 1,
-          status: 'active',
-        },
       },
     });
     const projection = ledger.repository.readProjection('task', 'task-3');
@@ -463,255 +450,10 @@ describe('LedgerRepository', () => {
         headers: {},
         createdAt: FIXED_NOW,
         visibleAt: FIXED_NOW,
-        leaseKey: 'runner/task-3',
-        leaseFenceToken: 1,
         dispatchedAt: null,
         attempts: 0,
       },
     ]);
-    expect(ledger.repository.readLease('runner/task-3')).toEqual({
-      leaseKey: 'runner/task-3',
-      ownerId: 'runner-a',
-      fenceToken: 1,
-      status: 'active',
-      acquiredAt: FIXED_NOW,
-      renewedAt: FIXED_NOW,
-      releasedAt: null,
-      metadata: {},
-    });
-
-    ledger.close();
-  });
-
-  it('increments the fence token on replacement and rejects stale completion', () => {
-    const ledger = openSqliteLedger({
-      filename: withDatabasePath(),
-      clock: { now: () => FIXED_NOW },
-    });
-
-    const firstAcquire = ledger.repository.transact({
-      lease: {
-        kind: 'acquire',
-        leaseKey: 'runner/task-4',
-        ownerId: 'runner-a',
-      },
-    });
-    const secondAcquire = ledger.repository.transact({
-      lease: {
-        kind: 'acquire',
-        leaseKey: 'runner/task-4',
-        ownerId: 'runner-b',
-      },
-    });
-
-    expect(firstAcquire).toEqual({
-      ok: true,
-      value: {
-        aggregateId: null,
-        aggregateVersion: null,
-        appendedEventCount: 0,
-        lastEventSequence: null,
-        outboxCount: 0,
-        lease: {
-          leaseKey: 'runner/task-4',
-          ownerId: 'runner-a',
-          fenceToken: 1,
-          status: 'active',
-        },
-      },
-    });
-    expect(secondAcquire).toEqual({
-      ok: true,
-      value: {
-        aggregateId: null,
-        aggregateVersion: null,
-        appendedEventCount: 0,
-        lastEventSequence: null,
-        outboxCount: 0,
-        lease: {
-          leaseKey: 'runner/task-4',
-          ownerId: 'runner-b',
-          fenceToken: 2,
-          status: 'active',
-        },
-      },
-    });
-
-    const staleRelease = ledger.repository.transact({
-      lease: {
-        kind: 'release',
-        leaseKey: 'runner/task-4',
-        ownerId: 'runner-a',
-        expectedFenceToken: 1,
-      },
-      outbox: [
-        {
-          commandId: 'cmd-stale',
-          topic: 'complete',
-          payload: { leaseKey: 'runner/task-4' },
-        },
-      ],
-    });
-
-    expect(staleRelease).toEqual({
-      ok: false,
-      error: {
-        kind: 'stale_fence',
-        leaseKey: 'runner/task-4',
-        expectedFenceToken: 1,
-        actualFenceToken: 2,
-        actualOwnerId: 'runner-b',
-        actualStatus: 'active',
-      },
-    });
-    expect(ledger.repository.readLease('runner/task-4')).toEqual({
-      leaseKey: 'runner/task-4',
-      ownerId: 'runner-b',
-      fenceToken: 2,
-      status: 'active',
-      acquiredAt: FIXED_NOW,
-      renewedAt: FIXED_NOW,
-      releasedAt: null,
-      metadata: {},
-    });
-    expect(ledger.repository.listOutbox()).toHaveLength(0);
-
-    ledger.close();
-  });
-
-  it('rejects a fenced-out runner completion before any durable mutation becomes visible', () => {
-    const ledger = openSqliteLedger({
-      filename: withDatabasePath(),
-      clock: { now: () => FIXED_NOW },
-    });
-
-    expect(
-      ledger.repository.transact({
-        aggregate: {
-          aggregateId: 'task-5',
-          expectedVersion: 0,
-          events: [
-            {
-              eventId: 'evt-5-seed',
-              eventType: 'TaskCreated',
-              eventSchemaVersion: 1,
-              payload: { taskId: 'task-5' },
-            },
-          ],
-        },
-        lease: {
-          kind: 'acquire',
-          leaseKey: 'runner/task-5',
-          ownerId: 'runner-a',
-        },
-      }),
-    ).toEqual({
-      ok: true,
-      value: {
-        aggregateId: 'task-5',
-        aggregateVersion: 1,
-        appendedEventCount: 1,
-        lastEventSequence: 1,
-        outboxCount: 0,
-        lease: {
-          leaseKey: 'runner/task-5',
-          ownerId: 'runner-a',
-          fenceToken: 1,
-          status: 'active',
-        },
-      },
-    });
-
-    expect(
-      ledger.repository.transact({
-        lease: {
-          kind: 'acquire',
-          leaseKey: 'runner/task-5',
-          ownerId: 'runner-b',
-        },
-      }),
-    ).toEqual({
-      ok: true,
-      value: {
-        aggregateId: null,
-        aggregateVersion: null,
-        appendedEventCount: 0,
-        lastEventSequence: null,
-        outboxCount: 0,
-        lease: {
-          leaseKey: 'runner/task-5',
-          ownerId: 'runner-b',
-          fenceToken: 2,
-          status: 'active',
-        },
-      },
-    });
-
-    const staleCompletion = ledger.repository.transact({
-      fenceGuard: {
-        leaseKey: 'runner/task-5',
-        ownerId: 'runner-a',
-        expectedFenceToken: 1,
-      },
-      aggregate: {
-        aggregateId: 'task-5',
-        expectedVersion: 1,
-        events: [
-          {
-            eventId: 'evt-5-complete',
-            eventType: 'TaskCompleted',
-            eventSchemaVersion: 1,
-            payload: { taskId: 'task-5' },
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: 'task',
-          projectionId: 'task-5',
-          payload: { status: 'completed' },
-        },
-      ],
-      outbox: [
-        {
-          commandId: 'cmd-5-complete',
-          topic: 'complete',
-          payload: { taskId: 'task-5' },
-          leaseKey: 'runner/task-5',
-        },
-      ],
-    });
-
-    expect(staleCompletion).toEqual({
-      ok: false,
-      error: {
-        kind: 'stale_fence',
-        leaseKey: 'runner/task-5',
-        expectedFenceToken: 1,
-        actualFenceToken: 2,
-        actualOwnerId: 'runner-b',
-        actualStatus: 'active',
-      },
-    });
-    expect(ledger.repository.readAggregateHead('task-5')).toEqual({
-      aggregateId: 'task-5',
-      version: 1,
-      updatedAt: FIXED_NOW,
-    });
-    expect(ledger.repository.listEvents('task-5')).toHaveLength(1);
-    expect(ledger.repository.readProjection('task', 'task-5')).toBeNull();
-    expect(ledger.repository.listOutbox()).toHaveLength(0);
-    expect(ledger.repository.readLease('runner/task-5')).toEqual({
-      leaseKey: 'runner/task-5',
-      ownerId: 'runner-b',
-      fenceToken: 2,
-      status: 'active',
-      acquiredAt: FIXED_NOW,
-      renewedAt: FIXED_NOW,
-      releasedAt: null,
-      metadata: {},
-    });
 
     ledger.close();
   });

@@ -34,7 +34,13 @@ const SnapshottedExecutionSchema = z.discriminatedUnion('kind', [
       prompt: SnapshottedPromptSchema,
     })
     .strict(),
-  z.object({ kind: z.literal('process'), executor: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal('process'),
+      executor: z.string().min(1),
+      command: z.string().min(1),
+    })
+    .strict(),
   z.object({ kind: z.literal('integration'), adapter: z.string().min(1) }).strict(),
 ]);
 

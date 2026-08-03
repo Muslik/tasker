@@ -15,9 +15,9 @@ Workflow code.
 | Surface | Target/current location | Change it for |
 |---|---|---|
 | Workflow IR/compiler/validator | `src/workflow/` | generic graph syntax, hashes, ABI, deterministic invariants |
-| Temporal interpreter | `src/temporal/workflows/` (target) | genuinely new generic control-flow semantics only |
+| Temporal interpreter | `src/temporal/workflows/` | genuinely new generic control-flow semantics only |
 | Block catalog | `src/harness/step-definitions.ts` today | versioned task capabilities and Activity bindings |
-| Activities/executors | `src/temporal/activities/` (target) | provider, process, or integration execution |
+| Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
 | Agent prompts | `harness/prompts/` | readable analyzer/planner/step instructions |
 | Company policy | `harness/company.json` | reusable organization-wide workflow facts |
 | Project workflow policy | `harness/projects/*/project.json` | repository-specific translation/test/publication facts |
@@ -83,6 +83,11 @@ To add `fill-test-ops-plan`:
 This must not require changes to the generic interpreter, task queue, Temporal Client,
 operator layout, or another block. If it does, first prove that the behavior is a new
 generic control-flow concept rather than an ordinary task step.
+
+For a `process` block, add its executor key and command to the relevant versioned
+`processCommands` map in company or project policy. The analyzer sees the available
+block; execution uses the command captured in that run's immutable snapshot. Do not add
+step-name branching to an Activity.
 
 ### Block outcome contract
 
@@ -223,11 +228,10 @@ Reproduction or implementation may discover a shared component, translation proc
 or additional verification requirement. The Activity returns
 `workflow_change_required`; it does not edit Workflow state itself.
 
-Tasker asks the analyzer for a validated continuation:
-
-- same repository and lifecycle: append a bounded graph revision in the same Workflow;
-- separate repository/worktree/publication lifecycle: start a Child Workflow and wait
-  on a typed join.
+Tasker asks the analyzer for a validated continuation and starts the accepted graph as
+a Child Workflow. The parent keeps its completed prefix immutable and waits on a typed
+join. A different repository may additionally require its own managed worktree and
+publication lifecycle, but does not change this control-flow rule.
 
 During the pilot every revision is reviewable. Later known low-risk classes may be
 auto-accepted by policy, but deterministic validation never becomes optional.

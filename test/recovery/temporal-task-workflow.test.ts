@@ -13,6 +13,7 @@ import {
   type TaskWorkflowActivities,
   type TaskWorkflowPublicState,
 } from '../../src/temporal/index.js';
+import { JsonValueSchema } from '../../src/workflow/index.js';
 
 const workflowsPath = fileURLToPath(
   new URL('../../src/temporal/workflows/task-workflow.ts', import.meta.url),
@@ -111,9 +112,11 @@ describe('Temporal task workflow', () => {
     await startWorker({
       executeStep: (input) =>
         Promise.resolve({
+          status: 'completed',
           summary: `${input.uses} completed`,
           predicateResults: { 'attempt.succeeded@1': true },
           artifactIds: [],
+          transcriptId: null,
         }),
       evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? true),
     });
@@ -155,9 +158,11 @@ describe('Temporal task workflow', () => {
     await startWorker({
       executeStep: (input) =>
         Promise.resolve({
+          status: 'completed',
           summary: `${input.uses} completed after worker replacement`,
           predicateResults: { 'attempt.succeeded@1': true },
           artifactIds: [],
+          transcriptId: null,
         }),
       evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? true),
     });
@@ -373,5 +378,128 @@ describe('Temporal task workflow', () => {
     expect(new Set(commands.map((command) => command.snapshotChecksum))).toEqual(
       new Set(['0'.repeat(64)]),
     );
+  }, 30_000);
+
+  it('links an accepted workflow change as a recoverable Temporal child workflow', async () => {
+    const parentTask = `continuation-parent-${String(Date.now())}`;
+    const childTask = `continuation-child-${String(Date.now())}`;
+    const childInput = workflowInput('avia-13236-short-bug', childTask, 'automatic');
+    const links: { parentTaskReference: string; childTaskReference: string; childRunId: string }[] =
+      [];
+    const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] = async (
+      input,
+    ) => {
+      const stub = await stubTaskWorkflowActivities.planTaskImplementation(input);
+      return input.taskReference === parentTask && input.command.kind === 'initial'
+        ? {
+            ...stub,
+            status: 'workflow_change_required',
+            artifactId: `workflow-change:${parentTask}`,
+            request: {
+              reason: 'The defect belongs to a shared component repository.',
+              discoveredRepositories: ['twiket/ui-kit'],
+              requiredCapabilities: ['repository.read', 'workspace.write'],
+              evidence: ['reproduction:before'],
+            },
+          }
+        : stub;
+    };
+    const activities: Partial<TaskWorkflowActivities> = {
+      planTaskImplementation,
+      linkWorkflowContinuation: (input) => {
+        links.push(input);
+        return Promise.resolve({ linked: true });
+      },
+    };
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker(activities);
+    const started = await service.start(
+      workflowInput('avia-12536-feature-review', parentTask, 'automatic'),
+    );
+    expect(started.ok).toBe(true);
+
+    const review = await waitForWait(service, parentTask, 'workflow_change.review@1');
+    expect(review.workflowChange).toMatchObject({
+      artifactId: `workflow-change:${parentTask}`,
+      request: { discoveredRepositories: ['twiket/ui-kit'] },
+    });
+    const accepted = await service.resolveWait(parentTask, {
+      nodeId: review.currentNodeId ?? 'analyze-task',
+      waitKind: 'workflow_change.review@1',
+      resolution: JsonValueSchema.parse({
+        decision: 'accept',
+        continuationId: `${review.runId}:continuation-1`,
+        taskReference: childTask,
+        workflowHash: childInput.workflowHash,
+        graph: childInput.graph,
+        settings: childInput.settings,
+      }),
+    });
+    expect(accepted.ok).toBe(true);
+    await waitForWait(service, childTask, 'code_review@1');
+    expect(links).toEqual([
+      expect.objectContaining({
+        parentTaskReference: parentTask,
+        childTaskReference: childTask,
+      }),
+    ]);
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker(activities);
+    const childReview = await waitForWait(service, childTask, 'code_review@1');
+    if (childReview.status !== 'waiting') throw new Error('Expected child code review wait');
+    const completedChild = await service.resolveWait(childTask, {
+      nodeId: childReview.wait.nodeId,
+      waitKind: childReview.wait.waitKind,
+      resolution: { decision: 'done' },
+    });
+    expect(completedChild.ok).toBe(true);
+    await expect
+      .poll(async () => (await requireState(service, parentTask)).status)
+      .toBe('completed');
+  }, 30_000);
+
+  it('replays persisted history without carrying accidental vendor payloads', async () => {
+    const taskReference = `history-replay-${String(Date.now())}`;
+    const forbiddenPayload = 'jira-token-must-not-enter-temporal-history';
+    const input = workflowInput('avia-13236-short-bug', taskReference, 'automatic');
+    await expect(
+      service.start({
+        ...input,
+        // This models an untyped integration accidentally passing its whole vendor
+        // envelope. The client boundary must reject it before writing history.
+        vendorPayload: { authorization: forbiddenPayload },
+      } as unknown as typeof input),
+    ).rejects.toThrow(/vendorPayload/u);
+
+    const started = await service.start(input);
+    expect(started.ok).toBe(true);
+
+    const review = await waitForWait(service, taskReference, 'code_review@1');
+    if (review.status !== 'waiting') throw new Error('Expected code review wait');
+    const completed = await service.resolveWait(taskReference, {
+      nodeId: review.wait.nodeId,
+      waitKind: review.wait.waitKind,
+      resolution: { decision: 'done' },
+    });
+    expect(completed.ok).toBe(true);
+    await expect
+      .poll(async () => (await requireState(service, taskReference)).status)
+      .toBe('completed');
+
+    const history = await environment.client.workflow
+      .getHandle(`tasker:${taskReference}`)
+      .fetchHistory();
+    const serializedHistory = JSON.stringify(history, (_key, value: unknown) =>
+      value instanceof Uint8Array ? Buffer.from(value).toString('utf8') : value,
+    );
+
+    expect(serializedHistory).not.toContain(forbiddenPayload);
+    await expect(
+      Worker.runReplayHistory({ workflowsPath }, history, `tasker:${taskReference}`),
+    ).resolves.toBeUndefined();
   }, 30_000);
 });

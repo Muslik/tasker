@@ -8,5 +8,9 @@
     "extractCommand": "pnpm translations:extract",
     "pullCommand": "pnpm translations:pull"
   },
+  "processCommands": {
+    "translations.extract@1": "pnpm translations:extract",
+    "translations.pull@1": "pnpm translations:pull"
+  },
   "workflowGuidance": "projects/twiket-ui-kit/workflow.md"
 }

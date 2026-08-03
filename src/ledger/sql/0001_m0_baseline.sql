@@ -53,21 +53,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   headers_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   visible_at TEXT NOT NULL,
-  lease_key TEXT,
-  lease_fence_token INTEGER,
   dispatched_at TEXT,
   attempts INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS leases (
-  lease_key TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  fence_token INTEGER NOT NULL CHECK (fence_token > 0),
-  status TEXT NOT NULL CHECK (status IN ('active', 'released')),
-  acquired_at TEXT NOT NULL,
-  renewed_at TEXT NOT NULL,
-  released_at TEXT,
-  metadata_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signals (

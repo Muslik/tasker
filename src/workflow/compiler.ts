@@ -385,7 +385,7 @@ const normalizeNode = (
       };
 
     case 'wait': {
-      const waitContract = validateWaitReference(context, node.for, [...path, 'for']);
+      validateWaitReference(context, node.for, [...path, 'for']);
 
       if (node.resumeAt !== undefined) {
         context.resumeTargets.push({
@@ -399,7 +399,6 @@ const normalizeNode = (
         kind: 'wait',
         id: node.id,
         for: node.for,
-        slotPolicy: node.slotPolicy ?? waitContract?.slotPolicy ?? 'retain',
         ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
       };
     }

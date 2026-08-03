@@ -86,6 +86,7 @@ const unavailableState = (
     temporalStatus,
     executionContext: { status: 'unavailable' },
     planning: null,
+    workflowChange: null,
     nodeStates: {},
     attempts: {},
   });

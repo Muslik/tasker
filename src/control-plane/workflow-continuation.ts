@@ -17,7 +17,7 @@ import {
   type OperatorTaskSummary,
   type WorkflowResponse,
 } from './m1-contracts.js';
-import type { ImplementationPlanningRecord } from './implementation-planning.js';
+import type { ImplementationPlanningRecord } from './implementation-planning-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import type {
   WorkflowAnalyzer,
@@ -422,6 +422,21 @@ export class WorkflowContinuationCoordinator {
       workflowChange: planning.decision.request,
       targetRepository: repository.reference,
     });
+    const savedSubject = this.workflows.saveGenerationSubject(candidateTaskReference, {
+      schemaVersion: 1,
+      repositoryPath: repository.path,
+      task: fixture,
+      taskSnapshot,
+    });
+    if (!savedSubject.ok) {
+      return this.persistRecord(
+        WorkflowContinuationRecordSchema.parse({
+          ...base,
+          status: 'failed',
+          issues: [providerFailureIssue(generationFailureMessage(savedSubject.error))],
+        }),
+      );
+    }
     const generated =
       this.analyzer === undefined
         ? this.workflows.generateContinuationTask(fixture)

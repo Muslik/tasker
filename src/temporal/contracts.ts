@@ -25,6 +25,7 @@ import {
   WorkspaceBootstrapReceiptSchema,
   WorkspaceLocatorSchema,
 } from '../workspaces/contracts.js';
+import { WorkflowChangeRequestSchema } from '../workflow/index.js';
 
 export * from './public-state.js';
 
@@ -67,24 +68,76 @@ export const ResolveTaskWaitReceiptSchema = z
   .strict()
   .readonly();
 
+export const WorkflowContinuationAcceptanceSchema = z
+  .object({
+    decision: z.literal('accept'),
+    continuationId: z.string().min(1),
+    taskReference: z.string().min(1),
+    workflowHash: z.string().min(1),
+    graph: CompiledWorkflowSchema,
+    settings: TaskWorkflowSettingsSchema,
+  })
+  .strict()
+  .readonly();
+
+export const LinkWorkflowContinuationInputSchema = z
+  .object({
+    parentTaskReference: z.string().min(1),
+    childTaskReference: z.string().min(1),
+    childRunId: z.string().min(1),
+  })
+  .strict()
+  .readonly();
+
+export const LinkWorkflowContinuationResultSchema = z
+  .object({ linked: z.literal(true) })
+  .strict()
+  .readonly();
+
 export const ExecuteTaskStepInputSchema = z
   .object({
     taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
     nodeId: z.string().min(1),
+    stepAttempt: z.number().int().positive(),
     uses: z.string().min(1),
+    workspace: WorkspaceLocatorSchema,
+    planningSnapshot: PlanningSnapshotReferenceSchema,
+    operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
     input: JsonValueSchema,
   })
   .strict()
   .readonly();
 
-export const ExecuteTaskStepResultSchema = z
-  .object({
-    summary: z.string().min(1),
+const ExecuteTaskStepResultBaseSchema = z.object({
+  summary: z.string().min(1),
+  artifactIds: z.array(z.string().min(1)),
+  transcriptId: z.string().min(1).nullable(),
+});
+
+export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
+  ExecuteTaskStepResultBaseSchema.extend({
+    status: z.literal('completed'),
     predicateResults: z.record(z.string(), z.boolean()),
-    artifactIds: z.array(z.string().min(1)),
   })
-  .strict()
-  .readonly();
+    .strict()
+    .readonly(),
+  ExecuteTaskStepResultBaseSchema.extend({
+    status: z.literal('blocked'),
+    waitKind: z.string().min(1),
+  })
+    .strict()
+    .readonly(),
+  ExecuteTaskStepResultBaseSchema.extend({
+    status: z.literal('workflow_change_required'),
+    request: WorkflowChangeRequestSchema,
+    predicateResults: z.record(z.string(), z.boolean()).default({}),
+  })
+    .strict()
+    .readonly(),
+]);
 
 export const EvaluatePredicateInputSchema = z
   .object({
@@ -151,6 +204,9 @@ export type TaskWorkflowInput = z.infer<typeof TaskWorkflowInputSchema>;
 export type TaskWorkflowMemo = z.infer<typeof TaskWorkflowMemoSchema>;
 export type ResolveTaskWaitCommand = z.infer<typeof ResolveTaskWaitCommandSchema>;
 export type ResolveTaskWaitReceipt = z.infer<typeof ResolveTaskWaitReceiptSchema>;
+export type WorkflowContinuationAcceptance = z.infer<typeof WorkflowContinuationAcceptanceSchema>;
+export type LinkWorkflowContinuationInput = z.infer<typeof LinkWorkflowContinuationInputSchema>;
+export type LinkWorkflowContinuationResult = z.infer<typeof LinkWorkflowContinuationResultSchema>;
 export type ExecuteTaskStepInput = z.infer<typeof ExecuteTaskStepInputSchema>;
 export type ExecuteTaskStepResult = z.infer<typeof ExecuteTaskStepResultSchema>;
 export type EvaluatePredicateInput = z.infer<typeof EvaluatePredicateInputSchema>;
@@ -165,6 +221,9 @@ export interface TaskWorkflowActivities {
   executeStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   evaluatePredicate(input: EvaluatePredicateInput): Promise<boolean>;
   planTaskImplementation(input: PlanTaskImplementationInput): Promise<TaskWorkflowPlanningState>;
+  linkWorkflowContinuation(
+    input: LinkWorkflowContinuationInput,
+  ): Promise<LinkWorkflowContinuationResult>;
 }
 
 export interface TaskWorkflowResult {
