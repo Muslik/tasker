@@ -26,10 +26,20 @@ import {
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
 import {
+  loadWorkspaceConfiguration,
+  loadWorkspaceBootstrapConfiguration,
+  CommandWorkspaceBootstrapAdapter,
+  ManagedWorkspaceManager,
+  WorkspaceBootstrapCoordinator,
+  WorkspaceBootstrapStore,
+  WorkspaceStore,
+} from '../workspaces/index.js';
+import {
   createPlanningActivity,
   createTemporalActivityCommandRunner,
 } from './activities/planning-activity.js';
 import { stubTaskWorkflowActivities } from './activities/stub-activities.js';
+import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
 
@@ -78,9 +88,19 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
           createTemporalActivityCommandRunner(nodeCommandRunner, planningTranscripts),
         ),
   });
+  const workspaces = new ManagedWorkspaceManager(
+    loadWorkspaceConfiguration(),
+    new WorkspaceStore(ledger.repository, systemClock),
+    nodeCommandRunner,
+  );
+  const bootstrap = new WorkspaceBootstrapCoordinator(
+    new WorkspaceBootstrapStore(ledger.repository),
+    new CommandWorkspaceBootstrapAdapter(loadWorkspaceBootstrapConfiguration(), nodeCommandRunner),
+  );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {
       ...stubTaskWorkflowActivities,
+      ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
       ...createPlanningActivity(planning),
     });
     try {

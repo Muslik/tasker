@@ -13,6 +13,7 @@ import {
 import { loadHarnessPack, type LoadedHarnessPack } from '../../src/harness/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
 import { ImplementationPlanningDecisionSchema } from '../../src/planning/implementation-plan.js';
+import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
 import {
   DeterministicImplementationPlanner,
   type ImplementationPlanner,
@@ -239,7 +240,13 @@ describe('implementation planning recovery', () => {
         planner: new DeterministicImplementationPlanner(),
         harnessPack: originalPack,
       });
-      const snapshot = snapshotCoordinator.createRunSnapshot('avia-13236-short-bug', workflowHash);
+      const subject = subjects.resolve('avia-13236-short-bug');
+      if (!subject.ok) throw new Error(`Subject failed: ${subject.error.kind}`);
+      const snapshot = snapshotCoordinator.createRunSnapshot('avia-13236-short-bug', workflowHash, {
+        workspaceId: '0'.repeat(24),
+        reference: subject.value.task.repository,
+        path: directory,
+      });
       if (!snapshot.ok) throw new Error(`Snapshot failed: ${snapshot.error.kind}`);
 
       const changedContent = `${originalPack.prompts.implementationPlanner.content}\nchanged later`;
@@ -285,6 +292,53 @@ describe('implementation planning recovery', () => {
       });
       expect(observedPrompt).toBe(originalPack.prompts.implementationPlanner.content);
       expect(observedPrompt).not.toBe(changedContent);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('creates a distinct immutable snapshot for each managed workspace', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-workspace-snapshot-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      const workflowHash = generated.value.view.workflow.graphHash;
+      if (workflowHash === null) throw new Error('Expected a compiled workflow hash');
+      const subjects = new WorkflowGenerationSubjectSource(directory);
+      const subject = subjects.resolve('avia-13236-short-bug');
+      if (!subject.ok) throw new Error(`Subject failed: ${subject.error.kind}`);
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects,
+        planner: new DeterministicImplementationPlanner(),
+      });
+
+      const first = coordinator.createRunSnapshot('avia-13236-short-bug', workflowHash, {
+        workspaceId: '0'.repeat(24),
+        reference: subject.value.task.repository,
+        path: join(directory, 'worktree-1'),
+      });
+      const second = coordinator.createRunSnapshot('avia-13236-short-bug', workflowHash, {
+        workspaceId: '1'.repeat(24),
+        reference: subject.value.task.repository,
+        path: join(directory, 'worktree-2'),
+      });
+
+      if (!first.ok || !second.ok) throw new Error('Expected both snapshots to succeed');
+      expect(second.value.artifactId).not.toBe(first.value.artifactId);
+      const secondArtifact = ledger.repository.readArtifact(second.value.artifactId);
+      if (secondArtifact === null) throw new Error('Expected second snapshot artifact');
+      expect(RunPlanningSnapshotSchema.parse(secondArtifact.payload).repository).toEqual({
+        workspaceId: '1'.repeat(24),
+        reference: subject.value.task.repository,
+        path: join(directory, 'worktree-2'),
+      });
     } finally {
       ledger.close();
       rmSync(directory, { recursive: true, force: true });

@@ -38,5 +38,30 @@ export const WorkspaceLocatorSchema = z
   .strict()
   .readonly();
 
+export const WorkspaceBootstrapReceiptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    operationId: z.string().min(1),
+    workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
+    adapterId: z.string().min(1),
+    adapterVersion: z.string().min(1),
+    profile: z.string().min(1),
+    files: z.array(
+      z
+        .object({
+          relativePath: z
+            .string()
+            .min(1)
+            .refine((value) => !value.startsWith('/') && !value.split('/').includes('..')),
+          sha256: ContentHashSchema,
+        })
+        .strict(),
+    ),
+    completedAt: z.iso.datetime(),
+  })
+  .strict()
+  .readonly();
+
 export type PrepareWorkspaceRequest = z.infer<typeof PrepareWorkspaceRequestSchema>;
 export type WorkspaceLocator = z.infer<typeof WorkspaceLocatorSchema>;
+export type WorkspaceBootstrapReceipt = z.infer<typeof WorkspaceBootstrapReceiptSchema>;

@@ -7,10 +7,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { nodeCommandRunner } from '../../src/providers/command-runner.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
+import { err, ok } from '../../src/shared/outcome.js';
 import {
   ManagedWorkspaceManager,
+  WorkspaceBootstrapCoordinator,
+  WorkspaceBootstrapStore,
   WorkspaceStore,
   type PrepareWorkspaceRequest,
+  type WorkspaceBootstrapReceipt,
   type WorkspaceConfiguration,
 } from '../../src/workspaces/index.js';
 
@@ -151,5 +155,58 @@ describe('managed workspace recovery', () => {
         repositoryStorePath: realpathSync(configuration.repositoryStorePath),
       },
     });
+  });
+
+  it('reconciles bootstrap output after the adapter response was lost', async () => {
+    const { clock, ledger, configuration, request } = setup();
+    const manager = new ManagedWorkspaceManager(
+      configuration,
+      new WorkspaceStore(ledger.repository, clock),
+      nodeCommandRunner,
+    );
+    const workspace = await manager.prepare(request);
+    if (!workspace.ok) throw new Error(workspace.error.kind);
+    let externalReceipt: WorkspaceBootstrapReceipt | null = null;
+    let applyCalls = 0;
+    const adapter = {
+      inspect: () =>
+        Promise.resolve(
+          externalReceipt === null
+            ? ok({ status: 'absent' as const })
+            : ok({ status: 'ready' as const, receipt: externalReceipt }),
+        ),
+      apply: (_workspace: typeof workspace.value, operationId: string) => {
+        applyCalls += 1;
+        externalReceipt = {
+          schemaVersion: 1,
+          operationId,
+          workspaceId: workspace.value.workspaceId,
+          adapterId: 'response-loss-test',
+          adapterVersion: '1',
+          profile: 'fixture',
+          files: [],
+          completedAt: clock.now(),
+        };
+        return Promise.resolve(
+          err({
+            kind: 'adapter_failed' as const,
+            phase: 'apply' as const,
+            message: 'response lost after apply',
+            retryable: true,
+          }),
+        );
+      },
+    };
+    const store = new WorkspaceBootstrapStore(ledger.repository);
+    const first = await new WorkspaceBootstrapCoordinator(store, adapter).prepare(workspace.value);
+    expect(first).toMatchObject({ ok: false, error: { kind: 'adapter_failed' } });
+
+    const recovered = await new WorkspaceBootstrapCoordinator(store, adapter).prepare(
+      workspace.value,
+    );
+
+    expect(recovered).toEqual(ok(externalReceipt));
+    expect(applyCalls).toBe(1);
+    expect(store.read(workspace.value.workspaceId)).toEqual(recovered);
   });
 });

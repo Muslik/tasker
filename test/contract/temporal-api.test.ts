@@ -28,6 +28,46 @@ class ContractTemporalRunService implements TaskTemporalRunService {
 
   public constructor(private readonly startsWithQuestion = false) {}
 
+  private executionContext(
+    input: StartTaskWorkflowInput,
+  ): TaskWorkflowPublicState['executionContext'] {
+    const workspaceId = '0'.repeat(24);
+    return {
+      status: 'ready',
+      workspace: {
+        schemaVersion: 1,
+        workspaceId,
+        taskReference: input.taskReference,
+        workflowId: `tasker:${input.taskReference}`,
+        workflowRunId: `run:${input.taskReference}`,
+        workflowHash: input.workflowHash,
+        repository: {
+          reference: 'contract/repository',
+          sourcePath: '/tasker/repositories/contract',
+          baseCommit: '0'.repeat(40),
+        },
+        runnerId: 'contract',
+        path: '/tasker/worktrees/contract',
+        branch: `tasker/${input.taskReference}`,
+        preparedAt: '2026-08-03T00:00:00.000Z',
+      },
+      bootstrap: {
+        schemaVersion: 1,
+        operationId: `workspace:${workspaceId}:bootstrap@1`,
+        workspaceId,
+        adapterId: 'contract',
+        adapterVersion: '1',
+        profile: 'contract',
+        files: [],
+        completedAt: '2026-08-03T00:00:00.000Z',
+      },
+      planningSnapshot: {
+        artifactId: `planning-snapshot:${input.taskReference}`,
+        checksum: '0'.repeat(64),
+      },
+    };
+  }
+
   private planning(
     input: Pick<StartTaskWorkflowInput, 'taskReference' | 'settings'>,
     status: 'ready' | 'needs_clarification',
@@ -93,6 +133,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       runId: `run:${input.taskReference}`,
       workflowHash: input.workflowHash,
       settings: input.settings,
+      executionContext: this.executionContext(input),
       planning: this.startsWithQuestion ? this.planning(input, 'needs_clarification', 1) : null,
       status: 'waiting',
       currentNodeId: wait.nodeId,

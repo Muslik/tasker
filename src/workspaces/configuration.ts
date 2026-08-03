@@ -9,6 +9,10 @@ export interface WorkspaceConfiguration {
   readonly runnerId: string;
 }
 
+export interface WorkspaceBootstrapConfiguration {
+  readonly command: string | null;
+}
+
 export const defaultWorkspaceStorePath = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -29,4 +33,10 @@ export const loadWorkspaceConfiguration = (
   repositoryStorePath: defaultRepositoryStorePath(environment),
   workspaceStorePath: defaultWorkspaceStorePath(environment),
   runnerId: environment.TASKER_RUNNER_ID?.trim() || 'local',
+});
+
+export const loadWorkspaceBootstrapConfiguration = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): WorkspaceBootstrapConfiguration => ({
+  command: environment.TASKER_WORKSPACE_BOOTSTRAP_COMMAND?.trim() || null,
 });

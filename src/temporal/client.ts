@@ -7,7 +7,6 @@ import {
 } from '@temporalio/client';
 
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import type { PlanningSnapshotSource } from '../planning/run-planning-snapshot.js';
 import {
   TASKER_TEMPORAL_TASK_QUEUE,
   TASK_WORKFLOW_SCHEMA_VERSION,
@@ -27,7 +26,6 @@ import type { TemporalRunRegistry } from './run-registry.js';
 export type TemporalRunError =
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
   | { readonly kind: 'run_settings_conflict'; readonly taskReference: string }
-  | { readonly kind: 'planning_snapshot_unavailable'; readonly message: string }
   | { readonly kind: 'runtime_unavailable'; readonly message: string };
 
 export interface TaskTemporalRunService {
@@ -86,6 +84,7 @@ const unavailableState = (
     outcome: null,
     reason,
     temporalStatus,
+    executionContext: { status: 'unavailable' },
     planning: null,
     nodeStates: {},
     attempts: {},
@@ -104,32 +103,14 @@ export class TemporalTaskRunService implements TaskTemporalRunService {
     private readonly client: Client,
     private readonly configuration: TemporalClientConfiguration = DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
     private readonly registry?: TemporalRunRegistry,
-    private readonly planningSnapshots?: PlanningSnapshotSource,
   ) {}
 
   public async start(
     input: StartTaskWorkflowInput,
   ): Promise<Outcome<TaskWorkflowPublicState, TemporalRunError>> {
-    if (this.planningSnapshots === undefined) {
-      return err({
-        kind: 'planning_snapshot_unavailable',
-        message: 'The Temporal runtime has no planning snapshot source',
-      });
-    }
-    const planningSnapshot = this.planningSnapshots.createRunSnapshot(
-      input.taskReference,
-      input.workflowHash,
-    );
-    if (!planningSnapshot.ok) {
-      return err({
-        kind: 'planning_snapshot_unavailable',
-        message: `Planning snapshot failed: ${planningSnapshot.error.kind}`,
-      });
-    }
     const workflowInput = TaskWorkflowInputSchema.parse({
       ...input,
       schemaVersion: TASK_WORKFLOW_SCHEMA_VERSION,
-      planningSnapshot: planningSnapshot.value,
     });
     const memo = memoFrom(input);
 
@@ -245,7 +226,6 @@ export class TemporalTaskRunService implements TaskTemporalRunService {
 export const connectTemporalTaskRunService = async (
   configuration: TemporalClientConfiguration = DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
   registry?: TemporalRunRegistry,
-  planningSnapshots?: PlanningSnapshotSource,
 ): Promise<{ readonly connection: Connection; readonly service: TemporalTaskRunService }> => {
   const connection = await Connection.connect({ address: configuration.address });
   return {
@@ -254,7 +234,6 @@ export const connectTemporalTaskRunService = async (
       new Client({ connection, namespace: configuration.namespace }),
       configuration,
       registry,
-      planningSnapshots,
     ),
   };
 };

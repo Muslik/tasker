@@ -196,8 +196,6 @@ const sendTemporalRunError = (reply: FastifyReply, error: TemporalRunError): Fas
       return reply
         .code(409)
         .send(apiError(error.kind, 'This run already exists with different immutable settings'));
-    case 'planning_snapshot_unavailable':
-      return reply.code(503).send(apiError(error.kind, error.message));
     case 'runtime_unavailable':
       return reply.code(503).send(apiError(error.kind, error.message));
   }

@@ -162,6 +162,12 @@ T2 exit gate:
 
 Build the first real repository-changing vertical slice without remote mutation.
 
+Implementation status on 2026-08-03: deterministic application-data worktrees,
+durable locator/bootstrap receipts, target-aware `inspect`/`apply` bootstrap protocol,
+the heartbeat-enabled Temporal preparation Activity, worktree-based immutable planning
+snapshot, and recoverable `workspace.retry@1` wait are complete. A compatible external
+company bootstrap executable and real agent/process block execution remain.
+
 ### 6.1 Repository lifecycle
 
 1. Resolve repository from explicit Tasker selection, future Jira field, or

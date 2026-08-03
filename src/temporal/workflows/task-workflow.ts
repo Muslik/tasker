@@ -42,6 +42,17 @@ const planningActivities = proxyActivities<Pick<TaskWorkflowActivities, 'planTas
   },
 });
 
+const workspaceActivities = proxyActivities<Pick<TaskWorkflowActivities, 'prepareTaskWorkspace'>>({
+  startToCloseTimeout: '5 minutes',
+  scheduleToCloseTimeout: '30 minutes',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
+    maximumAttempts: 3,
+  },
+});
+
 type MutableNodeStates = Record<string, TemporalNodeStatus>;
 type MutableAttempts = Record<string, number>;
 type PredicateFacts = Record<string, boolean>;
@@ -167,6 +178,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     runId: execution.runId,
     workflowHash: input.workflowHash,
     settings: input.settings,
+    executionContext: { status: 'preparing' },
     planning: null,
     status: 'running',
     currentNodeId: null,
@@ -199,6 +211,9 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return planReviewFrom(command.resolution) !== null;
       }
       if (state.wait.waitKind === 'planning.retry@1') {
+        return retryResolution(command.resolution);
+      }
+      if (state.wait.waitKind === 'workspace.retry@1') {
         return retryResolution(command.resolution);
       }
       if (state.wait.waitKind === 'workflow_change.review@1') {
@@ -263,6 +278,10 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     node: PlanningStepNode,
     initialCommand: PlanningActivityCommand,
   ): Promise<void> => {
+    if (state.executionContext.status !== 'ready') {
+      throw ApplicationFailure.nonRetryable('Planning has no prepared execution context');
+    }
+    const planningSnapshot = state.executionContext.planningSnapshot;
     let command = initialCommand;
 
     for (;;) {
@@ -276,7 +295,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
           result = await planningActivities.planTaskImplementation({
             taskReference: input.taskReference,
             workflowHash: input.workflowHash,
-            planningSnapshot: input.planningSnapshot,
+            planningSnapshot,
             nodeId: node.id,
             commandId,
             requestedStrategy: input.settings.planningStrategy,
@@ -320,6 +339,38 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     }
   };
 
+  const ensureExecutionContext = async (nodeId: string): Promise<void> => {
+    if (state.executionContext.status === 'ready') return;
+
+    for (;;) {
+      markRunning(nodeId);
+      try {
+        const prepared = await workspaceActivities.prepareTaskWorkspace({
+          taskReference: input.taskReference,
+          workflowId: execution.workflowId,
+          workflowRunId: execution.runId,
+          workflowHash: input.workflowHash,
+        });
+        state = {
+          ...state,
+          executionContext: {
+            status: 'ready',
+            workspace: prepared.workspace,
+            bootstrap: prepared.bootstrap,
+            planningSnapshot: prepared.planningSnapshot,
+          },
+        };
+        return;
+      } catch (error) {
+        if (isCancellation(error)) throw error;
+        const retry = await openWait(nodeId, 'workspace.retry@1');
+        if (!retryResolution(retry)) {
+          throw ApplicationFailure.nonRetryable('Workspace retry wait received invalid payload');
+        }
+      }
+    }
+  };
+
   const evaluate = async (reference: string): Promise<boolean> => {
     const known = predicateFacts[reference];
     if (known !== undefined) return known;
@@ -349,6 +400,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       case 'step': {
         if (node.uses === 'task.analyze@1') {
           planningNode = node;
+          await ensureExecutionContext(node.id);
           await executePlanning(node, { kind: 'initial' });
           return { kind: 'continue' };
         }

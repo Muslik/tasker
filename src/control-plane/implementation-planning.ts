@@ -18,6 +18,7 @@ import {
   PlanningSnapshotReferenceSchema,
   RunPlanningSnapshotSchema,
   type PlanningSnapshotReference,
+  type PlanningSnapshotWorkspace,
   type RunPlanningSnapshot,
 } from '../planning/run-planning-snapshot.js';
 import type {
@@ -184,7 +185,7 @@ export class ImplementationPlanningStore {
     snapshotInput: RunPlanningSnapshot,
   ): Outcome<PlanningSnapshotReference, ImplementationPlanningStoreError> {
     const snapshot = RunPlanningSnapshotSchema.parse(snapshotInput);
-    const artifactId = `planning-snapshot:${snapshot.taskReference}:${snapshot.workflowHash}`;
+    const artifactId = `planning-snapshot:${snapshot.taskReference}:${snapshot.repository.workspaceId}:${snapshot.workflowHash}`;
     const existing = this.ledger.readArtifact(artifactId);
     if (existing !== null) {
       const parsed = RunPlanningSnapshotSchema.safeParse(existing.payload);
@@ -199,7 +200,7 @@ export class ImplementationPlanningStore {
           });
     }
 
-    const aggregateId = `planning-snapshot:${snapshot.taskReference}:${snapshot.workflowHash}`;
+    const aggregateId = artifactId;
     const result = this.ledger.transact({
       aggregate: {
         aggregateId,
@@ -540,6 +541,12 @@ export type ImplementationPlanningError =
   | { readonly kind: 'subject'; readonly error: M1ServiceError }
   | { readonly kind: 'workflow_not_ready'; readonly taskReference: string }
   | {
+      readonly kind: 'workspace_repository_mismatch';
+      readonly taskReference: string;
+      readonly expectedReference: string;
+      readonly actualReference: string;
+    }
+  | {
       readonly kind: 'workflow_snapshot_mismatch';
       readonly taskReference: string;
       readonly expectedHash: string;
@@ -659,9 +666,18 @@ export class ImplementationPlanningCoordinator {
   public createRunSnapshot(
     taskReference: string,
     expectedWorkflowHash: string,
+    workspace: PlanningSnapshotWorkspace,
   ): Outcome<PlanningSnapshotReference, ImplementationPlanningError> {
     const subject = this.subjects.resolve(taskReference);
     if (!subject.ok) return err({ kind: 'subject', error: subject.error });
+    if (subject.value.task.repository !== workspace.reference) {
+      return err({
+        kind: 'workspace_repository_mismatch',
+        taskReference,
+        expectedReference: subject.value.task.repository,
+        actualReference: workspace.reference,
+      });
+    }
     const workflow = this.workflows.read(taskReference);
     if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
     if (workflow.value?.status !== 'ready') {
@@ -686,8 +702,9 @@ export class ImplementationPlanningCoordinator {
       taskSnapshot: subject.value.taskSnapshot,
       workflow: JsonValueSchema.parse(workflow.value.view.workflow),
       repository: {
+        workspaceId: workspace.workspaceId,
         reference: subject.value.task.repository,
-        path: subject.value.repositoryPath,
+        path: workspace.path,
       },
       harness: snapshotHarness(this.harnessPackSource(), subject.value.task.repository, graph.data),
       createdAt: this.store.now(),

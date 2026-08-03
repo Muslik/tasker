@@ -128,7 +128,6 @@ export const startM1Server = async (): Promise<void> => {
       ? await connectTemporalTaskRunService(
           temporalConfiguration,
           new LedgerTemporalRunRegistry(ledger.repository),
-          implementationPlanning,
         )
       : null;
   const workflowContinuation = createWorkflowContinuationCoordinator({

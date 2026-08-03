@@ -1,7 +1,7 @@
 # T3 managed work execution
 
-Status: managed workspace foundation implemented 2026-08-03; Temporal workspace
-Activity, bootstrap adapter, executable blocks, and mutation recovery smoke remain.
+Status: managed workspace, target-aware bootstrap protocol, and Temporal preparation
+Activity implemented 2026-08-03; executable blocks and mutation recovery smoke remain.
 
 ## Boundary
 
@@ -37,10 +37,17 @@ translation rules, `ai-assistance` branches, or provider-specific behavior.
 The current personal harness command `bootstrap init <profile>` discovers worktrees
 from the profile's original project checkout and does not accept an explicit target.
 Calling it for a separately managed Tasker clone would configure the wrong checkout and
-could touch `~/Projects/work`. T3 therefore requires a target-aware, configurable
-bootstrap adapter contract. Until such an adapter is configured, company bootstrap is a
-typed unavailable capability; Tasker will not copy the existing `work` tree or invent a
-nested overlay.
+could touch `~/Projects/work`. Tasker therefore exposes a target-aware adapter protocol:
+the configured executable receives `inspect` or `apply`, a JSON request on stdin with
+the exact workspace locator, and returns either `absent` or a versioned receipt with
+the profile and resulting file hashes. `inspect` makes response-loss recovery possible
+without blindly applying the bootstrap twice. The command is configured through
+`TASKER_WORKSPACE_BOOTSTRAP_COMMAND`.
+
+Until a compatible adapter is configured, bootstrap returns a typed unavailable error.
+The Temporal run exhausts bounded Activity retries and opens `workspace.retry@1`; it
+does not continue planning in an unprepared checkout. Tasker will not copy the existing
+`work` tree or invent a nested overlay.
 
 `ai-assistance` remains an optional company policy pack that contributes ordinary
 registered blocks. It is unrelated to workspace allocation and Temporal durability.
@@ -53,14 +60,22 @@ registered blocks. It is unrelated to workspace allocation and Temporal durabili
 - branch/worktree creation from a managed checkout;
 - manager and SQLite restart reuse the same dirty worktree without duplicating it;
 - response-loss reconciliation between Git mutation and ledger receipt;
+- durable bootstrap receipt plus `inspect`/`apply` response-loss reconciliation;
 - explicit rejection of a source checkout outside the managed repository store.
+- a heartbeat-enabled Temporal Activity bound to `task.analyze@1` that prepares the
+  worktree, bootstraps it, then creates the immutable planning snapshot from that path;
+- API start no longer performs filesystem/snapshot work before starting Temporal;
+- planning snapshot identity includes the managed `workspaceId`, so a later run of the
+  same task and graph cannot silently reuse another run's repository input;
+- workspace/bootstrap/snapshot locators are visible as one valid execution-context
+  state, never as independently nullable fields;
+- infrastructure failure opens a recoverable `workspace.retry@1` wait and resumes in
+  the same Workflow Run after worker replacement.
 
 ## Remaining T3 sequence
 
-1. Add the target-aware bootstrap adapter and persist/reconcile its receipt.
-2. Run workspace preparation as a heartbeat-enabled Temporal Activity before planning.
-3. Create the immutable planning snapshot from the prepared worktree, not the source
-   clone.
-4. Replace stub execution with provider-neutral agent/process block Activities.
-5. Prove a disposable file change and build survive worker replacement after mutation
+1. Provide or adapt the external company harness executable to the target-aware
+   `inspect`/`apply` protocol and configure it locally.
+2. Replace stub execution with provider-neutral agent/process block Activities.
+3. Prove a disposable file change and build survive worker replacement after mutation
    but before Activity completion without applying the change twice.

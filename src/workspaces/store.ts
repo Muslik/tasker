@@ -3,9 +3,15 @@ import type { JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../workflow/schema.js';
-import { WorkspaceLocatorSchema, type WorkspaceLocator } from './contracts.js';
+import {
+  WorkspaceBootstrapReceiptSchema,
+  WorkspaceLocatorSchema,
+  type WorkspaceBootstrapReceipt,
+  type WorkspaceLocator,
+} from './contracts.js';
 
 export const WORKSPACE_PROJECTION = 'workspace_by_run';
+export const WORKSPACE_BOOTSTRAP_PROJECTION = 'workspace_bootstrap_by_workspace';
 
 export type WorkspaceStoreError =
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict }
@@ -84,6 +90,71 @@ export class WorkspaceStore {
     });
     if (committed.ok) return ok(locator);
     const concurrent = this.read(locator.workspaceId);
+    return concurrent.ok && concurrent.value !== null
+      ? ok(concurrent.value)
+      : err({ kind: 'ledger_conflict', conflict: committed.error });
+  }
+}
+
+export class WorkspaceBootstrapStore {
+  public constructor(private readonly ledger: LedgerRepository) {}
+
+  public read(workspaceId: string): Outcome<WorkspaceBootstrapReceipt | null, WorkspaceStoreError> {
+    const projection = this.ledger.readProjection(WORKSPACE_BOOTSTRAP_PROJECTION, workspaceId);
+    if (projection === null) return ok(null);
+    const parsed = WorkspaceBootstrapReceiptSchema.safeParse(projection.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({
+          kind: 'projection_corrupt',
+          workspaceId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  public save(
+    receiptInput: WorkspaceBootstrapReceipt,
+  ): Outcome<WorkspaceBootstrapReceipt, WorkspaceStoreError> {
+    const receipt = WorkspaceBootstrapReceiptSchema.parse(receiptInput);
+    const existing = this.read(receipt.workspaceId);
+    if (!existing.ok) return existing;
+    if (existing.value !== null) return ok(existing.value);
+    const aggregateId = `workspace-bootstrap:${receipt.workspaceId}`;
+    const committed = this.ledger.transact({
+      aggregate: {
+        aggregateId,
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: `event:${aggregateId}:1`,
+            eventType: 'WorkspaceBootstrapPrepared',
+            eventSchemaVersion: 1,
+            payload: asJson({
+              operationId: receipt.operationId,
+              workspaceId: receipt.workspaceId,
+              adapterId: receipt.adapterId,
+              adapterVersion: receipt.adapterVersion,
+              profile: receipt.profile,
+              files: receipt.files,
+            }),
+            actor: 'workspace_bootstrap',
+          },
+        ],
+      },
+      projections: [
+        {
+          kind: 'upsert',
+          projectionType: WORKSPACE_BOOTSTRAP_PROJECTION,
+          projectionId: receipt.workspaceId,
+          payload: asJson(receipt),
+        },
+      ],
+      timestamp: receipt.completedAt,
+    });
+    if (committed.ok) return ok(receipt);
+    const concurrent = this.read(receipt.workspaceId);
     return concurrent.ok && concurrent.value !== null
       ? ok(concurrent.value)
       : err({ kind: 'ledger_conflict', conflict: committed.error });

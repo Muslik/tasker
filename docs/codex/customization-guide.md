@@ -169,6 +169,16 @@ The repository Activity:
 4. reconciles the receipt on Activity retry;
 5. keeps the same worktree across questions, waits, worker restarts, and plan revisions.
 
+The configured command is target-aware and shell-independent. Tasker invokes
+`<command> inspect` or `<command> apply` in the managed worktree and sends a versioned
+JSON request on stdin containing `operationId` and the complete workspace locator. It
+must return JSON with either `{ "status": "absent" }` or
+`{ "status": "ready", "receipt": ... }`. `apply` must return `ready`; `inspect`
+must discover an already-applied result so a lost process response does not duplicate
+bootstrap effects. Configure the executable with
+`TASKER_WORKSPACE_BOOTSTRAP_COMMAND`. The current personal `bootstrap init <profile>`
+does not implement this protocol and must not be pointed at Tasker directly.
+
 Replacing the bootstrap tool changes one Activity adapter. It does not change the graph
 interpreter or workflow history model.
 

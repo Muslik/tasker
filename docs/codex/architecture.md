@@ -93,7 +93,9 @@ Repositories are cloned into Tasker's application-data directory, never into
 `~/Projects/work`. Existing operator clones may be discovered for naming help but are
 not mutated. Before planning, Tasker creates a managed branch/worktree and runs the
 configured external harness bootstrap. Its locator and bootstrap receipt are product
-artifacts referenced by workflow input.
+artifacts recorded by the preparation Activity and referenced by durable Workflow
+state. The API request contains portable task/graph/settings data; it does not perform
+runner-local filesystem work before Temporal starts.
 
 Repeated Jira synchronization updates the cached snapshot and `syncedAt`; it does not
 append activity-log noise. A VPN/403/network failure changes sync health only. It does

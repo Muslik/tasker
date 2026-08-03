@@ -21,6 +21,10 @@ import {
   PlanningSnapshotReferenceSchema,
   type PlanningSnapshotReference,
 } from '../planning/run-planning-snapshot.js';
+import {
+  WorkspaceBootstrapReceiptSchema,
+  WorkspaceLocatorSchema,
+} from '../workspaces/contracts.js';
 
 export * from './public-state.js';
 
@@ -29,7 +33,6 @@ export const TaskWorkflowInputSchema = z
     schemaVersion: z.literal(TASK_WORKFLOW_SCHEMA_VERSION),
     taskReference: z.string().min(1),
     workflowHash: z.string().min(1),
-    planningSnapshot: PlanningSnapshotReferenceSchema,
     graph: CompiledWorkflowSchema,
     settings: TaskWorkflowSettingsSchema,
   })
@@ -125,6 +128,25 @@ export const PlanTaskImplementationInputSchema = z
 
 export const PlanTaskImplementationResultSchema = TaskWorkflowPlanningStateSchema;
 
+export const PrepareTaskWorkspaceInputSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict()
+  .readonly();
+
+export const PrepareTaskWorkspaceResultSchema = z
+  .object({
+    workspace: WorkspaceLocatorSchema,
+    bootstrap: WorkspaceBootstrapReceiptSchema,
+    planningSnapshot: PlanningSnapshotReferenceSchema,
+  })
+  .strict()
+  .readonly();
+
 export type TaskWorkflowInput = z.infer<typeof TaskWorkflowInputSchema>;
 export type TaskWorkflowMemo = z.infer<typeof TaskWorkflowMemoSchema>;
 export type ResolveTaskWaitCommand = z.infer<typeof ResolveTaskWaitCommandSchema>;
@@ -134,9 +156,12 @@ export type ExecuteTaskStepResult = z.infer<typeof ExecuteTaskStepResultSchema>;
 export type EvaluatePredicateInput = z.infer<typeof EvaluatePredicateInputSchema>;
 export type PlanningActivityCommand = z.infer<typeof PlanningActivityCommandSchema>;
 export type PlanTaskImplementationInput = z.infer<typeof PlanTaskImplementationInputSchema>;
+export type PrepareTaskWorkspaceInput = z.infer<typeof PrepareTaskWorkspaceInputSchema>;
+export type PrepareTaskWorkspaceResult = z.infer<typeof PrepareTaskWorkspaceResultSchema>;
 export type { PlanningSnapshotReference };
 
 export interface TaskWorkflowActivities {
+  prepareTaskWorkspace(input: PrepareTaskWorkspaceInput): Promise<PrepareTaskWorkspaceResult>;
   executeStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   evaluatePredicate(input: EvaluatePredicateInput): Promise<boolean>;
   planTaskImplementation(input: PlanTaskImplementationInput): Promise<TaskWorkflowPlanningState>;

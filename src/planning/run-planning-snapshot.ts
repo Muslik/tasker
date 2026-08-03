@@ -55,6 +55,7 @@ export const RunPlanningSnapshotSchema = z
     workflow: JsonValueSchema,
     repository: z
       .object({
+        workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
         reference: z.string().min(1),
         path: z.string().min(1),
       })
@@ -81,9 +82,16 @@ export const RunPlanningSnapshotSchema = z
 export type PlanningSnapshotReference = z.infer<typeof PlanningSnapshotReferenceSchema>;
 export type RunPlanningSnapshot = z.infer<typeof RunPlanningSnapshotSchema>;
 
+export interface PlanningSnapshotWorkspace {
+  readonly workspaceId: string;
+  readonly reference: string;
+  readonly path: string;
+}
+
 export interface PlanningSnapshotSource {
   createRunSnapshot(
     taskReference: string,
     workflowHash: string,
+    workspace: PlanningSnapshotWorkspace,
   ): Outcome<PlanningSnapshotReference, { readonly kind: string }>;
 }

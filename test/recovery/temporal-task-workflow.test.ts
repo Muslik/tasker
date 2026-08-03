@@ -43,8 +43,7 @@ const requireState = async (
   const result = await service.read(taskReference);
   if (!result.ok) {
     throw new Error(
-      result.error.kind === 'runtime_unavailable' ||
-        result.error.kind === 'planning_snapshot_unavailable'
+      result.error.kind === 'runtime_unavailable'
         ? result.error.message
         : `${result.error.kind}: ${result.error.taskReference}`,
     );
@@ -108,15 +107,6 @@ describe('Temporal task workflow', () => {
         updateTimeoutMs: 5_000,
       },
       runRegistry,
-      {
-        createRunSnapshot: (taskReference, workflowHash) => ({
-          ok: true,
-          value: {
-            artifactId: `planning-snapshot:${taskReference}:${workflowHash}`,
-            checksum: '0'.repeat(64),
-          },
-        }),
-      },
     );
     await startWorker({
       executeStep: (input) =>
@@ -240,6 +230,44 @@ describe('Temporal task workflow', () => {
       resolution: { decision: 'done' },
     });
     expect(completed.ok).toBe(true);
+  }, 30_000);
+
+  it('keeps the run waiting until workspace preparation can resume', async () => {
+    const taskReference = `workspace-retry-${String(Date.now())}`;
+    let preparationAttempts = 0;
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      prepareTaskWorkspace: () => {
+        preparationAttempts += 1;
+        throw new Error('managed repository is temporarily unavailable');
+      },
+    });
+
+    const started = await service.start(
+      workflowInput('avia-13236-short-bug', taskReference, 'automatic'),
+    );
+    expect(started.ok).toBe(true);
+    const blocked = await waitForWait(service, taskReference, 'workspace.retry@1');
+    if (blocked.status !== 'waiting') throw new Error('Expected workspace retry wait');
+    expect(preparationAttempts).toBe(3);
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker();
+    const resumed = await service.resolveWait(taskReference, {
+      nodeId: blocked.wait.nodeId,
+      waitKind: 'workspace.retry@1',
+      resolution: { decision: 'resume' },
+    });
+    expect(resumed.ok).toBe(true);
+    const review = await waitForWait(service, taskReference, 'code_review@1');
+
+    expect(review.runId).toBe(blocked.runId);
+    expect(review.executionContext).toMatchObject({
+      status: 'ready',
+      workspace: { taskReference, workflowRunId: blocked.runId },
+    });
   }, 30_000);
 
   it('restores planning questions and plan revisions in the same run', async () => {

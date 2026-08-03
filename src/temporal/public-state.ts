@@ -7,6 +7,11 @@ import {
   WorkflowChangeRequestSchema,
 } from '../planning/implementation-plan.js';
 import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
+import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapshot.js';
+import {
+  WorkspaceBootstrapReceiptSchema,
+  WorkspaceLocatorSchema,
+} from '../workspaces/contracts.js';
 
 export const TASK_WORKFLOW_SCHEMA_VERSION = 1;
 export const TASKER_TEMPORAL_TASK_QUEUE = 'tasker-local';
@@ -41,6 +46,19 @@ export const TaskWorkflowPlanningStateSchema = z.discriminatedUnion('status', [
   }).strict(),
 ]);
 
+export const TaskWorkflowExecutionContextSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('preparing') }).strict(),
+  z
+    .object({
+      status: z.literal('ready'),
+      workspace: WorkspaceLocatorSchema,
+      bootstrap: WorkspaceBootstrapReceiptSchema,
+      planningSnapshot: PlanningSnapshotReferenceSchema,
+    })
+    .strict(),
+  z.object({ status: z.literal('unavailable') }).strict(),
+]);
+
 export const TemporalNodeStatusSchema = z.enum([
   'planned',
   'running',
@@ -58,6 +76,7 @@ const TaskWorkflowStateBaseSchema = z
     runId: z.string().min(1),
     workflowHash: z.string().min(1),
     settings: TaskWorkflowSettingsSchema,
+    executionContext: TaskWorkflowExecutionContextSchema,
     planning: TaskWorkflowPlanningStateSchema.nullable(),
     nodeStates: z.record(z.string(), TemporalNodeStatusSchema),
     attempts: z.record(z.string(), z.number().int().nonnegative()),
@@ -101,6 +120,7 @@ export const TaskWorkflowPublicStateSchema = z.discriminatedUnion('status', [
 ]);
 
 export type TaskWorkflowSettings = z.infer<typeof TaskWorkflowSettingsSchema>;
+export type TaskWorkflowExecutionContext = z.infer<typeof TaskWorkflowExecutionContextSchema>;
 export type TaskWorkflowPlanningState = z.infer<typeof TaskWorkflowPlanningStateSchema>;
 export type TemporalNodeStatus = z.infer<typeof TemporalNodeStatusSchema>;
 export type TaskWorkflowWait = z.infer<typeof TaskWorkflowWaitSchema>;
