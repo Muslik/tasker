@@ -21,6 +21,20 @@ The initial manifest declares seven repositories: `front-avia`, `front-backoffic
 `notifications`. Empty profiles are intentional: they receive common skills today and
 can gain project rules without changing TypeScript application code.
 
+Project-owned `.ai` files already committed to a repository are not copied into this
+pack. They arrive naturally with the managed clone and remain that repository's source
+of truth. Only harness-owned replacements belong under `profiles/<id>/overrides/.ai`.
+The imported override set is currently:
+
+- `front-avia`: `REVIEW.md`, `app-runbook.md`, `index.md`, and three documents under
+  `.ai/docs`;
+- `front-bus`: `REVIEW.md` and `index.md`;
+- `front-railways`: `REVIEW.md`, `index.md`, and four documents under `.ai/docs`.
+
+The other imported profiles had no `.ai` overrides in the source harness. Their existing
+repository `.ai` trees must not be duplicated here; doing so would create competing
+copies which drift independently.
+
 The old `bootstrap`, `config`, `harness-wt-hook`, generated Loop output, `.DS_Store`,
 and `.env` did not move. They are operator-machine mechanics or runtime data, not
 company/project policy. In particular, credentials remain in the external file selected
@@ -130,4 +144,5 @@ changes. Planning reads the same configured filesystem that later execution uses
 
 Run `pnpm verify` after a change. The workspace bootstrap unit suite loads the real pack,
 materializes it into a disposable Git repository, checks Git cleanliness, and proves
-that subsequent source edits cannot alter the active worktree.
+that every hidden `.ai` override is materialized, repository-owned `.ai` remains intact,
+and subsequent source edits cannot alter the active worktree.

@@ -99,6 +99,81 @@ describe('workspace harness bootstrap', () => {
     expect(git(repository.path, 'ls-files', '-v', 'AGENTS.md')).toMatch(/^S /u);
   });
 
+  it.each([
+    {
+      profile: 'front-avia',
+      reference: 'onetwotrip/front-avia',
+      files: [
+        '.ai/REVIEW.md',
+        '.ai/app-runbook.md',
+        '.ai/docs/architecture.md',
+        '.ai/docs/conventions.md',
+        '.ai/docs/project.md',
+        '.ai/index.md',
+      ],
+    },
+    {
+      profile: 'front-bus',
+      reference: 'onetwotrip/front-bus',
+      files: ['.ai/REVIEW.md', '.ai/index.md'],
+    },
+    {
+      profile: 'front-railways',
+      reference: 'onetwotrip/front-railways',
+      files: [
+        '.ai/REVIEW.md',
+        '.ai/docs/architecture.md',
+        '.ai/docs/conventions.md',
+        '.ai/docs/patterns.md',
+        '.ai/docs/project.md',
+        '.ai/index.md',
+      ],
+    },
+  ])(
+    'materializes every hidden .ai override for $profile',
+    async ({ profile, reference, files }) => {
+      const repository = createRepository();
+      const workspace = locatorFor(repository, reference);
+      const adapter = createAdapter(
+        resolve('harness/workspace'),
+        mkdtempSync(join(tmpdir(), 'tasker-harness-snapshots-')),
+      );
+
+      const result = await adapter.apply(workspace, operationId(workspace));
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { status: 'ready', receipt: { profile } },
+      });
+      for (const file of files) {
+        expect(readFileSync(join(repository.path, file), 'utf8')).toBe(
+          readFileSync(join('harness/workspace/profiles', profile, 'overrides', file), 'utf8'),
+        );
+      }
+      expect(git(repository.path, 'status', '--porcelain')).toBe('');
+    },
+  );
+
+  it('leaves repository-owned .ai guidance unchanged when a profile has no override', async () => {
+    const repository = createRepository();
+    const workspace = locatorFor(repository, 'onetwotrip/front-backoffice');
+    const adapter = createAdapter(
+      resolve('harness/workspace'),
+      mkdtempSync(join(tmpdir(), 'tasker-harness-snapshots-')),
+    );
+
+    const result = await adapter.apply(workspace, operationId(workspace));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { status: 'ready', receipt: { profile: 'front-backoffice' } },
+    });
+    expect(readFileSync(join(repository.path, '.ai/index.md'), 'utf8')).toBe(
+      '# Repository AI index\n',
+    );
+    expect(git(repository.path, 'status', '--porcelain')).toBe('');
+  });
+
   it('repairs a partial workspace from its pinned pack after the source changes', async () => {
     const repository = createRepository();
     const workspace = locatorFor(repository);
