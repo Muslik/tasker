@@ -1,8 +1,8 @@
 # T3 managed work execution
 
-Status: managed workspace, target-aware bootstrap protocol, Temporal preparation
-Activity, executable block boundary, and browser E2E parity implemented 2026-08-03;
-the external bootstrap adapter and real local mutation response-loss smoke remain.
+Status: managed workspace, built-in multi-project harness bootstrap, optional external
+adapter protocol, Temporal preparation Activity, executable block boundary, and browser
+E2E parity implemented 2026-08-04; real local mutation response-loss smoke remains.
 
 ## Boundary
 
@@ -35,20 +35,22 @@ translation rules, `ai-assistance` branches, or provider-specific behavior.
 
 ## Harness bootstrap boundary
 
-The current personal harness command `bootstrap init <profile>` discovers worktrees
+The personal harness command `bootstrap init <profile>` discovers worktrees
 from the profile's original project checkout and does not accept an explicit target.
 Calling it for a separately managed Tasker clone would configure the wrong checkout and
-could touch `~/Projects/work`. Tasker therefore exposes a target-aware adapter protocol:
-the configured executable receives `inspect` or `apply`, a JSON request on stdin with
-the exact workspace locator, and returns either `absent` or a versioned receipt with
-the profile and resulting file hashes. `inspect` makes response-loss recovery possible
-without blindly applying the bootstrap twice. The command is configured through
-`TASKER_WORKSPACE_BOOTSTRAP_COMMAND`.
+could touch `~/Projects/work`. Tasker instead loads `harness/workspace/manifest.json`,
+resolves the exact managed repository, pins an immutable content-addressed snapshot,
+and copies the selected profile into only the managed worktree. Git exclusions and
+worktree-local `skip-worktree` bits keep this configuration out of the task diff.
 
-Until a compatible adapter is configured, bootstrap returns a typed unavailable error.
-The Temporal run exhausts bounded Activity retries and opens `workspace.retry@1`; it
-does not continue planning in an unprepared checkout. Tasker will not copy the existing
-`work` tree or invent a nested overlay.
+`inspect` verifies the pinned selection, file hashes, and Git hidden state. If a worker
+or response is lost after a partial apply, the next Activity attempt completes the same
+snapshot. Editing the source pack affects future workspaces only.
+
+An optional `TASKER_WORKSPACE_BOOTSTRAP_COMMAND` retains the target-aware external
+adapter protocol for another company or packaging system. It receives `inspect` or
+`apply` plus the exact workspace locator and must return `absent` or a versioned ready
+receipt.
 
 `ai-assistance` remains an optional company policy pack that contributes ordinary
 registered blocks. It is unrelated to workspace allocation and Temporal durability.
@@ -62,6 +64,9 @@ registered blocks. It is unrelated to workspace allocation and Temporal durabili
 - manager and SQLite restart reuse the same dirty worktree without duplicating it;
 - response-loss reconciliation between Git mutation and ledger receipt;
 - durable bootstrap receipt plus `inspect`/`apply` response-loss reconciliation;
+- seven repository profiles imported from the existing work harness without copying
+  credentials or operator checkout hooks;
+- content-addressed harness snapshots that isolate active runs from later edits;
 - explicit rejection of a source checkout outside the managed repository store.
 - a heartbeat-enabled Temporal Activity bound to `task.analyze@1` that prepares the
   worktree, bootstraps it, then creates the immutable planning snapshot from that path;
@@ -88,9 +93,7 @@ registered blocks. It is unrelated to workspace allocation and Temporal durabili
 
 ## Remaining T3 sequence
 
-1. Provide or adapt the external company harness executable to the target-aware
-   `inspect`/`apply` protocol and configure it locally.
-2. Prove a disposable file change and build survive worker replacement after mutation
+1. Prove a disposable file change and build survive worker replacement after mutation
    but before Activity completion without applying the change twice.
-3. Pilot the configured adapter and mutation recovery against a disposable managed
+2. Pilot the built-in profile and mutation recovery against a disposable managed
    repository; Temporal-only browser E2E coverage already passes.

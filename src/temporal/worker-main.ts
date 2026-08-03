@@ -34,6 +34,7 @@ import {
   loadWorkspaceConfiguration,
   loadWorkspaceBootstrapConfiguration,
   CommandWorkspaceBootstrapAdapter,
+  HarnessProfileWorkspaceBootstrapAdapter,
   ManagedWorkspaceManager,
   WorkspaceBootstrapCoordinator,
   WorkspaceBootstrapStore,
@@ -117,7 +118,19 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   const bootstrap = new WorkspaceBootstrapCoordinator(
     new WorkspaceBootstrapStore(ledger.repository),
-    new CommandWorkspaceBootstrapAdapter(loadWorkspaceBootstrapConfiguration(), nodeCommandRunner),
+    (() => {
+      const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
+      return bootstrapConfiguration.command === null
+        ? new HarnessProfileWorkspaceBootstrapAdapter(
+            {
+              sourcePackPath: bootstrapConfiguration.harnessPackPath,
+              snapshotStorePath: bootstrapConfiguration.snapshotStorePath,
+            },
+            nodeCommandRunner,
+            systemClock,
+          )
+        : new CommandWorkspaceBootstrapAdapter(bootstrapConfiguration, nodeCommandRunner);
+    })(),
   );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {

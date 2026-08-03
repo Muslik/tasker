@@ -19,6 +19,7 @@ import {
   prepareIsolatedCodexHome,
   parseCodexStream,
   providerFailureMessage,
+  workspaceHarnessProviderEnvironment,
 } from '../../providers/codex-cli-support.js';
 import type {
   CommandRequest,
@@ -204,7 +205,10 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
           '-',
         ],
         cwd: request.cwd,
-        env: { CODEX_HOME: isolatedCodexHome },
+        env: {
+          CODEX_HOME: isolatedCodexHome,
+          ...workspaceHarnessProviderEnvironment(request.cwd),
+        },
         stdin: request.prompt,
         timeoutMs: request.timeoutMs,
       });

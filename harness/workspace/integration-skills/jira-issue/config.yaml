@@ -1,0 +1,10 @@
+# jira-issue — per-project defaults for process fields.
+# Precedence: explicit-in-prompt > these defaults > live get_jira_fields > leave empty + open question.
+# base_url берётся из окружения JIRA_BASE_URL (сейчас: https://jira.twiket.com) для построения URL ключей.
+
+defaults:
+  team: "Transportation"
+  pm: "Oksana Venetskaya"
+  assignee: "Dzhabrail Markhiev"
+  sprint: "backlog"
+  labels: []

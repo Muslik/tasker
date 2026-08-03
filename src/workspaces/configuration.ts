@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { defaultRepositoryStorePath } from '../repositories/catalog.js';
 
@@ -11,7 +12,12 @@ export interface WorkspaceConfiguration {
 
 export interface WorkspaceBootstrapConfiguration {
   readonly command: string | null;
+  readonly harnessPackPath: string;
+  readonly snapshotStorePath: string;
 }
+
+const defaultWorkspaceHarnessPackPath = (): string =>
+  fileURLToPath(new URL('../../harness/workspace/', import.meta.url));
 
 export const defaultWorkspaceStorePath = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -39,4 +45,11 @@ export const loadWorkspaceBootstrapConfiguration = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): WorkspaceBootstrapConfiguration => ({
   command: environment.TASKER_WORKSPACE_BOOTSTRAP_COMMAND?.trim() || null,
+  harnessPackPath: resolve(
+    environment.TASKER_WORKSPACE_HARNESS_PATH?.trim() || defaultWorkspaceHarnessPackPath(),
+  ),
+  snapshotStorePath: resolve(
+    environment.TASKER_HARNESS_SNAPSHOT_STORE?.trim() ||
+      resolve(dirname(defaultRepositoryStorePath(environment)), 'harness-snapshots'),
+  ),
 });

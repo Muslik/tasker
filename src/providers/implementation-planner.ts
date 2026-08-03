@@ -19,6 +19,7 @@ import {
   prepareIsolatedCodexHome,
   providerFailureMessage,
   sha256,
+  workspaceHarnessProviderEnvironment,
 } from './codex-cli-support.js';
 import {
   ImplementationPlannerReceiptSchema,
@@ -307,7 +308,10 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
           '-',
         ],
         cwd: request.strategy === 'fast' ? isolatedWorkspace : request.repositoryPath,
-        env: { CODEX_HOME: isolatedCodexHome },
+        env: {
+          CODEX_HOME: isolatedCodexHome,
+          ...workspaceHarnessProviderEnvironment(request.repositoryPath),
+        },
         stdin: prompt,
         timeoutMs:
           request.strategy === 'ralplan'

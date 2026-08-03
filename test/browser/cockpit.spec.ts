@@ -364,7 +364,9 @@ test('the project profile explains why inline copy adds no translation wait', as
   await expect(page.getByTestId('workflow-decision-list')).toContainText(
     'Inline translation policy applied',
   );
-  await expect(page.getByTestId('workflow-decision-list')).toContainText('project:twiket/avia-web');
+  await expect(page.getByTestId('workflow-decision-list')).toContainText(
+    'project:onetwotrip/front-avia',
+  );
   await expect(page.getByTestId('workflow-decision-list')).toContainText(
     'add no translation commands or wait',
   );

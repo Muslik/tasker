@@ -183,7 +183,7 @@ export const TWIKET_HARNESS_STEPS = [
     description: 'Reproduce a bug before or after implementation and preserve evidence.',
     inputSchema: reproductionInputSchema,
     prompt: 'prompts/steps/bug-reproduce.md',
-    skills: ['browser', 'jenkins'],
+    skills: ['playwright-demo', 'jenkins'],
     retryBudget: 2,
     artifactContracts: ['reproduction-report', 'reproduction-media'],
     allowedEffects: ['command.run'],
@@ -214,7 +214,10 @@ export const TWIKET_HARNESS_STEPS = [
       description: `Run ${profile} verification selected for this task.`,
       inputSchema: verificationInputSchema,
       prompt: 'prompts/steps/verify.md',
-      skills: ['jenkins', 'test-design'],
+      skills:
+        profile === 'visual'
+          ? ['playwright-demo', 'jenkins', 'test-design']
+          : ['jenkins', 'test-design'],
       retryBudget: 2,
       artifactContracts: [`verification-${profile}`],
       allowedEffects: ['command.run'],

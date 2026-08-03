@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "version": "1",
-  "repository": "twiket/avia-web",
+  "repository": "onetwotrip/front-avia",
   "repositoryKind": "frontend",
   "translations": { "kind": "inline_json" },
   "processCommands": {},
-  "workflowGuidance": "projects/twiket-avia-web/workflow.md"
+  "workflowGuidance": "projects/onetwotrip-front-avia/workflow.md"
 }

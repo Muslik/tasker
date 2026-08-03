@@ -29,6 +29,8 @@ contract in
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
 Typed step contracts currently live in
 [`src/harness/step-definitions.ts`](src/harness/step-definitions.ts).
+The versioned multi-project agent configuration copied into managed worktrees lives in
+[`harness/workspace`](harness/workspace/README.md); credentials remain outside that pack.
 
 ## Current implementation state
 

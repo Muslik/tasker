@@ -113,6 +113,20 @@ Logical skill names are provider-neutral. An adapter maps them to Codex skills, 
 instructions, or another subscription CLI surface. The graph must not contain
 provider-specific command syntax.
 
+Keep three scopes distinct:
+
+- **repository guidance** is present for every agent working in that repository
+  (`localization`, state/data conventions, UI-kit rules);
+- **step skills** are selected by one immutable agent-step binding (`playwright-demo` for
+  reproduction/visual verification, CI readers for CI analysis);
+- **integration effects** are performed only by typed Activities (`pr.prepare@1`, Jira
+  mutation, publication), never by a catch-all skill.
+
+The old `pr-finalize` skill is therefore migration input, not the Tasker execution model:
+it combines several remote effects and approval points which Temporal must persist and
+reconcile separately. Conversely, `playwright-demo` is a valid reusable skill but does
+not itself make visual verification part of every graph.
+
 Use prompts for judgment and implementation guidance. Use deterministic obligations
 for requirements that must always hold, such as CI before PR review or before/after
 reproduction for a bug.
@@ -162,30 +176,43 @@ omit them. No Temporal Workflow, API route, or integration adapter changes.
 
 ## 7. Worktree harness bootstrap
 
-Tasker must not copy `/Users/dzhabrail/Projects/harness/work` or create nested `work`
-overlays inside each project. The existing external harness owns global/shared/project
-profiles and exposes its bootstrap command.
+Tasker must not call the personal `/Users/dzhabrail/Projects/harness/work/bootstrap` or
+create nested `work` overlays. That command discovers and mutates every worktree under
+`~/Projects/work`; Tasker owns a different managed clone.
+
+The built-in pack lives in `harness/workspace`. It contains portable integration/shared
+skills and repository profiles imported from the personal harness, but excludes its
+symlink machinery and secrets. `manifest.json` maps repository aliases to profiles, so
+adding another repository does not require an application-code branch.
 
 The repository Activity:
 
 1. allocates a managed task worktree under Tasker's application-data path;
-2. invokes the configured external bootstrap/profile adapter;
-3. persists profile/version/receipt and resulting instruction/skill hashes;
-4. reconciles the receipt on Activity retry;
-5. keeps the same worktree across questions, waits, worker restarts, and plan revisions.
+2. pins the current workspace-pack content hash in application data;
+3. materializes the resolved profile into that exact worktree;
+4. persists profile/version/receipt and resulting instruction/skill hashes;
+5. reconciles the receipt on Activity retry;
+6. keeps the same worktree across questions, waits, worker restarts, and plan revisions.
 
-The configured command is target-aware and shell-independent. Tasker invokes
+The built-in adapter is the default. `TASKER_WORKSPACE_HARNESS_PATH` can select another
+pack and `TASKER_HARNESS_SNAPSHOT_STORE` can relocate immutable snapshots. A company can
+replace the adapter entirely with a target-aware command: Tasker invokes
 `<command> inspect` or `<command> apply` in the managed worktree and sends a versioned
 JSON request on stdin containing `operationId` and the complete workspace locator. It
 must return JSON with either `{ "status": "absent" }` or
 `{ "status": "ready", "receipt": ... }`. `apply` must return `ready`; `inspect`
 must discover an already-applied result so a lost process response does not duplicate
-bootstrap effects. Configure the executable with
-`TASKER_WORKSPACE_BOOTSTRAP_COMMAND`. The current personal `bootstrap init <profile>`
-does not implement this protocol and must not be pointed at Tasker directly.
+bootstrap effects. Configure that optional executable with
+`TASKER_WORKSPACE_BOOTSTRAP_COMMAND`.
 
 Replacing the bootstrap tool changes one Activity adapter. It does not change the graph
 interpreter or workflow history model.
+
+There is no normal-path worktree script to remember to run. The Temporal repository
+Activity owns setup and reconciliation. The old `harness-wt-hook` was intentionally not
+imported because it scans and mutates `~/Projects/work`, while Tasker operates only on
+its managed application-data clone. A standalone adapter command remains optional for a
+future company-specific setup implementation.
 
 ## 8. Add or replace an integration
 

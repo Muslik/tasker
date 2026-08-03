@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "twiket-workspace",
+  "version": "1",
+  "engines": ["codex", "claude"],
+  "integrationSkills": "integration-skills",
+  "sharedSkills": "shared-skills",
+  "supportFiles": "lib",
+  "commands": "bin",
+  "profiles": [
+    {
+      "id": "front-avia",
+      "repositoryAliases": ["front-avia", "onetwotrip/front-avia"],
+      "skills": "profiles/front-avia/skills",
+      "overrides": "profiles/front-avia/overrides"
+    },
+    {
+      "id": "front-backoffice",
+      "repositoryAliases": ["front-backoffice", "onetwotrip/front-backoffice"],
+      "skills": "profiles/front-backoffice/skills",
+      "overrides": "profiles/front-backoffice/overrides"
+    },
+    {
+      "id": "front-bus",
+      "repositoryAliases": ["front-bus", "onetwotrip/front-bus"],
+      "skills": "profiles/front-bus/skills",
+      "overrides": "profiles/front-bus/overrides"
+    },
+    {
+      "id": "front-core-packages",
+      "repositoryAliases": ["front-core-packages", "onetwotrip/front-core-packages"],
+      "skills": "profiles/front-core-packages/skills",
+      "overrides": "profiles/front-core-packages/overrides"
+    },
+    {
+      "id": "front-index",
+      "repositoryAliases": ["front-index", "onetwotrip/front-index"],
+      "skills": "profiles/front-index/skills",
+      "overrides": "profiles/front-index/overrides"
+    },
+    {
+      "id": "front-railways",
+      "repositoryAliases": ["front-railways", "onetwotrip/front-railways"],
+      "skills": "profiles/front-railways/skills",
+      "overrides": "profiles/front-railways/overrides"
+    },
+    {
+      "id": "notifications",
+      "repositoryAliases": ["notifications", "onetwotrip/notifications"],
+      "skills": "profiles/notifications/skills",
+      "overrides": "profiles/notifications/overrides"
+    }
+  ]
+}

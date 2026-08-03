@@ -2,5 +2,9 @@
 dist/
 coverage/
 docs/
+harness/workspace/integration-skills/
+harness/workspace/lib/
+harness/workspace/profiles/
+harness/workspace/shared-skills/
 node_modules/
 pnpm-lock.yaml

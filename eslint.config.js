@@ -8,6 +8,7 @@ export default tseslint.config(
       'coverage/**',
       'dist/**',
       'eslint.config.js',
+      'harness/workspace/**',
       'node_modules/**',
       'playwright-report/**',
       'test-results/**',

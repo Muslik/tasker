@@ -110,6 +110,20 @@ describe('file-backed harness pack', () => {
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it('binds visual evidence guidance only to reproduction and visual verification', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const skillsFor = (reference: string): readonly string[] => {
+      const definition = pack.steps.find((candidate) => candidate.reference === reference);
+      if (definition?.execution.kind !== 'agent') throw new Error(`Expected agent ${reference}`);
+      return definition.execution.skills;
+    };
+
+    expect(skillsFor('bug.reproduce@1')).toContain('playwright-demo');
+    expect(skillsFor('verify.visual@1')).toContain('playwright-demo');
+    expect(skillsFor('verify.targeted@1')).not.toContain('playwright-demo');
+    expect(skillsFor('verify.full@1')).not.toContain('playwright-demo');
+  });
+
   it('rejects prompt paths that escape through a symlink or parent traversal', async () => {
     const root = await createTemporaryPack();
     const manifestPath = join(root, 'company.json');

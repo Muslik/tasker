@@ -304,7 +304,7 @@ describe('M1 task workflow planning', () => {
       expect.objectContaining({
         id: 'translation-policy',
         title: 'Inline translation policy applied',
-        source: 'project:twiket/avia-web',
+        source: 'project:onetwotrip/front-avia',
       }),
     );
     expect(result.value.proposal.waits.map((entry) => entry.waitKind)).not.toContain(
