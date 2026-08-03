@@ -28,9 +28,9 @@ import { ok } from '../../src/shared/outcome.js';
 import {
   createPlanningActivity,
   createWorkspaceActivity,
-  stubTaskWorkflowActivities,
   TemporalTaskRunService,
 } from '../../src/temporal/index.js';
+import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
 import {
   ManagedWorkspaceManager,
   WorkspaceBootstrapCoordinator,
@@ -127,7 +127,7 @@ describe('Temporal managed workspace', () => {
         taskQueue,
         workflowsPath,
         activities: {
-          ...stubTaskWorkflowActivities,
+          ...testTaskWorkflowActivities,
           ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
           ...createPlanningActivity(planning),
         },

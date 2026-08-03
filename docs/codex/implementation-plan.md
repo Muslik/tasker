@@ -69,17 +69,16 @@ Create target modules without copying legacy scheduler concepts:
 ```text
 src/temporal/
   client.ts                 # start/query/update/signal/cancel boundary
+  contracts.ts              # typed Workflow/Activity boundary
+  public-state.ts           # operator-facing query state
+  run-registry.ts           # product lookup for Workflow ID/Run ID
   worker.ts                 # worker bootstrap and activity registration
   workflows/
     task-workflow.ts        # deterministic graph interpreter
-    public-state.ts         # query/update/signal contracts
-    interpreter.ts          # pure graph transition helpers
   activities/
-    stub-activities.ts      # deterministic-looking test activities only for T1
-  contracts/
-    input.ts
-    messages.ts
-    results.ts
+    block-execution.ts      # versioned agent/process block execution
+    planning-activity.ts    # implementation planning boundary
+    workspace-activity.ts   # managed checkout/worktree/bootstrap boundary
 ```
 
 Workflow modules must be dependency-isolated so build-time checks catch accidental
@@ -133,7 +132,8 @@ Implementation status on 2026-08-03: immutable input snapshots, the heartbeating
 cancellable Activity, durable questions, plan approval/revision, stable command IDs,
 API commands, and restart/idempotency tests are implemented. Bounded transcript
 artifact streaming and a real subscription-provider interruption smoke remain before
-the T2 exit gate is closed; see `t2-temporal-planning.md`.
+the product-level T2 exit gate is closed; see `t2-temporal-planning.md`. They do not
+justify retaining a second durable runtime.
 
 1. Snapshot task/repository/prompt/skill/policy references before the Activity.
 2. Route `fast`, `normal`, or consensus planning using deterministic run policy and
@@ -163,9 +163,10 @@ Implementation status on 2026-08-03: deterministic application-data worktrees,
 durable locator/bootstrap receipts, target-aware `inspect`/`apply` bootstrap protocol,
 the heartbeat-enabled Temporal preparation Activity, worktree-based immutable planning
 snapshot, recoverable `workspace.retry@1` wait, and registered agent/process block
-execution are complete. Temporal-backed browser parity, dependency isolation/replay,
-and final deletion cleanup pass. A real target-aware company bootstrap adapter and the
-first local mutation response-loss smoke remain product work within T3.
+execution are complete. Temporal-backed browser parity and dependency isolation/replay
+pass. A real target-aware company bootstrap adapter and the first local mutation
+response-loss smoke remain product work within T3; they are not cutover blockers
+because no legacy remote-mutation path is being preserved.
 
 ### 6.1 Repository lifecycle
 
@@ -285,7 +286,7 @@ After enough reviewed runs, allow policy to auto-accept known low-risk revision 
 
 Implementation status on 2026-08-03: complete. Temporal is the only runtime, the
 release suite and 12 Temporal-backed browser scenarios pass, and the cutover removes
-more than 6,400 net lines.
+more than 5,300 net lines.
 
 Cutover only after the parity matrix in
 [`temporal-migration.md`](temporal-migration.md) passes. Then:

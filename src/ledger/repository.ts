@@ -14,7 +14,6 @@ import type {
   LedgerCommitResult,
   LedgerConflict,
   LedgerTransaction,
-  OutboxRecord,
   ProjectionRecord,
   SnapshotRecord,
   SnapshotWrite,
@@ -391,48 +390,6 @@ export class LedgerRepository {
     };
   }
 
-  public listOutbox(): readonly OutboxRecord[] {
-    return this.database
-      .prepare<
-        [],
-        {
-          command_id: string;
-          topic: string;
-          payload_json: string;
-          headers_json: string;
-          created_at: string;
-          visible_at: string;
-          dispatched_at: string | null;
-          attempts: number;
-        }
-      >(
-        `
-          SELECT
-            command_id,
-            topic,
-            payload_json,
-            headers_json,
-            created_at,
-            visible_at,
-            dispatched_at,
-            attempts
-          FROM outbox
-          ORDER BY rowid ASC
-        `,
-      )
-      .all()
-      .map((row) => ({
-        commandId: row.command_id,
-        topic: row.topic,
-        payload: parseJson(row.payload_json),
-        headers: parseJson(row.headers_json),
-        createdAt: row.created_at,
-        visibleAt: row.visible_at,
-        dispatchedAt: row.dispatched_at,
-        attempts: row.attempts,
-      }));
-  }
-
   private commitTransaction(transaction: LedgerTransaction): LedgerCommitResult {
     const now = transaction.timestamp ?? this.clock.now();
     this.verifySchemaVersions(transaction);
@@ -440,12 +397,6 @@ export class LedgerRepository {
     const duplicateEventId = containsDuplicate(eventIds);
     if (duplicateEventId !== null) {
       raiseConflict({ kind: 'duplicate_event_id', eventId: duplicateEventId });
-    }
-
-    const commandIds = transaction.outbox?.map((command) => command.commandId) ?? [];
-    const duplicateCommandId = containsDuplicate(commandIds);
-    if (duplicateCommandId !== null) {
-      raiseConflict({ kind: 'duplicate_outbox_command_id', commandId: duplicateCommandId });
     }
 
     const aggregate = transaction.aggregate;
@@ -542,43 +493,12 @@ export class LedgerRepository {
     this.insertSnapshots(transaction.snapshots ?? [], now);
     this.applyProjectionMutations(transaction.projections ?? [], now);
     this.insertArtifacts(transaction.artifacts ?? [], now);
-    this.insertSignals(transaction.signals ?? [], now);
-
-    for (const command of transaction.outbox ?? []) {
-      try {
-        this.database
-          .prepare<[string, string, string, string, string, string]>(
-            `
-              INSERT INTO outbox (
-                command_id,
-                topic,
-                payload_json,
-                headers_json,
-                created_at,
-                visible_at
-              )
-              VALUES (?, ?, ?, ?, ?, ?)
-            `,
-          )
-          .run(
-            command.commandId,
-            command.topic,
-            toJsonText(command.payload),
-            toJsonText(command.headers),
-            now,
-            command.visibleAt ?? now,
-          );
-      } catch (error) {
-        this.handleOutboxInsertError(error, command.commandId);
-      }
-    }
 
     return {
       aggregateId: aggregate?.aggregateId ?? null,
       aggregateVersion,
       appendedEventCount: aggregate?.events.length ?? 0,
       lastEventSequence,
-      outboxCount: transaction.outbox?.length ?? 0,
     };
   }
 
@@ -702,35 +622,6 @@ export class LedgerRepository {
     }
   }
 
-  private insertSignals(signals: NonNullable<LedgerTransaction['signals']>, now: string): void {
-    for (const signal of signals) {
-      this.database
-        .prepare<[string, string, string, string, string, string, string | null]>(
-          `
-            INSERT INTO signals (
-              signal_id,
-              signal_kind,
-              correlation_key,
-              payload_json,
-              received_at,
-              status,
-              resolved_wait_key
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `,
-        )
-        .run(
-          signal.signalId,
-          signal.signalKind,
-          signal.correlationKey,
-          toJsonText(signal.payload),
-          signal.receivedAt ?? now,
-          signal.status ?? 'received',
-          signal.resolvedWaitKey ?? null,
-        );
-    }
-  }
-
   private insertArtifacts(artifacts: readonly ArtifactWrite[], now: string): void {
     for (const artifact of artifacts) {
       const payloadJson = toJsonText(artifact.payload);
@@ -783,14 +674,6 @@ export class LedgerRepository {
           actualVersion,
         });
       }
-    }
-
-    throw error;
-  }
-
-  private handleOutboxInsertError(error: unknown, commandId: string): never {
-    if (isSqliteConstraintError(error) && error.message.includes('outbox.command_id')) {
-      raiseConflict({ kind: 'duplicate_outbox_command_id', commandId });
     }
 
     throw error;

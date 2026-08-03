@@ -43,7 +43,6 @@ describe('M1 persisted workflow', () => {
 
     const originalHash = generated.value.view.workflow.graphHash;
     expect(originalHash).not.toBeNull();
-    expect(firstLedger.repository.listOutbox()).toEqual([]);
     firstLedger.close();
 
     clock.advance(60_000);
@@ -64,8 +63,6 @@ describe('M1 persisted workflow', () => {
     expect(
       restartedLedger.repository.readArtifact('graph:avia-14001-translation-component'),
     ).not.toBeNull();
-    expect(restartedLedger.repository.listOutbox()).toEqual([]);
-
     restartedLedger.close();
   });
 
@@ -85,7 +82,6 @@ describe('M1 persisted workflow', () => {
     expect(generated.value.view.workflow.validatorReport.issues).toMatchObject([
       { code: 'unknown_reference' },
     ]);
-    expect(ledger.repository.listOutbox()).toEqual([]);
     expect(ledger.repository.readArtifact('graph:invalid-unknown-step')).toBeNull();
 
     ledger.close();

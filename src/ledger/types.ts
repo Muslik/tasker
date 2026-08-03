@@ -46,24 +46,6 @@ export type ProjectionMutation =
       readonly projectionId: string;
     };
 
-export interface OutboxWrite {
-  readonly commandId: string;
-  readonly topic: string;
-  readonly payload: JsonValue;
-  readonly headers?: JsonValue;
-  readonly visibleAt?: string;
-}
-
-export interface SignalWrite {
-  readonly signalId: string;
-  readonly signalKind: string;
-  readonly correlationKey: string;
-  readonly payload: JsonValue;
-  readonly receivedAt?: string;
-  readonly status?: string;
-  readonly resolvedWaitKey?: string;
-}
-
 export interface ArtifactWrite {
   readonly artifactId: string;
   readonly artifactKind: string;
@@ -78,8 +60,6 @@ export interface LedgerTransaction {
   readonly aggregate?: AggregateWrite;
   readonly snapshots?: readonly SnapshotWrite[];
   readonly projections?: readonly ProjectionMutation[];
-  readonly outbox?: readonly OutboxWrite[];
-  readonly signals?: readonly SignalWrite[];
   readonly artifacts?: readonly ArtifactWrite[];
   readonly timestamp?: string;
 }
@@ -142,17 +122,6 @@ export interface ArtifactRecord {
   readonly parentArtifactId: string | null;
 }
 
-export interface OutboxRecord {
-  readonly commandId: string;
-  readonly topic: string;
-  readonly payload: JsonValue;
-  readonly headers: JsonValue;
-  readonly createdAt: string;
-  readonly visibleAt: string;
-  readonly dispatchedAt: string | null;
-  readonly attempts: number;
-}
-
 export type LedgerConflict =
   | {
       readonly kind: 'version_conflict';
@@ -163,10 +132,6 @@ export type LedgerConflict =
   | {
       readonly kind: 'duplicate_event_id';
       readonly eventId: string;
-    }
-  | {
-      readonly kind: 'duplicate_outbox_command_id';
-      readonly commandId: string;
     }
   | {
       readonly kind: 'unsupported_schema_version';
@@ -181,5 +146,4 @@ export interface LedgerCommitResult {
   readonly aggregateVersion: number | null;
   readonly appendedEventCount: number;
   readonly lastEventSequence: number | null;
-  readonly outboxCount: number;
 }

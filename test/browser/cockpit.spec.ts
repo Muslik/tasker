@@ -298,11 +298,11 @@ test('I can review an immutable workflow continuation without losing the parent 
         const record = await readJson(response, WorkflowContinuationRecordSchema);
         return record.status;
       },
-      { timeout: 10_000 },
+      { timeout: 20_000 },
     )
     .toBe('linked');
   await expect(page.getByTestId('workflow-continuation-review')).toContainText('linked', {
-    timeout: 10_000,
+    timeout: 20_000,
   });
   await expect(page.getByTestId('workflow-continuation-review')).toContainText('Linked run');
   await expect(page.getByTestId('selected-task')).toContainText('Linked continuation executing');

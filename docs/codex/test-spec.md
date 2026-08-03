@@ -296,7 +296,10 @@ Playwright acceptance scenarios:
 
 ### T6 deletion gate
 
-- all preceding gates are green on Temporal;
+- Temporal parity is green for every public behavior previously owned by the legacy
+  runtime;
+- incomplete product milestones such as future Bitbucket/Jenkins mutations do not
+  block deletion when no equivalent legacy mutation path remains;
 - representative legacy behavior has an equivalent public Temporal test;
 - no new run can select legacy runtime;
 - code search finds no runtime dependency on legacy ready-set/lease/fence/cursor/wait

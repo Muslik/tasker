@@ -63,6 +63,11 @@ describe('openSqliteLedger', () => {
         .prepare<[string], { value: string }>('SELECT value FROM schema_metadata WHERE key = ?')
         .get('schema_family'),
     ).toEqual({ value: 'tasker' });
+    expect(
+      second.database
+        .prepare<[string], { value: string }>('SELECT value FROM schema_metadata WHERE key = ?')
+        .get('schema_baseline'),
+    ).toEqual({ value: 'product-store-v1' });
 
     second.close();
   });
@@ -80,7 +85,7 @@ describe('openSqliteLedger', () => {
     });
     first.close();
 
-    const migrationPath = join(migrationsDirectory, '0001_m0_baseline.sql');
+    const migrationPath = join(migrationsDirectory, '0001_product_store.sql');
     writeFileSync(
       migrationPath,
       `${readFileSync(migrationPath, 'utf8')}\n-- checksum changed\n`,
@@ -109,7 +114,7 @@ describe('openSqliteLedger', () => {
     });
     seededMissing.close();
 
-    rmSync(join(missingDirectory, '0001_m0_baseline.sql'));
+    rmSync(join(missingDirectory, '0001_product_store.sql'));
 
     expect(() =>
       openSqliteLedger({
@@ -131,8 +136,8 @@ describe('openSqliteLedger', () => {
     });
     seededRenamed.close();
 
-    const originalPath = join(renamedDirectory, '0001_m0_baseline.sql');
-    const renamedPath = join(renamedDirectory, '0001_m0_renamed.sql');
+    const originalPath = join(renamedDirectory, '0001_product_store.sql');
+    const renamedPath = join(renamedDirectory, '0001_renamed.sql');
     writeFileSync(renamedPath, readFileSync(originalPath, 'utf8'), 'utf8');
     rmSync(originalPath);
 
@@ -166,7 +171,6 @@ describe('LedgerRepository', () => {
           },
         ],
       },
-      outbox: [{ commandId: 'must-not-exist', topic: 'dispatch', payload: {} }],
     });
     const unsupportedSnapshot = ledger.repository.transact({
       snapshots: [
@@ -204,7 +208,6 @@ describe('LedgerRepository', () => {
       },
     });
     expect(ledger.repository.listEvents()).toEqual([]);
-    expect(ledger.repository.listOutbox()).toEqual([]);
     expect(snapshotCount).toBe(0);
 
     ledger.close();
@@ -239,95 +242,54 @@ describe('LedgerRepository', () => {
     ledger.close();
   });
 
-  it('rolls back the full transaction when outbox insertion conflicts', () => {
+  it('rolls back the full transaction when an artifact insert fails', () => {
     const ledger = openSqliteLedger({
       filename: withDatabasePath(),
       clock: { now: () => FIXED_NOW },
     });
 
-    const first = ledger.repository.transact({
-      aggregate: {
-        aggregateId: 'task-1',
-        expectedVersion: 0,
-        events: [
+    expect(() =>
+      ledger.repository.transact({
+        aggregate: {
+          aggregateId: 'task-1',
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: 'evt-1',
+              eventType: 'TaskCreated',
+              eventSchemaVersion: 1,
+              payload: { taskId: 'task-1' },
+            },
+          ],
+        },
+        projections: [
           {
-            eventId: 'evt-1',
-            eventType: 'TaskCreated',
-            eventSchemaVersion: 1,
-            payload: { taskId: 'task-1' },
+            kind: 'upsert',
+            projectionType: 'task',
+            projectionId: 'task-1',
+            payload: { status: 'ready' },
           },
         ],
-      },
-      outbox: [
-        {
-          commandId: 'cmd-1',
-          topic: 'dispatch',
-          payload: { taskId: 'task-1' },
-        },
-      ],
-    });
-
-    expect(first).toEqual({
-      ok: true,
-      value: {
-        aggregateId: 'task-1',
-        aggregateVersion: 1,
-        appendedEventCount: 1,
-        lastEventSequence: 1,
-        outboxCount: 1,
-      },
-    });
-
-    const second = ledger.repository.transact({
-      aggregate: {
-        aggregateId: 'task-1',
-        expectedVersion: 1,
-        events: [
+        artifacts: [
           {
-            eventId: 'evt-2',
-            eventType: 'TaskUpdated',
-            eventSchemaVersion: 1,
-            payload: { taskId: 'task-1', status: 'ready' },
+            artifactId: 'artifact-with-missing-parent',
+            artifactKind: 'debug_bundle',
+            storageUri: 'file:///tmp/debug-bundle.json',
+            payload: {},
+            parentArtifactId: 'missing-parent',
           },
         ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: 'task',
-          projectionId: 'task-1',
-          payload: { status: 'ready' },
-        },
-      ],
-      outbox: [
-        {
-          commandId: 'cmd-1',
-          topic: 'dispatch',
-          payload: { taskId: 'task-1', status: 'ready' },
-        },
-      ],
-    });
-
-    expect(second).toEqual({
-      ok: false,
-      error: {
-        kind: 'duplicate_outbox_command_id',
-        commandId: 'cmd-1',
-      },
-    });
-    expect(ledger.repository.readAggregateHead('task-1')).toEqual({
-      aggregateId: 'task-1',
-      version: 1,
-      updatedAt: FIXED_NOW,
-    });
-    expect(ledger.repository.listEvents('task-1')).toHaveLength(1);
+      }),
+    ).toThrow(/FOREIGN KEY constraint failed/);
+    expect(ledger.repository.readAggregateHead('task-1')).toBeNull();
+    expect(ledger.repository.listEvents('task-1')).toEqual([]);
     expect(ledger.repository.readProjection('task', 'task-1')).toBeNull();
-    expect(ledger.repository.listOutbox()).toHaveLength(1);
+    expect(ledger.repository.readArtifact('artifact-with-missing-parent')).toBeNull();
 
     ledger.close();
   });
 
-  it('reports CAS conflicts without exposing outbox commands', () => {
+  it('reports CAS conflicts without partial writes', () => {
     const ledger = openSqliteLedger({
       filename: withDatabasePath(),
       clock: { now: () => FIXED_NOW },
@@ -363,13 +325,6 @@ describe('LedgerRepository', () => {
           },
         ],
       },
-      outbox: [
-        {
-          commandId: 'cmd-cas',
-          topic: 'dispatch',
-          payload: { aggregateId: 'task-2' },
-        },
-      ],
     });
 
     expect(result).toEqual({
@@ -382,12 +337,11 @@ describe('LedgerRepository', () => {
       },
     });
     expect(ledger.repository.listEvents('task-2')).toHaveLength(1);
-    expect(ledger.repository.listOutbox()).toHaveLength(0);
 
     ledger.close();
   });
 
-  it('commits event, projection, and outbox state atomically', () => {
+  it('commits event and projection state atomically', () => {
     const ledger = openSqliteLedger({
       filename: withDatabasePath(),
       clock: { now: () => FIXED_NOW },
@@ -415,13 +369,6 @@ describe('LedgerRepository', () => {
           lastEventSequence: 1,
         },
       ],
-      outbox: [
-        {
-          commandId: 'cmd-3',
-          topic: 'dispatch',
-          payload: { taskId: 'task-3' },
-        },
-      ],
     });
 
     expect(result).toEqual({
@@ -431,7 +378,6 @@ describe('LedgerRepository', () => {
         aggregateVersion: 1,
         appendedEventCount: 1,
         lastEventSequence: 1,
-        outboxCount: 1,
       },
     });
     const projection = ledger.repository.readProjection('task', 'task-3');
@@ -442,19 +388,6 @@ describe('LedgerRepository', () => {
     expect(typeof projection?.checksum).toBe('string');
     expect(projection?.updatedAt).toBe(FIXED_NOW);
     expect(projection?.lastEventSequence).toBe(1);
-    expect(ledger.repository.listOutbox()).toEqual([
-      {
-        commandId: 'cmd-3',
-        topic: 'dispatch',
-        payload: { taskId: 'task-3' },
-        headers: {},
-        createdAt: FIXED_NOW,
-        visibleAt: FIXED_NOW,
-        dispatchedAt: null,
-        attempts: 0,
-      },
-    ]);
-
     ledger.close();
   });
 });

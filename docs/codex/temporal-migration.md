@@ -45,7 +45,8 @@ resumes runs only through Temporal. There is no runtime selector or fallback to 
 deleted custom executor.
 
 SQLite and Temporal are not dual ledgers. Temporal owns execution; SQLite owns product
-data and external-effect evidence.
+data and external-effect evidence. The product schema contains no execution outbox or
+signal table; Temporal owns Activity delivery and Workflow messages.
 
 ## Target code ownership
 
@@ -159,12 +160,12 @@ they are product work, not a reason to keep a second runtime.
 
 Current cutover evidence on 2026-08-03:
 
-- `pnpm verify` passes: formatting, server/cockpit typecheck, lint, 120 Vitest tests,
+- `pnpm verify` passes: formatting, server/cockpit typecheck, lint, 118 Vitest tests,
   and the production server/cockpit build;
 - explicit replay, payload-boundary, recovery, block-execution, and repository tests
   pass;
 - `pnpm test:e2e` passes all 12 Temporal-backed cockpit scenarios without retries;
-- the cutover diff removes 4,900+ net lines, including the runner, scheduler,
+- the cutover diff removes 5,300+ net lines, including the runner, scheduler,
   lease/fence/runtime contracts, M0-only demo/domain code, and implementation-detail
   tests.
 

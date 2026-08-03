@@ -8,11 +8,11 @@ import { findTaskFixture, planTaskWorkflow } from '../../src/planning/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import {
   LedgerTemporalRunRegistry,
-  stubTaskWorkflowActivities,
   TemporalTaskRunService,
   type TaskWorkflowActivities,
   type TaskWorkflowPublicState,
 } from '../../src/temporal/index.js';
+import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
 import { JsonValueSchema } from '../../src/workflow/index.js';
 
 const workflowsPath = fileURLToPath(
@@ -85,7 +85,7 @@ describe('Temporal task workflow', () => {
       connection: environment.nativeConnection,
       taskQueue,
       workflowsPath,
-      activities: { ...stubTaskWorkflowActivities, ...activities },
+      activities: { ...testTaskWorkflowActivities, ...activities },
       // The time-skipping test server does not advance sticky-queue timers while
       // the client waits. Disabling the cache exercises replay on every task and
       // lets this test prove recovery without depending on wall-clock fallback.
@@ -217,7 +217,7 @@ describe('Temporal task workflow', () => {
       planTaskImplementation: (input) => {
         analyzeAttempts += 1;
         if (analyzeAttempts === 1) throw new Error('transient provider failure');
-        return stubTaskWorkflowActivities.planTaskImplementation(input);
+        return testTaskWorkflowActivities.planTaskImplementation(input);
       },
     });
 
@@ -290,7 +290,7 @@ describe('Temporal task workflow', () => {
         kind: input.command.kind,
         snapshotChecksum: input.planningSnapshot.checksum,
       });
-      const stub = await stubTaskWorkflowActivities.planTaskImplementation(input);
+      const stub = await testTaskWorkflowActivities.planTaskImplementation(input);
       const common = {
         commandId: stub.commandId,
         transcriptId: stub.transcriptId,
@@ -389,7 +389,7 @@ describe('Temporal task workflow', () => {
     const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] = async (
       input,
     ) => {
-      const stub = await stubTaskWorkflowActivities.planTaskImplementation(input);
+      const stub = await testTaskWorkflowActivities.planTaskImplementation(input);
       return input.taskReference === parentTask && input.command.kind === 'initial'
         ? {
             ...stub,
