@@ -1,6 +1,3 @@
-import { z } from 'zod';
-
-import { getHarnessPack } from '../harness/index.js';
 import type { TaskFixture } from './fixtures.js';
 import {
   resolvePackagePublicationPolicy,
@@ -18,9 +15,6 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
-
-export const WorkflowTemplateIdSchema = z.enum(['feature_with_review', 'short_bugfix']);
-export type WorkflowTemplateId = z.infer<typeof WorkflowTemplateIdSchema>;
 
 interface TaskContext {
   readonly description: string;
@@ -42,18 +36,14 @@ const translationNodes = (
     step('extract-translation-keys', {
       uses: 'translations.extract@1',
       with: {
-        command: profile.translations.extractCommand,
         repository,
         taskId: task.taskId,
       },
     }),
-    wait('wait-for-translator', {
-      for: 'translation_complete@1',
-    }),
+    wait('wait-for-translator', { for: 'translation_complete@1' }),
     step('pull-translations', {
       uses: 'translations.pull@1',
       with: {
-        command: profile.translations.pullCommand,
         repository,
         taskId: task.taskId,
       },
@@ -67,17 +57,34 @@ const taskInput = (task: TaskContext, objective: string) => ({
   taskId: task.taskId,
 });
 
+const reproductionInput = (task: TaskContext, phase: 'before' | 'after', objective: string) => ({
+  ...taskInput(task, objective),
+  phase,
+});
+
 const verificationInput = (task: TaskContext, profile: string) => ({
   profile,
   taskId: task.taskId,
 });
 
-const planReviewBoundary = (task: TaskContext): WorkflowNodeSource =>
+const planBoundary = (task: TaskContext): WorkflowNodeSource =>
   gate('review-plan', {
     reason: 'Every task produces a plan; immutable run settings decide whether a human reviews it.',
     resumeWhen: 'plan.approved@1',
     with: { taskId: task.taskId },
   });
+
+const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] => [
+  step('prepare-pr', {
+    uses: 'pr.prepare@1',
+    with: taskInput(task, 'Prepare the implementation for code review.'),
+  }),
+  step('observe-ci', {
+    uses: 'ci.observe@1',
+    with: taskInput(task, 'Wait for CI and classify failures before code review completes.'),
+  }),
+  wait('wait-for-code-review', { for: 'code_review@1' }),
+];
 
 const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
@@ -85,10 +92,14 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
-    planReviewBoundary(task),
-    step('reproduce-bug', {
+    planBoundary(task),
+    step('reproduce-before', {
       uses: 'bug.reproduce@1',
-      with: taskInput(task, 'Reproduce the reported behavior and preserve evidence.'),
+      with: reproductionInput(
+        task,
+        'before',
+        'Reproduce the reported behavior and preserve before evidence.',
+      ),
     }),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
@@ -104,13 +115,15 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
         }),
       ]),
     }),
-    step('prepare-pr', {
-      uses: 'pr.prepare@1',
-      with: taskInput(task, 'Prepare the implementation for code review.'),
+    step('reproduce-after', {
+      uses: 'bug.reproduce@1',
+      with: reproductionInput(
+        task,
+        'after',
+        'Repeat the reproduction and preserve after evidence.',
+      ),
     }),
-    wait('wait-for-code-review', {
-      for: 'code_review@1',
-    }),
+    ...pullRequestReadiness(task),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
 
@@ -123,7 +136,7 @@ const featureWithReviewRoot = (
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
-    planReviewBoundary(task),
+    planBoundary(task),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -147,13 +160,7 @@ const featureWithReviewRoot = (
       ]),
     }),
     ...translationNodes(task, task.repository, resolveProjectWorkflowProfile(task.repository)),
-    step('prepare-pr', {
-      uses: 'pr.prepare@1',
-      with: taskInput(task, 'Prepare the feature for code review.'),
-    }),
-    wait('wait-for-code-review', {
-      for: 'code_review@1',
-    }),
+    ...pullRequestReadiness(task),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
 
@@ -172,14 +179,11 @@ const sharedComponentRoot = (
           step('publish-development-package', {
             uses: 'component.dev_publish@1',
             with: {
-              command: publication.developmentPublishCommand,
               repository: task.componentRepository,
               taskId: task.taskId,
             },
           }),
-          wait('wait-for-final-publish', {
-            for: 'final_publish@1',
-          }),
+          wait('wait-for-final-publish', { for: 'final_publish@1' }),
           step('consume-published-version', {
             uses: 'component.consume_published@1',
             with: taskInput(
@@ -195,7 +199,7 @@ const sharedComponentRoot = (
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
-    planReviewBoundary(task),
+    planBoundary(task),
     bounded_loop('component-implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -215,29 +219,14 @@ const sharedComponentRoot = (
       uses: 'verify.targeted@1',
       with: verificationInput(task, verificationProfile),
     }),
-    step('prepare-pr', {
-      uses: 'pr.prepare@1',
-      with: taskInput(task, 'Prepare the consuming application for code review.'),
-    }),
-    wait('wait-for-code-review', {
-      for: 'code_review@1',
-    }),
+    ...pullRequestReadiness(task),
     finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
   ]);
 };
 
-export const selectWorkflowTemplate = (fixture: TaskFixture): WorkflowTemplateId =>
-  fixture.family === 'short_bugfix' ? 'short_bugfix' : 'feature_with_review';
-
-export const getBaseWorkflowTemplate = (templateId: WorkflowTemplateId): WorkflowSource => {
-  const source = getHarnessPack().workflowTemplates.get(templateId);
-  if (source === undefined) {
-    throw new Error(`Harness pack does not define workflow template ${templateId}`);
-  }
-  return defineWorkflow(source);
-};
-
-export const materializeTaskWorkflow = (fixture: TaskFixture): WorkflowSource => {
+// This deterministic composer exists only for local fixtures and validator tests. Production
+// workflow analyzers receive no skeleton and must assemble the complete graph from the catalog.
+export const assembleFixtureWorkflow = (fixture: TaskFixture): WorkflowSource => {
   switch (fixture.family) {
     case 'short_bugfix':
       return defineWorkflow({

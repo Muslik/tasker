@@ -14,8 +14,8 @@ There are three deliberately different representations:
 
 | Representation | Producer | Purpose | May contain executable functions? |
 |---|---|---|---|
-| TypeScript source DSL | harness author | templates, policies, registered step definitions | only registration-time constructors; never persisted |
-| JSON IR proposal | compiler/agent | task-specific proposed workflow | no |
+| TypeScript contract catalog | harness author | node helpers, policies, step definitions, executor bindings | only registration-time constructors; never persisted |
+| JSON IR proposal | agent | complete task-specific proposed workflow | no |
 | compiled graph artifact | deterministic compiler | validated, versioned, hashed run input | no |
 
 The first-wave dependency set is intentionally small:
@@ -72,54 +72,18 @@ failure mode.
 
 ## 3. Workflow description
 
-### 3.1 Human-authored templates use TypeScript
+### 3.1 Harness authors register building blocks, not workflow templates
 
-Templates and reusable fragments live in versioned `.ts` modules. TypeScript gives
-refactoring, autocomplete, literal inference, and compile-time key-to-payload checks.
-The authoring helpers only construct plain data.
+Step, predicate, wait, and executor contracts live in versioned `.ts` modules.
+TypeScript gives refactoring, autocomplete, literal inference, and compile-time
+schema-to-payload checks. Workflow node helpers only construct plain data, but no
+preassembled base graph is given to the analyzer.
 
-Illustrative API:
+Preassembled `bugfixWorkflow` or `featureWorkflow` modules are intentionally rejected:
+they bias the analyzer toward a family template and make omitted or irrelevant work
+hard to see. A task analyzer instead receives the catalog and emits the full JSON graph.
 
-```ts
-export const bugfixWorkflow = defineWorkflow({
-  id: 'bugfix',
-  version: 1,
-  root: sequence('delivery', [
-    step('investigate', {
-      uses: 'agent.investigate@1',
-      with: { requireReproduction: true },
-    }),
-    branch('choose-verification', {
-      when: predicate('change.needs_visual_verification@1'),
-      then: step('visual-check', {
-        uses: 'verify.visual@1',
-        with: { baseline: 'current-main' },
-      }),
-      otherwise: step('targeted-check', {
-        uses: 'verify.targeted@1',
-        with: { selection: 'changed-files' },
-      }),
-    }),
-    boundedLoop('ci-repair', {
-      maxAttempts: 3,
-      until: predicate('ci.is_acceptable@1'),
-      body: sequence('repair-cycle', [
-        step('run-ci', { uses: 'ci.run@1', with: {} }),
-        step('classify-ci', { uses: 'ci.classify@1', with: {} }),
-        step('repair', { uses: 'agent.repair@1', with: {} }),
-      ]),
-    }),
-    wait('code-review', {
-      for: 'review_event@1',
-      slot: 'release',
-      resumeAt: 'process-review',
-    }),
-    finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
-  ]),
-} satisfies WorkflowSource);
-```
-
-The exact helper names can change during M0, but these properties cannot:
+The node helper names may evolve, but these properties cannot:
 
 - helpers return only JSON-serializable values;
 - node `kind` is the discriminant;
@@ -127,22 +91,22 @@ The exact helper names can change during M0, but these properties cannot:
 - step, predicate, wait, retry, and policy references include an ABI version;
 - `boundedLoop` requires its bound at construction;
 - no inline predicate, callback, shell command, or arbitrary code can enter the IR;
-- `satisfies` preserves literal information used to infer node and payload types.
+- typed registrations preserve input/output schema and execution-binding variants.
 
-Do not introduce a fluent builder with hidden mutable state. The full source graph
+Do not introduce a fluent builder with hidden mutable state. The proposed task graph
 must remain readable top-to-bottom and serializable after one pure construction pass.
 
 ### 3.2 Agents produce JSON, not TypeScript
 
-The analyzer receives the task snapshot, available workflow fragments, registered
-step types, capabilities, and policy constraints. It proposes JSON matching
+The analyzer receives the task snapshot, repository evidence, registered node/step
+types, capabilities, policy constraints, and mandatory obligations. It proposes JSON matching
 `WorkflowProposalSchema`. It cannot emit code that Tasker imports or executes.
 
 The deterministic compiler then:
 
 1. parses the proposal with Zod;
-2. resolves template/fragment references;
-3. validates ABI versions, capabilities, effect policies, terminal paths, loop bounds,
+2. resolves versioned step, predicate, and wait references;
+3. validates ABI versions, obligations, capabilities, effect policies, terminal paths, loop bounds,
    waits, and recovery/handoff paths;
 4. normalizes ordering and defaults;
 5. emits canonical JSON;

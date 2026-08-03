@@ -119,7 +119,9 @@ Evidence:
 - `same_snapshot_and_policy_produce_same_graph_hash`
 - `different_task_families_produce_distinct_graphs`
 - `graph_tree_renders_from_persisted_projection_after_restart`
-- `graph_diff_shows_task_specific_changes_from_template`
+- `analyzer_context_contains_no_base_workflow`
+- `reject_pr_path_without_ci_and_review`
+- `reject_bug_without_before_and_after_reproduction`
 - `reject_unknown_step_type`
 - `reject_unbounded_loop`
 - `reject_missing_terminal_path`

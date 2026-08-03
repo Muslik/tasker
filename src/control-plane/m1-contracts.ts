@@ -5,7 +5,7 @@ import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
-export const M1_VIEW_SCHEMA_VERSION = 2;
+export const M1_VIEW_SCHEMA_VERSION = 3;
 
 export const FixtureFamilySchema = z.enum([
   'short_bugfix',
@@ -39,15 +39,6 @@ export const WorkflowAssemblyDecisionViewSchema = z
     source: z.string().min(1),
     reason: z.string().min(1),
     effect: z.string().min(1),
-  })
-  .strict();
-
-export const GraphDiffEntrySchema = z
-  .object({
-    kind: z.enum(['added', 'changed', 'removed']),
-    path: z.string().min(1),
-    before: JsonValueSchema.optional(),
-    after: JsonValueSchema.optional(),
   })
   .strict();
 
@@ -101,7 +92,6 @@ export const WorkflowViewSchema = z
       .object({
         proposalId: z.string().min(1),
         assemblyDecisions: z.array(WorkflowAssemblyDecisionViewSchema).min(1),
-        templateId: z.string().min(1),
         status: z.enum(['valid', 'rejected']),
         graphHash: z.string().min(1).nullable(),
         graph: JsonValueSchema.nullable(),
@@ -112,7 +102,6 @@ export const WorkflowViewSchema = z
             issues: z.array(WorkflowValidationIssueViewSchema),
           })
           .strict(),
-        diff: z.array(GraphDiffEntrySchema),
         capabilities: z
           .object({
             available: z.array(z.string().min(1)),

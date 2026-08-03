@@ -1581,8 +1581,8 @@ const WorkflowDiagnostics = ({ view }: { readonly view: WorkflowView }) => (
     </summary>
     <div className="space-y-3 px-5 pb-4 text-xs">
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
-        <dt>Template</dt>
-        <dd className="truncate font-mono text-foreground">{view.workflow.templateId}</dd>
+        <dt>Assembly</dt>
+        <dd className="truncate text-foreground">Task-specific graph</dd>
         <dt>Proposal</dt>
         <dd className="truncate font-mono text-foreground">{view.workflow.proposalId}</dd>
         <dt>Graph</dt>
@@ -1590,24 +1590,9 @@ const WorkflowDiagnostics = ({ view }: { readonly view: WorkflowView }) => (
           {view.workflow.graphHash ?? 'not compiled'}
         </dd>
       </dl>
-      <p className="font-medium">Template → task graph</p>
-      {view.workflow.diff.length === 0 ? (
-        <p className="text-muted-foreground">No graph diff</p>
-      ) : (
-        <ol className="space-y-2" data-testid="graph-diff">
-          {view.workflow.diff.map((entry, index) => (
-            <li key={`${entry.kind}:${entry.path}:${String(index)}`}>
-              <div className="flex items-center gap-2">
-                <StateBadge>{entry.kind}</StateBadge>
-                <code className="truncate text-muted-foreground">{entry.path}</code>
-              </div>
-              <pre className="mt-1 max-h-32 overflow-auto rounded-md bg-muted/40 p-2 text-[10px] text-muted-foreground">
-                {formatValue(entry.before)} → {formatValue(entry.after)}
-              </pre>
-            </li>
-          ))}
-        </ol>
-      )}
+      <p className="text-muted-foreground">
+        Built from an empty graph using the registered node, step, policy, and obligation catalog.
+      </p>
     </div>
   </details>
 );

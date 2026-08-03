@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { WorkflowChangeKindSchema, WorkflowSourceSchema } from '../workflow/index.js';
+import type { StepTypeContract } from '../workflow/index.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const RelativePathSchema = z
@@ -10,54 +10,28 @@ const RelativePathSchema = z
     message: 'Expected a path relative to the harness pack',
   });
 
-export const StepInputKindSchema = z.enum(['command', 'json', 'task', 'verification']);
+export type HarnessExecutionBinding =
+  | {
+      readonly kind: 'agent';
+      readonly prompt: string;
+      readonly skills: readonly string[];
+    }
+  | {
+      readonly kind: 'process';
+      readonly executor: string;
+    }
+  | {
+      readonly kind: 'integration';
+      readonly adapter: string;
+    };
 
-export const StepExecutionBindingSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('agent'),
-      prompt: RelativePathSchema,
-      skills: z.array(VersionedReferenceSchema),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('system'),
-      executor: VersionedReferenceSchema,
-    })
-    .strict(),
-]);
-
-export const HarnessStepDefinitionSchema = z
-  .object({
-    reference: VersionedReferenceSchema,
-    description: z.string().min(1),
-    inputKind: StepInputKindSchema,
-    allowedEffects: z.array(z.string().min(1)),
-    requiredCapabilities: z.array(z.string().min(1)),
-    resumeBoundary: z.enum(['none', 'attempt', 'step']),
-    idempotency: z.enum(['none', 'key', 'probe']),
-    retryBudget: z.number().int().nonnegative(),
-    waitKinds: z.array(VersionedReferenceSchema),
-    artifactContracts: z.array(z.string().min(1)),
-    workflowChanges: z.array(WorkflowChangeKindSchema),
-    reconciliation: z
-      .object({
-        strategy: z.enum(['probe', 'receipt']),
-        description: z.string().min(1).optional(),
-      })
-      .strict()
-      .optional(),
-    execution: StepExecutionBindingSchema,
-  })
-  .strict();
-
-export const HarnessStepsManifestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    steps: z.array(HarnessStepDefinitionSchema).min(1),
-  })
-  .strict();
+export interface HarnessStepDefinition {
+  readonly reference: string;
+  readonly description: string;
+  readonly retryBudget: number;
+  readonly contract: StepTypeContract;
+  readonly execution: HarnessExecutionBinding;
+}
 
 const TranslationPolicySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('inline_json') }).strict(),
@@ -78,7 +52,6 @@ export const HarnessProjectManifestSchema = z
     repositoryKind: z.enum(['frontend', 'generic']),
     translations: TranslationPolicySchema,
     workflowGuidance: RelativePathSchema.optional(),
-    workOverlay: RelativePathSchema.optional(),
   })
   .strict();
 
@@ -108,15 +81,10 @@ export const HarnessCompanyManifestSchema = z
         workflowAnalyzer: RelativePathSchema,
       })
       .strict(),
-    workflowTemplates: z.record(z.string().min(1), RelativePathSchema),
     globalPackageRules: z.array(GlobalPackageRuleManifestSchema),
-    workOverlay: RelativePathSchema.optional(),
   })
   .strict();
 
-export const HarnessWorkflowTemplateSchema = WorkflowSourceSchema;
-
-export type HarnessStepDefinition = z.infer<typeof HarnessStepDefinitionSchema>;
 export type HarnessProjectManifest = z.infer<typeof HarnessProjectManifestSchema>;
 export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema>;
 
@@ -139,9 +107,11 @@ export interface LoadedHarnessPack {
   readonly company: HarnessCompanyManifest;
   readonly steps: readonly LoadedHarnessStep[];
   readonly projects: readonly LoadedHarnessProject[];
-  readonly workflowTemplates: ReadonlyMap<string, z.infer<typeof WorkflowSourceSchema>>;
   readonly prompts: {
     readonly implementationPlanner: LoadedPrompt;
     readonly workflowAnalyzer: LoadedPrompt;
   };
 }
+
+export const parseVersionedReference = (reference: string): string =>
+  VersionedReferenceSchema.parse(reference);

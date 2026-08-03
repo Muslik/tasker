@@ -169,7 +169,7 @@ describe('Jira workflow generation', () => {
     expect(evidence.repository.reference).toBe('onetwotrip/front-avia');
     const planner = z
       .object({
-        contracts: z.object({
+        buildingBlocks: z.object({
           steps: z.array(
             z.object({
               reference: z.string(),
@@ -177,12 +177,14 @@ describe('Jira workflow generation', () => {
             }),
           ),
         }),
+        obligations: z.array(z.object({ id: z.string() }).loose()),
       })
       .parse(request.plannerContext);
     expect(
-      planner.contracts.steps.find((contract) => contract.reference === 'verify.visual@1')
+      planner.buildingBlocks.steps.find((contract) => contract.reference === 'verify.visual@1')
         ?.inputSchema.required,
     ).toEqual(['profile', 'taskId']);
+    expect(planner.obligations.map(({ id }) => id)).toContain('pr-requires-ci-and-review');
     expect(
       ledger.repository.listEvents('workflow:jira:AVIA-13235').map((event) => event.eventType),
     ).toEqual(['WorkflowAnalyzed', 'WorkflowRejected', 'WorkflowAnalyzed', 'WorkflowPlanned']);

@@ -4,6 +4,5 @@
   "repository": "twiket/avia-web",
   "repositoryKind": "frontend",
   "translations": { "kind": "inline_json" },
-  "workflowGuidance": "projects/twiket-avia-web/workflow.md",
-  "workOverlay": "projects/twiket-avia-web/work"
+  "workflowGuidance": "projects/twiket-avia-web/workflow.md"
 }

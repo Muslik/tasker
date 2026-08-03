@@ -216,14 +216,15 @@ workflow Tasker proposes before any provider or integration executes.
 ### Implementation steps
 
 1. Implement successful `IntakeRequest -> Task` creation from a local fixture.
-2. Implement a versioned step registry and two initial templates:
-   `short_bugfix` and `feature_with_review`.
+2. Implement versioned node/step/predicate/wait registries and a deterministic fixture
+   composer used only by tests and offline demos. Production analyzers receive no graph
+   skeleton.
 3. Implement analyzer output as an untrusted `WorkflowProposal` artifact.
 4. Implement deterministic compiler/validator that materializes the immutable graph.
 5. Persist snapshot, validator report, graph hash, provider capabilities, retry
    budgets, waits, expected artifacts, verification-plan rationale, and ordered
    workflow-assembly decisions.
-6. Implement graph diff from template to task-specific graph.
+6. Implement deterministic workflow obligations and ordered assembly-decision provenance.
 7. Add local HTTP read API for intake/task/run/graph projections.
 8. Add a React/Vite operator console with:
    - a left task queue with persisted statuses and attention state;
@@ -233,8 +234,7 @@ workflow Tasker proposes before any provider or integration executes.
    - verification profile and rationale;
    - validation errors and graph JSON download;
    - a native SSE feed that announces new ledger events and refreshes projections;
-   - the raw template diff collapsed under diagnostics rather than used as the main
-     workflow explanation.
+   - proposal identity, graph hash, and validator evidence under diagnostics.
 9. Keep the cockpit read-only in this milestone.
 10. Add a CLI graph renderer as a fallback/debug surface.
 
@@ -246,7 +246,7 @@ workflow Tasker proposes before any provider or integration executes.
 - identical task/policy input produces the same graph hash;
 - unknown step, missing terminal path, unmet capability, unsafe effect, or unbounded
   loop is shown as a validation failure and cannot be queued;
-- graph and template diff survive restart and render from projections;
+- graph, assembly decisions, and validator evidence survive restart and render from projections;
 - no LLM output is executed during this milestone.
 
 ### Operator demo
@@ -256,14 +256,14 @@ workflow Tasker proposes before any provider or integration executes.
 3. Click `Generate workflow` and see the left status and center ledger activity update
    from the event stream.
 4. Inspect **Why this workflow**, the right-side tree, waits, bounded loops, and
-   verification rationale; expand the template diff only when debugging the compiler.
+   verification rationale and diagnostics.
 5. restart the process and show the same persisted graph/hash.
 6. submit an invalid graph fixture and show a precise validator error.
 
 ### Artifacts
 
 - four compiled task/policy fixtures;
-- graph/template diff artifacts;
+- proposal, graph, assembly-decision, and validator artifacts;
 - cockpit screenshot/video;
 - validator report examples;
 - successful and rejected debug bundles.
@@ -297,7 +297,7 @@ same deterministic compiler/validator and cockpit used by M1.
 1. Extract a `WorkflowAnalyzerPort` whose output is untrusted JSON, not executable code.
 2. Define a narrow analyzer-output schema: proposed workflow source, assembly decisions,
    and verification plan. Derive capabilities, waits, retry budgets, expected artifacts,
-   template diff, and graph hash inside Tasker.
+   and graph hash inside Tasker.
 3. Add a Codex CLI adapter using saved ChatGPT subscription authentication,
    non-interactive `exec`, `--ephemeral`, `--sandbox read-only`, and
    `--output-schema`.
@@ -412,13 +412,12 @@ of later durable effect work; they must not be added as direct UI requests.
 ### Implemented slice
 
 1. Admit a current Jira task only when its managed repository binding is resolved.
-2. Classify bugs and non-bugs into conservative base templates without pretending to
-   understand implementation details before repository analysis.
+2. Normalize bug/non-bug facts for policy evaluation without selecting a base graph.
 3. Give the analyzer the full Jira snapshot, including comments, links, and attachment
    metadata, plus the selected checkout and workflow policies/contracts.
 4. Send the analyzer proposal through the existing typed proposal boundary,
    deterministic compiler, capability checks, and validator.
-5. Persist provider receipt, proposal, diff, validator report, graph, and workflow view
+5. Persist provider receipt, proposal, validator report, graph, and workflow view
    under a Jira-specific workflow aggregate. Do not collide with Jira intake history.
 6. Merge Jira intake decisions and workflow planning decisions into one operator
    timeline while keeping repeated Jira synchronization out of activity.

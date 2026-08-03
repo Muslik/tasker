@@ -120,7 +120,7 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
     'Workflow compiled and persisted',
   );
   await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
-    'reproduce-bug',
+    'reproduce-before',
   );
 });
 
@@ -150,7 +150,7 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
   await expect(page.getByTestId('validation-panel')).toContainText('Validator passed');
   await expect(page.getByTestId('graph-hash')).not.toHaveText('not compiled');
-  await expect(page.getByTestId('workflow-debug-details')).toContainText('Template → task graph');
+  await expect(page.getByTestId('workflow-debug-details')).toContainText('Task-specific graph');
   await expect(page.getByRole('link', { name: 'Download graph JSON' })).toBeVisible();
 });
 

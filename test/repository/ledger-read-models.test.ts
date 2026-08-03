@@ -68,7 +68,7 @@ describe('LedgerRepository read models', () => {
           artifactId: 'proposal-fixture-1',
           artifactKind: 'workflow_proposal',
           storageUri: 'ledger://artifacts/proposal-fixture-1',
-          payload: { templateId: 'short_bugfix@1' },
+          payload: { analyzerVersion: 'codex-cli@1' },
           metadata: { source: 'deterministic_m1_analyzer' },
         },
       ],
@@ -89,7 +89,7 @@ describe('LedgerRepository read models', () => {
     });
     expect(ledger.repository.readArtifact('proposal-fixture-1')).toMatchObject({
       artifactKind: 'workflow_proposal',
-      payload: { templateId: 'short_bugfix@1' },
+      payload: { analyzerVersion: 'codex-cli@1' },
       metadata: { source: 'deterministic_m1_analyzer' },
       parentArtifactId: null,
     });

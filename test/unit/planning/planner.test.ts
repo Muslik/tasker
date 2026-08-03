@@ -6,6 +6,7 @@ import {
   planTaskWorkflow,
   planWorkflowProposal,
 } from '../../../src/planning/index.js';
+import { WorkflowSourceSchema } from '../../../src/workflow/index.js';
 
 const fixture = (fixtureId: string) => {
   const value = findTaskFixture(fixtureId);
@@ -16,7 +17,7 @@ const fixture = (fixtureId: string) => {
 };
 
 describe('M1 task workflow planning', () => {
-  it('compiles every accepted task policy into a distinct inspectable graph', () => {
+  it('compiles every accepted task analysis into a distinct inspectable graph', () => {
     const results = listTaskFixtures()
       .filter((candidate) => candidate.expected === 'accepted')
       .map((candidate) => planTaskWorkflow(candidate));
@@ -30,7 +31,7 @@ describe('M1 task workflow planning', () => {
         (result) =>
           result.ok &&
           result.value.presentation.nodeCount > 0 &&
-          result.value.diff.entries.length > 0,
+          result.value.proposal.assemblyDecisions.length > 0,
       ),
     ).toBe(true);
     expect(results[0]?.ok && results[0].value.executionEligibility).toEqual({
@@ -39,7 +40,7 @@ describe('M1 task workflow planning', () => {
     });
   });
 
-  it('produces the same graph, metadata, and diff for identical fixture input', () => {
+  it('produces the same graph and metadata for identical fixture input', () => {
     const input = fixture('avia-13236-short-bug');
 
     const results = [planTaskWorkflow(input), planTaskWorkflow(input)];
@@ -52,7 +53,7 @@ describe('M1 task workflow planning', () => {
     if (!planned.ok) {
       throw new Error('Expected the short bug fixture to produce a proposal');
     }
-    const parsedSource = planned.value.proposal.templateSource;
+    const parsedSource = WorkflowSourceSchema.parse(planned.value.proposal.source);
     if (parsedSource.root.kind !== 'sequence') {
       throw new Error('Expected a sequence root');
     }
@@ -75,6 +76,111 @@ describe('M1 task workflow planning', () => {
         stage: 'workflow_validation',
         validatorReport: {
           issues: [{ code: 'required_planning_boundary_missing' }],
+        },
+      },
+    });
+  });
+
+  it('rejects a PR workflow when the analyzer omits CI observation', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) {
+      throw new Error('Expected the short bug fixture to produce a sequence proposal');
+    }
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+    if (source.root.kind !== 'sequence') {
+      throw new Error('Expected the short bug fixture to produce a sequence proposal');
+    }
+    const withoutCi = {
+      ...planned.value.proposal,
+      source: {
+        ...source,
+        root: {
+          ...source.root,
+          children: source.root.children.filter(
+            (child) => child.kind !== 'step' || child.uses !== 'ci.observe@1',
+          ),
+        },
+      },
+    };
+
+    const result = planWorkflowProposal(withoutCi);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        stage: 'workflow_validation',
+        validatorReport: {
+          issues: [{ code: 'unsatisfied_workflow_obligation' }],
+        },
+      },
+    });
+  });
+
+  it('rejects a write-capable workflow when the analyzer omits PR preparation', () => {
+    const planned = planTaskWorkflow(fixture('avia-12536-feature-review'));
+    if (!planned.ok) throw new Error('Expected the feature fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+    if (source.root.kind !== 'sequence') throw new Error('Expected a sequence proposal');
+    const withoutPullRequest = {
+      ...planned.value.proposal,
+      source: {
+        ...source,
+        root: {
+          ...source.root,
+          children: source.root.children.filter(
+            (child) => child.kind !== 'step' || child.uses !== 'pr.prepare@1',
+          ),
+        },
+      },
+    };
+
+    const result = planWorkflowProposal(withoutPullRequest);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        stage: 'workflow_validation',
+        validatorReport: {
+          issues: [
+            {
+              code: 'unsatisfied_workflow_obligation',
+              details: { obligationId: 'write-requires-pr' },
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it('rejects a bug workflow without after-fix reproduction evidence', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+    if (source.root.kind !== 'sequence') throw new Error('Expected a sequence proposal');
+    const withoutAfterEvidence = {
+      ...planned.value.proposal,
+      source: {
+        ...source,
+        root: {
+          ...source.root,
+          children: source.root.children.filter((child) => child.id !== 'reproduce-after'),
+        },
+      },
+    };
+
+    const result = planWorkflowProposal(withoutAfterEvidence);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        stage: 'workflow_validation',
+        validatorReport: {
+          issues: [
+            {
+              code: 'unsatisfied_workflow_obligation',
+              details: { obligationId: 'bug-requires-before-and-after-evidence' },
+            },
+          ],
         },
       },
     });
@@ -144,7 +250,7 @@ describe('M1 task workflow planning', () => {
       'translation-policy',
       'publication-policy',
       'verification-profile',
-      'code-review-wait',
+      'pr-readiness',
     ]);
     expect(
       Object.values(result.value.presentation.nodes).some((node) => node.kind === 'wait'),

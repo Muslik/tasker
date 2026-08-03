@@ -9,8 +9,8 @@ import {
   type ValidationReport,
 } from '../workflow/index.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
-import { createWorkflowDiff, GraphDiffArtifactSchema, type GraphDiffFailure } from './diff.js';
 import { FixtureInputFailureSchema } from './fixtures.js';
+import { validateWorkflowObligations } from './obligations.js';
 import {
   analyzeTaskFixture,
   parseWorkflowProposal,
@@ -46,18 +46,8 @@ const CapabilityValidationFailureSchema = z
   })
   .strict();
 
-const DiffPlanningFailureSchema = z
-  .object({
-    code: z.literal('graph_diff_failed'),
-    proposal: WorkflowProposalArtifactSchema,
-    side: z.enum(['task', 'template']),
-    stage: z.literal('diff'),
-  })
-  .strict();
-
 export const PlanningFailureSchema = z.discriminatedUnion('stage', [
   CapabilityValidationFailureSchema,
-  DiffPlanningFailureSchema,
   FixturePlanningFailureSchema,
   ProposalPlanningFailureSchema,
   WorkflowValidationFailureSchema,
@@ -66,7 +56,6 @@ export const PlanningFailureSchema = z.discriminatedUnion('stage', [
 export const PlannedWorkflowSchema = z
   .object({
     compiled: CompiledWorkflowArtifactSchema,
-    diff: GraphDiffArtifactSchema,
     executionEligibility: z
       .object({
         reason: z.literal('m1_read_only'),
@@ -94,16 +83,6 @@ const requiredCapabilitiesFromCompiledGraph = (
     left.localeCompare(right),
   );
 };
-
-const toDiffFailure = (
-  proposal: WorkflowProposalArtifact,
-  failure: GraphDiffFailure,
-): PlanningFailure => ({
-  code: 'graph_diff_failed',
-  proposal,
-  side: failure.side,
-  stage: 'diff',
-});
 
 const validateRequiredPlanningBoundary = (graph: CompiledWorkflow): ValidationReport => {
   const first = graph.root.kind === 'sequence' ? graph.root.children[0] : undefined;
@@ -161,12 +140,20 @@ const planParsedWorkflowProposal = (
   }
 
   const planningBoundaryReport = validateRequiredPlanningBoundary(compiledResult.value.graph);
-  if (planningBoundaryReport.issues.length > 0) {
+  const obligationReport = validateWorkflowObligations(
+    compiledResult.value.graph,
+    proposal.fixture,
+  );
+  const policyIssues = [...planningBoundaryReport.issues, ...obligationReport.issues];
+  if (policyIssues.length > 0) {
     return err({
       code: 'workflow_rejected',
       proposal,
       stage: 'workflow_validation',
-      validatorReport: planningBoundaryReport,
+      validatorReport: {
+        workflowId: compiledResult.value.graph.metadata.workflowId,
+        issues: policyIssues,
+      },
     });
   }
 
@@ -188,20 +175,9 @@ const planParsedWorkflowProposal = (
     });
   }
 
-  const diffResult = createWorkflowDiff({
-    task: proposal.source,
-    template: proposal.templateSource,
-    templateId: proposal.templateId,
-  });
-
-  if (!diffResult.ok) {
-    return err(toDiffFailure(proposal, diffResult.error));
-  }
-
   return ok(
     PlannedWorkflowSchema.parse({
       compiled: compiledResult.value,
-      diff: diffResult.value,
       executionEligibility: {
         reason: 'm1_read_only',
         status: 'disabled',

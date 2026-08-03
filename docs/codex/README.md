@@ -42,7 +42,8 @@ Read in this order:
     repository retry, candidate review, and linked child-run execution projected as one task.
 15. [`customization-guide.md`](customization-guide.md) — operator/developer extension
     contract, prompt and harness pack layout, step registration, provider-neutral
-    `SkillRef` mapping, tracker adapter boundaries, and provenance-preserving materialization.
+    execution bindings, tracker adapter boundaries, project harness bootstrap, and
+    task-specific assembly rules.
 
 The first visible workflow shipped in M1. M1.5 now assembles it through a real read-only
 subscription CLI provider. M2 has started: accepted graphs can now queue and traverse
@@ -60,15 +61,16 @@ M0, M1, M1.5, M1.6, M1.7, M1.8, and the first M2 vertical slice are implemented.
 console has the task queue on the left, persisted activity and workflow rationale in
 the center, and the current graph on the right. It includes validation failures,
 waits, retry bounds, project/global policy decisions, verification rationale,
-capabilities, collapsed template diagnostics, SSE refresh, and JSON download.
+capabilities, assembly provenance, SSE refresh, and JSON download.
 Implementation planning now uses a real subscription Codex CLI provider; accepted
 continuations reach their own durable code-review wait and resolve the parent join on
 completion, while graph nodes remain deterministic local stubs. Tasker performs no repository, Jira,
 Bitbucket, or CI mutation. Provider provenance and measured tokens are persisted and
 visible.
 An imported Jira task with a resolved checkout can now be compiled into a workflow.
-Jira text only selects a conservative admission template; the analyzer receives the
-full Jira snapshot and bounded repository evidence before proposing the graph.
+Admission supplies normalized task facts; the analyzer receives the full Jira snapshot,
+bounded repository evidence, policies, obligations, and the building-block catalog,
+then constructs the complete graph from scratch.
 
 Older July 30 versions remain under `.omx/plans/` for audit history; they are not the
 current implementation source of truth.

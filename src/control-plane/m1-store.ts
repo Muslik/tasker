@@ -22,7 +22,6 @@ export interface M1WorkflowArtifacts {
   readonly analyzerVersion: string;
   readonly proposal: JsonValue;
   readonly validatorReport: JsonValue;
-  readonly diff: JsonValue;
   readonly compiledGraph?: JsonValue | undefined;
 }
 
@@ -156,14 +155,6 @@ export class M1WorkflowStore {
         storageUri: `ledger://artifacts/validator:${fixtureId}${attemptSuffix}`,
         payload: artifacts.validatorReport,
         metadata: { workflowStatus: view.workflow.status },
-        parentArtifactId: proposalArtifactId,
-      },
-      {
-        artifactId: `diff:${fixtureId}${attemptSuffix}`,
-        artifactKind: 'workflow_template_diff',
-        storageUri: `ledger://artifacts/diff:${fixtureId}${attemptSuffix}`,
-        payload: artifacts.diff,
-        metadata: { templateId: view.workflow.templateId },
         parentArtifactId: proposalArtifactId,
       },
     ];

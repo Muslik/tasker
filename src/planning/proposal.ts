@@ -17,12 +17,7 @@ import {
   type FixtureInputFailure,
   type TaskFixture,
 } from './fixtures.js';
-import {
-  getBaseWorkflowTemplate,
-  materializeTaskWorkflow,
-  selectWorkflowTemplate,
-  WorkflowTemplateIdSchema,
-} from './templates.js';
+import { assembleFixtureWorkflow } from './fixture-assembly.js';
 import {
   resolvePackagePublicationPolicy,
   resolveProjectWorkflowProfile,
@@ -104,8 +99,6 @@ export const WorkflowProposalArtifactSchema = z
     proposalSchemaVersion: z.literal(1),
     retryBudgets: z.array(RetryBudgetSchema),
     source: z.unknown(),
-    templateId: WorkflowTemplateIdSchema,
-    templateSource: WorkflowSourceSchema,
     verificationPlan: VerificationPlanSchema,
     waits: z.array(WaitMetadataSchema),
   })
@@ -289,8 +282,8 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
       reason: `The intake classified this task as ${fixture.family}.`,
       effect:
         fixture.family === 'short_bugfix'
-          ? 'Start from the short bugfix flow with mandatory reproduction.'
-          : 'Start from the feature-with-review flow and specialize it for this task.',
+          ? 'Add before/after reproduction, bounded repair, verification, CI, and review blocks.'
+          : 'Compose the required implementation, verification, CI, and review blocks.',
     },
     {
       id: 'bounded-repair',
@@ -395,11 +388,11 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
     effect: `Use the ${createVerificationPlan(fixture).profile} verification profile.`,
   });
   decisions.push({
-    id: 'code-review-wait',
-    title: 'Human code review retained',
-    source: 'global:code-review',
-    reason: 'Every task that prepares a PR must stop for operator review.',
-    effect: 'End the autonomous delivery phase at the code-review wait.',
+    id: 'pr-readiness',
+    title: 'CI and human code review retained',
+    source: 'global:pr-readiness',
+    reason: 'Every task that prepares a PR must expose CI classification and operator review.',
+    effect: 'Observe CI, then end the autonomous delivery phase at the code-review wait.',
   });
 
   return decisions;
@@ -485,7 +478,7 @@ const applyRejectedVariant = (fixture: TaskFixture, source: WorkflowSource): unk
 };
 
 const toProposalCandidate = (fixture: TaskFixture): unknown => {
-  const validSource = materializeTaskWorkflow(fixture);
+  const validSource = assembleFixtureWorkflow(fixture);
   return proposalCandidateFromParts(fixture, 'm1-deterministic@1', {
     assemblyDecisions: createAssemblyDecisions(fixture),
     source: applyRejectedVariant(fixture, validSource),
@@ -502,7 +495,6 @@ const proposalCandidateFromParts = (
     readonly verificationPlan: z.infer<typeof VerificationPlanSchema>;
   },
 ): unknown => {
-  const templateId = selectWorkflowTemplate(fixture);
   const parsedSource = WorkflowSourceSchema.safeParse(parts.source);
   const metadata = parsedSource.success
     ? collectProposalMetadata(parsedSource.data)
@@ -529,8 +521,6 @@ const proposalCandidateFromParts = (
     proposalSchemaVersion: 1,
     retryBudgets: metadata.retryBudgets,
     source: parts.source,
-    templateId,
-    templateSource: getBaseWorkflowTemplate(templateId),
     verificationPlan: parts.verificationPlan,
     waits: metadata.waits,
   };

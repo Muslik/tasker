@@ -55,7 +55,7 @@ export type M1ServiceError =
     }
   | {
       readonly kind: 'non_json_artifact';
-      readonly artifact: 'compiled_graph' | 'diff' | 'proposal' | 'validator_report';
+      readonly artifact: 'compiled_graph' | 'proposal' | 'validator_report';
     }
   | {
       readonly kind: 'store_failure';
@@ -109,7 +109,7 @@ const toFixtureSummary = (fixture: TaskFixture): FixtureSummary =>
 
 const toJson = (
   value: unknown,
-  artifact: 'compiled_graph' | 'diff' | 'proposal' | 'validator_report',
+  artifact: 'compiled_graph' | 'proposal' | 'validator_report',
 ): Outcome<JsonValue, M1ServiceError> => {
   const result = JsonValueSchema.safeParse(value);
   return result.success ? ok(result.data) : err({ kind: 'non_json_artifact', artifact });
@@ -223,7 +223,6 @@ const baseWorkflowView = (
   workflow: {
     proposalId: `proposal:${fixture.fixtureId}`,
     assemblyDecisions: proposal.assemblyDecisions,
-    templateId: `${proposal.templateId}@1`,
     capabilities: proposal.capabilities,
     retryBudgets: retryBudgetRecord(proposal),
     waits: proposal.waits.map((wait) => ({
@@ -262,17 +261,6 @@ const rejectedValidatorReport = (failure: PlanningFailure): ValidationReport => 
           },
         ],
       };
-    case 'diff':
-      return {
-        workflowId: `${failure.proposal.fixture.fixtureId}-workflow`,
-        issues: [
-          {
-            code: 'invalid_source',
-            message: `Could not compare ${failure.side} graph with the selected template`,
-            path: ['diff'],
-          },
-        ],
-      };
     case 'fixture':
     case 'proposal':
       throw new Error(`Planning failed before a proposal existed at ${failure.stage}`);
@@ -283,7 +271,6 @@ const rejectedProposal = (failure: PlanningFailure): WorkflowProposalArtifact | 
   switch (failure.stage) {
     case 'workflow_validation':
     case 'capability_validation':
-    case 'diff':
       return failure.proposal;
     case 'fixture':
     case 'proposal':
@@ -298,12 +285,10 @@ const buildAcceptedView = (
 ): Outcome<BuiltView, M1ServiceError> => {
   const graph = toJson(planned.compiled.graph, 'compiled_graph');
   const proposal = toJson(planned.proposal, 'proposal');
-  const diff = toJson(planned.diff, 'diff');
   const validatorReport = toJson(planned.compiled.validatorReport, 'validator_report');
 
   if (!graph.ok) return graph;
   if (!proposal.ok) return proposal;
-  if (!diff.ok) return diff;
   if (!validatorReport.ok) return validatorReport;
 
   const common = baseWorkflowView(fixture, planned.proposal, persistedAt);
@@ -317,10 +302,6 @@ const buildAcceptedView = (
       graph: graph.value,
       tree: toTree(planned.presentation),
       validatorReport: planned.compiled.validatorReport,
-      diff: planned.diff.entries.map((entry) => ({
-        ...entry,
-        path: `/${entry.path.map(String).join('/')}`,
-      })),
     },
   });
 
@@ -330,7 +311,6 @@ const buildAcceptedView = (
       analyzerVersion: planned.proposal.analyzerVersion,
       compiledGraph: graph.value,
       proposal: proposal.value,
-      diff: diff.value,
       validatorReport: validatorReport.value,
     },
   });
@@ -349,12 +329,9 @@ const buildRejectedView = (
   const proposal = toJson(proposalValue, 'proposal');
   const validatorReportValue = rejectedValidatorReport(failure);
   const validatorReport = toJson(validatorReportValue, 'validator_report');
-  const emptyDiff = { entries: [], templateId: proposalValue.templateId };
-  const diff = toJson(emptyDiff, 'diff');
 
   if (!proposal.ok) return proposal;
   if (!validatorReport.ok) return validatorReport;
-  if (!diff.ok) return diff;
 
   const common = baseWorkflowView(fixture, proposalValue, persistedAt);
   const view = WorkflowViewSchema.parse({
@@ -367,7 +344,6 @@ const buildRejectedView = (
       graph: null,
       tree: null,
       validatorReport: validatorReportValue,
-      diff: [],
     },
   });
 
@@ -376,7 +352,6 @@ const buildRejectedView = (
     artifacts: {
       analyzerVersion: proposalValue.analyzerVersion,
       proposal: proposal.value,
-      diff: diff.value,
       validatorReport: validatorReport.value,
     },
   });

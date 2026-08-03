@@ -11,16 +11,20 @@ will parse and validate that string against its authoritative workflow contract.
 
 The JSON encoded inside sourceJson MUST have exactly these top-level keys:
 {"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence"}}
-Start by copying plannerContext.baseTemplate, then make only justified task-specific changes to its
-id and recursive root nodes. Do not invent an envelope. In particular, NEVER return top-level keys
-such as schemaVersion, task, repository, workflow, steps, or edges inside sourceJson.
+Construct the complete graph from an empty root using only plannerContext.buildingBlocks. There is
+no base workflow, template, family skeleton, or implicit compiler insertion. Every node must be
+justified by task evidence, repository evidence, company/project policy, or a mandatory obligation.
+Do not invent an envelope. In particular, NEVER return top-level keys such as schemaVersion, task,
+repository, workflow, steps, or edges inside sourceJson.
 Every task workflow must retain task.analyze@1 as the first root-sequence child and a
 plan.approved@1 gate as the second. Tasker run settings decide whether that gate pauses for a human;
 they never remove the mandatory planning step or its deterministic validation boundary.
 
-Use only node kinds and versioned contracts present in plannerContext. The base template is a
-starting point, not executable authority. Explain every material specialization in
-assemblyDecisions. Select verification from observable task/repository facts and policy.
+Use only node kinds and versioned contracts present in plannerContext.buildingBlocks. Satisfy every
+applicable plannerContext.obligations rule; Tasker will reject the proposal rather than silently add
+missing semantic work. Explain every material assembly choice in assemblyDecisions. Select
+verification from observable task/repository facts and policy. A bug requires before and after
+reproduction evidence. A PR path requires CI observation and the code-review wait.
 
 Do not claim facts that require later execution. In particular, do not claim that a bug was
 reproduced or that an implementation works. If reproduction or implementation later discovers

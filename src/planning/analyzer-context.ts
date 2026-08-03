@@ -8,7 +8,7 @@ import {
   resolvePackagePublicationPolicy,
   resolveProjectWorkflowProfile,
 } from './project-policies.js';
-import { getBaseWorkflowTemplate, selectWorkflowTemplate } from './templates.js';
+import { WORKFLOW_OBLIGATIONS } from './obligations.js';
 
 export interface WorkflowAnalyzerContext {
   readonly taskSnapshot: JsonValue;
@@ -61,7 +61,6 @@ export const createWorkflowAnalyzerContext = (
     taskSnapshot,
     plannerContext: JsonValueSchema.parse({
       availableCapabilities: M1_AVAILABLE_CAPABILITIES,
-      baseTemplate: getBaseWorkflowTemplate(selectWorkflowTemplate(fixture)),
       harness: {
         companyId: pack.company.id,
         companyVersion: pack.company.version,
@@ -80,7 +79,9 @@ export const createWorkflowAnalyzerContext = (
         projectHarnessVersion: harnessProject?.version ?? null,
         publication,
       },
-      contracts: {
+      obligations: WORKFLOW_OBLIGATIONS,
+      buildingBlocks: {
+        nodeKinds: ['sequence', 'step', 'branch', 'bounded_loop', 'wait', 'gate', 'finalize'],
         predicates: M1_WORKFLOW_CONTRACTS.predicates.entries.map((contract) => ({
           reference: toContractReference(contract),
           inputSchema: inputContract(contract.inputSchema),
@@ -89,6 +90,7 @@ export const createWorkflowAnalyzerContext = (
         steps: M1_WORKFLOW_CONTRACTS.stepTypes.entries.map((contract) => ({
           reference: toContractReference(contract),
           inputSchema: inputContract(contract.inputSchema),
+          outputSchema: inputContract(contract.outputSchema),
           allowedEffects: contract.allowedEffects,
           artifactContracts: contract.artifactContracts,
           requiredCapabilities: contract.requiredCapabilities,

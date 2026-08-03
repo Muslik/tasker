@@ -33,7 +33,8 @@ flowchart LR
 - five rejected fixtures: unknown step, missing terminal path, malformed unbounded
   loop, unmet capability, and unsafe effect metadata;
 - versioned step, predicate, and wait registries;
-- deterministic template selection and task-specific materialization;
+- deterministic fixture-only task graph composition for offline tests; production
+  analyzers compose from an empty graph;
 - explicit repository workflow policies and persisted **Why this workflow** assembly
   decisions;
 - project workflow policy is treated as harness configuration rather than app
@@ -43,13 +44,13 @@ flowchart LR
 - a separate global frontend package rule: component paths under `packages/@ott/`
   receive the reusable dev-publish plus human-final-publish flow;
 - strict Zod parsing at fixture, proposal, projection, HTTP, and browser boundaries;
-- graph SHA-256, template-to-task diff, retry budgets, waits, expected artifacts,
+- graph SHA-256, retry budgets, waits, expected artifacts,
   capability inventory, and verification rationale;
 - compiler rejection of wait cursors that reference a node absent from the graph;
 - an explicit `consume-published-version` step after the human final-publish wait in
   the cross-repository flow;
 - atomic ledger commit of intake/task/workflow events, snapshot, projections, and
-  linked proposal/validator/diff/graph artifacts;
+  linked proposal/validator/graph artifacts;
 - persisted accepted and rejected outcomes with no outbox command;
 - Fastify endpoints for fixtures, the operator task queue, persisted activity,
   intake/task/run/graph projections, workflow generation/readback, and graph download;
@@ -75,7 +76,7 @@ left pane is the task queue, the center is the selected task's persisted activit
 validation surface and **Why this workflow**, and the sticky right pane is the current
 workflow tree. It also shows graph status/hash, verification policy, capabilities,
 waits and slot policy, retry bounds, validation errors, and a graph JSON download. The
-raw template diff is collapsed under diagnostics. Select `invalid-unknown-step` to see
+proposal identity and graph hash are collapsed under diagnostics. Select `invalid-unknown-step` to see
 a rejected proposal that never becomes executable.
 
 ![M1 operator console showing task queue, persisted activity, and current workflow](artifacts/operator-cockpit.png)
@@ -104,7 +105,7 @@ fnm exec --using=24.16.0 /usr/local/bin/pnpm m1 show avia-13236-short-bug \
   inline/JSON copy task contains no translation command or wait;
 - the `@ott` component path independently matches a reusable global frontend package
   publication rule;
-- closing and reopening the SQLite ledger restores the same graph hash and diff;
+- closing and reopening the SQLite ledger restores the same graph hash and decisions;
 - repeated generation returns the persisted result instead of creating duplicate
   work;
 - rejected proposals persist their exact report but have no graph artifact or outbox

@@ -8,11 +8,12 @@ import type { z } from 'zod';
 import {
   HarnessCompanyManifestSchema,
   HarnessProjectManifestSchema,
-  HarnessStepsManifestSchema,
-  HarnessWorkflowTemplateSchema,
+  parseVersionedReference,
   type LoadedHarnessPack,
   type LoadedPrompt,
 } from './contracts.js';
+import { TWIKET_HARNESS_STEPS } from './step-definitions.js';
+import { toContractReference } from '../workflow/index.js';
 
 const DEFAULT_HARNESS_ROOT = fileURLToPath(new URL('../../harness/', import.meta.url));
 
@@ -81,9 +82,6 @@ const loadProjects = (root: string) => {
     .map((entry) => {
       const manifestPath = join(projectsRoot, entry.name, 'project.json');
       const project = parseFile(HarnessProjectManifestSchema, manifestPath);
-      if (project.workOverlay !== undefined) {
-        resolvePackPath(root, project.workOverlay, 'directory');
-      }
       return Object.freeze({
         ...project,
         guidance:
@@ -105,7 +103,6 @@ export const resolveHarnessRoot = (configuredPath = process.env.TASKER_HARNESS_P
 export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   const rootPath = resolveHarnessRoot(configuredPath);
   const company = parseFile(HarnessCompanyManifestSchema, join(rootPath, 'company.json'));
-  const manifest = parseFile(HarnessStepsManifestSchema, join(rootPath, 'steps.json'));
   const projects = loadProjects(rootPath);
   const seenRepositories = new Set<string>();
   for (const project of projects) {
@@ -116,42 +113,34 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   }
 
   const seenSteps = new Set<string>();
-  const steps = manifest.steps.map((step) => {
+  const steps = TWIKET_HARNESS_STEPS.map((step) => {
+    parseVersionedReference(step.reference);
+    if (step.reference !== toContractReference(step.contract)) {
+      throw new Error(
+        `Harness step reference ${step.reference} does not match its contract ${toContractReference(step.contract)}`,
+      );
+    }
     if (seenSteps.has(step.reference)) {
       throw new Error(`Duplicate harness step definition for ${step.reference}`);
     }
     seenSteps.add(step.reference);
+    if (step.execution.kind === 'process') {
+      parseVersionedReference(step.execution.executor);
+    }
+    if (step.execution.kind === 'integration') {
+      parseVersionedReference(step.execution.adapter);
+    }
     return Object.freeze({
       ...step,
       prompt: step.execution.kind === 'agent' ? loadPrompt(rootPath, step.execution.prompt) : null,
     });
   });
 
-  const workflowTemplates = new Map(
-    Object.entries(company.workflowTemplates)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(
-        ([id, relativePath]) =>
-          [
-            id,
-            parseFile(
-              HarnessWorkflowTemplateSchema,
-              resolvePackPath(rootPath, relativePath, 'file'),
-            ),
-          ] as const,
-      ),
-  );
-
-  if (company.workOverlay !== undefined) {
-    resolvePackPath(rootPath, company.workOverlay, 'directory');
-  }
-
   return Object.freeze({
     rootPath,
     company,
     steps: Object.freeze(steps),
     projects: Object.freeze(projects),
-    workflowTemplates,
     prompts: Object.freeze({
       implementationPlanner: loadPrompt(rootPath, company.systemPrompts.implementationPlanner),
       workflowAnalyzer: loadPrompt(rootPath, company.systemPrompts.workflowAnalyzer),
@@ -165,6 +154,3 @@ export const getHarnessPack = (): LoadedHarnessPack => {
   defaultPack ??= loadHarnessPack();
   return defaultPack;
 };
-
-export const resolveHarnessOverlayPath = (pack: LoadedHarnessPack, relativePath: string): string =>
-  resolvePackPath(pack.rootPath, relativePath, 'directory');

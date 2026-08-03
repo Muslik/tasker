@@ -4,8 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadHarnessPack, materializeHarnessOverlay } from '../../../src/harness/index.js';
-import { createHarnessWorkflowContracts } from '../../../src/planning/index.js';
+import { loadHarnessPack, type HarnessStepDefinition } from '../../../src/harness/index.js';
+import {
+  createHarnessWorkflowContracts,
+  getHarnessStepDefinition,
+} from '../../../src/planning/index.js';
 import {
   compileWorkflow,
   defineWorkflow,
@@ -31,33 +34,36 @@ afterEach(async () => {
 });
 
 describe('file-backed harness pack', () => {
-  it('registers a new versioned step without changing the workflow compiler', async () => {
-    const root = await createTemporaryPack();
-    const manifestPath = join(root, 'steps.json');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
-      steps: Record<string, unknown>[];
-    };
-    manifest.steps.push({
+  it('registers a typed company step without changing the workflow compiler', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const analyzerStep = getHarnessStepDefinition('task.analyze@1');
+    if (analyzerStep === undefined) throw new Error('Expected task analyzer definition');
+    const customStep: HarnessStepDefinition = {
       reference: 'company.custom@1',
       description: 'Produce a company-specific read-only report.',
-      inputKind: 'task',
-      allowedEffects: [],
-      requiredCapabilities: ['repository.read'],
-      resumeBoundary: 'attempt',
-      idempotency: 'none',
       retryBudget: 1,
-      waitKinds: [],
-      artifactContracts: ['custom-report'],
-      workflowChanges: [],
       execution: {
         kind: 'agent',
         prompt: 'prompts/steps/fill-test-ops-plan.md',
         skills: ['company-custom@1'],
       },
-    });
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+      contract: {
+        id: 'company.custom',
+        version: '1',
+        inputSchema: analyzerStep.contract.inputSchema,
+        outputSchema: analyzerStep.contract.outputSchema,
+        allowedEffects: [],
+        requiredCapabilities: ['repository.read'],
+        resumeBoundary: 'attempt',
+        idempotency: 'none',
+        retryPolicy: 'bounded:1',
+        waitKinds: [],
+        artifactContracts: ['custom-report'],
+        workflowChanges: [],
+      },
+    };
 
-    const contracts = createHarnessWorkflowContracts(loadHarnessPack(root));
+    const contracts = createHarnessWorkflowContracts([...pack.steps, customStep]);
     const result = compileWorkflow({
       source: defineWorkflow({
         id: 'custom-step-workflow',
@@ -97,48 +103,20 @@ describe('file-backed harness pack', () => {
     );
 
     expect(stepDefinition).toMatchObject({
-      execution: { kind: 'agent', skills: ['test-ops-planning@1'] },
+      execution: { kind: 'agent', skills: ['test-ops-planning'] },
       prompt: { relativePath: 'prompts/steps/fill-test-ops-plan.md' },
     });
     expect(stepDefinition?.prompt?.content).toContain('test-operations plan');
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  it('materializes company and project overlays idempotently without replacing changed files', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'tasker-worktree-'));
-    temporaryDirectories.push(worktree);
-    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-
-    const receipt = await materializeHarnessOverlay(pack, 'twiket/ui-kit', worktree);
-
-    expect(receipt).toMatchObject({
-      companyId: 'twiket-frontend',
-      companyVersion: '1',
-      projectVersion: '1',
-      repository: 'twiket/ui-kit',
-    });
-    expect(receipt.files.map(({ relativePath, source }) => ({ relativePath, source }))).toEqual([
-      { relativePath: '.tasker/harness/company.md', source: 'company' },
-      { relativePath: '.tasker/harness/project.md', source: 'project' },
-    ]);
-    await expect(materializeHarnessOverlay(pack, 'twiket/ui-kit', worktree)).resolves.toEqual(
-      receipt,
-    );
-    await writeFile(join(worktree, '.tasker/harness/company.md'), 'operator-owned change\n');
-    await expect(materializeHarnessOverlay(pack, 'twiket/ui-kit', worktree)).rejects.toThrow(
-      'refuses to replace an existing file',
-    );
-  });
-
   it('rejects prompt paths that escape through a symlink or parent traversal', async () => {
     const root = await createTemporaryPack();
-    const manifestPath = join(root, 'steps.json');
+    const manifestPath = join(root, 'company.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
-      steps: { execution?: { kind?: string; prompt?: string } }[];
+      systemPrompts: { workflowAnalyzer: string };
     };
-    const agentStep = manifest.steps.find((candidate) => candidate.execution?.kind === 'agent');
-    if (agentStep?.execution === undefined) throw new Error('Expected an agent step fixture');
-    agentStep.execution.prompt = '../outside.md';
+    manifest.systemPrompts.workflowAnalyzer = '../outside.md';
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
     expect(() => loadHarnessPack(root)).toThrow('Expected a path relative to the harness pack');

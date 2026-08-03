@@ -3,86 +3,17 @@ import { z } from 'zod';
 import {
   getHarnessPack,
   type HarnessStepDefinition,
-  type LoadedHarnessPack,
   type LoadedHarnessStep,
-  type StepInputKindSchema,
 } from '../harness/index.js';
 import {
   createPredicateRegistry,
   createStepTypeRegistry,
   createWaitRegistry,
+  toContractReference,
   type PredicateContract,
-  type StepTypeContract,
   type WorkflowCompilerContracts,
   type WaitContract,
 } from '../workflow/index.js';
-
-const taskInputSchema = z
-  .object({
-    objective: z.string().min(1),
-    repository: z.string().min(1),
-    taskId: z.string().min(1),
-  })
-  .strict();
-
-const verificationInputSchema = z
-  .object({
-    profile: z.string().min(1),
-    taskId: z.string().min(1),
-  })
-  .strict();
-
-const commandInputSchema = z
-  .object({
-    command: z.string().min(1),
-    repository: z.string().min(1),
-    taskId: z.string().min(1),
-  })
-  .strict();
-
-type StepInputKind = z.infer<typeof StepInputKindSchema>;
-
-const inputSchemas = {
-  command: commandInputSchema,
-  json: z.looseObject({}),
-  task: taskInputSchema,
-  verification: verificationInputSchema,
-} satisfies Readonly<Record<StepInputKind, z.ZodType>>;
-
-interface M1StepDefinition {
-  readonly contract: StepTypeContract;
-  readonly source: LoadedHarnessStep;
-}
-
-const splitReference = (reference: string): { readonly id: string; readonly version: string } => {
-  const separator = reference.lastIndexOf('@');
-  if (separator < 1) throw new Error(`Invalid versioned step reference: ${reference}`);
-  return { id: reference.slice(0, separator), version: reference.slice(separator + 1) };
-};
-
-const toRuntimeContract = (source: HarnessStepDefinition): StepTypeContract => {
-  const { id, version } = splitReference(source.reference);
-  return {
-    id,
-    version,
-    inputSchema: inputSchemas[source.inputKind],
-    outputSchema: z.looseObject({}),
-    allowedEffects: [...source.allowedEffects],
-    requiredCapabilities: [...source.requiredCapabilities],
-    resumeBoundary: source.resumeBoundary,
-    idempotency: source.idempotency,
-    retryPolicy: `bounded:${String(source.retryBudget)}`,
-    waitKinds: [...source.waitKinds],
-    artifactContracts: [...source.artifactContracts],
-    workflowChanges: [...source.workflowChanges],
-    ...(source.reconciliation === undefined
-      ? {}
-      : { reconciliation: { ...source.reconciliation } }),
-  };
-};
-
-const createStepDefinitions = (pack: LoadedHarnessPack): readonly M1StepDefinition[] =>
-  pack.steps.map((source) => ({ contract: toRuntimeContract(source), source }));
 
 const predicateContracts = [
   {
@@ -96,7 +27,7 @@ const predicateContracts = [
     version: '1',
     inputSchema: z.object({ taskId: z.string().min(1) }).strict(),
     description:
-      'The universal planning boundary was resolved automatically or by the operator according to immutable run settings.',
+      'The mandatory plan boundary resolved automatically or by the operator according to immutable run settings.',
   },
 ] satisfies readonly PredicateContract[];
 
@@ -130,9 +61,16 @@ const waitContracts = [
 ] satisfies readonly WaitContract[];
 
 export const createHarnessWorkflowContracts = (
-  pack: LoadedHarnessPack,
+  definitions: readonly HarnessStepDefinition[],
 ): WorkflowCompilerContracts => {
-  const definitions = createStepDefinitions(pack);
+  for (const definition of definitions) {
+    if (definition.reference !== toContractReference(definition.contract)) {
+      throw new Error(
+        `Harness step reference ${definition.reference} does not match its contract ${toContractReference(definition.contract)}`,
+      );
+    }
+  }
+
   return Object.freeze({
     predicates: createPredicateRegistry(predicateContracts),
     stepTypes: createStepTypeRegistry(definitions.map(({ contract }) => contract)),
@@ -141,18 +79,19 @@ export const createHarnessWorkflowContracts = (
 };
 
 const defaultPack = getHarnessPack();
-const stepDefinitions = createStepDefinitions(defaultPack);
 
-export const M1_WORKFLOW_CONTRACTS = createHarnessWorkflowContracts(defaultPack);
+export const M1_WORKFLOW_CONTRACTS = createHarnessWorkflowContracts(defaultPack.steps);
 
 const retryBudgets = new Map(
-  stepDefinitions.map(({ source }) => [source.reference, source.retryBudget]),
+  defaultPack.steps.map((definition) => [definition.reference, definition.retryBudget]),
 );
 
 export const getStepRetryBudget = (reference: string): number | undefined =>
   retryBudgets.get(reference);
 
-const stepSources = new Map(stepDefinitions.map(({ source }) => [source.reference, source]));
+const stepSources = new Map(
+  defaultPack.steps.map((definition) => [definition.reference, definition]),
+);
 
 export const getHarnessStepDefinition = (reference: string): LoadedHarnessStep | undefined =>
   stepSources.get(reference);

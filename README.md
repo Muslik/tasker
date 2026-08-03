@@ -3,8 +3,11 @@
 Personal, local-first task-adaptive agent harness. The canonical design and delivery
 status are under [`docs/codex`](docs/codex/README.md).
 
-Prompts, step contracts, workflow templates, company policy, and project workflow
-guidance are editable under [`harness`](harness). See the
+Prompts, company policy, and project workflow guidance are editable under
+[`harness`](harness); typed step contracts and executor bindings live in
+[`src/harness/step-definitions.ts`](src/harness/step-definitions.ts). There are no
+base workflow templates: each graph is assembled for one task from the registered
+catalog and then rejected or accepted by deterministic validation. See the
 [`customization guide`](docs/codex/customization-guide.md) before adding a step or
 using a separate company pack.
 

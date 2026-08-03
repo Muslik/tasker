@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('M1 persisted workflow', () => {
-  it('restores the same graph hash and template diff after a process restart', () => {
+  it('restores the same task-specific graph after a process restart', () => {
     const filename = databasePath();
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
     const firstLedger = openSqliteLedger({ filename, clock });
@@ -39,9 +39,7 @@ describe('M1 persisted workflow', () => {
     if (!generated.ok) return;
 
     const originalHash = generated.value.view.workflow.graphHash;
-    const originalDiff = generated.value.view.workflow.diff;
     expect(originalHash).not.toBeNull();
-    expect(originalDiff.length).toBeGreaterThan(0);
     expect(firstLedger.repository.listOutbox()).toEqual([]);
     firstLedger.close();
 
@@ -53,7 +51,6 @@ describe('M1 persisted workflow', () => {
     expect(restored.ok).toBe(true);
     if (!restored.ok || restored.value === null) return;
     expect(restored.value.view.workflow.graphHash).toBe(originalHash);
-    expect(restored.value.view.workflow.diff).toEqual(originalDiff);
     expect(restored.value.view.persistedAt).toBe('2026-08-01T12:00:00.000Z');
     expect(
       restartedLedger.repository.readSnapshot('snapshot:avia-14001-translation-component'),

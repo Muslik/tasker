@@ -8,6 +8,5 @@
     "extractCommand": "pnpm translations:extract",
     "pullCommand": "pnpm translations:pull"
   },
-  "workflowGuidance": "projects/twiket-ui-kit/workflow.md",
-  "workOverlay": "projects/twiket-ui-kit/work"
+  "workflowGuidance": "projects/twiket-ui-kit/workflow.md"
 }

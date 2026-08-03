@@ -105,7 +105,7 @@ No network or provider side effect occurs inside this transaction.
 | Concern | Deterministic code owns | Agent may propose |
 |---|---|---|
 | Intake | fetch/result classification, eligibility schema, no-partial-run rule | eligibility evidence and task-type hypothesis |
-| Workflow | IR parsing, validation, capability/effect checks, loop bounds | template choice, branches, step parameters, expansion proposal |
+| Workflow | IR parsing, obligations, capability/effect checks, loop bounds | the complete task-specific graph, branches, step parameters, expansion proposal |
 | Scheduling | ready-set calculation, slots, leases, fencing, wakeups | provider preference within policy |
 | Effects | intent, idempotency key, receipt, reconciliation | payload content within step contract |
 | Recovery | legal transitions and resume cursor | changed hypothesis or course correction |
@@ -244,31 +244,33 @@ The first-wave graph is one immutable compiled artifact per run. Persisted in-ru
 contracts are proven. Before that milestone, discovery of an unsupported graph shape
 opens a gate and produces a replan/new-run proposal without losing the worktree.
 
-Human-authored templates use a typed TypeScript data DSL; the analyzer produces JSON
-IR proposals; the deterministic compiler emits the only persisted executable graph.
-Agents never generate or import TypeScript code. Zod is the runtime schema source for
-all three boundaries. The exact API and library decision are specified in
+The kernel exposes a typed TypeScript catalog of node, step, predicate, wait, policy,
+and executor contracts. The analyzer produces a complete JSON IR proposal from an
+empty graph; the deterministic compiler emits the only persisted executable graph.
+There is no base workflow, family skeleton, or semantic node insertion in the
+compiler. Agents never generate or import TypeScript code. Zod is the runtime schema
+source for untyped boundaries. The exact API and library decision are specified in
 [`technology-decisions.md`](technology-decisions.md#3-workflow-description).
 
 #### How a task becomes a workflow
 
-`Template -> task graph` is an internal implementation shorthand, not the operator
-model. The actual assembly pipeline is:
+Every workflow belongs to one task. The assembly pipeline is:
 
 ```mermaid
 flowchart LR
-  T["Task snapshot"] --> F["Classify task family"]
-  F --> B["Select the smallest base flow"]
-  B --> P["Apply repository policies"]
-  P --> V["Select verification profile"]
-  V --> H["Insert bounded repair and human waits"]
-  H --> C["Compile and validate"]
-  C --> G["Persist graph plus assembly decisions"]
+  T["Task snapshot + linked context"] --> A["Read-only repository analysis"]
+  B["Node and step catalog"] --> P["Agent assembles complete proposal"]
+  O["Company/project policy + obligations"] --> P
+  A --> P
+  P --> C["Parse, compile, and validate"]
+  C -->|"rejected"| R["Visible issues / bounded re-plan"]
+  C -->|"accepted"| G["Persist graph plus assembly decisions"]
 ```
 
-The family supplies only the stable skeleton: for example a bug adds reproduction,
-while every task starts with the same planning boundary. Repository policy supplies
-project-specific behavior. A copy change in `twiket/ui-kit` can therefore add
+Task classification is evidence, not a template selector. For example, a bug obligates
+the proposal to include before/after reproduction; a write path obligates verification
+and PR preparation; and a PR path obligates CI observation and code review. Repository policy supplies project-specific
+behavior. A copy change in `twiket/ui-kit` can therefore add
 `extract -> translation wait -> pull`, while the same intent in `twiket/avia-web`
 stays inside the implementation step because that project stores copy inline or in
 locale JSON. An unknown repository receives the conservative simple policy and does
@@ -379,20 +381,22 @@ projects:
       pull: pnpm translations:pull
 ```
 
-The real files use the typed TypeScript data DSL and Zod boundary; YAML above only
-illustrates the ownership. Global policy contains reusable workflow conventions such
+The current pack stores readable company/project policy as validated JSON plus optional
+Markdown guidance, while executable step contracts and bindings are typed TypeScript.
+YAML above only illustrates the ownership. Global policy contains reusable workflow conventions such
 as where frontend `@ott` packages live and how they are published. A project profile
 contains only workflow-specific facts: translation mode, verification matrix,
 commands, repository links, and permitted effects. Code architecture, FSD, reducer
 style, and implementation conventions remain agent skills/instructions and are not
 duplicated here.
 
-The intended source layout is explicit:
+The source layout is explicit:
 
 ```text
-config/workflows/global/frontend.ts
-config/workflows/projects/twiket/avia-web.ts
-config/workflows/projects/twiket/ui-kit.ts
+harness/company.json
+harness/projects/twiket-avia-web/project.json
+harness/projects/twiket-avia-web/workflow.md
+src/harness/step-definitions.ts
 ```
 
 A profile may link a short Markdown note for human context, but prose alone cannot
@@ -409,14 +413,14 @@ separate assembly decisions.
 
 The compiler persists an ordered `assemblyDecisions` artifact alongside the graph.
 Each entry contains structured source provenance, the input fact, selected policy,
-and visible graph effect. The
-cockpit renders this as **Why this workflow**. The raw base-template diff remains an
-expandable diagnostic for harness authors; it is not the primary operator view.
+and visible graph effect. The cockpit renders this as **Why this workflow**. Diagnostics
+show proposal identity, graph hash, validation issues, and provenance; there is no
+meaningless comparison against a base template.
 
 This boundary is deliberately mixed:
 
-- classification and recommended parameters may be agentic later;
-- policy lookup, graph construction, loop limits, capability checks, effect safety,
+- classification, graph construction, and recommended parameters are agentic;
+- policy lookup, mandatory obligations, loop limits, capability checks, effect safety,
   terminal paths, and persistence are deterministic;
 - changing a repository policy affects only future runs because every current run
   keeps its immutable policy snapshot and graph hash.

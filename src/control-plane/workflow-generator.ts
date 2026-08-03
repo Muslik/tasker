@@ -77,7 +77,7 @@ const taskFromJira = (
       },
       admission: {
         family: task.family,
-        note: 'Deterministic admission selects a safe base template; the analyzer owns task-specific graph assembly.',
+        note: 'Admission supplies task facts only; the analyzer assembles a complete task-specific graph from the registered catalog.',
       },
     }),
   });
