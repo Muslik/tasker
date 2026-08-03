@@ -11,6 +11,9 @@ importers:
       '@base-ui/react':
         specifier: 1.6.0
         version: 1.6.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@temporalio/activity':
+        specifier: 1.21.1
+        version: 1.21.1
       '@temporalio/client':
         specifier: 1.21.1
         version: 1.21.1

@@ -15,14 +15,16 @@ Read these for decisions and future implementation:
    next Temporal walking-skeleton milestone.
 4. [`t1-temporal-walking-skeleton.md`](t1-temporal-walking-skeleton.md) — implemented
    runtime boundary, local commands, recovery evidence, and deliberate limits.
-5. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
+5. [`t2-temporal-planning.md`](t2-temporal-planning.md) — real planning Activity,
+   immutable input snapshot, durable question/review loop, and remaining exit work.
+6. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
    acceptance gates.
-6. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
+7. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
    contracts, messages, Activities, persistence, retry, and dependency decisions.
-7. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
+8. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
    prompts, policies, providers, trackers, repositories, and company packs without
    rewriting the runtime.
-8. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
+9. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
    correction.
 
 These eight files are the source of truth. Older `.omx` plans are audit history only.
@@ -44,10 +46,10 @@ history, waits, retries, recovery, and parent/child coordination. It does not re
 Tasker's analyzer, IR, compiler, validator, block catalog, policies, integrations,
 worktree management, operator console, artifacts, costs, or retrospective.
 
-The opt-in T1 Temporal walking skeleton is now implemented. It runs compiled graphs,
-durable waits, validated Updates, and stub Activities, while real
-repository/Jira/Bitbucket/Jenkins mutation remains disabled. T2 moves implementation
-planning into a real Activity before mutation Activities are enabled.
+The opt-in Temporal runtime now runs compiled graphs, durable waits, validated Updates,
+and a real implementation-planning Activity. Planning questions, plan review/revision,
+provider retry, and immutable run inputs have recovery coverage. Repository,
+Jira/Bitbucket/Jenkins mutation remains disabled.
 
 ## Historical implementation records
 
@@ -71,6 +73,7 @@ Temporal public recovery/integration tests after parity.
 
 ## Immediate implementation target
 
-Close the remaining T1 observability/health items, then implement T2 real planning as a
-Temporal Activity. Real coding, remote mutation, CI, and cross-repository continuation
-follow only after the corresponding safety gates are green.
+Close the remaining T2 transcript and real-provider recovery evidence described in
+[`t2-temporal-planning.md`](t2-temporal-planning.md). Then implement T3 managed
+worktrees and provider-neutral block execution. Remote mutation, CI, and
+cross-repository continuation follow only after their safety gates are green.

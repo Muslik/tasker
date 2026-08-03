@@ -16,6 +16,7 @@ import {
   type ResolveTaskWaitCommand,
   type StartTaskWorkflowInput,
   type TaskTemporalRunService,
+  type TaskWorkflowPlanningState,
   type TaskWorkflowPublicState,
 } from '../../src/temporal/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
@@ -25,12 +26,63 @@ const resources: { readonly directory: string; readonly ledger: SqliteLedger }[]
 class ContractTemporalRunService implements TaskTemporalRunService {
   private readonly runs = new Map<string, TaskWorkflowPublicState>();
 
+  public constructor(private readonly startsWithQuestion = false) {}
+
+  private planning(
+    input: Pick<StartTaskWorkflowInput, 'taskReference' | 'settings'>,
+    status: 'ready' | 'needs_clarification',
+    attempt: number,
+  ): TaskWorkflowPlanningState {
+    const selectedStrategy: 'fast' | 'ralplan' =
+      input.settings.planningStrategy === 'ralplan' ? 'ralplan' : 'fast';
+    const common = {
+      commandId: `tasker:${input.taskReference}:planning:${String(attempt)}`,
+      attempt,
+      artifactId: `plan:${input.taskReference}:${String(attempt)}`,
+      requestedStrategy: input.settings.planningStrategy,
+      selectedStrategy,
+      receipt: {
+        status: 'completed' as const,
+        provider: 'deterministic' as const,
+        plannerVersion: 'implementation-planner@1' as const,
+        cliVersion: 'contract@1',
+        model: 'deterministic',
+        serviceTier: 'fast' as const,
+        strategy: selectedStrategy,
+        sessionId: `contract:${String(attempt)}`,
+        promptHash: '0'.repeat(64),
+        durationMs: 0,
+        usage: {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        hypotheticalApiCostUsd: 0,
+      },
+    };
+    return status === 'ready'
+      ? { ...common, status }
+      : {
+          ...common,
+          status,
+          questions: [
+            {
+              id: 'target-browser',
+              question: 'Which browsers must be verified?',
+              reason: 'The task does not say.',
+            },
+          ],
+        };
+  }
+
   public start(input: StartTaskWorkflowInput) {
     const existing = this.runs.get(input.taskReference);
     if (existing !== undefined) return Promise.resolve(ok(existing));
 
-    const wait =
-      input.settings.planApproval === 'required'
+    const wait = this.startsWithQuestion
+      ? { nodeId: 'analyze-task', waitKind: 'human_clarification' }
+      : input.settings.planApproval === 'required'
         ? { nodeId: 'review-plan', waitKind: 'plan.approved@1' }
         : { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' };
     const state: TaskWorkflowPublicState = {
@@ -40,6 +92,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       runId: `run:${input.taskReference}`,
       workflowHash: input.workflowHash,
       settings: input.settings,
+      planning: this.startsWithQuestion ? this.planning(input, 'needs_clarification', 1) : null,
       status: 'waiting',
       currentNodeId: wait.nodeId,
       wait,
@@ -71,31 +124,65 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       );
     }
 
+    const resolution =
+      typeof command.resolution === 'object' &&
+      command.resolution !== null &&
+      !Array.isArray(command.resolution)
+        ? command.resolution
+        : {};
     const state: TaskWorkflowPublicState =
-      current.wait.waitKind === 'plan.approved@1'
+      current.wait.waitKind === 'human_clarification'
         ? {
             ...current,
             status: 'waiting',
-            currentNodeId: 'wait-for-code-review',
-            wait: { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' },
+            currentNodeId: 'review-plan',
+            wait: { nodeId: 'review-plan', waitKind: 'plan.approved@1' },
+            planning: this.planning({ taskReference, settings: current.settings }, 'ready', 2),
             outcome: null,
             nodeStates: {
               ...current.nodeStates,
               [current.wait.nodeId]: 'succeeded',
-              'wait-for-code-review': 'waiting',
+              'review-plan': 'waiting',
             },
           }
-        : {
-            ...current,
-            status: 'completed',
-            currentNodeId: null,
-            wait: null,
-            outcome: 'waiting_for_review',
-            nodeStates: {
-              ...current.nodeStates,
-              [current.wait.nodeId]: 'succeeded',
-            },
-          };
+        : current.wait.waitKind === 'plan.approved@1' && resolution.decision === 'request_changes'
+          ? {
+              ...current,
+              status: 'waiting',
+              currentNodeId: 'review-plan',
+              wait: { nodeId: 'review-plan', waitKind: 'plan.approved@1' },
+              planning: this.planning(
+                { taskReference, settings: current.settings },
+                'ready',
+                (current.planning?.attempt ?? 1) + 1,
+              ),
+              outcome: null,
+              nodeStates: { ...current.nodeStates, 'review-plan': 'waiting' },
+            }
+          : current.wait.waitKind === 'plan.approved@1'
+            ? {
+                ...current,
+                status: 'waiting',
+                currentNodeId: 'wait-for-code-review',
+                wait: { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' },
+                outcome: null,
+                nodeStates: {
+                  ...current.nodeStates,
+                  [current.wait.nodeId]: 'succeeded',
+                  'wait-for-code-review': 'waiting',
+                },
+              }
+            : {
+                ...current,
+                status: 'completed',
+                currentNodeId: null,
+                wait: null,
+                outcome: 'waiting_for_review',
+                nodeStates: {
+                  ...current.nodeStates,
+                  [current.wait.nodeId]: 'succeeded',
+                },
+              };
     this.runs.set(taskReference, state);
     return Promise.resolve(ok(state));
   }
@@ -186,6 +273,81 @@ describe('Temporal HTTP boundary', () => {
       url: '/api/workflows/avia-12536-feature-review/run',
     });
     expect(featureRun.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'code_review@1' },
+    });
+
+    await api.close();
+  });
+
+  it('routes clarification answers and plan revisions through typed Temporal updates', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-temporal-planning-api-'));
+    const clock = makeAdjustableClock('2026-08-03T10:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const workflows = createM1WorkflowService(ledger.repository, clock);
+    workflows.generate('avia-12536-feature-review');
+    const api = buildM1Api({
+      service: workflows,
+      temporalRunService: new ContractTemporalRunService(true),
+    });
+
+    const started = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/start',
+      payload: { settings: { planApproval: 'required', planningStrategy: 'ralplan' } },
+    });
+    expect(started.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'human_clarification' },
+      planning: { status: 'needs_clarification', attempt: 1 },
+    });
+
+    const genericResume = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/resume',
+    });
+    expect(genericResume.statusCode).toBe(409);
+    expect(genericResume.json()).toMatchObject({ error: 'typed_resolution_required' });
+
+    const incomplete = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/planning-clarification',
+      payload: { answers: [{ questionId: 'another-question', answer: 'Unknown' }] },
+    });
+    expect(incomplete.statusCode).toBe(400);
+
+    const answered = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/planning-clarification',
+      payload: { answers: [{ questionId: 'target-browser', answer: 'Chrome and Safari' }] },
+    });
+    expect(answered.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'plan.approved@1' },
+      planning: { status: 'ready', attempt: 2, selectedStrategy: 'ralplan' },
+    });
+
+    const revised = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/plan-review',
+      payload: {
+        decision: 'request_changes',
+        guidance: 'Add the rollback verification before implementation.',
+      },
+    });
+    expect(revised.json()).toMatchObject({
+      status: 'waiting',
+      wait: { waitKind: 'plan.approved@1' },
+      planning: { status: 'ready', attempt: 3 },
+    });
+
+    const approved = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-12536-feature-review/plan-review',
+      payload: { decision: 'approve' },
+    });
+    expect(approved.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'code_review@1' },
     });

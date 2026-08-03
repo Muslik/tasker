@@ -132,6 +132,12 @@ state comes from the Workflow Query/projection.
 
 Move the existing subscription-Codex planning capability into a Temporal Activity.
 
+Implementation status on 2026-08-03: immutable input snapshots, the heartbeating and
+cancellable Activity, durable questions, plan approval/revision, stable command IDs,
+API commands, and restart/idempotency tests are implemented. Bounded transcript
+artifact streaming and a real subscription-provider interruption smoke remain before
+the T2 exit gate is closed; see `t2-temporal-planning.md`.
+
 1. Snapshot task/repository/prompt/skill/policy references before the Activity.
 2. Route `fast`, `normal`, or consensus planning using deterministic run policy and
    bounded input evidence.

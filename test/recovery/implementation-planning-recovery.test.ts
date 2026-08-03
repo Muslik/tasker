@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   DeterministicStubRunService,
   WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
+import { loadHarnessPack, type LoadedHarnessPack } from '../../src/harness/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
 import { ImplementationPlanningDecisionSchema } from '../../src/planning/implementation-plan.js';
 import {
@@ -120,6 +122,166 @@ describe('implementation planning recovery', () => {
         value: { view: { workflow: { graphHash } } },
       });
       expect(calls).toBe(2);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('deduplicates a completed Temporal planning command after Activity retry', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-command-retry-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      const fallback = new DeterministicImplementationPlanner();
+      let providerCalls = 0;
+      const planner: ImplementationPlanner = {
+        plan: (request) => {
+          providerCalls += 1;
+          return fallback.plan(request);
+        },
+      };
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects: new WorkflowGenerationSubjectSource(directory),
+        planner,
+      });
+      const commandId = 'tasker:avia-13236-short-bug:planning:1';
+
+      const completed = await coordinator.prepare('avia-13236-short-bug', 'fast', null, commandId);
+      const retriedCompletion = await coordinator.prepare(
+        'avia-13236-short-bug',
+        'fast',
+        null,
+        commandId,
+      );
+
+      expect(completed).toEqual(retriedCompletion);
+      expect(completed).toMatchObject({
+        ok: true,
+        value: { status: 'ready', attempt: 1, commandId },
+      });
+      expect(providerCalls).toBe(1);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to plan against a workflow graph that changed after the run started', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-snapshot-mismatch-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      let providerCalls = 0;
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects: new WorkflowGenerationSubjectSource(directory),
+        planner: {
+          plan: (request) => {
+            providerCalls += 1;
+            return new DeterministicImplementationPlanner().plan(request);
+          },
+        },
+      });
+
+      const outcome = await coordinator.prepare(
+        'avia-13236-short-bug',
+        'fast',
+        null,
+        'tasker:avia-13236-short-bug:planning:1',
+        'workflow-hash-from-another-run',
+      );
+
+      expect(outcome).toEqual({
+        ok: false,
+        error: {
+          kind: 'workflow_snapshot_mismatch',
+          taskReference: 'avia-13236-short-bug',
+          expectedHash: 'workflow-hash-from-another-run',
+          actualHash: generated.value.view.workflow.graphHash,
+        },
+      });
+      expect(providerCalls).toBe(0);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the snapshotted planning prompt after the configured harness changes', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-harness-snapshot-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      const workflowHash = generated.value.view.workflow.graphHash;
+      if (workflowHash === null) throw new Error('Expected a compiled workflow hash');
+      const subjects = new WorkflowGenerationSubjectSource(directory);
+      const originalPack = loadHarnessPack(join(process.cwd(), 'harness'));
+      const snapshotCoordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects,
+        planner: new DeterministicImplementationPlanner(),
+        harnessPack: originalPack,
+      });
+      const snapshot = snapshotCoordinator.createRunSnapshot('avia-13236-short-bug', workflowHash);
+      if (!snapshot.ok) throw new Error(`Snapshot failed: ${snapshot.error.kind}`);
+
+      const changedContent = `${originalPack.prompts.implementationPlanner.content}\nchanged later`;
+      const changedPack: LoadedHarnessPack = {
+        ...originalPack,
+        prompts: {
+          ...originalPack.prompts,
+          implementationPlanner: {
+            ...originalPack.prompts.implementationPlanner,
+            content: changedContent,
+            contentSha256: createHash('sha256').update(changedContent).digest('hex'),
+          },
+        },
+      };
+      let observedPrompt: string | null = null;
+      const fallback = new DeterministicImplementationPlanner();
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects,
+        harnessPack: changedPack,
+        planner: {
+          plan: (request) => {
+            observedPrompt = request.promptTemplate;
+            return fallback.plan(request);
+          },
+        },
+      });
+
+      const planned = await coordinator.prepare(
+        'avia-13236-short-bug',
+        'fast',
+        null,
+        'tasker:avia-13236-short-bug:planning:1',
+        workflowHash,
+        snapshot.value,
+      );
+
+      expect(planned).toMatchObject({ ok: true, value: { status: 'ready' } });
+      expect(observedPrompt).toBe(originalPack.prompts.implementationPlanner.content);
+      expect(observedPrompt).not.toBe(changedContent);
     } finally {
       ledger.close();
       rmSync(directory, { recursive: true, force: true });

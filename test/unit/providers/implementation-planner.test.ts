@@ -81,6 +81,7 @@ class RecordingRunner implements CommandRunner {
 const request = (strategy: 'fast' | 'ralplan') => ({
   repositoryPath: process.cwd(),
   strategy,
+  promptTemplate: '{{strategyInstruction}}\n{{plannerContext}}\n{{repositoryEvidence}}',
   context: {
     taskSnapshot: { taskId: 'AVIA-13235', summary: 'Repair seat marker color' },
     workflow: { kind: 'sequence', id: 'delivery' },

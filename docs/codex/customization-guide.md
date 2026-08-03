@@ -143,6 +143,18 @@ Use global policy for reusable workflow knowledge, for example:
 Do not encode a full graph in company policy. It contributes facts, block availability,
 and obligations; the task analyzer still assembles the graph specifically for the task.
 
+For example, a company-wide `ai-assistance` requirement is an optional policy pack,
+not kernel behavior. It may expose blocks such as:
+
+- `ai.assistance.initialize@1` to create the task README;
+- `ai.assistance.record_plan@1` to persist the accepted plan before implementation;
+- `ai.assistance.finalize@1` to write result/verification evidence and the PR section;
+- `ai.assistance.validate@1` as the deterministic pre-PR gate.
+
+When the policy is enabled, the analyzer selects those ordinary blocks and the
+validator enforces the declared obligation. Removing it later makes new task graphs
+omit them. No Temporal Workflow, API route, or integration adapter changes.
+
 ## 7. Worktree harness bootstrap
 
 Tasker must not copy `/Users/dzhabrail/Projects/harness/work` or create nested `work`

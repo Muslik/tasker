@@ -195,6 +195,8 @@ const sendTemporalRunError = (reply: FastifyReply, error: TemporalRunError): Fas
       return reply
         .code(409)
         .send(apiError(error.kind, 'This run already exists with different immutable settings'));
+    case 'planning_snapshot_unavailable':
+      return reply.code(503).send(apiError(error.kind, error.message));
     case 'runtime_unavailable':
       return reply.code(503).send(apiError(error.kind, error.message));
   }
@@ -976,7 +978,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         taskReference: params.data.fixtureId,
         workflowHash,
         graph: graph.data,
-        settings: { planApproval: command.data.settings.planApproval },
+        settings: command.data.settings,
       });
       return started.ok
         ? reply.send(ExecutionRunViewSchema.parse(started.value))
@@ -1071,6 +1073,20 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           .code(409)
           .send(apiError('run_not_waiting', 'The run is not waiting for an operator command'));
       }
+      if (
+        current.value.wait.waitKind === 'human_clarification' ||
+        current.value.wait.waitKind === 'plan.approved@1' ||
+        current.value.wait.waitKind === 'workflow_change.review@1'
+      ) {
+        return reply
+          .code(409)
+          .send(
+            apiError(
+              'typed_resolution_required',
+              'Use the dedicated planning or workflow-review command for this wait',
+            ),
+          );
+      }
       const resumed = await options.temporalRunService.resolveWait(params.data.fixtureId, {
         nodeId: current.value.wait.nodeId,
         waitKind: current.value.wait.waitKind,
@@ -1112,16 +1128,6 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     }
 
     if (options.temporalRunService !== undefined) {
-      if (command.data.decision === 'request_changes') {
-        return reply
-          .code(409)
-          .send(
-            apiError(
-              'temporal_plan_revision_not_migrated',
-              'Plan revision remains on the legacy runtime until the planning Activities migrate',
-            ),
-          );
-      }
       const current = await options.temporalRunService.read(params.data.fixtureId);
       if (!current.ok) return sendTemporalRunError(reply, current.error);
       if (
@@ -1136,7 +1142,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       const reviewed = await options.temporalRunService.resolveWait(params.data.fixtureId, {
         nodeId: current.value.wait.nodeId,
         waitKind: current.value.wait.waitKind,
-        resolution: { decision: 'approve' },
+        resolution: command.data,
       });
       return reviewed.ok
         ? reply.send(ExecutionRunViewSchema.parse(reviewed.value))
@@ -1218,7 +1224,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   });
 
   api.post('/api/workflows/:fixtureId/planning-clarification', async (request, reply) => {
-    if (options.runService === undefined || options.implementationPlanning === undefined) {
+    if (
+      options.temporalRunService === undefined &&
+      (options.runService === undefined || options.implementationPlanning === undefined)
+    ) {
       return reply
         .code(503)
         .send(apiError('implementation_planning_not_configured', 'Planning is disabled'));
@@ -1232,6 +1241,54 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply
         .code(400)
         .send(apiError('invalid_clarification_answers', 'Provide a non-empty answer per question'));
+    }
+    if (options.temporalRunService !== undefined) {
+      const current = await options.temporalRunService.read(params.data.fixtureId);
+      if (!current.ok) return sendTemporalRunError(reply, current.error);
+      if (
+        current.value === null ||
+        current.value.status !== 'waiting' ||
+        current.value.wait.waitKind !== 'human_clarification' ||
+        current.value.planning?.status !== 'needs_clarification'
+      ) {
+        return reply
+          .code(409)
+          .send(
+            apiError(
+              'run_not_at_planning_clarification',
+              'The run is not waiting for planning clarification',
+            ),
+          );
+      }
+      const expected = new Set(current.value.planning.questions.map((question) => question.id));
+      const received = new Set(command.data.answers.map((answer) => answer.questionId));
+      if (
+        received.size !== command.data.answers.length ||
+        received.size !== expected.size ||
+        [...received].some((questionId) => !expected.has(questionId))
+      ) {
+        return reply
+          .code(400)
+          .send(
+            apiError(
+              'invalid_clarification_answers',
+              'Provide exactly one answer for every active planning question',
+            ),
+          );
+      }
+      const answered = await options.temporalRunService.resolveWait(params.data.fixtureId, {
+        nodeId: current.value.wait.nodeId,
+        waitKind: current.value.wait.waitKind,
+        resolution: command.data,
+      });
+      return answered.ok
+        ? reply.send(ExecutionRunViewSchema.parse(answered.value))
+        : sendTemporalRunError(reply, answered.error);
+    }
+    if (options.implementationPlanning === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('implementation_planning_not_configured', 'Planning is disabled'));
     }
     const currentRun = options.runService.read(params.data.fixtureId);
     if (!currentRun.ok) return sendRunError(reply, currentRun.error);

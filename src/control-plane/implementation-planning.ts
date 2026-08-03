@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { loadHarnessPack, type LoadedHarnessPack, type LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import {
@@ -13,6 +14,12 @@ import {
   type PlanningQuestionAnswer,
   type ImplementationPlanLink,
 } from '../planning/implementation-plan.js';
+import {
+  PlanningSnapshotReferenceSchema,
+  RunPlanningSnapshotSchema,
+  type PlanningSnapshotReference,
+  type RunPlanningSnapshot,
+} from '../planning/run-planning-snapshot.js';
 import type {
   ImplementationPlanner,
   ImplementationPlannerFailure,
@@ -20,7 +27,7 @@ import type {
 import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../workflow/schema.js';
+import { CompiledWorkflowSchema, JsonValueSchema } from '../workflow/schema.js';
 import {
   OperatorActivityEntrySchema,
   OperatorStreamEventSchema,
@@ -53,6 +60,7 @@ const PlanningFailureViewSchema = z
 const PlanningRecordBaseSchema = z.object({
   schemaVersion: z.literal(1),
   taskReference: z.string().min(1),
+  commandId: z.string().min(1).nullable(),
   attempt: z.number().int().positive(),
   requestedStrategy: PlanningStrategyRequestSchema,
   selectedStrategy: PlanningStrategySchema,
@@ -109,7 +117,22 @@ export type ImplementationPlanningStoreError =
       readonly issues: readonly string[];
     }
   | { readonly kind: 'planning_attempt_not_current'; readonly taskReference: string }
-  | { readonly kind: 'clarification_answer_conflict'; readonly taskReference: string };
+  | { readonly kind: 'clarification_answer_conflict'; readonly taskReference: string }
+  | {
+      readonly kind: 'planning_snapshot_not_found';
+      readonly artifactId: string;
+    }
+  | {
+      readonly kind: 'planning_snapshot_corrupt';
+      readonly artifactId: string;
+      readonly issues: readonly string[];
+    }
+  | {
+      readonly kind: 'planning_snapshot_checksum_mismatch';
+      readonly artifactId: string;
+      readonly expectedChecksum: string;
+      readonly actualChecksum: string;
+    };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const aggregateIdFor = (taskReference: string): string => `implementation-plan:${taskReference}`;
@@ -119,6 +142,10 @@ export class ImplementationPlanningStore {
     private readonly ledger: LedgerRepository,
     private readonly clock: Clock,
   ) {}
+
+  public now(): string {
+    return this.clock.now();
+  }
 
   public read(
     taskReference: string,
@@ -145,8 +172,105 @@ export class ImplementationPlanningStore {
       : this.ledger.listEvents(aggregateIdFor(taskReference));
   }
 
+  public createRunSnapshot(
+    snapshotInput: RunPlanningSnapshot,
+  ): Outcome<PlanningSnapshotReference, ImplementationPlanningStoreError> {
+    const snapshot = RunPlanningSnapshotSchema.parse(snapshotInput);
+    const artifactId = `planning-snapshot:${snapshot.taskReference}:${snapshot.workflowHash}`;
+    const existing = this.ledger.readArtifact(artifactId);
+    if (existing !== null) {
+      const parsed = RunPlanningSnapshotSchema.safeParse(existing.payload);
+      return parsed.success
+        ? ok(PlanningSnapshotReferenceSchema.parse({ artifactId, checksum: existing.checksum }))
+        : err({
+            kind: 'planning_snapshot_corrupt',
+            artifactId,
+            issues: parsed.error.issues.map(
+              (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+            ),
+          });
+    }
+
+    const aggregateId = `planning-snapshot:${snapshot.taskReference}:${snapshot.workflowHash}`;
+    const result = this.ledger.transact({
+      aggregate: {
+        aggregateId,
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: `event:${aggregateId}:1`,
+            eventType: 'PlanningRunSnapshotCreated',
+            eventSchemaVersion: 1,
+            payload: asJson({ artifactId, workflowHash: snapshot.workflowHash }),
+            actor: 'kernel',
+          },
+        ],
+      },
+      artifacts: [
+        {
+          artifactId,
+          artifactKind: 'planning_run_snapshot',
+          storageUri: `ledger://artifacts/${artifactId}`,
+          payload: asJson(snapshot),
+          metadata: asJson({
+            taskReference: snapshot.taskReference,
+            workflowHash: snapshot.workflowHash,
+            companyId: snapshot.harness.company.id,
+            companyVersion: snapshot.harness.company.version,
+          }),
+          createdAt: snapshot.createdAt,
+        },
+      ],
+      timestamp: snapshot.createdAt,
+    });
+    if (!result.ok) {
+      const concurrentlyCreated = this.ledger.readArtifact(artifactId);
+      if (concurrentlyCreated !== null) {
+        return ok(
+          PlanningSnapshotReferenceSchema.parse({
+            artifactId,
+            checksum: concurrentlyCreated.checksum,
+          }),
+        );
+      }
+      return err({ kind: 'ledger_conflict', conflict: result.error });
+    }
+    const created = this.ledger.readArtifact(artifactId);
+    if (created === null) return err({ kind: 'planning_snapshot_not_found', artifactId });
+    return ok(PlanningSnapshotReferenceSchema.parse({ artifactId, checksum: created.checksum }));
+  }
+
+  public readRunSnapshot(
+    referenceInput: PlanningSnapshotReference,
+  ): Outcome<RunPlanningSnapshot, ImplementationPlanningStoreError> {
+    const reference = PlanningSnapshotReferenceSchema.parse(referenceInput);
+    const artifact = this.ledger.readArtifact(reference.artifactId);
+    if (artifact === null) {
+      return err({ kind: 'planning_snapshot_not_found', artifactId: reference.artifactId });
+    }
+    if (artifact.checksum !== reference.checksum) {
+      return err({
+        kind: 'planning_snapshot_checksum_mismatch',
+        artifactId: reference.artifactId,
+        expectedChecksum: reference.checksum,
+        actualChecksum: artifact.checksum,
+      });
+    }
+    const parsed = RunPlanningSnapshotSchema.safeParse(artifact.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({
+          kind: 'planning_snapshot_corrupt',
+          artifactId: reference.artifactId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
   public begin(input: {
     readonly taskReference: string;
+    readonly commandId: string | null;
     readonly requestedStrategy: PlanningStrategyRequest;
     readonly selectedStrategy: PlanningStrategy;
     readonly selectionReason: string;
@@ -160,6 +284,7 @@ export class ImplementationPlanningStore {
       schemaVersion: 1,
       status: 'planning',
       taskReference: input.taskReference,
+      commandId: input.commandId,
       attempt,
       requestedStrategy: input.requestedStrategy,
       selectedStrategy: input.selectedStrategy,
@@ -404,6 +529,12 @@ export type ImplementationPlanningError =
   | { readonly kind: 'subject'; readonly error: M1ServiceError }
   | { readonly kind: 'workflow_not_ready'; readonly taskReference: string }
   | {
+      readonly kind: 'workflow_snapshot_mismatch';
+      readonly taskReference: string;
+      readonly expectedHash: string;
+      readonly actualHash: string | null;
+    }
+  | {
       readonly kind: 'invalid_clarification_answers';
       readonly taskReference: string;
       readonly issues: readonly string[];
@@ -420,6 +551,61 @@ const countWorkflowNodes = (value: JsonValue): number => {
     ownNode +
     Object.values(value).reduce<number>((total, child) => total + countWorkflowNodes(child), 0)
   );
+};
+
+const snapshotPrompt = (prompt: LoadedPrompt) => ({
+  relativePath: prompt.relativePath,
+  content: prompt.content,
+  contentSha256: prompt.contentSha256,
+});
+
+const snapshotHarness = (
+  pack: LoadedHarnessPack,
+  repositoryReference: string,
+  workflowGraph: JsonValue,
+) => {
+  const graph = CompiledWorkflowSchema.parse(workflowGraph);
+  const referencedSteps = new Set(graph.metadata.references.stepTypes);
+  const steps = pack.steps
+    .filter((step) => referencedSteps.has(step.reference))
+    .map((step) => {
+      if (step.execution.kind === 'agent') {
+        if (step.prompt === null) {
+          throw new Error(`Agent block ${step.reference} has no loaded prompt`);
+        }
+        return {
+          reference: step.reference,
+          execution: {
+            kind: 'agent' as const,
+            skills: step.execution.skills,
+            prompt: snapshotPrompt(step.prompt),
+          },
+        };
+      }
+      return {
+        reference: step.reference,
+        execution:
+          step.execution.kind === 'process'
+            ? { kind: 'process' as const, executor: step.execution.executor }
+            : { kind: 'integration' as const, adapter: step.execution.adapter },
+      };
+    });
+  const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
+  const snapshottedProject = (() => {
+    if (project === undefined) return null;
+    const { guidance, ...manifest } = project;
+    return {
+      manifest,
+      guidance: guidance === null ? null : snapshotPrompt(guidance),
+    };
+  })();
+
+  return {
+    company: pack.company,
+    project: snapshottedProject,
+    implementationPlannerPrompt: snapshotPrompt(pack.prompts.implementationPlanner),
+    steps,
+  };
 };
 
 const selectStrategy = (
@@ -454,7 +640,48 @@ export class ImplementationPlanningCoordinator {
     private readonly workflows: M1WorkflowService,
     private readonly subjects: WorkflowGenerationSubjectSource,
     private readonly planner: ImplementationPlanner,
+    private readonly harnessPackSource: () => LoadedHarnessPack,
   ) {}
+
+  public createRunSnapshot(
+    taskReference: string,
+    expectedWorkflowHash: string,
+  ): Outcome<PlanningSnapshotReference, ImplementationPlanningError> {
+    const subject = this.subjects.resolve(taskReference);
+    if (!subject.ok) return err({ kind: 'subject', error: subject.error });
+    const workflow = this.workflows.read(taskReference);
+    if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
+    if (workflow.value?.status !== 'ready') {
+      return err({ kind: 'workflow_not_ready', taskReference });
+    }
+    const actualHash = workflow.value.view.workflow.graphHash;
+    if (actualHash !== expectedWorkflowHash) {
+      return err({
+        kind: 'workflow_snapshot_mismatch',
+        taskReference,
+        expectedHash: expectedWorkflowHash,
+        actualHash,
+      });
+    }
+    const graph = JsonValueSchema.safeParse(workflow.value.view.workflow.graph);
+    if (!graph.success) return err({ kind: 'workflow_not_ready', taskReference });
+    const snapshot = RunPlanningSnapshotSchema.parse({
+      schemaVersion: 1,
+      taskReference,
+      workflowHash: expectedWorkflowHash,
+      task: subject.value.task,
+      taskSnapshot: subject.value.taskSnapshot,
+      workflow: JsonValueSchema.parse(workflow.value.view.workflow),
+      repository: {
+        reference: subject.value.task.repository,
+        path: subject.value.repositoryPath,
+      },
+      harness: snapshotHarness(this.harnessPackSource(), subject.value.task.repository, graph.data),
+      createdAt: this.store.now(),
+    });
+    const stored = this.store.createRunSnapshot(snapshot);
+    return stored.ok ? stored : err({ kind: 'store', error: stored.error });
+  }
 
   public read(
     taskReference: string,
@@ -467,21 +694,33 @@ export class ImplementationPlanningCoordinator {
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
     operatorGuidance: string | null = null,
+    commandId: string | null = null,
+    expectedWorkflowHash: string | null = null,
+    snapshotReference: PlanningSnapshotReference | null = null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
-    const current = this.inFlight.get(taskReference);
+    const inFlightKey = `${taskReference}:${commandId ?? 'legacy'}`;
+    const current = this.inFlight.get(inFlightKey);
     if (current !== undefined) return current;
-    const pending = this.prepareOnce(taskReference, requestedStrategy, operatorGuidance).finally(
-      () => {
-        this.inFlight.delete(taskReference);
-      },
-    );
-    this.inFlight.set(taskReference, pending);
+    const pending = this.prepareOnce(
+      taskReference,
+      requestedStrategy,
+      operatorGuidance,
+      commandId,
+      expectedWorkflowHash,
+      snapshotReference,
+    ).finally(() => {
+      this.inFlight.delete(inFlightKey);
+    });
+    this.inFlight.set(inFlightKey, pending);
     return pending;
   }
 
   public answer(
     taskReference: string,
     answersInput: readonly PlanningQuestionAnswer[],
+    commandId: string | null = null,
+    expectedWorkflowHash: string | null = null,
+    snapshotReference: PlanningSnapshotReference | null = null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
     const command = PlanningClarificationAnswerCommandSchema.safeParse({
       answers: answersInput,
@@ -499,6 +738,19 @@ export class ImplementationPlanningCoordinator {
     }
     const current = this.store.read(taskReference);
     if (!current.ok) return Promise.resolve(err({ kind: 'store', error: current.error }));
+    if (commandId !== null && current.value?.commandId === commandId) {
+      if (current.value.status === 'failed' || current.value.status === 'planning') {
+        return this.prepare(
+          taskReference,
+          current.value.requestedStrategy,
+          current.value.operatorGuidance,
+          commandId,
+          expectedWorkflowHash,
+          snapshotReference,
+        );
+      }
+      return Promise.resolve(ok(current.value));
+    }
     if (current.value?.status !== 'needs_clarification') {
       return Promise.resolve(
         err({
@@ -551,7 +803,14 @@ export class ImplementationPlanningCoordinator {
       ]),
       `Answer artifact: ${recorded.value.artifactId}`,
     ].join('\n');
-    return this.prepare(taskReference, current.value.requestedStrategy, guidance);
+    return this.prepare(
+      taskReference,
+      current.value.requestedStrategy,
+      guidance,
+      commandId,
+      expectedWorkflowHash,
+      snapshotReference,
+    );
   }
 
   public link(record: ReadyImplementationPlanningRecord): ImplementationPlanLink {
@@ -680,10 +939,22 @@ export class ImplementationPlanningCoordinator {
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
     operatorGuidance: string | null,
+    commandId: string | null,
+    expectedWorkflowHash: string | null,
+    snapshotReference: PlanningSnapshotReference | null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
     const existing = this.store.read(taskReference);
     if (!existing.ok) return err({ kind: 'store', error: existing.error });
     if (
+      commandId !== null &&
+      existing.value?.commandId === commandId &&
+      existing.value.status !== 'planning' &&
+      existing.value.status !== 'failed'
+    ) {
+      return ok(existing.value);
+    }
+    if (
+      commandId === null &&
       operatorGuidance === null &&
       existing.value !== null &&
       existing.value.status !== 'failed' &&
@@ -693,36 +964,90 @@ export class ImplementationPlanningCoordinator {
       return ok(existing.value);
     }
 
-    const subject = this.subjects.resolve(taskReference);
-    if (!subject.ok) return err({ kind: 'subject', error: subject.error });
-    const workflow = this.workflows.read(taskReference);
-    if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
-    if (workflow.value?.status !== 'ready') {
-      return err({ kind: 'workflow_not_ready', taskReference });
-    }
-    const workflowJson = JsonValueSchema.parse(workflow.value.view.workflow);
-    const selection = selectStrategy(requestedStrategy, subject.value, workflowJson);
-    const begun = this.store.begin({
-      taskReference,
+    const planningInput = (() => {
+      if (snapshotReference !== null) {
+        const loaded = this.store.readRunSnapshot(snapshotReference);
+        if (!loaded.ok) return err({ kind: 'store' as const, error: loaded.error });
+        if (
+          loaded.value.taskReference !== taskReference ||
+          (expectedWorkflowHash !== null && loaded.value.workflowHash !== expectedWorkflowHash)
+        ) {
+          return err({
+            kind: 'workflow_snapshot_mismatch' as const,
+            taskReference,
+            expectedHash: expectedWorkflowHash ?? loaded.value.workflowHash,
+            actualHash: loaded.value.workflowHash,
+          });
+        }
+        return ok({
+          subject: {
+            repositoryPath: loaded.value.repository.path,
+            task: loaded.value.task,
+            taskSnapshot: loaded.value.taskSnapshot,
+          },
+          workflowJson: loaded.value.workflow,
+          promptTemplate: loaded.value.harness.implementationPlannerPrompt.content,
+        });
+      }
+
+      const subject = this.subjects.resolve(taskReference);
+      if (!subject.ok) return err({ kind: 'subject' as const, error: subject.error });
+      const workflow = this.workflows.read(taskReference);
+      if (!workflow.ok) return err({ kind: 'subject' as const, error: workflow.error });
+      if (workflow.value?.status !== 'ready') {
+        return err({ kind: 'workflow_not_ready' as const, taskReference });
+      }
+      if (
+        expectedWorkflowHash !== null &&
+        workflow.value.view.workflow.graphHash !== expectedWorkflowHash
+      ) {
+        return err({
+          kind: 'workflow_snapshot_mismatch' as const,
+          taskReference,
+          expectedHash: expectedWorkflowHash,
+          actualHash: workflow.value.view.workflow.graphHash,
+        });
+      }
+      return ok({
+        subject: subject.value,
+        workflowJson: JsonValueSchema.parse(workflow.value.view.workflow),
+        promptTemplate: this.harnessPackSource().prompts.implementationPlanner.content,
+      });
+    })();
+    if (!planningInput.ok) return planningInput;
+    const selection = selectStrategy(
       requestedStrategy,
-      selectedStrategy: selection.strategy,
-      selectionReason: selection.reason,
-      operatorGuidance,
-    });
+      planningInput.value.subject,
+      planningInput.value.workflowJson,
+    );
+    const begun =
+      commandId !== null &&
+      existing.value?.commandId === commandId &&
+      existing.value.status === 'planning'
+        ? ok(existing.value)
+        : this.store.begin({
+            taskReference,
+            commandId,
+            requestedStrategy,
+            selectedStrategy: selection.strategy,
+            selectionReason: selection.reason,
+            operatorGuidance,
+          });
     if (!begun.ok) return err({ kind: 'store', error: begun.error });
     if (begun.value.status !== 'planning') {
       throw new Error('Planning begin did not produce a planning record');
     }
 
     const result = await this.planner.plan({
-      repositoryPath: subject.value.repositoryPath,
+      repositoryPath: planningInput.value.subject.repositoryPath,
       strategy: selection.strategy,
       context: {
-        taskSnapshot: subject.value.taskSnapshot,
-        workflow: workflowJson,
-        repositoryReference: subject.value.task.repository,
+        taskSnapshot: planningInput.value.subject.taskSnapshot,
+        workflow: planningInput.value.workflowJson,
+        repositoryReference: planningInput.value.subject.task.repository,
         operatorGuidance,
       },
+      promptTemplate: planningInput.value.promptTemplate,
     });
     const saved = result.ok
       ? this.store.complete(begun.value, result)
@@ -737,10 +1062,18 @@ export const createImplementationPlanningCoordinator = (input: {
   readonly workflows: M1WorkflowService;
   readonly subjects: WorkflowGenerationSubjectSource;
   readonly planner: ImplementationPlanner;
-}): ImplementationPlanningCoordinator =>
-  new ImplementationPlanningCoordinator(
+  readonly harnessPack?: LoadedHarnessPack;
+  readonly harnessPackSource?: () => LoadedHarnessPack;
+}): ImplementationPlanningCoordinator => {
+  const fixedPack = input.harnessPack;
+  const harnessPackSource =
+    input.harnessPackSource ??
+    (fixedPack === undefined ? () => loadHarnessPack() : () => fixedPack);
+  return new ImplementationPlanningCoordinator(
     new ImplementationPlanningStore(input.ledger, input.clock),
     input.workflows,
     input.subjects,
     input.planner,
+    harnessPackSource,
   );
+};

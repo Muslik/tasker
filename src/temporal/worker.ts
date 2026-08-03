@@ -33,6 +33,7 @@ export const createTaskerTemporalWorker = async (
 
 export const connectTaskerTemporalWorker = async (
   configuration: TemporalClientConfiguration = DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
+  activities: TaskWorkflowActivities = stubTaskWorkflowActivities,
 ): Promise<{ readonly connection: NativeConnection; readonly worker: Worker }> => {
   const connection = await NativeConnection.connect({ address: configuration.address });
   return {
@@ -41,6 +42,7 @@ export const connectTaskerTemporalWorker = async (
       connection,
       namespace: configuration.namespace,
       taskQueue: configuration.taskQueue,
+      activities,
     }),
   };
 };

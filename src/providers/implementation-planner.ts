@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
-import { getHarnessPack, renderPromptTemplate } from '../harness/index.js';
+import { renderPromptTemplate } from '../harness/index.js';
 import {
   ImplementationPlannerContextSchema,
   ImplementationPlanningDecisionSchema,
@@ -170,6 +170,7 @@ export interface ImplementationPlannerRequest {
   readonly repositoryPath: string;
   readonly strategy: PlanningStrategy;
   readonly context: ImplementationPlannerContext;
+  readonly promptTemplate: string;
 }
 
 export interface ImplementationPlannerSuccess {
@@ -212,7 +213,7 @@ return the final consensus decision through the required JSON schema.`
       : `Use one bounded planning pass and only the immutable repository evidence supplied below.
 Do not call tools or shell commands. Do not start a consensus or implementation workflow.`;
 
-  return renderPromptTemplate(getHarnessPack().prompts.implementationPlanner.content, {
+  return renderPromptTemplate(request.promptTemplate, {
     strategyInstruction,
     plannerContext: JSON.stringify(request.context, null, 2),
     repositoryEvidence:

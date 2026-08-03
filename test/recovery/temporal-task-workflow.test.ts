@@ -8,6 +8,7 @@ import { findTaskFixture, planTaskWorkflow } from '../../src/planning/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import {
   LedgerTemporalRunRegistry,
+  stubTaskWorkflowActivities,
   TemporalTaskRunService,
   type TaskWorkflowActivities,
   type TaskWorkflowPublicState,
@@ -31,7 +32,7 @@ const workflowInput = (
     taskReference,
     workflowHash: planned.value.compiled.hash,
     graph: planned.value.compiled.graph,
-    settings: { planApproval },
+    settings: { planApproval, planningStrategy: 'auto' },
   } as const;
 };
 
@@ -42,7 +43,8 @@ const requireState = async (
   const result = await service.read(taskReference);
   if (!result.ok) {
     throw new Error(
-      result.error.kind === 'runtime_unavailable'
+      result.error.kind === 'runtime_unavailable' ||
+        result.error.kind === 'planning_snapshot_unavailable'
         ? result.error.message
         : `${result.error.kind}: ${result.error.taskReference}`,
     );
@@ -57,10 +59,13 @@ const waitForWait = async (
   waitKind: string,
 ): Promise<TaskWorkflowPublicState> => {
   await expect
-    .poll(async () => {
-      const state = await requireState(service, taskReference);
-      return state.status === 'waiting' ? state.wait.waitKind : state.status;
-    })
+    .poll(
+      async () => {
+        const state = await requireState(service, taskReference);
+        return state.status === 'waiting' ? state.wait.waitKind : state.status;
+      },
+      { timeout: 5_000, interval: 50 },
+    )
     .toBe(waitKind);
 
   return requireState(service, taskReference);
@@ -75,12 +80,12 @@ describe('Temporal task workflow', () => {
   let runRegistry: LedgerTemporalRunRegistry;
   const taskQueue = `tasker-test-${String(process.pid)}`;
 
-  const startWorker = async (activities: TaskWorkflowActivities): Promise<void> => {
+  const startWorker = async (activities: Partial<TaskWorkflowActivities> = {}): Promise<void> => {
     worker = await Worker.create({
       connection: environment.nativeConnection,
       taskQueue,
       workflowsPath,
-      activities,
+      activities: { ...stubTaskWorkflowActivities, ...activities },
       // The time-skipping test server does not advance sticky-queue timers while
       // the client waits. Disabling the cache exercises replay on every task and
       // lets this test prove recovery without depending on wall-clock fallback.
@@ -103,6 +108,15 @@ describe('Temporal task workflow', () => {
         updateTimeoutMs: 5_000,
       },
       runRegistry,
+      {
+        createRunSnapshot: (taskReference, workflowHash) => ({
+          ok: true,
+          value: {
+            artifactId: `planning-snapshot:${taskReference}:${workflowHash}`,
+            checksum: '0'.repeat(64),
+          },
+        }),
+      },
     );
     await startWorker({
       executeStep: (input) =>
@@ -205,18 +219,11 @@ describe('Temporal task workflow', () => {
     worker.shutdown();
     await workerRun;
     await startWorker({
-      executeStep: (input) => {
-        if (input.nodeId === 'analyze-task') {
-          analyzeAttempts += 1;
-          if (analyzeAttempts === 1) throw new Error('transient provider failure');
-        }
-        return Promise.resolve({
-          summary: `${input.uses} completed`,
-          predicateResults: { 'attempt.succeeded@1': true },
-          artifactIds: [],
-        });
+      planTaskImplementation: (input) => {
+        analyzeAttempts += 1;
+        if (analyzeAttempts === 1) throw new Error('transient provider failure');
+        return stubTaskWorkflowActivities.planTaskImplementation(input);
       },
-      evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? true),
     });
 
     const started = await service.start(
@@ -233,5 +240,109 @@ describe('Temporal task workflow', () => {
       resolution: { decision: 'done' },
     });
     expect(completed.ok).toBe(true);
+  }, 30_000);
+
+  it('restores planning questions and plan revisions in the same run', async () => {
+    const taskReference = `planning-${String(Date.now())}`;
+    const commands: {
+      readonly commandId: string;
+      readonly kind: string;
+      readonly snapshotChecksum: string;
+    }[] = [];
+    const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] = async (
+      input,
+    ) => {
+      commands.push({
+        commandId: input.commandId,
+        kind: input.command.kind,
+        snapshotChecksum: input.planningSnapshot.checksum,
+      });
+      const stub = await stubTaskWorkflowActivities.planTaskImplementation(input);
+      const common = {
+        commandId: stub.commandId,
+        attempt: stub.attempt,
+        artifactId: stub.artifactId,
+        requestedStrategy: stub.requestedStrategy,
+        selectedStrategy: stub.selectedStrategy,
+        receipt: stub.receipt,
+      };
+      if (input.command.kind === 'initial') {
+        return {
+          ...common,
+          status: 'needs_clarification',
+          questions: [
+            {
+              id: 'target-browser',
+              question: 'Which browsers must be verified?',
+              reason: 'The task snapshot does not define the supported browser set.',
+            },
+          ],
+        };
+      }
+      return {
+        ...common,
+        status: 'ready',
+        attempt: input.command.kind === 'clarification' ? 2 : 3,
+        artifactId: `plan:${input.taskReference}:${input.command.kind}`,
+      };
+    };
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker({ planTaskImplementation });
+    const started = await service.start(
+      workflowInput('avia-12536-feature-review', taskReference, 'required'),
+    );
+    expect(started.ok).toBe(true);
+
+    const clarification = await waitForWait(service, taskReference, 'human_clarification');
+    expect(clarification).toMatchObject({
+      planning: {
+        status: 'needs_clarification',
+        attempt: 1,
+        questions: [{ id: 'target-browser' }],
+      },
+    });
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker({ planTaskImplementation });
+    const answered = await service.resolveWait(taskReference, {
+      nodeId: 'analyze-task',
+      waitKind: 'human_clarification',
+      resolution: {
+        answers: [{ questionId: 'target-browser', answer: 'Chrome and Safari' }],
+      },
+    });
+    expect(answered.ok).toBe(true);
+
+    const firstReview = await waitForWait(service, taskReference, 'plan.approved@1');
+    expect(firstReview.planning).toMatchObject({ status: 'ready', attempt: 2 });
+    const revised = await service.resolveWait(taskReference, {
+      nodeId: 'review-plan',
+      waitKind: 'plan.approved@1',
+      resolution: { decision: 'request_changes', guidance: 'Add an explicit rollback check.' },
+    });
+    expect(revised.ok).toBe(true);
+
+    const secondReview = await waitForWait(service, taskReference, 'plan.approved@1');
+    expect(secondReview.planning).toMatchObject({ status: 'ready', attempt: 3 });
+    const approved = await service.resolveWait(taskReference, {
+      nodeId: 'review-plan',
+      waitKind: 'plan.approved@1',
+      resolution: { decision: 'approve' },
+    });
+    expect(approved.ok).toBe(true);
+    await waitForWait(service, taskReference, 'code_review@1');
+
+    expect(commands.map((command) => command.kind)).toEqual([
+      'initial',
+      'clarification',
+      'revision',
+    ]);
+    expect(new Set(commands.map((command) => command.commandId))).toHaveLength(3);
+    expect(new Set(commands.map((command) => command.snapshotChecksum))).toEqual(
+      new Set(['0'.repeat(64)]),
+    );
   }, 30_000);
 });

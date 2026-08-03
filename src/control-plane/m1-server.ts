@@ -91,13 +91,6 @@ export const startM1Server = async (): Promise<void> => {
     taskQueue:
       process.env.TASKER_TEMPORAL_TASK_QUEUE ?? DEFAULT_TEMPORAL_CLIENT_CONFIGURATION.taskQueue,
   };
-  const temporalRuntime =
-    executionRuntime === 'temporal'
-      ? await connectTemporalTaskRunService(
-          temporalConfiguration,
-          new LedgerTemporalRunRegistry(ledger.repository),
-        )
-      : null;
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
@@ -130,6 +123,14 @@ export const startM1Server = async (): Promise<void> => {
       ? new DeterministicImplementationPlanner()
       : new CodexCliImplementationPlanner(nodeCommandRunner),
   });
+  const temporalRuntime =
+    executionRuntime === 'temporal'
+      ? await connectTemporalTaskRunService(
+          temporalConfiguration,
+          new LedgerTemporalRunRegistry(ledger.repository),
+          implementationPlanning,
+        )
+      : null;
   const workflowContinuation = createWorkflowContinuationCoordinator({
     ledger: ledger.repository,
     clock: systemClock,

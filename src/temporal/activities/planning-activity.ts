@@ -1,0 +1,149 @@
+import { Context } from '@temporalio/activity';
+
+import type { ImplementationPlanningRecord } from '../../control-plane/implementation-planning.js';
+import type {
+  PlanningQuestionAnswer,
+  PlanningSnapshotReference,
+  PlanningStrategyRequest,
+} from '../../planning/index.js';
+import type { CommandRequest, CommandRunner } from '../../providers/command-runner.js';
+import type { Outcome } from '../../shared/outcome.js';
+import {
+  PlanTaskImplementationInputSchema,
+  PlanTaskImplementationResultSchema,
+  type PlanTaskImplementationInput,
+  type TaskWorkflowActivities,
+} from '../contracts.js';
+
+type PlanningOutcome = Outcome<ImplementationPlanningRecord, { readonly kind: string }>;
+
+export interface TemporalImplementationPlanningCoordinator {
+  prepare(
+    taskReference: string,
+    requestedStrategy: PlanningStrategyRequest,
+    operatorGuidance?: string | null,
+    commandId?: string | null,
+    expectedWorkflowHash?: string | null,
+    snapshotReference?: PlanningSnapshotReference | null,
+  ): Promise<PlanningOutcome>;
+  answer(
+    taskReference: string,
+    answers: readonly PlanningQuestionAnswer[],
+    commandId?: string | null,
+    expectedWorkflowHash?: string | null,
+    snapshotReference?: PlanningSnapshotReference | null,
+  ): Promise<PlanningOutcome>;
+}
+
+const outcomeError = (outcome: Extract<PlanningOutcome, { readonly ok: false }>): Error =>
+  new Error(`Implementation planning stopped: ${outcome.error.kind}`);
+
+const planningResult = (record: ImplementationPlanningRecord, commandId: string) => {
+  if (record.status === 'planning') {
+    throw new Error('Implementation planning returned before the provider attempt completed');
+  }
+  if (record.status === 'failed') {
+    throw new Error(record.failure.message);
+  }
+
+  const common = {
+    status: record.status,
+    commandId,
+    attempt: record.attempt,
+    artifactId: record.artifactId,
+    requestedStrategy: record.requestedStrategy,
+    selectedStrategy: record.selectedStrategy,
+    receipt: record.receipt,
+  } as const;
+
+  switch (record.status) {
+    case 'ready':
+      return PlanTaskImplementationResultSchema.parse(common);
+    case 'needs_clarification':
+      return PlanTaskImplementationResultSchema.parse({
+        ...common,
+        questions: record.decision.questions,
+      });
+    case 'workflow_change_required':
+      return PlanTaskImplementationResultSchema.parse({
+        ...common,
+        request: record.decision.request,
+      });
+  }
+};
+
+export const createPlanningActivity = (
+  coordinator: TemporalImplementationPlanningCoordinator,
+): Pick<TaskWorkflowActivities, 'planTaskImplementation'> => ({
+  planTaskImplementation: async (inputValue: PlanTaskImplementationInput) => {
+    const input = PlanTaskImplementationInputSchema.parse(inputValue);
+    const context = Context.current();
+    context.heartbeat({ phase: 'planning', commandId: input.commandId });
+
+    const outcome = await (() => {
+      switch (input.command.kind) {
+        case 'initial':
+          return coordinator.prepare(
+            input.taskReference,
+            input.requestedStrategy,
+            null,
+            input.commandId,
+            input.workflowHash,
+            input.planningSnapshot,
+          );
+        case 'clarification':
+          return coordinator.answer(
+            input.taskReference,
+            input.command.answers,
+            input.commandId,
+            input.workflowHash,
+            input.planningSnapshot,
+          );
+        case 'revision':
+          return coordinator.prepare(
+            input.taskReference,
+            input.requestedStrategy,
+            input.command.guidance,
+            input.commandId,
+            input.workflowHash,
+            input.planningSnapshot,
+          );
+      }
+    })();
+
+    context.cancellationSignal.throwIfAborted();
+    if (!outcome.ok) throw outcomeError(outcome);
+    return planningResult(outcome.value, input.commandId);
+  },
+});
+
+export const createTemporalActivityCommandRunner = (delegate: CommandRunner): CommandRunner => ({
+  run: async (request: CommandRequest) => {
+    const context = Context.current();
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    const reportProgress = (): void => {
+      context.heartbeat({ phase: 'provider', stdoutBytes, stderrBytes });
+    };
+    const heartbeatTimer = setInterval(reportProgress, 10_000);
+    heartbeatTimer.unref();
+
+    try {
+      reportProgress();
+      const result = await delegate.run({
+        ...request,
+        cancellationSignal: context.cancellationSignal,
+        onOutput: (stream, chunk) => {
+          if (stream === 'stdout') stdoutBytes += Buffer.byteLength(chunk, 'utf8');
+          else stderrBytes += Buffer.byteLength(chunk, 'utf8');
+          request.onOutput?.(stream, chunk);
+          reportProgress();
+        },
+      });
+      context.cancellationSignal.throwIfAborted();
+      return result;
+    } finally {
+      clearInterval(heartbeatTimer);
+    }
+  },
+});

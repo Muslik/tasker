@@ -1,14 +1,44 @@
 import { z } from 'zod';
 
+import {
+  PlanningQuestionSchema,
+  PlanningStrategyRequestSchema,
+  PlanningStrategySchema,
+  WorkflowChangeRequestSchema,
+} from '../planning/implementation-plan.js';
+import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
+
 export const TASK_WORKFLOW_SCHEMA_VERSION = 1;
 export const TASKER_TEMPORAL_TASK_QUEUE = 'tasker-local';
 
 export const TaskWorkflowSettingsSchema = z
   .object({
     planApproval: z.enum(['required', 'automatic']),
+    planningStrategy: PlanningStrategyRequestSchema,
   })
   .strict()
   .readonly();
+
+const TaskWorkflowPlanningBaseSchema = z.object({
+  commandId: z.string().min(1),
+  attempt: z.number().int().positive(),
+  artifactId: z.string().min(1),
+  requestedStrategy: PlanningStrategyRequestSchema,
+  selectedStrategy: PlanningStrategySchema,
+  receipt: ImplementationPlannerReceiptSchema,
+});
+
+export const TaskWorkflowPlanningStateSchema = z.discriminatedUnion('status', [
+  TaskWorkflowPlanningBaseSchema.extend({ status: z.literal('ready') }).strict(),
+  TaskWorkflowPlanningBaseSchema.extend({
+    status: z.literal('needs_clarification'),
+    questions: z.array(PlanningQuestionSchema).min(1).max(10),
+  }).strict(),
+  TaskWorkflowPlanningBaseSchema.extend({
+    status: z.literal('workflow_change_required'),
+    request: WorkflowChangeRequestSchema,
+  }).strict(),
+]);
 
 export const TemporalNodeStatusSchema = z.enum([
   'planned',
@@ -27,6 +57,7 @@ const TaskWorkflowStateBaseSchema = z
     runId: z.string().min(1),
     workflowHash: z.string().min(1),
     settings: TaskWorkflowSettingsSchema,
+    planning: TaskWorkflowPlanningStateSchema.nullable(),
     nodeStates: z.record(z.string(), TemporalNodeStatusSchema),
     attempts: z.record(z.string(), z.number().int().nonnegative()),
   })
@@ -69,6 +100,7 @@ export const TaskWorkflowPublicStateSchema = z.discriminatedUnion('status', [
 ]);
 
 export type TaskWorkflowSettings = z.infer<typeof TaskWorkflowSettingsSchema>;
+export type TaskWorkflowPlanningState = z.infer<typeof TaskWorkflowPlanningStateSchema>;
 export type TemporalNodeStatus = z.infer<typeof TemporalNodeStatusSchema>;
 export type TaskWorkflowWait = z.infer<typeof TaskWorkflowWaitSchema>;
 export type TaskWorkflowPublicState = z.infer<typeof TaskWorkflowPublicStateSchema>;

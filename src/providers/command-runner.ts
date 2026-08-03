@@ -7,6 +7,8 @@ export interface CommandRequest {
   readonly env?: Readonly<Record<string, string>>;
   readonly stdin: string;
   readonly timeoutMs: number;
+  readonly cancellationSignal?: AbortSignal;
+  readonly onOutput?: ((stream: 'stdout' | 'stderr', chunk: string) => void) | undefined;
 }
 
 export type CommandResult =
@@ -51,12 +53,17 @@ export const nodeCommandRunner: CommandRunner = {
       let settled = false;
       let timedOut = false;
 
+      const cancelChild = (): void => {
+        child.kill('SIGTERM');
+      };
+
       const finish = (result: CommandResult): void => {
         if (settled) {
           return;
         }
         settled = true;
         clearTimeout(timeout);
+        request.cancellationSignal?.removeEventListener('abort', cancelChild);
         resolve(result);
       };
 
@@ -64,9 +71,11 @@ export const nodeCommandRunner: CommandRunner = {
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', (chunk: string) => {
         stdout += chunk;
+        request.onOutput?.('stdout', chunk);
       });
       child.stderr.on('data', (chunk: string) => {
         stderr += chunk;
+        request.onOutput?.('stderr', chunk);
       });
       child.once('error', (error) => {
         finish({
@@ -89,6 +98,9 @@ export const nodeCommandRunner: CommandRunner = {
         timedOut = true;
         child.kill('SIGTERM');
       }, request.timeoutMs);
+
+      request.cancellationSignal?.addEventListener('abort', cancelChild, { once: true });
+      if (request.cancellationSignal?.aborted === true) cancelChild();
 
       child.stdin.on('error', () => {
         // The exit/close event owns the durable process result, including early EPIPE.

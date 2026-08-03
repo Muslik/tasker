@@ -1,6 +1,7 @@
 import {
   ApplicationFailure,
   condition,
+  isCancellation,
   proxyActivities,
   setHandler,
   workflowInfo,
@@ -8,20 +9,36 @@ import {
 
 import type { CompiledWorkflowNode } from '../../workflow/index.js';
 import type {
+  PlanningActivityCommand,
   ResolveTaskWaitCommand,
   TaskWorkflowActivities,
   TaskWorkflowInput,
+  TaskWorkflowPlanningState,
   TaskWorkflowPublicState,
   TaskWorkflowResult,
+  TaskWaitResolution,
   TemporalNodeStatus,
 } from '../contracts.js';
 import { resolveTaskWaitUpdate, taskWorkflowStateQuery } from './messages.js';
 
-const activities = proxyActivities<TaskWorkflowActivities>({
+const activities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'executeStep' | 'evaluatePredicate'>
+>({
   startToCloseTimeout: '1 minute',
   retry: {
     initialInterval: '100 milliseconds',
     maximumAttempts: 2,
+  },
+});
+
+const planningActivities = proxyActivities<Pick<TaskWorkflowActivities, 'planTaskImplementation'>>({
+  startToCloseTimeout: '35 minutes',
+  scheduleToCloseTimeout: '2 hours',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
+    maximumAttempts: 3,
   },
 });
 
@@ -30,6 +47,54 @@ type MutableAttempts = Record<string, number>;
 type PredicateFacts = Record<string, boolean>;
 type Traversal =
   { readonly kind: 'continue' } | { readonly kind: 'finalized'; readonly outcome: string };
+
+type PlanningStepNode = Extract<CompiledWorkflowNode, { readonly kind: 'step' }>;
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const clarificationAnswersFrom = (
+  resolution: TaskWaitResolution,
+): { questionId: string; answer: string }[] | null => {
+  if (!isRecord(resolution) || !Array.isArray(resolution.answers)) return null;
+  const answers = resolution.answers;
+  if (answers.length === 0 || answers.length > 10) return null;
+  const parsed: { questionId: string; answer: string }[] = [];
+  for (const answer of answers) {
+    if (
+      !isRecord(answer) ||
+      typeof answer.questionId !== 'string' ||
+      !/^[a-z][a-z0-9-]*$/u.test(answer.questionId) ||
+      typeof answer.answer !== 'string' ||
+      answer.answer.trim().length === 0
+    ) {
+      return null;
+    }
+    parsed.push({ questionId: answer.questionId, answer: answer.answer.trim() });
+  }
+  return parsed;
+};
+
+const planReviewFrom = (
+  resolution: TaskWaitResolution,
+):
+  | { readonly decision: 'approve' }
+  | { readonly decision: 'request_changes'; guidance: string }
+  | null => {
+  if (!isRecord(resolution)) return null;
+  if (resolution.decision === 'approve') return { decision: 'approve' };
+  if (
+    resolution.decision === 'request_changes' &&
+    typeof resolution.guidance === 'string' &&
+    resolution.guidance.trim().length > 0
+  ) {
+    return { decision: 'request_changes', guidance: resolution.guidance.trim() };
+  }
+  return null;
+};
+
+const retryResolution = (resolution: TaskWaitResolution): boolean =>
+  isRecord(resolution) && resolution.decision === 'resume';
 
 const collectNodeIds = (node: CompiledWorkflowNode, ids: string[]): void => {
   ids.push(node.id);
@@ -92,6 +157,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
   const attempts: MutableAttempts = {};
   const predicateFacts: PredicateFacts = {};
   let pendingResolution: ResolveTaskWaitCommand | null = null;
+  let planningNode: PlanningStepNode | null = null;
+  let planningCommandSequence = 0;
   const execution = workflowInfo();
   let state: TaskWorkflowPublicState = {
     schemaVersion: 1,
@@ -100,6 +167,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     runId: execution.runId,
     workflowHash: input.workflowHash,
     settings: input.settings,
+    planning: null,
     status: 'running',
     currentNodeId: null,
     wait: null,
@@ -123,6 +191,25 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     if (state.wait.nodeId !== command.nodeId || state.wait.waitKind !== command.waitKind) {
       throw ApplicationFailure.nonRetryable('Wait resolution does not match the active wait');
     }
+    const validResolution = (() => {
+      if (state.wait.waitKind === 'human_clarification') {
+        return clarificationAnswersFrom(command.resolution) !== null;
+      }
+      if (state.wait.waitKind === 'plan.approved@1') {
+        return planReviewFrom(command.resolution) !== null;
+      }
+      if (state.wait.waitKind === 'planning.retry@1') {
+        return retryResolution(command.resolution);
+      }
+      if (state.wait.waitKind === 'workflow_change.review@1') {
+        const review = planReviewFrom(command.resolution);
+        return review?.decision === 'request_changes';
+      }
+      return true;
+    })();
+    if (!validResolution) {
+      throw ApplicationFailure.nonRetryable('Wait resolution payload is invalid');
+    }
 
     pendingResolution = command;
     return {
@@ -143,7 +230,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     };
   };
 
-  const openWait = async (nodeId: string, waitKind: string): Promise<void> => {
+  const openWait = async (nodeId: string, waitKind: string): Promise<TaskWaitResolution> => {
     nodeStates[nodeId] = 'waiting';
     state = {
       ...state,
@@ -156,6 +243,10 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     await condition(
       () => pendingResolution?.nodeId === nodeId && pendingResolution.waitKind === waitKind,
     );
+    const resolution = pendingResolution?.resolution;
+    if (resolution === undefined) {
+      throw ApplicationFailure.nonRetryable('Resolved wait has no payload');
+    }
     pendingResolution = null;
     nodeStates[nodeId] = 'succeeded';
     state = {
@@ -165,6 +256,68 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       wait: null,
       outcome: null,
     };
+    return resolution;
+  };
+
+  const executePlanning = async (
+    node: PlanningStepNode,
+    initialCommand: PlanningActivityCommand,
+  ): Promise<void> => {
+    let command = initialCommand;
+
+    for (;;) {
+      planningCommandSequence += 1;
+      const commandId = `${execution.workflowId}:planning:${String(planningCommandSequence)}`;
+      let result: TaskWorkflowPlanningState;
+      for (;;) {
+        markRunning(node.id);
+        attempts[node.id] = (attempts[node.id] ?? 0) + 1;
+        try {
+          result = await planningActivities.planTaskImplementation({
+            taskReference: input.taskReference,
+            workflowHash: input.workflowHash,
+            planningSnapshot: input.planningSnapshot,
+            nodeId: node.id,
+            commandId,
+            requestedStrategy: input.settings.planningStrategy,
+            command,
+          });
+          break;
+        } catch (error) {
+          if (isCancellation(error)) throw error;
+          const retry = await openWait(node.id, 'planning.retry@1');
+          if (!retryResolution(retry)) {
+            throw ApplicationFailure.nonRetryable('Planning retry wait received invalid payload');
+          }
+        }
+      }
+
+      state = { ...state, planning: result };
+      if (result.status === 'ready') {
+        nodeStates[node.id] = 'succeeded';
+        return;
+      }
+      if (result.status === 'needs_clarification') {
+        const resolution = await openWait(node.id, 'human_clarification');
+        const answers = clarificationAnswersFrom(resolution);
+        if (answers === null) {
+          throw ApplicationFailure.nonRetryable('Planning clarification payload is invalid');
+        }
+        command = { kind: 'clarification', sourceAttempt: result.attempt, answers };
+        continue;
+      }
+
+      const resolution = await openWait(node.id, 'workflow_change.review@1');
+      const review = planReviewFrom(resolution);
+      if (review?.decision !== 'request_changes') {
+        throw ApplicationFailure.nonRetryable('Workflow change requires revision guidance');
+      }
+      command = {
+        kind: 'revision',
+        sourceAttempt: result.attempt,
+        guidance: review.guidance,
+      };
+    }
   };
 
   const evaluate = async (reference: string): Promise<boolean> => {
@@ -194,6 +347,11 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return { kind: 'continue' };
       }
       case 'step': {
+        if (node.uses === 'task.analyze@1') {
+          planningNode = node;
+          await executePlanning(node, { kind: 'initial' });
+          return { kind: 'continue' };
+        }
         attempts[node.id] = (attempts[node.id] ?? 0) + 1;
         const result = await activities.executeStep({
           taskReference: input.taskReference,
@@ -233,13 +391,33 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       case 'wait':
         await openWait(node.id, node.for);
         return { kind: 'continue' };
-      case 'gate':
+      case 'gate': {
         if (node.resumeWhen === 'plan.approved@1' && input.settings.planApproval === 'automatic') {
           nodeStates[node.id] = 'skipped';
           return { kind: 'continue' };
         }
-        await openWait(node.id, node.resumeWhen);
-        return { kind: 'continue' };
+        if (node.resumeWhen !== 'plan.approved@1') {
+          await openWait(node.id, node.resumeWhen);
+          return { kind: 'continue' };
+        }
+        if (planningNode === null || state.planning === null) {
+          throw ApplicationFailure.nonRetryable('Plan review has no preceding planning result');
+        }
+        for (;;) {
+          const resolution = await openWait(node.id, node.resumeWhen);
+          const review = planReviewFrom(resolution);
+          if (review === null) {
+            throw ApplicationFailure.nonRetryable('Plan review payload is invalid');
+          }
+          if (review.decision === 'approve') return { kind: 'continue' };
+          await executePlanning(planningNode, {
+            kind: 'revision',
+            sourceAttempt: state.planning.attempt,
+            guidance: review.guidance,
+          });
+          markRunning(node.id);
+        }
+      }
       case 'finalize':
         nodeStates[node.id] = 'succeeded';
         return { kind: 'finalized', outcome: node.outcome };
