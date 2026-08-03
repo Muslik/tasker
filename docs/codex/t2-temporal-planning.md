@@ -1,7 +1,7 @@
 # T2 Temporal implementation planning
 
-Status: core control loop and durable operator transcript implemented 2026-08-03;
-real-provider exit evidence remains.
+Status: core control loop, durable operator transcript, and real-provider recovery
+evidence completed 2026-08-03.
 
 ## Operator-visible behavior
 
@@ -88,12 +88,18 @@ Temporal interpreter.
 - the transcript API and operator console expose live and completed provider output
   separately from durable business activity.
 
-## Remaining T2 exit work
+The real-provider smoke used Temporal Server 1.31.2 and subscription-authenticated
+`codex-cli 0.120.0` with model `gpt-5.4`. The first worker was stopped after provider
+attempt 1 had persisted 1,208 transcript bytes. A replacement worker replayed the same
+Workflow and resumed the same stable planning command as provider attempt 2. The final
+transcript contained both attempts (24 chunks, 6,405 bytes), and the planning Activity
+completed with a typed `workflow_change_required` result. The Workflow ID, Run ID,
+command ID, transcript ID, and implementation-plan attempt remained unchanged across
+the interruption.
 
-1. Run a subscription-authenticated Codex planning smoke through the real Temporal
-   worker, including worker interruption and recovery.
-2. Show the immutable planning-snapshot reference in compact diagnostics. The
-   transcript is already linked and rendered by the dedicated agent-log surface.
+## T2 exit status
 
-Repository mutation remains disabled until these are complete and T3 introduces the
-managed worktree boundary.
+All T2 exit evidence is complete. The implementation-plan projection and compact
+operator surface expose the checksum-addressed immutable planning snapshot, while the
+dedicated agent-log surface exposes the linked transcript. Repository mutation remains
+disabled; T3 introduces the managed worktree and executable workflow-block boundary.

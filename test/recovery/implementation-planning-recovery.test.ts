@@ -279,7 +279,10 @@ describe('implementation planning recovery', () => {
         snapshot.value,
       );
 
-      expect(planned).toMatchObject({ ok: true, value: { status: 'ready' } });
+      expect(planned).toMatchObject({
+        ok: true,
+        value: { status: 'ready', planningSnapshot: snapshot.value },
+      });
       expect(observedPrompt).toBe(originalPack.prompts.implementationPlanner.content);
       expect(observedPrompt).not.toBe(changedContent);
     } finally {

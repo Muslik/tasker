@@ -723,6 +723,20 @@ const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) =
   );
 };
 
+const PlanningSnapshotTag = ({ record }: { readonly record: ImplementationPlanningRecord }) => {
+  const reference = record.planningSnapshot;
+  if (reference === null) return null;
+  return (
+    <span
+      className="font-mono text-[10px] text-muted-foreground"
+      data-testid="planning-snapshot-reference"
+      title={`${reference.artifactId}\n${reference.checksum}`}
+    >
+      snapshot {reference.checksum.slice(0, 8)}
+    </span>
+  );
+};
+
 const ImplementationPlanSurface = ({
   planning,
   answers,
@@ -750,6 +764,7 @@ const ImplementationPlanSurface = ({
           <LoaderCircle className="size-4 animate-spin text-primary" />
           <strong>Implementation plan</strong>
           <span className="text-xs text-muted-foreground">{record.selectedStrategy}</span>
+          <PlanningSnapshotTag record={record} />
         </div>
       </section>
     );
@@ -761,6 +776,7 @@ const ImplementationPlanSurface = ({
           <AlertTriangle className="size-4" />
           <strong>Planning paused</strong>
           <span className="text-xs text-muted-foreground">{record.failure.message}</span>
+          <PlanningSnapshotTag record={record} />
         </div>
       </section>
     );
@@ -778,6 +794,7 @@ const ImplementationPlanSurface = ({
         <div className="mb-2 flex items-center gap-2 text-sm">
           <MessageSquare className="size-4 text-amber-300" />
           <strong>Planner needs clarification</strong>
+          <PlanningSnapshotTag record={record} />
         </div>
         <ol className="space-y-3">
           {record.decision.questions.map((question) => (
@@ -820,6 +837,7 @@ const ImplementationPlanSurface = ({
           <strong>Workflow change required</strong>
           <StateBadge>{record.selectedStrategy}</StateBadge>
           <span className="text-[11px] text-muted-foreground">attempt {record.attempt}</span>
+          <PlanningSnapshotTag record={record} />
         </div>
         <p className="text-sm text-muted-foreground">{record.decision.request.reason}</p>
         {record.operatorGuidance === null ? null : (
@@ -848,6 +866,7 @@ const ImplementationPlanSurface = ({
               <GitBranch className="size-4 text-muted-foreground" />
               <strong className="text-sm">Implementation plan</strong>
               <StateBadge>{record.selectedStrategy}</StateBadge>
+              <PlanningSnapshotTag record={record} />
               <span className="text-[11px] text-muted-foreground">
                 attempt {record.attempt} · {record.receipt.provider} ·{' '}
                 {(record.receipt.durationMs / 1000).toFixed(1)}s · {measuredTokens.toLocaleString()}{' '}

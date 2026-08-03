@@ -68,6 +68,7 @@ const PlanningRecordBaseSchema = z.object({
   taskReference: z.string().min(1),
   commandId: z.string().min(1).nullable(),
   transcriptId: z.string().min(1).nullable(),
+  planningSnapshot: PlanningSnapshotReferenceSchema.nullable(),
   attempt: z.number().int().positive(),
   requestedStrategy: PlanningStrategyRequestSchema,
   selectedStrategy: PlanningStrategySchema,
@@ -278,6 +279,7 @@ export class ImplementationPlanningStore {
   public begin(input: {
     readonly taskReference: string;
     readonly commandId: string | null;
+    readonly planningSnapshot: PlanningSnapshotReference | null;
     readonly requestedStrategy: PlanningStrategyRequest;
     readonly selectedStrategy: PlanningStrategy;
     readonly selectionReason: string;
@@ -293,6 +295,7 @@ export class ImplementationPlanningStore {
       taskReference: input.taskReference,
       commandId: input.commandId,
       transcriptId: input.commandId === null ? null : planningTranscriptIdFor(input.commandId),
+      planningSnapshot: input.planningSnapshot,
       attempt,
       requestedStrategy: input.requestedStrategy,
       selectedStrategy: input.selectedStrategy,
@@ -1048,6 +1051,7 @@ export class ImplementationPlanningCoordinator {
         : this.store.begin({
             taskReference,
             commandId,
+            planningSnapshot: snapshotReference,
             requestedStrategy,
             selectedStrategy: selection.strategy,
             selectionReason: selection.reason,
