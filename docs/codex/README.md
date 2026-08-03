@@ -73,7 +73,8 @@ Temporal public recovery/integration tests after parity.
 
 ## Immediate implementation target
 
-Close the remaining T2 transcript and real-provider recovery evidence described in
-[`t2-temporal-planning.md`](t2-temporal-planning.md). Then implement T3 managed
-worktrees and provider-neutral block execution. Remote mutation, CI, and
+T2 planning is complete in
+[`t2-temporal-planning.md`](t2-temporal-planning.md). Implement the T3 managed
+workspace and provider-neutral block boundary tracked in
+[`t3-managed-execution.md`](t3-managed-execution.md). Remote mutation, CI, and
 cross-repository continuation follow only after their safety gates are green.
