@@ -1796,6 +1796,8 @@ const WorkflowSidebar = ({
     if (task?.origin.kind === 'jira') {
       const binding = task.origin.repositoryBinding;
       const repositoryResolved = binding.status === 'resolved';
+      const jiraSnapshotReady = task.origin.syncStatus === 'current';
+      const workflowReady = jiraSnapshotReady && repositoryResolved;
       const repositoryLabel = repositoryResolved
         ? binding.repository.repositoryId
         : binding.status === 'missing'
@@ -1804,9 +1806,9 @@ const WorkflowSidebar = ({
             ? binding.reference
             : null;
       const prerequisites = [
-        ['Jira snapshot', 'complete'],
+        ['Jira snapshot', jiraSnapshotReady ? 'complete' : 'blocked'],
         ['Repository mapping', repositoryResolved ? 'complete' : 'blocked'],
-        ['Read-only analysis', repositoryResolved ? 'ready' : 'waiting'],
+        ['Read-only analysis', workflowReady ? 'ready' : 'waiting'],
         ['Compile & validate', 'waiting'],
       ] as const;
       return (
@@ -1816,12 +1818,12 @@ const WorkflowSidebar = ({
               <h2 className="text-sm font-semibold">Workflow</h2>
               <StateBadge
                 className={
-                  repositoryResolved
+                  workflowReady
                     ? 'bg-emerald-500/12 text-emerald-300'
                     : 'bg-amber-500/12 text-amber-300'
                 }
               >
-                {repositoryResolved ? 'ready' : 'blocked'}
+                {workflowReady ? 'ready' : 'blocked'}
               </StateBadge>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -1861,9 +1863,11 @@ const WorkflowSidebar = ({
             <div className="mt-4 border-t border-border pt-3">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Next</div>
               <p className="mt-1 leading-5 text-muted-foreground">
-                {repositoryResolved
-                  ? `Run the read-only workflow analyzer against ${binding.repository.repositoryId}.`
-                  : 'Add repo:name to the Jira description or re-import with a repository.'}
+                {!jiraSnapshotReady
+                  ? 'Restore Jira access and sync this task. The repository mapping is already saved.'
+                  : repositoryResolved
+                    ? `Run the read-only workflow analyzer against ${binding.repository.repositoryId}.`
+                    : 'Add repo:name to the Jira description or re-import with a repository.'}
               </p>
             </div>
           </div>

@@ -31,6 +31,13 @@ to the Workflow interpreter.
 
 ## Jira admission
 
+Jira intake persists the optional repository override independently of a successful Jira
+snapshot. If the first fetch returns 403/VPN, the task remains visible with an `unavailable`
+snapshot and the resolved managed checkout; a later Sync may omit the repository and reuses that
+binding. Intake, sync, and repository-resolution audit events remain in the ledger but are not
+projected into the central Activity timeline. The task header/details own current sync status and
+last-check time, so repeated retries do not create operator-log noise.
+
 The file-backed `jira-lifecycle` policy applies only to tasks normalized with origin
 `jira`. Its effect-based path obligations require `plan.approved@1` and
 `jira.start-work@1` before any `workspace.write` or `command.run` product effect. This

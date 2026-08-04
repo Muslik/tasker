@@ -21,6 +21,7 @@ export type JiraIssueStoreUpdate =
     }
   | {
       readonly state: UnavailableJiraIssueState;
+      readonly repositoryBinding?: JiraRepositoryBinding | undefined;
     };
 
 export type JiraIssueStoreError =
@@ -115,9 +116,9 @@ export class JiraIssueStore {
     const firstImport = head === null;
     const expectedVersion = head?.version ?? 0;
     const repositoryBinding =
-      'repositoryBinding' in update
-        ? JiraRepositoryBindingSchema.parse(update.repositoryBinding)
-        : null;
+      update.repositoryBinding === undefined
+        ? null
+        : JiraRepositoryBindingSchema.parse(update.repositoryBinding);
     const previousBinding = this.readRepositoryBinding(issueKey);
     if (!previousBinding.ok) return previousBinding;
     const events = [

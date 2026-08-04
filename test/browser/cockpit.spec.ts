@@ -102,7 +102,9 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
   await expect(page.getByTestId('jira-task-details')).toContainText('Open seat selection');
   await expect(page.getByTestId('jira-task-details')).toContainText('Evidence · 2');
   await expect(page.getByTestId('jira-task-details')).toContainText('Comments · 1');
-  await expect(page.getByTestId('task-activity-timeline')).toContainText('Repository mapped');
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'No persisted activity yet',
+  );
   await expect(page.getByTestId('task-activity-timeline')).not.toContainText(
     'Jira snapshot synchronized',
   );

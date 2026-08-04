@@ -23,6 +23,7 @@ import {
 } from './contracts.js';
 import {
   JiraDescriptionRepositoryReferenceSource,
+  resolveJiraIntakeRepositoryBinding,
   resolveJiraRepositoryBinding,
   type JiraRepositoryReferenceSource,
 } from './repository-reference.js';
@@ -270,70 +271,11 @@ export class JiraIssueService {
     const parsed = JiraIssueKeySchema.safeParse(issueKeyInput);
     if (!parsed.success) return err({ kind: 'invalid_issue_key', input: taskReference });
 
-    const visibleEventTypes = new Set([
-      'JiraIntakeRequested',
-      'JiraRepositoryBound',
-      'JiraRepositoryBindingBlocked',
-    ]);
-    const stateEventTypes = new Set(['JiraRepositoryBound', 'JiraRepositoryBindingBlocked']);
-    const auditEvents = this.store
-      .listEvents(parsed.data)
-      .filter((event) => visibleEventTypes.has(event.eventType));
-    const lastSequenceByState = new Map<string, number>();
-    for (const event of auditEvents) {
-      if (!stateEventTypes.has(event.eventType)) continue;
-      lastSequenceByState.set(
-        `${event.eventType}:${JSON.stringify(event.payload)}`,
-        event.sequence,
-      );
-    }
-
-    const entries = auditEvents
-      .filter((event) => {
-        if (!stateEventTypes.has(event.eventType)) return true;
-        const stateKey = `${event.eventType}:${JSON.stringify(event.payload)}`;
-        return lastSequenceByState.get(stateKey) === event.sequence;
-      })
-      .map((event) => {
-        if (event.eventType === 'JiraIntakeRequested') {
-          return {
-            sequence: event.sequence,
-            occurredAt: event.occurredAt,
-            source: 'operator' as const,
-            level: 'info' as const,
-            title: 'Jira issue imported',
-            detail: 'The issue key was persisted before the external Jira request.',
-          };
-        }
-        if (event.eventType === 'JiraRepositoryBound') {
-          return {
-            sequence: event.sequence,
-            occurredAt: event.occurredAt,
-            source: 'planner' as const,
-            level: 'info' as const,
-            title: 'Repository mapped',
-            detail:
-              'The repository reference resolved to one logical repository and local checkout.',
-          };
-        }
-        if (event.eventType === 'JiraRepositoryBindingBlocked') {
-          return {
-            sequence: event.sequence,
-            occurredAt: event.occurredAt,
-            source: 'planner' as const,
-            level: 'warning' as const,
-            title: 'Repository mapping blocked',
-            detail: 'Add a valid repo:name directive or provide a known repository during import.',
-          };
-        }
-        throw new Error(`Unmapped visible Jira activity event: ${event.eventType}`);
-      });
-
     return ok(
       OperatorActivityResponseSchema.parse({
         fixtureId: taskReference,
         providerSession: { status: 'not_started', reason: 'm1_planning_only' },
-        entries,
+        entries: [],
       }),
     );
   }
@@ -395,20 +337,37 @@ export class JiraIssueService {
               problem: fetched.error,
             },
     );
-    const saved =
-      next.status === 'current'
-        ? this.store.save({
-            state: next,
-            repositoryBinding: await resolveJiraRepositoryBinding({
-              issue: next.issue,
-              intakeFallback: intakeRepository,
-              previousBinding: previousBinding.value,
-              recordedAt,
-              catalog: this.repositoryCatalog,
-              referenceSource: this.repositoryReferenceSource,
-            }),
+    const hasPreviousIntakeFallback =
+      previousBinding.value !== null &&
+      previousBinding.value.status !== 'missing' &&
+      previousBinding.value.source === 'intake_fallback';
+    if (next.status === 'current') {
+      const repositoryBinding = await resolveJiraRepositoryBinding({
+        issue: next.issue,
+        intakeFallback: intakeRepository,
+        previousBinding: previousBinding.value,
+        recordedAt,
+        catalog: this.repositoryCatalog,
+        referenceSource: this.repositoryReferenceSource,
+      });
+      const saved = this.store.save({ state: next, repositoryBinding });
+      return saved.ok ? saved : err({ kind: 'store_failure', error: saved.error });
+    }
+
+    const repositoryBinding =
+      intakeRepository?.trim() || hasPreviousIntakeFallback
+        ? await resolveJiraIntakeRepositoryBinding({
+            issueKey,
+            intakeFallback: intakeRepository,
+            previousBinding: previousBinding.value,
+            recordedAt,
+            catalog: this.repositoryCatalog,
           })
-        : this.store.save({ state: next });
+        : null;
+    const saved =
+      repositoryBinding === null
+        ? this.store.save({ state: next })
+        : this.store.save({ state: next, repositoryBinding });
     return saved.ok ? saved : err({ kind: 'store_failure', error: saved.error });
   }
 }
