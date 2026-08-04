@@ -50,6 +50,7 @@ import {
   type ExecuteTaskStepResult,
   type TaskWorkflowActivities,
 } from '../contracts.js';
+import { TaskStepOutputArtifactSchema } from '../task-step-output.js';
 import {
   TaskStepRecoveryContextSchema,
   type TaskStepRecoveryContext,
@@ -70,29 +71,6 @@ const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
     })
     .strict(),
 ]);
-
-const TaskStepOutputArtifactSchema = z
-  .object({
-    schemaVersion: z.literal(2),
-    operationId: z.string().min(1),
-    workflowId: z.string().min(1),
-    workflowRunId: z.string().min(1),
-    nodeId: z.string().min(1),
-    stepReference: z.string().min(1),
-    stepAttempt: z.number().int().positive(),
-    runner: z.enum(['agent', 'integration', 'process', 'system']),
-    command: z.string().nullable(),
-    args: z.array(z.string()),
-    cwd: z.string().min(1),
-    exitCode: z.number().int().nullable(),
-    status: z.enum(['completed', 'blocked', 'workflow_change_required']),
-    stdout: z.string(),
-    stderr: z.string(),
-    details: JsonValueSchema,
-    result: ExecuteTaskStepResultSchema.nullable(),
-    recordedAt: z.iso.datetime(),
-  })
-  .strict();
 
 const TaskStepTranscriptChunkSchema = z
   .object({
@@ -1052,6 +1030,7 @@ export const executeRegisteredTaskStep = async (
       operatorGuidance: input.operatorGuidance,
       evidence: evidence.value,
       policies: snapshot.harness.policies,
+      project: snapshot.harness.project?.manifest ?? null,
       runtime,
     });
     if (execution.status === 'blocked') {
@@ -1462,10 +1441,13 @@ export const createTaskExecutionActivity = (
   TaskWorkflowActivities,
   | 'evaluatePredicate'
   | 'executeStep'
+  | 'executeReadOnlyStep'
   | 'executeWorkspaceReconciledStep'
   | 'executeRemoteReconciledStep'
 > => ({
   executeStep: async (input) => executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
+  executeReadOnlyStep: async (input) =>
+    executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
   executeWorkspaceReconciledStep: async (input) =>
     executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
   executeRemoteReconciledStep: async (input) =>

@@ -221,8 +221,8 @@ Do not enable generic Temporal retries before these contracts exist.
 Implemented first slice on 2026-08-04: immutable external-effect intent/applied
 receipts, adapter registry, `remote_reconciled` Activity delivery, controlled
 `unknown_outcome`, and output-receipt replay. Automatic retries are enabled only for
-the `pr.prepare@1` adapter boundary; other integration/process blocks remain
-`single_attempt`.
+the reconciled `pr.prepare@1` mutation boundary and the side-effect-free
+`ci.observe@1` read boundary; other integration/process blocks remain `single_attempt`.
 
 ### 7.2 Jira lifecycle
 
@@ -248,13 +248,13 @@ blocked. Neither restarts code work.
 6. Push amendments, re-observe CI, reply/resolve through explicit policy.
 7. If no comments appear, the operator may mark done; Tasker does not auto-merge.
 
-Steps 1-2 are implemented behind `TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true`. Local-git
+Steps 1-3 are implemented behind `TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true`. Local-git
 and fake-port tests cover lost push response, lost PR-create response, 403 resume, and
 existing-PR reuse. The company `ai-assistance` requirement is now an ordinary
 file-backed graph policy: it persists the accepted plan before implementation, harvests
 actual evidence, validates same-branch artifacts, and produces the provider-neutral
 draft consumed by Bitbucket. The real-mutation flag remains off until the remaining
-local T4 path and an explicit pilot are ready. Steps 3-7 remain open.
+local T4 path and an explicit pilot are ready. Steps 4-7 remain open.
 
 ### 7.4 Jenkins and Allure
 
@@ -268,6 +268,15 @@ Observe builds by webhook when possible and polling as recovery. Classify:
 Fetch relevant console/Allure attachments and preserve evidence. A flaky retry budget
 is separate from an implementation-fix budget. After bounded unknown failures, open an
 operator guidance/infrastructure wait.
+
+Implemented on 2026-08-04 as the file-backed `ci.observe@1` block and
+`jenkins.build@1` adapter. Project policy maps a repository to a job; the adapter waits
+for the exact managed branch commit, reads pipeline/Allure evidence, classifies terminal
+outcomes, and persists one operator-visible receipt. Its `read_only` Activity delivery
+survives Worker failure without pretending a read is a reconciled mutation. 403/VPN,
+flaky, infrastructure, and unknown outcomes pause at the CI boundary with all prior
+work preserved. Company Jenkins has not yet been called; fake-port and local Temporal
+recovery tests cover the contract.
 
 T4 exit gate: a real allowed pilot task reaches `code_review_pending`, survives VPN
 loss during push by resuming only push/reconciliation, consumes human PR comments, and
@@ -370,10 +379,9 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-Connect Jenkins observation and failure classification to the provider-neutral PR
-boundary, then ingest Bitbucket review threads with provenance and execute a bounded
-revision/push/CI loop. After that local crash matrix is complete, add policy-controlled
-Jira lifecycle effects and enable the explicit Bitbucket flag for one allowed pilot
-task. The pilot path remains Jira intake -> managed worktree -> agent implementation ->
-targeted verification -> validated PR draft -> safe push/PR -> Jenkins classification
--> human review/revision.
+Ingest Bitbucket review threads with provenance and execute a bounded
+revision/push/Jenkins loop. After that local crash matrix is complete, add
+policy-controlled Jira lifecycle effects and enable the explicit remote-effect flags
+for one allowed pilot task. The pilot path remains Jira intake -> managed worktree ->
+agent implementation -> targeted verification -> validated PR draft -> safe push/PR ->
+Jenkins classification -> human review/revision.

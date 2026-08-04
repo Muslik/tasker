@@ -1,7 +1,7 @@
 # Tasker design package
 
-Status: **Temporal-only runtime, T3 managed execution, and the first T4 company-policy
-to reconciled-PR boundary implemented**, 2026-08-04.
+Status: **Temporal-only runtime, T3 managed execution, and the T4 path through
+reconciled PR plus classified Jenkins observation implemented**, 2026-08-04.
 
 ## Canonical documents
 
@@ -56,8 +56,10 @@ now adds the `ai-assistance` sequence to each relevant task graph without enteri
 Temporal or Bitbucket code. Its deterministic Activities initialize and record the
 accepted plan, agent blocks harvest actual evidence and compose the PR draft, and a
 final validator fails closed before the reconciled Bitbucket boundary. The Bitbucket
-adapter remains disabled by default behind an explicit real-mutation flag. Jira
-lifecycle and Jenkins mutation/observation remain disabled.
+adapter remains disabled by default behind an explicit real-mutation flag. A
+file-backed Jenkins block now observes the exact task commit, classifies CI/Allure
+evidence, and pauses recoverably on VPN, flaky, infrastructure, or unknown outcomes.
+Jira lifecycle and Bitbucket review/revision remain disabled.
 
 ## Historical implementation records
 
@@ -85,6 +87,6 @@ T3 managed execution is implemented in
 [`t3-managed-execution.md`](t3-managed-execution.md). T4 now includes the company
 policy-to-PR boundary described in
 [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) and the gated Bitbucket effect
-family in [`t4-external-effects.md`](t4-external-effects.md). Next are Jenkins/CI
-classification, review/revision, and Jira lifecycle effects before a real pilot. Future
-work must not reintroduce a second runtime.
+family in [`t4-external-effects.md`](t4-external-effects.md). Next are Bitbucket
+review/revision and Jira lifecycle effects before a real pilot. Future work must not
+reintroduce a second runtime.

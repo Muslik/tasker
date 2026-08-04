@@ -1577,7 +1577,19 @@ const ActivityTimeline = ({
                     <span className="mr-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                       {sourceLabel(entry.source)}
                     </span>
-                    <strong className="text-sm font-medium">{entry.title}</strong>
+                    {entry.externalUrl === undefined ? (
+                      <strong className="text-sm font-medium">{entry.title}</strong>
+                    ) : (
+                      <a
+                        className="inline-flex items-center gap-1 text-sm font-medium hover:underline"
+                        href={entry.externalUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {entry.title}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    )}
                   </div>
                   <time
                     className="shrink-0 text-[11px] tabular-nums text-muted-foreground"

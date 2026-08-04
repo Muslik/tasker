@@ -142,6 +142,7 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('code.implement@1')).toEqual({ kind: 'workspace_reconciled' });
     expect(deliveryFor('verify.full@1')).toEqual({ kind: 'workspace_reconciled' });
     expect(deliveryFor('translations.extract@1')).toEqual({ kind: 'single_attempt' });
+    expect(deliveryFor('ci.observe@1')).toEqual({ kind: 'read_only' });
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
       kind: 'workspace_reconciled',

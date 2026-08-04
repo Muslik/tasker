@@ -146,6 +146,7 @@ const requestFor = (
   operatorGuidance: null,
   evidence: { acceptedPlan: null, completedSteps: [] },
   policies: [],
+  project: null,
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,

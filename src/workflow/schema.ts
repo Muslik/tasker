@@ -21,6 +21,7 @@ export interface StepNodeSource {
 
 export const StepActivityDeliverySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('single_attempt') }).strict(),
+  z.object({ kind: z.literal('read_only') }).strict(),
   z.object({ kind: z.literal('workspace_reconciled') }).strict(),
   z.object({ kind: z.literal('remote_reconciled') }).strict(),
 ]);

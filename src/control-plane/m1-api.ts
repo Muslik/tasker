@@ -33,6 +33,7 @@ import {
   type WorkflowTreeNode,
 } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
+import type { ExecutionActivityReader } from './execution-activity.js';
 import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
 import {
   WorkflowContinuationAcceptanceSchema,
@@ -62,6 +63,7 @@ export interface BuildM1ApiOptions {
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly workflowContinuation?: WorkflowContinuationCoordinator | undefined;
+  readonly executionActivity?: ExecutionActivityReader | undefined;
   readonly temporalRunService: TaskTemporalRunService;
 }
 
@@ -414,6 +416,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             ...workflowResult.value.entries,
             ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
             ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
+            ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
           ].sort((left, right) => left.sequence - right.sequence),
         }),
       );
@@ -428,6 +431,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
               ...result.value.entries,
               ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
               ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
+              ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
             ].sort((left, right) => left.sequence - right.sequence),
           }),
         )

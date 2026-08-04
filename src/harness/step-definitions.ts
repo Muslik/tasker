@@ -61,8 +61,60 @@ export const integrationOutputSchema = z
   })
   .strict();
 
+export const ciObservationOutputSchema = z
+  .object({
+    externalId: z.string().min(1),
+    status: z.enum([
+      'passed',
+      'likely_caused_by_change',
+      'likely_flaky',
+      'infrastructure',
+      'unknown',
+    ]),
+    provider: z.string().min(1),
+    build: z
+      .object({
+        number: z.number().int().nonnegative(),
+        url: z.httpUrl(),
+        revision: z.string().min(1),
+        result: z.string().min(1),
+        durationMs: z.number().int().nonnegative(),
+      })
+      .strict(),
+    stages: z.array(
+      z
+        .object({
+          name: z.string().min(1),
+          status: z.string().min(1),
+        })
+        .strict(),
+    ),
+    failures: z.array(
+      z
+        .object({
+          uid: z.string().min(1),
+          name: z.string().min(1),
+          status: z.string().min(1),
+          message: z.string().nullable(),
+          flaky: z.boolean(),
+          attachments: z.array(
+            z
+              .object({
+                name: z.string().min(1),
+                type: z.string().min(1),
+                source: z.string().min(1),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 const contractSchemas = {
   agent_output: agentOutputSchema,
+  ci_observation_output: ciObservationOutputSchema,
   integration_output: integrationOutputSchema,
   process_input: processInputSchema,
   process_output: processOutputSchema,
@@ -357,14 +409,6 @@ export const TWIKET_HARNESS_STEPS = [
     requiredArtifactContracts: ['pull-request-draft'],
     inputSchema: pullRequestInputSchema,
     activityDelivery: { kind: 'remote_reconciled' },
-  }),
-  integrationStep('ci.observe', {
-    adapter: 'jenkins.build@1',
-    description: 'Observe Jenkins and classify product, infrastructure, and flaky failures.',
-    retryBudget: 3,
-    allowedEffects: [],
-    requiredCapabilities: ['ci.read'],
-    artifactContracts: ['ci-verdict'],
   }),
   {
     reference: 'unsafe.effect@1',

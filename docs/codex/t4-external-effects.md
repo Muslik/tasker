@@ -1,9 +1,10 @@
-# T4 external effects and Bitbucket PR preparation
+# T4 external effects, Bitbucket PR preparation, and Jenkins observation
 
 Status: generic effect journal, `remote_reconciled` Temporal delivery, validated
 provider-neutral PR draft, and the first Bitbucket branch/PR adapter implemented behind
-an explicit pilot flag on 2026-08-04. Jira lifecycle mutation, Jenkins/Allure
-observation, review ingestion/revision, and the real company pilot remain open.
+an explicit pilot flag on 2026-08-04. The Jenkins/Allure read boundary and CI
+classification are also implemented. Jira lifecycle mutation, review
+ingestion/revision, and the real company pilot remain open.
 
 ## Boundary
 
@@ -14,13 +15,15 @@ not know Bitbucket endpoints, branch names, PR payloads, or company policy. An i
 Delivery classes now mean:
 
 - `single_attempt`: Temporal does not redeliver the Activity automatically;
+- `read_only`: Temporal may redeliver a side-effect-free remote observation after a
+  Worker/process failure;
 - `workspace_reconciled`: local agent mutation can be redelivered after inspecting the
   durable worktree intent/baseline;
 - `remote_reconciled`: a typed adapter owns read-before-write reconciliation and may be
   redelivered after Worker/process failure.
 
-Only `pr.prepare@1` uses `remote_reconciled` today. Adding an integration does not add a
-vendor branch to the Workflow interpreter.
+`pr.prepare@1` uses `remote_reconciled`; `ci.observe@1` uses `read_only`. Adding either
+integration did not add a vendor branch to the Workflow interpreter.
 
 Because step artifact dependencies are now part of the compiled contract, the current
 compiler/IR markers are compiler `3` and IR `m1`; new runs cannot silently mistake an
@@ -85,6 +88,39 @@ provider-neutral draft, the enabled policy validates its own required section, a
 Bitbucket consumes only the draft title/description. This keeps future policy packs and
 other SCM providers outside one another's code.
 
+## Jenkins observation
+
+`ci.observe@1` is a file-backed integration block bound to `jenkins.build@1`. The
+snapshotted project manifest supplies only the Jenkins job name. The adapter:
+
+1. resolves the exact `HEAD` of the managed task worktree;
+2. finds the multibranch job matching the exact managed branch, including Jenkins'
+   percent-encoded branch names;
+3. ignores stale builds until Jenkins reports that exact commit;
+4. waits through branch indexing, build start, and active build states with bounded
+   heartbeats;
+5. reads pipeline stages and failing Allure cases/attachment metadata;
+6. classifies the terminal result as `passed`, `likely_flaky`,
+   `likely_caused_by_change`, `infrastructure`, or `unknown`;
+7. persists one terminal step receipt and exposes one meaningful linked Activity entry.
+
+Polling is a recovery mechanism, not operator timeline content. A 403/VPN failure,
+timeout, flaky result, or ambiguous result opens the existing resumable step wait. A
+later attempt re-observes Jenkins against the same branch and current exact commit;
+implementation, verification, local commit, and PR preparation are not restarted.
+
+The `read_only` delivery class is intentionally distinct from `remote_reconciled`: the
+Jenkins adapter performs no write and therefore needs no remote mutation intent or
+applied receipt. Secrets remain in Worker memory. Jenkins URLs and classified evidence
+may be persisted; authorization headers may not.
+
+Configuration:
+
+- project: `ci: { "kind": "jenkins", "job": "front-avia" }`;
+- credentials: `JENKINS_USER` and `JENKINS_TOKEN`;
+- optional: `JENKINS_BASE_URL`, `TASKER_JENKINS_REQUEST_TIMEOUT_MS`,
+  `TASKER_JENKINS_POLL_INTERVAL_MS`, and `TASKER_JENKINS_OBSERVATION_TIMEOUT_MS`.
+
 ## Evidence
 
 Automated tests prove:
@@ -101,15 +137,21 @@ Automated tests prove:
   repeat completed workspace-step nodes;
 - the Activity's durable output receipt prevents a second adapter call after response
   loss.
+- a read-only CI Activity is redelivered after Worker failure without repeating prior
+  graph nodes;
+- Jenkins waits for the exact task commit, separates flaky/infrastructure/product
+  verdicts, preserves Allure failure evidence, and bounds branch-indexing polling;
+- a local managed-worktree run reaches code review through the real Bitbucket and
+  Jenkins adapters backed by deterministic fake remote ports;
+- the operator Activity surface contains only terminal CI evidence and links to the
+  relevant build.
 
-No request was sent to company Bitbucket in this milestone. The first real pilot still
-requires the policy block, explicit flag, and operator-visible confirmation of the
-selected task/repository.
+No request was sent to company Bitbucket or Jenkins in this milestone. The first real
+pilot still requires the policy block, explicit flag, and operator-visible confirmation
+of the selected task/repository.
 
 ## Remaining T4 sequence
 
-1. run a disposable/local end-to-end PR simulation through the real Worker adapter;
-2. implement Jenkins observation and CI classification;
-3. ingest Bitbucket review threads with provenance and execute revision/push/CI loops;
-4. add Jira assignment/status/comment/attachment effects under project policy;
-5. enable the real flag for one allowed task and complete the T4 exit gate.
+1. ingest Bitbucket review threads with provenance and execute revision/push/CI loops;
+2. add Jira assignment/status/comment/attachment effects under project policy;
+3. enable the real flags for one allowed task and complete the T4 exit gate.

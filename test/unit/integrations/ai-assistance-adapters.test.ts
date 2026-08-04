@@ -90,6 +90,7 @@ const requestFor = async (
     operatorGuidance: null,
     evidence,
     policies: loadHarnessPack().policies,
+    project: null,
     runtime: {
       attempt: 1,
       cancellationSignal: new AbortController().signal,

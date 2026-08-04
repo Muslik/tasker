@@ -69,6 +69,8 @@ interpreter:
 - `single_attempt` is used by process blocks and integrations that cannot yet prove
   read-before-write reconciliation. Temporal does not retry these effects merely
   because a Worker response was lost.
+- `read_only` is used by side-effect-free observations such as `ci.observe@1`. Temporal
+  may redeliver them after Worker failure because they cannot duplicate a remote write.
 - `remote_reconciled` is introduced in T4 for an integration whose versioned adapter
   persists intent, probes the remote system, and records an applied receipt. The first
   user is `pr.prepare@1`; see `t4-external-effects.md`.

@@ -164,20 +164,16 @@ describe('M1 task workflow planning', () => {
 
     const result = planWorkflowProposal(withoutPullRequest);
 
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        stage: 'workflow_validation',
-        validatorReport: {
-          issues: [
-            {
-              code: 'unsatisfied_workflow_obligation',
-              details: { obligationId: 'write-requires-pr' },
-            },
-          ],
-        },
-      },
-    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.stage).toBe('workflow_validation');
+    if (result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'write-requires-pr' },
+      }),
+    );
   });
 
   it('rejects a bug workflow without after-fix reproduction evidence', () => {

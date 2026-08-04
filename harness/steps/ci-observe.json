@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "reference": "ci.observe@1",
+  "description": "Observe the exact Jenkins branch build and classify its terminal result.",
+  "retryBudget": 3,
+  "inputContract": "task_input",
+  "outputContract": "ci_observation_output",
+  "execution": {
+    "kind": "integration",
+    "adapter": "jenkins.build@1"
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["ci.read"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["ci-verdict"],
+  "requiredArtifactContracts": ["pull-request"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

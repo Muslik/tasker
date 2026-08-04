@@ -8,6 +8,7 @@
     "extractCommand": "pnpm translations:extract",
     "pullCommand": "pnpm translations:pull"
   },
+  "ci": { "kind": "jenkins", "job": "ui-kit" },
   "processCommands": {
     "translations.extract@1": "pnpm translations:extract",
     "translations.pull@1": "pnpm translations:pull"

@@ -267,6 +267,7 @@ export const OperatorActivityEntrySchema = z
     level: z.enum(['info', 'warning', 'error']),
     title: z.string().min(1),
     detail: z.string().min(1),
+    externalUrl: z.httpUrl().optional(),
   })
   .strict();
 

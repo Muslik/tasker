@@ -40,6 +40,19 @@ const executionActivities = proxyActivities<Pick<TaskWorkflowActivities, 'execut
   },
 });
 
+const readOnlyExecutionActivities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'executeReadOnlyStep'>
+>({
+  startToCloseTimeout: '35 minutes',
+  scheduleToCloseTimeout: '2 hours',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
+    maximumAttempts: 3,
+  },
+});
+
 const workspaceReconciledExecutionActivities = proxyActivities<
   Pick<TaskWorkflowActivities, 'executeWorkspaceReconciledStep'>
 >({
@@ -544,6 +557,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             switch (node.activityDelivery.kind) {
               case 'single_attempt':
                 return executionActivities.executeStep;
+              case 'read_only':
+                return readOnlyExecutionActivities.executeReadOnlyStep;
               case 'workspace_reconciled':
                 return workspaceReconciledExecutionActivities.executeWorkspaceReconciledStep;
               case 'remote_reconciled':

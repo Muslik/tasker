@@ -259,6 +259,8 @@ stable operation IDs.
 Choose Activity delivery from evidence, not convenience:
 
 - use `single_attempt` when the effect has no safe remote proof yet;
+- use `read_only` only for a side-effect-free observation that Temporal can safely
+  repeat after Worker failure;
 - use `remote_reconciled` only when the adapter persists intent, probes the exact remote
   identity before writing, reconciles ambiguous responses, records an applied receipt,
   and returns `unknown_outcome` instead of blindly repeating.
@@ -266,6 +268,16 @@ Choose Activity delivery from evidence, not convenience:
 The generic external-effect journal is reusable, but reconciliation remains
 effect-specific. A Git ref, Jira comment, package version, and PR thread have different
 proof surfaces; do not hide them behind a generic “exactly once” claim.
+
+For Jenkins, project manifests configure only the replaceable provider mapping:
+
+```json
+{ "ci": { "kind": "jenkins", "job": "front-avia" } }
+```
+
+`ci.observe@1` remains a normal file-backed graph block. Moving to GitLab CI means
+binding the same contract to another read adapter and changing project/company policy;
+it does not require a Temporal Workflow branch.
 
 Moving to GitLab Issues and GitLab CI should require:
 

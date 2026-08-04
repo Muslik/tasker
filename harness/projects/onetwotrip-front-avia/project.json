@@ -4,6 +4,7 @@
   "repository": "onetwotrip/front-avia",
   "repositoryKind": "frontend",
   "translations": { "kind": "inline_json" },
+  "ci": { "kind": "jenkins", "job": "front-avia" },
   "processCommands": {},
   "workflowGuidance": "projects/onetwotrip-front-avia/workflow.md"
 }

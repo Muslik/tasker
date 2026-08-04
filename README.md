@@ -48,8 +48,10 @@ and the three-pane operator console. The company `ai-assistance` policy now cont
 ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
 flow into same-branch artifacts and a validated provider-neutral PR draft. The gated
 Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and
-passes its local crash matrix. Real Bitbucket mutation remains disabled by default.
-Jira lifecycle, Jenkins/Allure, and review/revision are the remaining T4 work. See
+passes its local crash matrix. The file-backed Jenkins block observes the exact task
+commit, classifies pipeline/Allure evidence, and resumes at CI after Worker/VPN failure.
+Real Bitbucket mutation remains disabled by default. Jira lifecycle and
+review/revision are the remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 

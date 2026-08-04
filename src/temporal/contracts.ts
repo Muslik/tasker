@@ -105,6 +105,7 @@ export const ExecuteTaskStepInputSchema = z
     uses: z.string().min(1),
     activityDelivery: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('single_attempt') }).strict(),
+      z.object({ kind: z.literal('read_only') }).strict(),
       z.object({ kind: z.literal('workspace_reconciled') }).strict(),
       z.object({ kind: z.literal('remote_reconciled') }).strict(),
     ]),
@@ -224,6 +225,7 @@ export type { PlanningSnapshotReference };
 export interface TaskWorkflowActivities {
   prepareTaskWorkspace(input: PrepareTaskWorkspaceInput): Promise<PrepareTaskWorkspaceResult>;
   executeStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
+  executeReadOnlyStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   executeWorkspaceReconciledStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   executeRemoteReconciledStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   evaluatePredicate(input: EvaluatePredicateInput): Promise<boolean>;

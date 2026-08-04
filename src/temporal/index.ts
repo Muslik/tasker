@@ -1,4 +1,5 @@
 export * from './contracts.js';
+export * from './task-step-output.js';
 export * from './client.js';
 export * from './run-registry.js';
 export * from './worker.js';

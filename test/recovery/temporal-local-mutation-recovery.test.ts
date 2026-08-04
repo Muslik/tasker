@@ -15,6 +15,11 @@ import {
   WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import { loadHarnessPack } from '../../src/harness/index.js';
+import {
+  IntegrationStepAdapterRegistry,
+  JenkinsBuildObserverAdapter,
+  type JenkinsBuildPort,
+} from '../../src/integrations/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
 import { parseTaskFixture, planTaskWorkflow } from '../../src/planning/index.js';
 import {
@@ -219,6 +224,42 @@ describe('Temporal local mutation recovery', () => {
       const firstRequests: TaskStepAgentRequest[] = [];
       const replacementRequests: TaskStepAgentRequest[] = [];
       const verificationCommands: string[] = [];
+      const jenkinsObservations: {
+        readonly job: string;
+        readonly branch: string;
+        readonly expectedRevision: string;
+      }[] = [];
+      const jenkinsBuilds: JenkinsBuildPort = {
+        observe: (input) => {
+          jenkinsObservations.push(input);
+          return Promise.resolve({
+            status: 'finished',
+            build: {
+              number: 1,
+              url: 'https://jenkins.example/job/front-avia/1/',
+              revision: input.expectedRevision,
+              result: 'SUCCESS',
+              durationMs: 100,
+              stages: [{ name: 'Tests', status: 'SUCCESS' }],
+              failures: [],
+            },
+          });
+        },
+      };
+      const integrations = new IntegrationStepAdapterRegistry([
+        new JenkinsBuildObserverAdapter(
+          {
+            baseUrl: 'https://jenkins.example',
+            user: 'test',
+            token: 'test',
+            requestTimeoutMs: 1_000,
+            pollIntervalMs: 1,
+            observationTimeoutMs: 1_000,
+          },
+          nodeCommandRunner,
+          jenkinsBuilds,
+        ),
+      ]);
 
       const firstRunner: TaskStepAgentRunner = {
         provider: 'codex',
@@ -270,7 +311,6 @@ describe('Temporal local mutation recovery', () => {
           'pr.describe@1',
           'ai.assistance.validate@1',
           'pr.prepare@1',
-          'ci.observe@1',
         ]);
         const execution = createTaskExecutionActivity({
           snapshots: planningStore,
@@ -279,6 +319,7 @@ describe('Temporal local mutation recovery', () => {
           mutationRecovery,
           agentRunner,
           commands: nodeCommandRunner,
+          integrations,
         });
         const executeStep = (input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult> =>
           simulatedExternalBoundaries.has(input.uses)
@@ -295,6 +336,10 @@ describe('Temporal local mutation recovery', () => {
           ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
           ...createPlanningActivity(planning),
           executeStep,
+          executeReadOnlyStep: (input) =>
+            simulatedExternalBoundaries.has(input.uses)
+              ? Promise.resolve(completedStep(input))
+              : execution.executeReadOnlyStep(input),
           executeWorkspaceReconciledStep,
           executeRemoteReconciledStep: (input) =>
             simulatedExternalBoundaries.has(input.uses)
@@ -343,10 +388,13 @@ describe('Temporal local mutation recovery', () => {
       await startWorker(replacementRunner);
 
       await expect
-        .poll(async () => {
-          const state = await service.read(task.fixtureId);
-          return state.ok && state.value?.status === 'waiting' ? state.value.wait.waitKind : null;
-        })
+        .poll(
+          async () => {
+            const state = await service.read(task.fixtureId);
+            return state.ok && state.value?.status === 'waiting' ? state.value.wait.waitKind : null;
+          },
+          { timeout: 5_000, interval: 50 },
+        )
         .toBe('code_review@1');
       const state = await service.read(task.fixtureId);
       if (!state.ok || state.value?.executionContext.status !== 'ready') {
@@ -393,6 +441,13 @@ describe('Temporal local mutation recovery', () => {
         current: { changedPaths: [{ status: ' M', path: sourceRelativePath }] },
       });
       expect(verificationCommands).toEqual(['test', 'build']);
+      expect(jenkinsObservations).toMatchObject([
+        {
+          job: 'front-avia',
+          branch: state.value.executionContext.workspace.branch,
+          expectedRevision: git(state.value.executionContext.workspace.path, ['rev-parse', 'HEAD']),
+        },
+      ]);
       expect(
         ledger.repository.readArtifact(`task-step-mutation-intent:${operationId}`),
       ).not.toBeNull();

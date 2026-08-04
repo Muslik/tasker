@@ -274,6 +274,7 @@ const workflowActivities = {
     };
   },
   executeStep: completeStep,
+  executeReadOnlyStep: completeStep,
   executeWorkspaceReconciledStep: completeStep,
   executeRemoteReconciledStep: completeStep,
   evaluatePredicate: async (input) => input.facts[input.reference] ?? true,

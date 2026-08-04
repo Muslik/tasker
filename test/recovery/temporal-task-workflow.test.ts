@@ -268,6 +268,28 @@ describe('Temporal task workflow', () => {
     expect([...workspaceCalls.keys()]).toContain('implement-fix');
   }, 30_000);
 
+  it('redelivers a read-only CI observation after Worker failure', async () => {
+    const taskReference = `ci-observation-retry-${String(Date.now())}`;
+    let ciDeliveries = 0;
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      executeReadOnlyStep: (input) => {
+        ciDeliveries += 1;
+        if (ciDeliveries === 1) throw new Error('worker stopped while reading Jenkins');
+        return testTaskWorkflowActivities.executeReadOnlyStep(input);
+      },
+    });
+
+    const started = await service.start(
+      workflowInput('avia-13236-short-bug', taskReference, 'automatic'),
+    );
+
+    expect(started.ok).toBe(true);
+    await waitForWait(service, taskReference, 'code_review@1');
+    expect(ciDeliveries).toBe(2);
+  }, 30_000);
+
   it('keeps the run waiting until workspace preparation can resume', async () => {
     const taskReference = `workspace-retry-${String(Date.now())}`;
     let preparationAttempts = 0;

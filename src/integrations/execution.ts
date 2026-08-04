@@ -1,5 +1,5 @@
 import type { TaskFixture } from '../planning/fixtures.js';
-import type { HarnessPolicyManifest } from '../harness/index.js';
+import type { HarnessPolicyManifest, HarnessProjectManifest } from '../harness/index.js';
 import type { JsonValue } from '../workflow/schema.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
 
@@ -36,6 +36,7 @@ export interface IntegrationStepExecutionRequest {
   readonly operatorGuidance: string | null;
   readonly evidence: TaskRunEvidence;
   readonly policies: readonly HarnessPolicyManifest[];
+  readonly project: HarnessProjectManifest | null;
   readonly runtime: IntegrationStepRuntime;
 }
 
@@ -53,6 +54,7 @@ export type IntegrationStepExecutionResult =
         | 'infrastructure'
         | 'invalid_request'
         | 'remote_conflict'
+        | 'verification'
         | 'unknown_outcome';
       readonly summary: string;
       readonly details: JsonValue;

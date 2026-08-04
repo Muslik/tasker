@@ -16,6 +16,7 @@ const ProcessCommandsSchema = z.record(VersionedReferenceSchema, z.string().trim
 
 export const HarnessContractNameSchema = z.enum([
   'agent_output',
+  'ci_observation_output',
   'integration_output',
   'process_input',
   'process_output',
@@ -57,7 +58,12 @@ export const HarnessStepManifestSchema = z
     inputContract: HarnessContractNameSchema,
     outputContract: HarnessContractNameSchema,
     execution: HarnessStepExecutionManifestSchema,
-    activityDelivery: z.enum(['single_attempt', 'workspace_reconciled', 'remote_reconciled']),
+    activityDelivery: z.enum([
+      'single_attempt',
+      'read_only',
+      'workspace_reconciled',
+      'remote_reconciled',
+    ]),
     allowedEffects: z.array(z.string().min(1)),
     requiredCapabilities: z.array(z.string().min(1)),
     resumeBoundary: z.enum(['none', 'attempt', 'step']),
@@ -151,6 +157,16 @@ const TranslationPolicySchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+const CiPolicySchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }).strict(),
+  z
+    .object({
+      kind: z.literal('jenkins'),
+      job: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
 export const HarnessProjectManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -158,6 +174,7 @@ export const HarnessProjectManifestSchema = z
     repository: z.string().min(1),
     repositoryKind: z.enum(['frontend', 'generic']),
     translations: TranslationPolicySchema,
+    ci: CiPolicySchema.default({ kind: 'none' }),
     processCommands: ProcessCommandsSchema,
     workflowGuidance: RelativePathSchema.optional(),
   })

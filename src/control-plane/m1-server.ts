@@ -29,6 +29,7 @@ import {
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
 import { buildM1Api } from './m1-api.js';
+import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
@@ -109,6 +110,7 @@ export const startM1Server = async (): Promise<void> => {
     workflowGenerator,
     implementationPlanning,
     workflowContinuation,
+    executionActivity: new LedgerExecutionActivityReader(ledger.repository),
     temporalRunService: temporalRuntime.service,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });

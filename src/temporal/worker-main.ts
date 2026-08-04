@@ -20,7 +20,10 @@ import {
   createJiraIssueService,
   ExternalEffectStore,
   IntegrationStepAdapterRegistry,
+  JenkinsBuildClient,
+  JenkinsBuildObserverAdapter,
   JiraServerClient,
+  loadJenkinsBuildConfiguration,
   loadJiraConfiguration,
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
@@ -85,10 +88,20 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const bitbucketPullRequestEffectsEnabled =
     process.env.TASKER_ENABLE_BITBUCKET_PR_EFFECTS === 'true';
   const externalEffects = new ExternalEffectStore(ledger.repository, systemClock);
+  const jenkinsConfiguration = loadJenkinsBuildConfiguration();
   const integrationAdapters = new IntegrationStepAdapterRegistry([
     new AiAssistanceInitializeAdapter(externalEffects),
     new AiAssistanceRecordPlanAdapter(externalEffects),
     new AiAssistanceValidateAdapter(),
+    ...(jenkinsConfiguration === null
+      ? []
+      : [
+          new JenkinsBuildObserverAdapter(
+            jenkinsConfiguration,
+            nodeCommandRunner,
+            new JenkinsBuildClient(jenkinsConfiguration),
+          ),
+        ]),
     ...(bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
       ? []
       : [
