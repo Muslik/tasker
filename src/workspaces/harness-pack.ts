@@ -16,6 +16,7 @@ const WorkspaceHarnessProfileSchema = z
     id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/u),
     repositoryAliases: z.array(z.string().min(1)).min(1),
     skills: RelativePathSchema,
+    stepSkills: RelativePathSchema,
     overrides: RelativePathSchema,
   })
   .strict();
@@ -104,6 +105,45 @@ const listFiles = (root: string, relativeDirectory: string): WorkspaceHarnessSou
   return visit(directory);
 };
 
+const validateSkillPackages = (root: string, relativeDirectory: string): ReadonlySet<string> => {
+  const directory = resolveDirectory(root, relativeDirectory);
+  const names = new Set<string>();
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === '.DS_Store' || entry.name === '.gitkeep') continue;
+    if (!entry.isDirectory()) {
+      throw new Error(
+        `Workspace harness skill entry must be a directory: ${relativeDirectory}/${entry.name}`,
+      );
+    }
+    const skillFile = join(directory, entry.name, 'SKILL.md');
+    if (!existsSync(skillFile) || !statSync(skillFile).isFile()) {
+      throw new Error(
+        `Workspace harness skill has no SKILL.md: ${relativeDirectory}/${entry.name}`,
+      );
+    }
+    const content = readFileSync(skillFile, 'utf8');
+    const frontmatter = /^---\r?\n(?<body>[\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(content)?.groups
+      ?.body;
+    const declaredName =
+      frontmatter === undefined
+        ? null
+        : /^name:\s*(?<name>[^\s]+)\s*$/mu.exec(frontmatter)?.groups?.name;
+    const hasDescription = frontmatter !== undefined && /^description:\s*\S.*$/mu.test(frontmatter);
+    if (declaredName !== entry.name) {
+      throw new Error(
+        `Workspace harness skill name must match its directory: ${relativeDirectory}/${entry.name}`,
+      );
+    }
+    if (!hasDescription) {
+      throw new Error(
+        `Workspace harness skill has no portable description: ${relativeDirectory}/${entry.name}`,
+      );
+    }
+    names.add(entry.name);
+  }
+  return names;
+};
+
 export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspaceHarnessPack => {
   const rootPath = realpathSync(configuredPath);
   const manifestPath = join(rootPath, 'manifest.json');
@@ -124,12 +164,28 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
     }
   }
 
+  const integrationSkills = validateSkillPackages(rootPath, manifest.integrationSkills);
+  const sharedSkills = validateSkillPackages(rootPath, manifest.sharedSkills);
+  for (const skill of integrationSkills) {
+    if (sharedSkills.has(skill)) {
+      throw new Error(`Duplicate common workspace harness skill ${skill}`);
+    }
+  }
+  for (const profile of manifest.profiles) {
+    validateSkillPackages(rootPath, profile.skills);
+    validateSkillPackages(rootPath, profile.stepSkills);
+  }
+
   const directories = [
     manifest.integrationSkills,
     manifest.sharedSkills,
     manifest.supportFiles,
     manifest.commands,
-    ...manifest.profiles.flatMap((profile) => [profile.skills, profile.overrides]),
+    ...manifest.profiles.flatMap((profile) => [
+      profile.skills,
+      profile.stepSkills,
+      profile.overrides,
+    ]),
   ];
   const filesByPath = new Map<string, WorkspaceHarnessSourceFile>();
   filesByPath.set('manifest.json', {
@@ -153,6 +209,34 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
     contentSha256: digest.digest('hex'),
     files: Object.freeze(files),
   });
+};
+
+export const workspaceHarnessCommonSkillNames = (
+  pack: LoadedWorkspaceHarnessPack,
+): ReadonlySet<string> => {
+  const roots = [pack.manifest.integrationSkills, pack.manifest.sharedSkills];
+  return new Set(
+    pack.files.flatMap((file) => {
+      for (const root of roots) {
+        const prefix = `${root.replace(/\/$/u, '')}/`;
+        if (!file.relativePath.startsWith(prefix)) continue;
+        const name = file.relativePath.slice(prefix.length).split('/')[0];
+        if (name !== undefined && name.length > 0 && name !== '.gitkeep') return [name];
+      }
+      return [];
+    }),
+  );
+};
+
+export const assertWorkspaceHarnessProvidesSkills = (
+  pack: LoadedWorkspaceHarnessPack,
+  requiredSkills: readonly string[],
+): void => {
+  const available = workspaceHarnessCommonSkillNames(pack);
+  const missing = [...new Set(requiredSkills)].filter((skill) => !available.has(skill));
+  if (missing.length > 0) {
+    throw new Error(`Workspace harness does not provide step skills: ${missing.sort().join(', ')}`);
+  }
 };
 
 export const resolveWorkspaceHarnessProfile = (

@@ -136,13 +136,16 @@ describe('temporal block execution activity', () => {
     ledger.close();
   });
 
-  it('uses the snapshotted agent prompt instead of the current harness prompt path', async () => {
+  it('uses the snapshotted prompt and skills for an agent attempt', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const prompts: string[] = [];
+    const selectedSkills: (readonly string[])[] = [];
     const agentRunner: TaskStepAgentRunner = {
+      provider: 'codex',
       run: (request) => {
         prompts.push(request.prompt);
+        selectedSkills.push(request.skills);
         return Promise.resolve(
           ok({
             stdout: '',
@@ -203,6 +206,7 @@ describe('temporal block execution activity', () => {
     });
     expect(prompts[0]).toContain('SNAPSHOT PROMPT');
     expect(prompts[0]).toContain('VPN is enabled; retry the same verification');
+    expect(selectedSkills).toEqual([['jenkins', 'test-design']]);
   });
 
   it('resolves a registered process command from the immutable snapshot project policy', async () => {
@@ -264,6 +268,7 @@ describe('temporal block execution activity', () => {
         currentSteps: createCurrentStepRegistry(pack),
         traces,
         agentRunner: {
+          provider: 'codex',
           run: vi.fn(),
         },
         commands: { run: commands },
@@ -344,6 +349,7 @@ describe('temporal block execution activity', () => {
         currentSteps: createCurrentStepRegistry(pack),
         traces,
         agentRunner: {
+          provider: 'codex',
           run: vi.fn(),
         },
         commands: {

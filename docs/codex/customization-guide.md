@@ -109,9 +109,33 @@ planning/execution Activity receives an immutable snapshot reference and content
 A file edit affects future attempts/runs according to explicit run policy; it never
 rewrites a completed Activity result or accepted history.
 
-Logical skill names are provider-neutral. An adapter maps them to Codex skills, Claude
-instructions, or another subscription CLI surface. The graph must not contain
-provider-specific command syntax.
+Logical skill names are provider-neutral. An adapter maps the same portable package to
+Codex, Claude, or another subscription CLI discovery surface. The graph must not
+contain provider-specific command syntax.
+
+The built-in workspace pack stores one portable Agent Skills package per logical name.
+Bootstrap creates an effective pinned catalog under `.tasker/harness/skills`; it does
+not expose that whole catalog to an agent. At Activity start, the provider adapter
+materializes only the names captured in the immutable step snapshot:
+
+- Codex: `<isolated CODEX_HOME>/skills/<name>`;
+- Claude: `<temporary directory>/.claude/skills/<name>` with `--add-dir`.
+
+Supporting scripts and assets travel with the package. `TASKER_SKILLS_ROOT` points to
+the selected provider view, so a skill must never depend on a hard-coded `.codex` or
+`.claude` path. Repository profile skills are the exception to step scope: they are
+ambient implementation guidance and are installed for both providers in the managed
+worktree. A missing step skill fails closed before provider invocation.
+
+Repository-specific operational skills belong in the profile's `step-skills`, not its
+ambient `skills`. This keeps instructions such as localization conventions always
+available while a review/publish/tracker skill remains invisible until a registered
+block explicitly selects it.
+
+A package that invokes another package declares logical names in `dependencies.json`.
+The provider adapter resolves that transitive set before either CLI starts. Dependencies
+do not grant graph effects: selecting a legacy macro such as `pr-finalize` is still
+invalid as a replacement for typed PR/Jira integration blocks.
 
 Keep three scopes distinct:
 
@@ -248,6 +272,10 @@ Implement the provider Activity binding:
 Provider session resumption is an optimization. Temporal Activity/workflow state plus
 Tasker artifacts are the durable recovery source. A provider that cannot resume starts
 a new attempt with bounded persisted context.
+
+Codex is the currently selected worker runner. Claude is already a first-class provider
+layout for every workspace skill package; wiring its stream parser, usage receipt, and
+tool policy is a provider-Activity addition, not a skill migration or workflow change.
 
 ## 10. Late discoveries
 

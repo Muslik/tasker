@@ -7,14 +7,15 @@ bootstrap program.
 
 ## What moved
 
-| Old location                 | New form                         | Runtime destination                                                  |
-| ---------------------------- | -------------------------------- | -------------------------------------------------------------------- |
-| `work/skills/*`              | `integration-skills/*`           | `.<provider>/skills/*`                                               |
-| `work/shared/*`              | `shared-skills/*`                | `.<provider>/skills/*`                                               |
-| `work/<profile>/skills/*`    | `profiles/<profile>/skills/*`    | `.<provider>/skills/*`, overriding a common skill with the same name |
-| `work/<profile>/overrides/*` | `profiles/<profile>/overrides/*` | repository-relative files                                            |
-| `work/lib/*`                 | `lib/*`                          | `.<provider>/lib/*` for integration skill scripts                    |
-| `work/bin/with-env`          | portable `bin/with-env`          | `.<provider>/bin/with-env`                                           |
+| Old location                 | New form                         | Runtime destination                                                     |
+| ---------------------------- | -------------------------------- | ----------------------------------------------------------------------- |
+| `work/skills/*`              | `integration-skills/*`           | pinned `.tasker/harness/skills/*`; selected per Activity                |
+| `work/shared/*`              | `shared-skills/*`                | pinned `.tasker/harness/skills/*`; selected per Activity                |
+| `work/<profile>/skills/*`    | `profiles/<profile>/skills/*`    | effective catalog plus ambient `.codex/skills/*` and `.claude/skills/*` |
+| profile operational skills   | `profiles/<profile>/step-skills` | effective catalog only; selected per Activity                           |
+| `work/<profile>/overrides/*` | `profiles/<profile>/overrides/*` | repository-relative files                                               |
+| `work/lib/*`                 | `lib/*`                          | `.tasker/harness/lib/*` for integration skill scripts                   |
+| `work/bin/with-env`          | portable `bin/with-env`          | `.tasker/harness/bin/with-env`                                          |
 
 The initial manifest declares seven repositories: `front-avia`, `front-backoffice`,
 `front-bus`, `front-core-packages`, `front-index`, `front-railways`, and
@@ -49,8 +50,12 @@ a worktree or content snapshot.
 3. The managed worktree pins that hash in `.tasker/harness-bootstrap.json` before files
    are applied. A retry after process/worker failure therefore resumes from the pinned
    snapshot even if this source directory has changed.
-4. Common, integration, and profile skills are copied into `.codex` and `.claude`.
-   Profile overrides are copied to repository paths. No symlink points back here.
+4. Common and integration skills are copied into a hidden, provider-neutral catalog at
+   `.tasker/harness/skills`. Profile ambient and step skills replace common packages of
+   the same name in that catalog. Only ambient profile skills are additionally exposed
+   in both `.codex/skills` and `.claude/skills`; operational profile skills stay hidden
+   until selected by a step. Profile overrides are copied to repository paths. No
+   symlink points back here.
 5. Generated untracked files are placed in the managed clone's Git exclude file;
    tracked overrides use that worktree's `skip-worktree` bit. The task branch therefore
    contains code and task artifacts, not operator configuration.
@@ -89,13 +94,19 @@ The block catalog does that. In particular:
   interpret evidence; it cannot grant itself `git.write`, `jira.write`, or another
   outward-facing capability.
 
-The initial compatibility bootstrap exposes the imported common skill catalog inside
-the managed worktree so Codex and Claude can discover it while execution is brought up.
-That is not the final authorization boundary. Before remote writes are enabled, the
-provider adapter must materialize only the skills named by the immutable step snapshot
-into the isolated provider home. Until then, integration blocks remain blocked and
-human-reviewed. This limitation is explicit so “available” is never mistaken for
-“allowed”.
+The hidden catalog is storage, not provider discovery and not authorization. For every
+agent Activity, Tasker reads the logical skill names from the immutable step snapshot
+and copies only those complete packages into an isolated provider view:
+
+- Codex receives `<isolated CODEX_HOME>/skills/<name>`;
+- Claude receives `<temporary directory>/.claude/skills/<name>` and that directory is
+  supplied through `--add-dir`.
+
+Both views originate from the same `SKILL.md` package and supporting files. Scripts use
+`TASKER_SKILLS_ROOT`, which points at the selected provider view instead of a hard-coded
+`.codex` or `.claude` path. A missing logical package blocks before the subscription CLI
+starts. Thus `pr-finalize` can remain in the pinned migration catalog without becoming
+visible to `code.implement@1` or another unrelated step.
 
 ## Setup lifecycle
 
@@ -105,8 +116,8 @@ For a new task the durable order is:
 2. Tasker prepares its application-data clone, branch, and managed worktree.
 3. The bootstrap Activity resolves the repository alias in `manifest.json`.
 4. The complete pack is content-addressed and pinned for the run.
-5. Repository overrides and skills are materialized; credentials stay in the external
-   environment file.
+5. Repository overrides and the hidden effective skill catalog are materialized;
+   credentials stay in the external environment file.
 6. Only then do repository analysis, workflow assembly, optional plan review, and block
    execution begin.
 
@@ -125,6 +136,17 @@ changes. Planning reads the same configured filesystem that later execution uses
 - Add a common skill under `shared-skills`; add an API/tool skill under
   `integration-skills`; add repository-specific implementation knowledge under that
   profile's `skills` directory.
+- Put a repository-specific operational skill under `profiles/<id>/step-skills`. It is
+  available for explicit block binding without becoming ambient guidance for every
+  agent in that repository. `feature-review` uses this scope because it can read and
+  draft remote review data.
+- Keep portable packages in the Agent Skills common subset: a directory named after
+  the logical skill, a `SKILL.md` with `name` and `description`, and optional files
+  referenced relative to that directory. Never put provider CLI flags or provider-home
+  paths in the package.
+- If a package directly invokes another skill package, declare those logical names in
+  its `dependencies.json`. Tasker resolves the transitive set before invocation and
+  fails closed when a dependency is missing; both provider views receive the same set.
 - Prefer improving an existing skill over adding a near-duplicate. For a new reusable
   operation, add the skill package here and bind its logical name in a versioned step;
   do not encode graph order in `SKILL.md`.

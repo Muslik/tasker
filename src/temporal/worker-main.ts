@@ -33,12 +33,14 @@ import { systemClock } from '../shared/clock.js';
 import {
   loadWorkspaceConfiguration,
   loadWorkspaceBootstrapConfiguration,
+  assertWorkspaceHarnessProvidesSkills,
   CommandWorkspaceBootstrapAdapter,
   HarnessProfileWorkspaceBootstrapAdapter,
   ManagedWorkspaceManager,
   WorkspaceBootstrapCoordinator,
   WorkspaceBootstrapStore,
   WorkspaceStore,
+  loadWorkspaceHarnessPack,
 } from '../workspaces/index.js';
 import {
   createPlanningActivity,
@@ -116,21 +118,29 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     new WorkspaceStore(ledger.repository, systemClock),
     nodeCommandRunner,
   );
+  const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
+  if (bootstrapConfiguration.command === null) {
+    assertWorkspaceHarnessProvidesSkills(
+      loadWorkspaceHarnessPack(bootstrapConfiguration.harnessPackPath),
+      harnessPack.steps.flatMap((step) =>
+        step.execution.kind === 'agent' ? [...step.execution.skills] : [],
+      ),
+    );
+  }
+  const bootstrapAdapter =
+    bootstrapConfiguration.command === null
+      ? new HarnessProfileWorkspaceBootstrapAdapter(
+          {
+            sourcePackPath: bootstrapConfiguration.harnessPackPath,
+            snapshotStorePath: bootstrapConfiguration.snapshotStorePath,
+          },
+          nodeCommandRunner,
+          systemClock,
+        )
+      : new CommandWorkspaceBootstrapAdapter(bootstrapConfiguration, nodeCommandRunner);
   const bootstrap = new WorkspaceBootstrapCoordinator(
     new WorkspaceBootstrapStore(ledger.repository),
-    (() => {
-      const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
-      return bootstrapConfiguration.command === null
-        ? new HarnessProfileWorkspaceBootstrapAdapter(
-            {
-              sourcePackPath: bootstrapConfiguration.harnessPackPath,
-              snapshotStorePath: bootstrapConfiguration.snapshotStorePath,
-            },
-            nodeCommandRunner,
-            systemClock,
-          )
-        : new CommandWorkspaceBootstrapAdapter(bootstrapConfiguration, nodeCommandRunner);
-    })(),
+    bootstrapAdapter,
   );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {

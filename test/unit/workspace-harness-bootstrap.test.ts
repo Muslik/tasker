@@ -1,13 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { loadHarnessPack } from '../../src/harness/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { nodeCommandRunner } from '../../src/providers/command-runner.js';
 import type { WorkspaceLocator } from '../../src/workspaces/contracts.js';
+import {
+  assertWorkspaceHarnessProvidesSkills,
+  loadWorkspaceHarnessPack,
+} from '../../src/workspaces/harness-pack.js';
 import { HarnessProfileWorkspaceBootstrapAdapter } from '../../src/workspaces/harness-profile-bootstrap.js';
 
 const git = (cwd: string, ...args: string[]): string =>
@@ -59,6 +64,19 @@ const createAdapter = (sourcePackPath: string, snapshotStorePath: string) =>
   );
 
 describe('workspace harness bootstrap', () => {
+  it('provides a portable package for every registered agent-step skill', () => {
+    const workflowPack = loadHarnessPack();
+    const workspacePack = loadWorkspaceHarnessPack(resolve('harness/workspace'));
+    const requiredSkills = workflowPack.steps.flatMap((step) =>
+      step.execution.kind === 'agent' ? [...step.execution.skills] : [],
+    );
+
+    expect(workspacePack.manifest.engines).toEqual(expect.arrayContaining(['codex', 'claude']));
+    expect(() => {
+      assertWorkspaceHarnessProvidesSkills(workspacePack, requiredSkills);
+    }).not.toThrow();
+  });
+
   it('materializes the resolved project profile without creating repository changes', async () => {
     const repository = createRepository();
     const workspace = locatorFor(repository);
@@ -78,16 +96,29 @@ describe('workspace harness bootstrap', () => {
       readFileSync(join(repository.path, '.codex/skills/localization/SKILL.md'), 'utf8'),
     ).toContain('localization');
     expect(
-      readFileSync(join(repository.path, '.claude/skills/ai-assistance/SKILL.md'), 'utf8'),
-    ).toContain('AI assistance');
-    expect(readFileSync(join(repository.path, '.codex/skills/jira/SKILL.md'), 'utf8')).toContain(
-      'Jira issue reader',
-    );
+      readFileSync(join(repository.path, '.claude/skills/localization/SKILL.md'), 'utf8'),
+    ).toContain('localization');
+    expect(
+      readFileSync(join(repository.path, '.tasker/harness/skills/jira/SKILL.md'), 'utf8'),
+    ).toContain('Jira issue reader');
+    expect(
+      readFileSync(
+        join(repository.path, '.tasker/harness/skills/typescript-design/SKILL.md'),
+        'utf8',
+      ),
+    ).toContain('make invalid states unrepresentable');
+    expect(existsSync(join(repository.path, '.codex/skills/jira/SKILL.md'))).toBe(false);
+    expect(existsSync(join(repository.path, '.claude/skills/pr-finalize/SKILL.md'))).toBe(false);
+    expect(
+      existsSync(join(repository.path, '.tasker/harness/skills/feature-review/SKILL.md')),
+    ).toBe(true);
+    expect(existsSync(join(repository.path, '.codex/skills/feature-review/SKILL.md'))).toBe(false);
+    expect(existsSync(join(repository.path, '.claude/skills/feature-review/SKILL.md'))).toBe(false);
     const environmentFile = join(snapshotStore, 'test.env');
     writeFileSync(environmentFile, 'TASKER_TEST_VALUE=loaded\n', 'utf8');
     expect(
       execFileSync(
-        join(repository.path, '.codex/bin/with-env'),
+        join(repository.path, '.tasker/harness/bin/with-env'),
         ['sh', '-c', 'printf %s "$TASKER_TEST_VALUE"'],
         {
           encoding: 'utf8',

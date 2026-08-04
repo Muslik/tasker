@@ -19,8 +19,12 @@ import {
   prepareIsolatedCodexHome,
   parseCodexStream,
   providerFailureMessage,
-  workspaceHarnessProviderEnvironment,
 } from '../../providers/codex-cli-support.js';
+import {
+  prepareAgentSkills,
+  type AgentProvider,
+  workspaceHarnessEnvironment,
+} from '../../providers/agent-skills.js';
 import type {
   CommandRequest,
   CommandResult,
@@ -42,7 +46,7 @@ import {
   type TaskWorkflowActivities,
 } from '../contracts.js';
 
-const CodexAgentOutcomeSchema = z.discriminatedUnion('status', [
+const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
   z
     .object({
       status: z.literal('completed'),
@@ -112,6 +116,7 @@ export interface TaskStepActivityContext {
 export interface TaskStepAgentRequest {
   readonly operationId: string;
   readonly prompt: string;
+  readonly skills: readonly string[];
   readonly outputSchema: z.ZodType;
   readonly cwd: string;
   readonly timeoutMs: number;
@@ -127,6 +132,18 @@ export interface TaskStepAgentResult {
 
 export type TaskStepAgentFailure =
   | { readonly kind: 'provider_unavailable'; readonly message: string }
+  | {
+      readonly kind: 'skill_unavailable';
+      readonly skill: string;
+      readonly message: string;
+    }
+  | {
+      readonly kind: 'invalid_skill_package';
+      readonly skill: string;
+      readonly message: string;
+    }
+  | { readonly kind: 'skill_materialization_failed'; readonly message: string }
+  | { readonly kind: 'invalid_skill_selection'; readonly issues: readonly string[] }
   | { readonly kind: 'provider_timed_out'; readonly durationMs: number; readonly stderr: string }
   | {
       readonly kind: 'provider_failed';
@@ -139,10 +156,13 @@ export type TaskStepAgentFailure =
   | { readonly kind: 'invalid_output'; readonly issues: readonly string[] };
 
 export interface TaskStepAgentRunner {
+  readonly provider: AgentProvider;
   run(request: TaskStepAgentRequest): Promise<Outcome<TaskStepAgentResult, TaskStepAgentFailure>>;
 }
 
 export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
+  public readonly provider = 'codex' as const;
+
   public constructor(
     private readonly runner: CommandRunner,
     private readonly options: {
@@ -178,6 +198,13 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
     const serviceTier = this.options.serviceTier ?? 'fast';
     try {
       await prepareIsolatedCodexHome(isolatedCodexHome);
+      const preparedSkills = await prepareAgentSkills({
+        provider: 'codex',
+        repositoryPath: request.cwd,
+        configurationRoot: isolatedCodexHome,
+        skills: [...request.skills],
+      });
+      if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
         schemaPath,
         `${JSON.stringify(z.toJSONSchema(request.outputSchema), null, 2)}\n`,
@@ -207,7 +234,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
         cwd: request.cwd,
         env: {
           CODEX_HOME: isolatedCodexHome,
-          ...workspaceHarnessProviderEnvironment(request.cwd),
+          ...workspaceHarnessEnvironment(request.cwd, preparedSkills.value.skillsRoot),
         },
         stdin: request.prompt,
         timeoutMs: request.timeoutMs,
@@ -802,7 +829,8 @@ export const executeRegisteredTaskStep = async (
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),
       prompt,
-      outputSchema: CodexAgentOutcomeSchema,
+      skills: snapshottedStep.execution.skills,
+      outputSchema: AgentStepOutcomeSchema,
       cwd: input.workspace.path,
       timeoutMs: 35 * 60_000,
       runtime,
@@ -816,7 +844,7 @@ export const executeRegisteredTaskStep = async (
         provider.error,
         'stdout' in provider.error ? provider.error.stdout : '',
         'stderr' in provider.error ? provider.error.stderr : '',
-        'codex',
+        dependencies.agentRunner.provider,
       );
       return block(
         `Agent execution for ${input.uses} is blocked: ${provider.error.kind}`,
@@ -824,7 +852,7 @@ export const executeRegisteredTaskStep = async (
         artifactIds,
       );
     }
-    const decision = CodexAgentOutcomeSchema.parse(provider.value.finalMessage);
+    const decision = AgentStepOutcomeSchema.parse(provider.value.finalMessage);
     if (decision.status === 'workflow_change_required') {
       const declared = parseDeclaredWorkflowChangeRequest(
         decision.request,
@@ -843,7 +871,7 @@ export const executeRegisteredTaskStep = async (
           },
           provider.value.stdout,
           provider.value.stderr,
-          'codex',
+          dependencies.agentRunner.provider,
         );
         return block(
           `Agent execution for ${input.uses} returned an invalid workflow change request`,
@@ -859,7 +887,7 @@ export const executeRegisteredTaskStep = async (
         stepReference: input.uses,
         stepAttempt: input.stepAttempt,
         runner: 'agent',
-        command: 'codex',
+        command: dependencies.agentRunner.provider,
         args: [],
         cwd: input.workspace.path,
         exitCode: 0,
@@ -891,7 +919,7 @@ export const executeRegisteredTaskStep = async (
         },
         provider.value.stdout,
         provider.value.stderr,
-        'codex',
+        dependencies.agentRunner.provider,
       );
       return block(
         `Agent execution for ${input.uses} returned output that does not match the registered contract`,
@@ -907,7 +935,7 @@ export const executeRegisteredTaskStep = async (
       stepReference: input.uses,
       stepAttempt: input.stepAttempt,
       runner: 'agent',
-      command: 'codex',
+      command: dependencies.agentRunner.provider,
       args: [],
       cwd: input.workspace.path,
       exitCode: 0,

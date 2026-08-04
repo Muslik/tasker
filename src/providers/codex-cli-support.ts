@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, chmod, copyFile, cp, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -52,20 +52,6 @@ export interface ParsedCodexStream {
 export const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 const sourceCodexHome = (): string => process.env.CODEX_HOME ?? join(homedir(), '.codex');
-
-export const workspaceHarnessProviderEnvironment = (
-  repositoryPath: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): Readonly<Record<string, string>> => ({
-  TASKER_SKILLS_ROOT: join(repositoryPath, '.codex', 'skills'),
-  TASKER_HARNESS_BIN: join(repositoryPath, '.codex', 'bin'),
-  TASKER_HARNESS_ENV_FILE:
-    environment.TASKER_HARNESS_ENV_FILE?.trim() ||
-    resolve(
-      environment.TASKER_HARNESS_WORK_PATH?.trim() || resolve('..', 'harness', 'work'),
-      '.env',
-    ),
-});
 
 const copyIfReadable = async (source: string, target: string): Promise<void> => {
   try {

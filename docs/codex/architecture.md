@@ -179,6 +179,13 @@ A registered block has a stable versioned reference and one execution kind:
   generated graph;
 - `integration`: a typed external adapter with prepare/execute/reconcile behavior.
 
+Logical agent skills are stored once in the pinned workspace harness. An Activity
+projects only its snapshotted selection into the active subscription CLI's discovery
+layout (`CODEX_HOME/skills` for Codex or an added `.claude/skills` directory for
+Claude). The workflow graph and block contract contain no provider paths. Repository
+profile skills remain ambient guidance for both providers; shared/integration packages
+remain undiscoverable until a step selects them.
+
 Process commands are policy data, not interpreter branches. Company-wide commands live
 in `harness/company.json`; repository-specific overrides live in
 `harness/projects/*/project.json`. The resolved command, executor, and harness checksum
