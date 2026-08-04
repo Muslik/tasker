@@ -5,6 +5,7 @@ export default tseslint.config(
   {
     ignores: [
       '.omx/**',
+      '.tmp/**',
       'coverage/**',
       'dist/**',
       'eslint.config.js',

@@ -99,6 +99,12 @@ remote-mutating runs. Its history was therefore not manufactured into Temporal E
 History. Existing product artifacts remain ordinary Tasker data; new execution starts
 as an explicit Temporal run.
 
+The original `0001_m0_baseline` migration remains immutable so an existing Tasker
+database can be opened after cutover. `0002_temporal_product_store_cutover` changes the
+schema marker and removes only the obsolete outbox, lease, and signal tables. Product
+events, projections, snapshots, and artifacts are preserved. Migration tests seed an
+M0 database, apply the cutover, and read the same product evidence afterward.
+
 ## First vertical slice
 
 The runtime consumes an accepted task-specific graph and supports:
@@ -157,6 +163,8 @@ they are product work, not a reason to keep a second runtime.
 - [x] Full lint/typecheck/unit/integration/e2e suite passes after deletion.
 - [x] Docs and operator guide describe only the final runtime, with historical files
       clearly marked.
+- [x] One `pnpm dev` command owns local Temporal, Worker, API/UI health, and shutdown.
+- [x] Existing M0 product data crosses the immutable `0002` schema migration.
 
 Current cutover evidence on 2026-08-03:
 

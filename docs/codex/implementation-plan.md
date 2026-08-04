@@ -303,6 +303,10 @@ Implementation status on 2026-08-03: complete. Temporal is the only runtime, the
 release suite and 12 Temporal-backed browser scenarios pass, and the cutover removes
 more than 5,300 net lines.
 
+Local cutover ergonomics were closed on 2026-08-04: `pnpm dev` now owns the complete
+development stack and health gate, while an immutable `0002` migration preserves M0
+product evidence and removes only obsolete scheduler storage.
+
 Cutover only after the parity matrix in
 [`temporal-migration.md`](temporal-migration.md) passes. Then:
 

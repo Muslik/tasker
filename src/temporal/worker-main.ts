@@ -201,7 +201,11 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       }),
     });
     try {
-      await runtime.worker.run();
+      const workerRun = runtime.worker.run();
+      if (typeof process.send === 'function') {
+        process.send({ type: 'tasker-worker-ready', taskQueue: configuration.taskQueue });
+      }
+      await workerRun;
     } finally {
       await runtime.connection.close();
     }

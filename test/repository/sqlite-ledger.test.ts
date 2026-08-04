@@ -43,7 +43,7 @@ describe('openSqliteLedger', () => {
       clock: { now: () => FIXED_NOW },
     });
 
-    expect(first.appliedMigrations).toHaveLength(1);
+    expect(first.appliedMigrations).toHaveLength(2);
     expect(first.database.pragma('journal_mode', { simple: true })).toBe('wal');
     expect(first.database.pragma('foreign_keys', { simple: true })).toBe(1);
     expect(first.database.pragma('busy_timeout', { simple: true })).toBe(1_234);
@@ -85,7 +85,7 @@ describe('openSqliteLedger', () => {
     });
     first.close();
 
-    const migrationPath = join(migrationsDirectory, '0001_product_store.sql');
+    const migrationPath = join(migrationsDirectory, '0002_temporal_product_store_cutover.sql');
     writeFileSync(
       migrationPath,
       `${readFileSync(migrationPath, 'utf8')}\n-- checksum changed\n`,
@@ -114,7 +114,7 @@ describe('openSqliteLedger', () => {
     });
     seededMissing.close();
 
-    rmSync(join(missingDirectory, '0001_product_store.sql'));
+    rmSync(join(missingDirectory, '0002_temporal_product_store_cutover.sql'));
 
     expect(() =>
       openSqliteLedger({
@@ -136,8 +136,8 @@ describe('openSqliteLedger', () => {
     });
     seededRenamed.close();
 
-    const originalPath = join(renamedDirectory, '0001_product_store.sql');
-    const renamedPath = join(renamedDirectory, '0001_renamed.sql');
+    const originalPath = join(renamedDirectory, '0002_temporal_product_store_cutover.sql');
+    const renamedPath = join(renamedDirectory, '0002_renamed.sql');
     writeFileSync(renamedPath, readFileSync(originalPath, 'utf8'), 'utf8');
     rmSync(originalPath);
 
@@ -148,6 +148,69 @@ describe('openSqliteLedger', () => {
         clock: { now: () => FIXED_NOW },
       }),
     ).toThrow(/name mismatch/);
+  });
+
+  it('cuts an M0 database over without losing product history', () => {
+    const filename = withDatabasePath();
+    const legacyMigrations = join(makeTempDirectory(), 'legacy-migrations');
+    mkdirSync(legacyMigrations, { recursive: true });
+    cpSync(
+      join(defaultMigrationsDirectory, '0001_m0_baseline.sql'),
+      join(legacyMigrations, '0001_m0_baseline.sql'),
+    );
+    const legacy = openSqliteLedger({
+      filename,
+      migrationsDirectory: legacyMigrations,
+      clock: { now: () => FIXED_NOW },
+    });
+    const recorded = legacy.repository.transact({
+      aggregate: {
+        aggregateId: 'task:legacy-product-history',
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: 'legacy-product-event',
+            eventType: 'TaskCreated',
+            eventSchemaVersion: 1,
+            payload: { taskId: 'AVIA-1' },
+          },
+        ],
+      },
+      artifacts: [
+        {
+          artifactId: 'legacy-product-artifact',
+          artifactKind: 'jira_issue_snapshot',
+          storageUri: 'ledger://legacy-product-artifact',
+          payload: { issueKey: 'AVIA-1' },
+          metadata: {},
+        },
+      ],
+    });
+    expect(recorded.ok).toBe(true);
+    legacy.close();
+
+    const cutOver = openSqliteLedger({ filename, clock: { now: () => FIXED_NOW } });
+
+    expect(cutOver.appliedMigrations.map(({ name }) => name)).toEqual([
+      'm0_baseline',
+      'temporal_product_store_cutover',
+    ]);
+    expect(cutOver.repository.listEvents('task:legacy-product-history')).toHaveLength(1);
+    expect(cutOver.repository.readArtifact('legacy-product-artifact')).not.toBeNull();
+    expect(
+      cutOver.database
+        .prepare<[], { name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('outbox', 'leases', 'signals')",
+        )
+        .all(),
+    ).toEqual([]);
+    expect(
+      cutOver.database
+        .prepare<[string], { value: string }>('SELECT value FROM schema_metadata WHERE key = ?')
+        .get('schema_baseline'),
+    ).toEqual({ value: 'product-store-v1' });
+
+    cutOver.close();
   });
 });
 

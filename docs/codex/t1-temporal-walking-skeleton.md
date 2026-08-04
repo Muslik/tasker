@@ -25,18 +25,20 @@ Install Temporal CLI once:
 brew install temporal
 ```
 
-Then use four terminals:
+The normal local path is one command:
 
 ```bash
-pnpm temporal:dev
-pnpm temporal:worker
-pnpm temporal:api
-pnpm dev:cockpit
+pnpm dev
 ```
 
-The development service creates namespace `tasker-dev`, listens on `127.0.0.1:7233`,
-and serves Temporal UI at `http://127.0.0.1:8233`. Tasker remains at
-`http://127.0.0.1:4311`.
+It builds the app once, starts or reuses the local Temporal service, starts the Worker
+and API/operator console, waits for the Temporal-backed health response, and owns
+coordinated shutdown. The development service creates namespace `tasker-dev`, listens
+on `127.0.0.1:7233`, and serves Temporal UI at `http://127.0.0.1:8233`. Tasker remains
+at `http://127.0.0.1:4311`.
+
+Use `pnpm temporal:dev`, `pnpm temporal:worker`, `pnpm temporal:api`, and
+`pnpm dev:cockpit` separately only when diagnosing one process boundary.
 
 The local database `.tasker/temporal.sqlite` is development state, not a production
 durability design. Delete it only when intentionally resetting all local Temporal

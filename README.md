@@ -56,10 +56,15 @@ for the runtime boundary and recovery evidence.
 ```bash
 fnm exec --using=24.16.0 /usr/local/bin/pnpm verify
 fnm exec --using=24.16.0 /usr/local/bin/pnpm test:e2e
-fnm exec --using=24.16.0 /usr/local/bin/pnpm demo:m1
+fnm exec --using=24.16.0 /usr/local/bin/pnpm dev
 ```
 
-To exercise Tasker, install Temporal CLI and run `pnpm temporal:dev`,
-`pnpm temporal:worker`, `pnpm temporal:api`, and `pnpm dev:cockpit` in separate
-terminals. The cockpit is then available at `http://127.0.0.1:4311`, with Temporal UI
-at `http://127.0.0.1:8233`.
+`pnpm dev` is the normal local entry point. It builds Tasker, starts or reuses the local
+Temporal development service, starts the worker and API/operator console, waits for the
+Temporal-backed health check, and stops every process it owns on Ctrl-C. Install the
+Temporal CLI first. The operator console is available at `http://127.0.0.1:4311`; the
+Temporal debugging UI is at `http://127.0.0.1:8233`.
+
+The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:cockpit` commands remain
+available for diagnosing one process in isolation. `demo:m1` is a compatibility alias
+for the complete `pnpm dev` stack, not a second runtime.

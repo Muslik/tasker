@@ -1,4 +1,5 @@
 .omx/
+.tmp/
 dist/
 coverage/
 docs/

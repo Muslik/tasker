@@ -3,6 +3,7 @@ dist/
 coverage/
 .omx/
 .omc/
+.tmp/
 .tasker/
 playwright-report/
 test-results/
