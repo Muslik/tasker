@@ -29,7 +29,7 @@ export const processInputSchema = z
   })
   .strict();
 
-const WorkspaceRelativePathSchema = z
+export const WorkspaceRelativePathSchema = z
   .string()
   .min(1)
   .refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), {
@@ -46,6 +46,49 @@ export const agentOutputSchema = z
     artifacts: z.array(z.string().min(1)).default([]),
   })
   .strict();
+
+const ReproductionEvidenceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('video'),
+      path: WorkspaceRelativePathSchema,
+      mimeType: z.string().regex(/^video\/[a-z0-9][a-z0-9.+-]*$/u),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('image'),
+      path: WorkspaceRelativePathSchema,
+      mimeType: z.string().regex(/^image\/[a-z0-9][a-z0-9.+-]*$/u),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('log'),
+      path: WorkspaceRelativePathSchema,
+      mimeType: z.string().regex(/^(?:text|application)\/[a-z0-9][a-z0-9.+-]*$/u),
+    })
+    .strict(),
+]);
+
+export const reproductionOutputSchema = z.discriminatedUnion('phase', [
+  z
+    .object({
+      summary: z.string().min(1),
+      phase: z.literal('before'),
+      outcome: z.literal('reproduced'),
+      evidence: z.array(ReproductionEvidenceSchema).min(1),
+    })
+    .strict(),
+  z
+    .object({
+      summary: z.string().min(1),
+      phase: z.literal('after'),
+      outcome: z.literal('verified_fixed'),
+      evidence: z.array(ReproductionEvidenceSchema).min(1),
+    })
+    .strict(),
+]);
 
 export const processOutputSchema = z
   .object({
@@ -204,6 +247,7 @@ const agentStep = (
   options: {
     readonly description: string;
     readonly inputSchema?: z.ZodType;
+    readonly outputSchema?: z.ZodType;
     readonly prompt: string;
     readonly skills: readonly string[];
     readonly retryBudget: number;
@@ -221,7 +265,7 @@ const agentStep = (
   contract: contract(id, {
     retryBudget: options.retryBudget,
     inputSchema: options.inputSchema ?? taskInputSchema,
-    outputSchema: agentOutputSchema,
+    outputSchema: options.outputSchema ?? agentOutputSchema,
     allowedEffects: [...(options.allowedEffects ?? [])],
     requiredCapabilities: [...(options.requiredCapabilities ?? ['repository.read'])],
     resumeBoundary: options.allowedEffects?.length ? 'step' : 'attempt',
@@ -324,6 +368,7 @@ export const TWIKET_HARNESS_STEPS = [
   agentStep('bug.reproduce', {
     description: 'Reproduce a bug before or after implementation and preserve evidence.',
     inputSchema: reproductionInputSchema,
+    outputSchema: reproductionOutputSchema,
     prompt: 'prompts/steps/bug-reproduce.md',
     skills: ['playwright-demo', 'jenkins'],
     retryBudget: 2,

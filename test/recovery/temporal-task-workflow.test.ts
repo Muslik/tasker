@@ -37,8 +37,8 @@ const workflowInput = (
   } as const;
 };
 
-const jiraWorkflowInput = (taskReference: string) => {
-  const fixture = findTaskFixture('avia-12536-feature-review');
+const jiraWorkflowInput = (taskReference: string, fixtureId = 'avia-12536-feature-review') => {
+  const fixture = findTaskFixture(fixtureId);
   if (fixture === undefined) throw new Error('Missing Jira workflow fixture');
   const planned = planTaskWorkflow({ ...fixture, origin: 'jira' });
   if (!planned.ok) throw new Error('Jira workflow fixture did not compile');
@@ -397,6 +397,71 @@ describe('Temporal task workflow', () => {
     expect(reviewReadyCalls).toBe(2);
     expect(implementationCalls).toBe(1);
     expect(pullRequestCalls).toBe(1);
+  }, 30_000);
+
+  it('resumes Jira reproduction publishing without repeating reproduction or product work', async () => {
+    const taskReference = `jira-reproduction-evidence-${String(Date.now())}`;
+    let attachmentCalls = 0;
+    let beforeReproductionCalls = 0;
+    let implementationCalls = 0;
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      executeRemoteReconciledStep: (input) => {
+        if (input.uses !== 'jira.attach-reproduction@1') {
+          return testTaskWorkflowActivities.executeRemoteReconciledStep(input);
+        }
+        attachmentCalls += 1;
+        return Promise.resolve(
+          attachmentCalls === 1
+            ? {
+                status: 'blocked' as const,
+                summary: 'Jira returned 403 while publishing reproduction evidence',
+                waitKind: 'jira.attach-reproduction.1.blocked@1',
+                artifactIds: ['jira-reproduction-evidence:intent'],
+                transcriptId: null,
+              }
+            : {
+                status: 'completed' as const,
+                summary: 'Jira contains before-reproduction evidence',
+                predicateResults: { 'attempt.succeeded@1': true },
+                artifactIds: ['jira-reproduction-evidence:receipt'],
+                transcriptId: null,
+              },
+        );
+      },
+      executeWorkspaceReconciledStep: (input) => {
+        if (input.uses === 'bug.reproduce@1' && input.nodeId === 'reproduce-before') {
+          beforeReproductionCalls += 1;
+        }
+        if (input.uses === 'code.implement@1') implementationCalls += 1;
+        return testTaskWorkflowActivities.executeWorkspaceReconciledStep(input);
+      },
+    });
+
+    const started = await service.start(jiraWorkflowInput(taskReference, 'avia-13236-short-bug'));
+
+    expect(started.ok).toBe(true);
+    const blocked = await waitForWait(
+      service,
+      taskReference,
+      'jira.attach-reproduction.1.blocked@1',
+    );
+    if (blocked.status !== 'waiting') throw new Error('Expected Jira reproduction wait');
+    expect(beforeReproductionCalls).toBe(1);
+    expect(implementationCalls).toBe(0);
+
+    const resumed = await service.resolveWait(taskReference, {
+      nodeId: blocked.wait.nodeId,
+      waitKind: blocked.wait.waitKind,
+      resolution: { guidance: 'VPN is enabled; reconcile the Jira attachment and continue.' },
+    });
+
+    expect(resumed.ok).toBe(true);
+    await waitForWait(service, taskReference, 'code_review@1');
+    expect(attachmentCalls).toBe(2);
+    expect(beforeReproductionCalls).toBe(1);
+    expect(implementationCalls).toBe(1);
   }, 30_000);
 
   it('redelivers a read-only CI observation after Worker failure', async () => {

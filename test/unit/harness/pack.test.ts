@@ -158,6 +158,7 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.start-work@1')).toEqual({ kind: 'remote_reconciled' });
+    expect(deliveryFor('jira.attach-reproduction@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.review-ready@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
       kind: 'workspace_reconciled',
@@ -185,7 +186,11 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(root);
     const references = pack.steps.map(({ reference }) => reference);
 
-    expect(pack.policies.map(({ id }) => id)).toEqual(['jira-lifecycle', 'review-feedback']);
+    expect(pack.policies.map(({ id }) => id)).toEqual([
+      'jira-lifecycle',
+      'jira-reproduction-evidence',
+      'review-feedback',
+    ]);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
     expect(references).toContain('pr.describe@1');
@@ -221,6 +226,22 @@ describe('file-backed harness pack', () => {
     expect(references).not.toContain('jira.review-ready@1');
   });
 
+  it('removes Jira reproduction publishing without changing Jira lifecycle blocks', async () => {
+    const root = await createTemporaryPack();
+    const policyPath = join(root, 'policies/jira-reproduction-evidence.json');
+    const policy = JSON.parse(await readFile(policyPath, 'utf8')) as { enabled: boolean };
+    policy.enabled = false;
+    await writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
+
+    const pack = loadHarnessPack(root);
+    const references = pack.steps.map(({ reference }) => reference);
+
+    expect(pack.policies.map(({ id }) => id)).not.toContain('jira-reproduction-evidence');
+    expect(references).not.toContain('jira.attach-reproduction@1');
+    expect(references).toContain('jira.start-work@1');
+    expect(references).toContain('jira.review-ready@1');
+  });
+
   it('binds visual evidence guidance only to reproduction and visual verification', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const skillsFor = (reference: string): readonly string[] => {
@@ -233,6 +254,36 @@ describe('file-backed harness pack', () => {
     expect(skillsFor('verify.visual@1')).toContain('playwright-demo');
     expect(skillsFor('verify.targeted@1')).not.toContain('playwright-demo');
     expect(skillsFor('verify.full@1')).not.toContain('playwright-demo');
+  });
+
+  it('requires typed phase-compatible evidence for successful reproduction', () => {
+    const reproduction = getHarnessStepDefinition('bug.reproduce@1');
+    if (reproduction === undefined) throw new Error('Expected reproduction block');
+
+    expect(
+      reproduction.contract.outputSchema.safeParse({
+        summary: 'Visible bug reproduced',
+        phase: 'before',
+        outcome: 'reproduced',
+        evidence: [{ kind: 'video', path: 'evidence/before.mp4', mimeType: 'video/mp4' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      reproduction.contract.outputSchema.safeParse({
+        summary: 'Claimed success without proof',
+        phase: 'before',
+        outcome: 'reproduced',
+        evidence: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      reproduction.contract.outputSchema.safeParse({
+        summary: 'Mismatched media metadata',
+        phase: 'before',
+        outcome: 'reproduced',
+        evidence: [{ kind: 'video', path: 'evidence/before.png', mimeType: 'image/png' }],
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects prompt paths that escape through a symlink or parent traversal', async () => {

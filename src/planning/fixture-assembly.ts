@@ -15,13 +15,23 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
-import { getHarnessPack, harnessPolicyAppliesToOrigin } from '../harness/index.js';
+import {
+  getHarnessPack,
+  harnessPolicyAppliesToTask,
+  harnessPolicyStepMarkerMatches,
+} from '../harness/index.js';
+import type { JsonValue } from '../workflow/schema.js';
 
 interface TaskContext {
   readonly description: string;
   readonly repository: string;
   readonly taskId: string;
   readonly title: string;
+}
+
+interface PolicyTaskContext {
+  readonly origin: string;
+  readonly family: string;
 }
 
 const translationNodes = (
@@ -99,11 +109,11 @@ const acceptedPlanRecord = (task: TaskContext): readonly WorkflowNodeSource[] =>
     : [];
 
 const postPlanPolicySteps = (
-  task: TaskContext & { readonly origin: string },
+  task: TaskContext & PolicyTaskContext,
 ): readonly WorkflowNodeSource[] => {
   const pack = getHarnessPack();
   const references = pack.policies
-    .filter((policy) => harnessPolicyAppliesToOrigin(policy, task.origin))
+    .filter((policy) => harnessPolicyAppliesToTask(policy, task))
     .flatMap((policy) =>
       policy.obligations.flatMap((obligation) => {
         if (obligation.direction !== 'before' || obligation.trigger.kind !== 'effect') return [];
@@ -136,12 +146,12 @@ const postPlanPolicySteps = (
 };
 
 const beforeCodeReviewPolicySteps = (
-  task: TaskContext & { readonly origin: string },
+  task: TaskContext & PolicyTaskContext,
   prefix: '' | 'review-',
 ): readonly WorkflowNodeSource[] => {
   const pack = getHarnessPack();
   const references = pack.policies
-    .filter((policy) => harnessPolicyAppliesToOrigin(policy, task.origin))
+    .filter((policy) => harnessPolicyAppliesToTask(policy, task))
     .flatMap((policy) =>
       policy.obligations
         .filter(
@@ -149,6 +159,50 @@ const beforeCodeReviewPolicySteps = (
             obligation.direction === 'before' &&
             obligation.trigger.kind === 'wait' &&
             obligation.trigger.reference === 'code_review@1',
+        )
+        .flatMap((obligation) =>
+          obligation.ordered
+            .filter(
+              (marker) =>
+                marker.kind === 'step' &&
+                pack.steps.find((candidate) => candidate.reference === marker.reference)?.policy ===
+                  policy.id,
+            )
+            .map((marker) => ({ policy, reference: marker.reference })),
+        ),
+    )
+    .filter(
+      (candidate, index, candidates) =>
+        candidates.findIndex(({ reference }) => reference === candidate.reference) === index,
+    );
+
+  return references.map(({ policy, reference }) =>
+    step(
+      `${prefix}policy-${policy.id}-${reference.split('@')[0]?.replaceAll('.', '-') ?? 'step'}`,
+      {
+        uses: reference,
+        with: taskInput(task, policy.description),
+      },
+    ),
+  );
+};
+
+const afterStepPolicySteps = (
+  task: TaskContext & PolicyTaskContext,
+  triggerReference: string,
+  triggerInput: JsonValue,
+  prefix: string,
+): readonly WorkflowNodeSource[] => {
+  const pack = getHarnessPack();
+  const references = pack.policies
+    .filter((policy) => harnessPolicyAppliesToTask(policy, task))
+    .flatMap((policy) =>
+      policy.obligations
+        .filter(
+          (obligation) =>
+            obligation.direction === 'after' &&
+            obligation.trigger.kind === 'step' &&
+            harnessPolicyStepMarkerMatches(obligation.trigger, triggerReference, triggerInput),
         )
         .flatMap((obligation) =>
           obligation.ordered
@@ -221,7 +275,7 @@ const pullRequestPublication = (
 ];
 
 const pullRequestReadiness = (
-  task: TaskContext & { readonly origin: string },
+  task: TaskContext & PolicyTaskContext,
 ): readonly WorkflowNodeSource[] => [
   ...pullRequestPublication(task, ''),
   ...beforeCodeReviewPolicySteps(task, ''),
@@ -251,7 +305,7 @@ const pullRequestReadiness = (
   }),
 ];
 
-const shortBugfixRoot = (task: TaskContext & { readonly origin: string }): WorkflowNodeSource =>
+const shortBugfixRoot = (task: TaskContext & PolicyTaskContext): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
     ...aiAssistancePrelude(task),
     step('analyze-task', {
@@ -269,6 +323,16 @@ const shortBugfixRoot = (task: TaskContext & { readonly origin: string }): Workf
         'Reproduce the reported behavior and preserve before evidence.',
       ),
     }),
+    ...afterStepPolicySteps(
+      task,
+      'bug.reproduce@1',
+      reproductionInput(
+        task,
+        'before',
+        'Reproduce the reported behavior and preserve before evidence.',
+      ),
+      'before-reproduction-',
+    ),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -298,6 +362,7 @@ const shortBugfixRoot = (task: TaskContext & { readonly origin: string }): Workf
 const featureWithReviewRoot = (
   task: TaskContext & {
     readonly origin: string;
+    readonly family: string;
     readonly translationIntent: 'copy_change' | 'none';
   },
   options: { readonly includeVisualCheck: boolean },

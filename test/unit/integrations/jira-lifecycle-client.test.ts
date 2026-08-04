@@ -91,4 +91,44 @@ describe('Jira lifecycle client', () => {
     if (typeof requestBody !== 'string') throw new Error('Expected a JSON request body');
     expect(requestBody).not.toContain('secret-token');
   });
+
+  it('reads and uploads Jira attachments with the Jira Server multipart contract', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>((_input, init) =>
+      Promise.resolve(
+        init?.method === 'GET'
+          ? Response.json({
+              fields: {
+                attachment: [{ id: '11', filename: 'before.mp4', mimeType: 'video/mp4', size: 3 }],
+              },
+            })
+          : new Response(null, { status: 200 }),
+      ),
+    );
+    const client = new JiraLifecycleClient(configuration, fetchImplementation);
+
+    const observed = await client.listAttachments('AVIA-12536');
+    const uploaded = await client.uploadAttachment('AVIA-12536', {
+      filename: 'before.mp4',
+      mimeType: 'video/mp4',
+      content: Uint8Array.from([1, 2, 3]),
+    });
+
+    expect(observed).toEqual({
+      status: 'observed',
+      attachments: [{ id: '11', filename: 'before.mp4', mimeType: 'video/mp4', size: 3 }],
+    });
+    expect(uploaded).toEqual({ status: 'accepted' });
+    const [, write] = fetchImplementation.mock.calls;
+    expect(write?.[0]).toBe('https://jira.example/rest/api/2/issue/AVIA-12536/attachments');
+    expect(new Headers(write?.[1]?.headers).get('x-atlassian-token')).toBe('no-check');
+    expect(new Headers(write?.[1]?.headers).get('authorization')).toBe('Bearer secret-token');
+    expect(write?.[1]?.headers).not.toHaveProperty('content-type');
+    const form = write?.[1]?.body;
+    expect(form).toBeInstanceOf(FormData);
+    if (!(form instanceof FormData)) throw new Error('Expected multipart form data');
+    const file = form.get('file');
+    expect(file).toBeInstanceOf(Blob);
+    if (!(file instanceof Blob)) throw new Error('Expected attachment blob');
+    expect(file).toMatchObject({ name: 'before.mp4', type: 'video/mp4', size: 3 });
+  });
 });

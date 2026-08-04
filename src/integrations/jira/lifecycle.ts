@@ -77,6 +77,25 @@ const RawCommentsSchema = z
   })
   .loose();
 
+const RawAttachmentsSchema = z
+  .object({
+    fields: z
+      .object({
+        attachment: z.array(
+          z
+            .object({
+              id: z.string().min(1),
+              filename: z.string().min(1),
+              mimeType: z.string().min(1),
+              size: z.number().int().nonnegative(),
+            })
+            .loose(),
+        ),
+      })
+      .loose(),
+  })
+  .loose();
+
 export interface JiraLifecycleIssue {
   readonly issueKey: JiraIssueKey;
   readonly issueType: string;
@@ -119,6 +138,17 @@ export type JiraCommentObservation =
     }
   | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
 
+export interface JiraAttachmentMetadata {
+  readonly id: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+}
+
+export type JiraAttachmentObservation =
+  | { readonly status: 'observed'; readonly attachments: readonly JiraAttachmentMetadata[] }
+  | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
+
 export type JiraLifecycleMutation =
   | { readonly status: 'accepted' }
   | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
@@ -130,6 +160,18 @@ export interface JiraLifecyclePort {
   assign(issueKey: JiraIssueKey, accountName: string): Promise<JiraLifecycleMutation>;
   transition(issueKey: JiraIssueKey, transitionId: string): Promise<JiraLifecycleMutation>;
   comment(issueKey: JiraIssueKey, body: string): Promise<JiraLifecycleMutation>;
+}
+
+export interface JiraAttachmentPort {
+  listAttachments(issueKey: JiraIssueKey): Promise<JiraAttachmentObservation>;
+  uploadAttachment(
+    issueKey: JiraIssueKey,
+    attachment: {
+      readonly filename: string;
+      readonly mimeType: string;
+      readonly content: Uint8Array;
+    },
+  ): Promise<JiraLifecycleMutation>;
 }
 
 type FetchImplementation = typeof fetch;
@@ -175,7 +217,7 @@ const problemForStatus = (status: number): JiraLifecycleProblem => {
   };
 };
 
-export class JiraLifecycleClient implements JiraLifecyclePort {
+export class JiraLifecycleClient implements JiraLifecyclePort, JiraAttachmentPort {
   public constructor(
     private readonly configuration: JiraConfiguration,
     private readonly fetchImplementation: FetchImplementation = fetch,
@@ -278,6 +320,31 @@ export class JiraLifecycleClient implements JiraLifecyclePort {
     return { status: 'observed', comments: parsed.data.comments };
   }
 
+  public async listAttachments(issueKey: JiraIssueKey): Promise<JiraAttachmentObservation> {
+    const response = await this.request(
+      'GET',
+      `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=attachment`,
+    );
+    if (response.status === 'failed') return response;
+    const payload = await this.json(
+      response.response,
+      'Jira returned an invalid attachments response',
+    );
+    if (payload.status === 'failed') return payload;
+    const parsed = RawAttachmentsSchema.safeParse(payload.value);
+    if (!parsed.success) {
+      return {
+        status: 'failed',
+        problem: {
+          kind: 'invalid_response',
+          message: 'Jira attachments response did not match its contract',
+          retryable: false,
+        },
+      };
+    }
+    return { status: 'observed', attachments: parsed.data.fields.attachment };
+  }
+
   public assign(issueKey: JiraIssueKey, accountName: string): Promise<JiraLifecycleMutation> {
     return this.mutate('PUT', `/rest/api/2/issue/${encodeURIComponent(issueKey)}`, {
       fields: { assignee: { name: accountName } },
@@ -294,6 +361,49 @@ export class JiraLifecycleClient implements JiraLifecyclePort {
     return this.mutate('POST', `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment`, {
       body,
     });
+  }
+
+  public async uploadAttachment(
+    issueKey: JiraIssueKey,
+    attachment: {
+      readonly filename: string;
+      readonly mimeType: string;
+      readonly content: Uint8Array;
+    },
+  ): Promise<JiraLifecycleMutation> {
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([Uint8Array.from(attachment.content)], { type: attachment.mimeType }),
+      attachment.filename,
+    );
+    try {
+      const response = await this.fetchImplementation(
+        `${this.configuration.baseUrl}/rest/api/2/issue/${encodeURIComponent(issueKey)}/attachments`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            authorization: `Bearer ${this.configuration.token}`,
+            'x-atlassian-token': 'no-check',
+          },
+          body: form,
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
+        },
+      );
+      return response.ok
+        ? { status: 'accepted' }
+        : { status: 'failed', problem: problemForStatus(response.status) };
+    } catch (error) {
+      return {
+        status: 'failed',
+        problem: {
+          kind: 'unavailable',
+          message: error instanceof Error ? error.message : 'Jira attachment upload failed',
+          retryable: true,
+        },
+      };
+    }
   }
 
   private async mutate(method: 'POST' | 'PUT', path: string, body: JsonValue) {

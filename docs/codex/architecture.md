@@ -135,7 +135,9 @@ declares a product effect such as `workspace.write` or `command.run`; a fixture 
 future GitLab-origin task does not see that block. Effect selectors protect future
 blocks without enumerating their names in the policy. The same policy can require a
 provider-neutral `jira.review-ready@1` integration after PR/CI and before human review;
-neither obligation adds Jira branches to the compiler or Temporal Workflow.
+an independent Jira evidence policy can select only `bug.reproduce@1` markers whose
+input contains `phase=before` and require `jira.attach-reproduction@1` after them.
+These obligations add no Jira branches to the compiler or Temporal Workflow.
 
 The accepted compiled graph, run policy, and hashes become immutable Temporal Workflow
 input. Large prompts, repository snapshots, transcripts, videos, and screenshots stay

@@ -212,7 +212,11 @@ For a representative run, inspect Event History and Search Attributes:
 - code-review transition/comment requires durable PR evidence and follows CI;
 - Jira review-ready 403 resumes only that node without repeating code or PR preparation;
 - repeated comment/attachment Activity reconciles existing remote result;
-- before-reproduction media attaches only when explicit policy permits it.
+- before-reproduction media attaches only when explicit policy permits it;
+- attachment paths cannot escape the managed worktree, and exact file bytes determine
+  the remote identity;
+- Jira attachment 403/lost response resumes only the attachment node without repeating
+  reproduction or implementation.
 
 ### 6.4 Bitbucket
 
@@ -303,6 +307,8 @@ same built-in-profile worktree, runs the task test and build, and reaches
   reconciles lost responses, and resumes in the same worktree;
 - Jira review readiness transitions and publishes one PR link before the review wait,
   reconciling 403 and lost responses without duplicate comments;
+- enabled Jira evidence policy publishes available before-reproduction media and
+  reconciles 403/lost upload responses without repeating completed product nodes;
 - 403 during push resumes only push/reconciliation;
 - CI classifications and PR revise loop pass;
 - external-effect crash matrix is green for enabled mutations.

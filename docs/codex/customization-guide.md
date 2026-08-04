@@ -162,12 +162,18 @@ PR publication. Use `after` for continuations such as revision -> PR update -> C
 thread acknowledgement -> review. This validates a dynamically assembled graph without
 turning the sequence into a Temporal branch.
 
-A policy may declare `appliesTo.taskOrigins`, so Jira-only blocks are absent from local
-fixtures or a future GitLab Issue analyzer context. A marker with `kind: "effect"`
+A policy may declare `appliesTo.taskOrigins` and optional `taskFamilies`, so Jira-only
+blocks are absent from local fixtures or a future GitLab Issue analyzer context, while
+bug-only evidence blocks are also absent from Jira feature tasks. A marker with `kind: "effect"`
 matches any registered step declaring that effect. The Jira admission policy therefore
 protects new `workspace.write` and `command.run` blocks without listing every step name.
 Use a step marker when exact ordering matters; use an effect marker for a capability
-boundary that future blocks must not bypass.
+boundary that future blocks must not bypass. A step marker may include a partial
+`with` object when the same block has distinct semantic phases. For example,
+`{"kind":"step","reference":"bug.reproduce@1","with":{"phase":"before"}}`
+matches before-reproduction but not after-fix verification. The deterministic validator
+uses the same selector as fixture assembly, so a policy cannot claim a requirement the
+generated graph interprets differently.
 
 ## 5. Project policy
 
@@ -317,8 +323,10 @@ The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`.
 account, eligible issue types, excluded labels, admission/review status paths, and
 compact review comment prefix live in
 `harness/policies/jira-lifecycle.json`; changing those rules does not change adapter or
-Temporal code. Keep the flag off until a selected pilot task and its transition
-requirements have been inspected.
+Temporal code. Optional media upload is deliberately separate in
+`harness/policies/jira-reproduction-evidence.json`; disabling it removes its owned
+`jira.attach-reproduction@1` block without changing Jira lifecycle. Keep the flag off
+until a selected pilot task and its transition requirements have been inspected.
 
 ## 9. Add another agent provider
 

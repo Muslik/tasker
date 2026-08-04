@@ -68,7 +68,8 @@ file-backed, origin-scoped policy plus a reconciled assignment/status adapter. I
 after plan acceptance, blocks product execution on ineligible tasks or 400/403, and
 resumes in the same worktree. Jira review readiness transitions to Code Review and
 posts one reconciled PR link after CI. The real Jira flag remains disabled; optional
-reproduction attachment and the company pilot are still open.
+before-reproduction media now flows through a separate file-backed policy and
+content-addressed reconciled attachment adapter. The company pilot is still open.
 
 ## Historical implementation records
 
@@ -99,5 +100,6 @@ policy-to-PR boundary described in
 family in [`t4-external-effects.md`](t4-external-effects.md). The local Bitbucket
 review/revision/reply lifecycle is also complete. Jira admission is implemented behind
 `TASKER_ENABLE_JIRA_EFFECTS=true`; Jira review readiness uses the same guarded adapter
-family. Next are optional reproduction evidence attachment and one explicitly allowed
-real pilot. Future work must not reintroduce a second runtime.
+family. Before-reproduction attachment is also complete as an independently removable
+Jira-origin policy. Next is one explicitly allowed real pilot. Future work must not
+reintroduce a second runtime.

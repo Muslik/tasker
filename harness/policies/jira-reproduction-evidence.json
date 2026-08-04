@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "jira-reproduction-evidence",
+  "version": "1",
+  "enabled": true,
+  "description": "Publish successful before-reproduction media to Jira without coupling reproduction to the tracker.",
+  "appliesTo": {
+    "taskOrigins": ["jira"],
+    "taskFamilies": ["short_bugfix"]
+  },
+  "configuration": {
+    "provider": "jira",
+    "phase": "before",
+    "mediaKinds": ["video", "image"],
+    "maxAttachments": 3,
+    "maxBytesPerAttachment": 52428800
+  },
+  "obligations": [
+    {
+      "id": "jira-before-reproduction-media",
+      "kind": "path_sequence",
+      "direction": "after",
+      "trigger": {
+        "kind": "step",
+        "reference": "bug.reproduce@1",
+        "with": { "phase": "before" }
+      },
+      "ordered": [{ "kind": "step", "reference": "jira.attach-reproduction@1" }],
+      "reason": "A successful Jira bug reproduction publishes available before media before product repair begins."
+    },
+    {
+      "id": "jira-repair-requires-published-reproduction",
+      "kind": "path_sequence",
+      "direction": "before",
+      "trigger": {
+        "kind": "step",
+        "reference": "code.implement@1"
+      },
+      "ordered": [
+        {
+          "kind": "step",
+          "reference": "bug.reproduce@1",
+          "with": { "phase": "before" }
+        },
+        { "kind": "step", "reference": "jira.attach-reproduction@1" }
+      ],
+      "reason": "Product repair must not start before available before-reproduction media has crossed the Jira evidence boundary."
+    }
+  ]
+}

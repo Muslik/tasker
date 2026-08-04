@@ -1,6 +1,6 @@
 import { JsonValueSchema, toContractReference, type JsonValue } from '../workflow/index.js';
 import { z } from 'zod';
-import { getHarnessPack, harnessPolicyAppliesToOrigin } from '../harness/index.js';
+import { getHarnessPack, harnessPolicyAppliesToTask } from '../harness/index.js';
 import { M1_AVAILABLE_CAPABILITIES } from './proposal.js';
 import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import type { TaskFixture } from './fixtures.js';
@@ -53,15 +53,13 @@ export const createWorkflowAnalyzerContext = (
       : { kind: 'none' as const };
 
   const pack = getHarnessPack();
-  const policies = pack.policies.filter((policy) =>
-    harnessPolicyAppliesToOrigin(policy, fixture.origin),
-  );
+  const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, fixture));
   const availableSteps = new Set(
     pack.steps
       .filter((step) => {
         if (step.policy === undefined) return true;
         const owner = pack.policies.find((policy) => policy.id === step.policy);
-        return owner !== undefined && harnessPolicyAppliesToOrigin(owner, fixture.origin);
+        return owner !== undefined && harnessPolicyAppliesToTask(owner, fixture);
       })
       .map(({ reference }) => reference),
   );

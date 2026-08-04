@@ -2,10 +2,11 @@
 
 Status: generic effect journal, reconciled Bitbucket PR publication, Jenkins/Allure
 observation, human-review/revision/reply lifecycle, and Jira task admission implemented
-behind explicit pilot flags on 2026-08-04. Jira review readiness was added behind the
-same Jira flag on 2026-08-04. Optional reproduction evidence mutation and the real
-company pilot remain open. Thread resolution is not implemented because the supported local
-Bitbucket contract exposes replies but no verified resolve endpoint.
+behind explicit pilot flags on 2026-08-04. Jira review readiness and optional
+before-reproduction evidence publishing were added behind the same Jira flag on
+2026-08-04. The real company pilot remains open. Thread resolution is not implemented
+because the supported local Bitbucket contract exposes replies but no verified resolve
+endpoint.
 
 ## Boundary
 
@@ -23,10 +24,10 @@ Delivery classes now mean:
 - `remote_reconciled`: a typed adapter owns read-before-write reconciliation and may be
   redelivered after Worker/process failure.
 
-`pr.prepare@1`, `review.acknowledge@1`, `jira.start-work@1`, and
-`jira.review-ready@1` use
-`remote_reconciled`; `ci.observe@1` uses `read_only`. Adding these integrations did not add a vendor branch to the Workflow
-interpreter.
+`pr.prepare@1`, `review.acknowledge@1`, `jira.start-work@1`,
+`jira.attach-reproduction@1`, and `jira.review-ready@1` use `remote_reconciled`;
+`ci.observe@1` uses `read_only`. Adding these integrations did not add a vendor branch
+to the Workflow interpreter.
 
 ## Jira admission
 
@@ -46,8 +47,33 @@ infrastructure wait. Neither reaches the next code step. Operator guidance retri
 admission against the same prepared worktree.
 
 Registration additionally requires `TASKER_ENABLE_JIRA_EFFECTS=true`. Credentials alone
-never enable writes. Optional reproduction attachments remain a separate future block
-because media upload has a different identity and proof surface.
+never enable writes.
+
+## Jira before-reproduction evidence
+
+The independent file-backed `jira-reproduction-evidence` policy applies only to Jira
+`short_bugfix` tasks. Its obligation selects `bug.reproduce@1` with
+`with.phase=before` and requires
+`jira.attach-reproduction@1` after that successful step; a second obligation requires
+both before `code.implement@1`. Fixture assembly places the attachment immediately
+after reproduction. Feature graphs, local-origin bug graphs, and after-fix reproduction
+do not acquire this effect. The policy can be disabled together with its owned step
+without changing Jira admission, review readiness, the compiler, or the Temporal
+Workflow.
+
+`bug.reproduce@1` now has a discriminated output contract: a before result can succeed
+only as `reproduced`, an after result only as `verified_fixed`, and every preserved
+video/image/log carries a managed-worktree-relative path plus MIME type. The attachment
+adapter selects only policy-permitted video/images, validates lexical and real paths,
+regular-file type, size, and non-empty content, then names each remote file from its
+SHA-256 digest. It stores no media bytes in Temporal history or the effect journal.
+
+Each attachment has its own intent/probe/receipt identity. Existing files with the same
+content-derived name and size are reused; a name collision with another size is a
+remote conflict. A lost upload response is accepted only after Jira lists the expected
+attachment. A 403 pauses only this block, and a later attempt probes Jira before write,
+so reproduction and implementation are not repeated. No selected media is a successful
+`no_media` outcome rather than a fabricated upload.
 
 ## Jira review readiness
 
@@ -227,6 +253,9 @@ Automated tests prove:
 - Jira review readiness rejects missing PR evidence before mutation, reconciles lost
   comment responses, deduplicates the PR link across attempts, and resumes a 403 at the
   same Temporal node without repeating implementation or PR preparation.
+- Jira reproduction publishing verifies the actual worktree bytes, reconciles a lost
+  upload response without a duplicate, resumes 403 at only the attachment node, and
+  does not repeat before-reproduction or product implementation.
 
 No request was sent to company Jira, Bitbucket, or Jenkins in this milestone. The first real
 pilot still requires the policy block, explicit flag, and operator-visible confirmation
@@ -234,7 +263,6 @@ of the selected task/repository.
 
 ## Remaining T4 sequence
 
-1. add the optional Jira before-reproduction attachment block;
-2. enable the real flags for one allowed task and complete the T4 exit gate;
-3. add automatic Bitbucket thread resolution only if a supported company endpoint and
+1. enable the real flags for one allowed task and complete the T4 exit gate;
+2. add automatic Bitbucket thread resolution only if a supported company endpoint and
    desired review policy are verified during the pilot.

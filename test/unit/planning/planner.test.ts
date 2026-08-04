@@ -197,6 +197,91 @@ describe('M1 task workflow planning', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('publishes Jira before-reproduction media before product repair', () => {
+    const result = planTaskWorkflow({
+      ...fixture('avia-13236-short-bug'),
+      origin: 'jira',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const source = WorkflowSourceSchema.parse(result.value.proposal.source);
+    if (source.root.kind !== 'sequence') throw new Error('Expected a sequence proposal');
+    const beforeIndex = source.root.children.findIndex(
+      (node) => node.kind === 'step' && node.id === 'reproduce-before',
+    );
+    const attachmentIndexes = source.root.children.flatMap((node, index) =>
+      node.kind === 'step' && node.uses === 'jira.attach-reproduction@1' ? [index] : [],
+    );
+    const repairIndex = source.root.children.findIndex(
+      (node) => node.kind === 'bounded_loop' && node.id === 'implementation-loop',
+    );
+
+    expect(attachmentIndexes).toHaveLength(1);
+    expect(attachmentIndexes[0]).toBe(beforeIndex + 1);
+    expect(attachmentIndexes[0]).toBeLessThan(repairIndex);
+  });
+
+  it('rejects a Jira bug workflow that omits before-reproduction publishing', () => {
+    const planned = planTaskWorkflow({
+      ...fixture('avia-13236-short-bug'),
+      origin: 'jira',
+    });
+    if (!planned.ok) throw new Error('Expected the Jira bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+
+    const result = planWorkflowProposal({
+      ...planned.value.proposal,
+      source: { ...source, root: removeStep(source.root, 'jira.attach-reproduction@1') },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'jira-before-reproduction-media' },
+      }),
+    );
+  });
+
+  it('rejects a Jira bug workflow that delays evidence publishing until after repair', () => {
+    const planned = planTaskWorkflow({
+      ...fixture('avia-13236-short-bug'),
+      origin: 'jira',
+    });
+    if (!planned.ok) throw new Error('Expected the Jira bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+    if (source.root.kind !== 'sequence') throw new Error('Expected a sequence proposal');
+    const attachment = source.root.children.find(
+      (node) => node.kind === 'step' && node.uses === 'jira.attach-reproduction@1',
+    );
+    if (attachment === undefined) throw new Error('Expected Jira evidence step');
+    const childrenWithoutAttachment = source.root.children.filter((node) => node !== attachment);
+    const repairIndex = childrenWithoutAttachment.findIndex(
+      (node) => node.kind === 'bounded_loop' && node.id === 'implementation-loop',
+    );
+    const delayedChildren = [
+      ...childrenWithoutAttachment.slice(0, repairIndex + 1),
+      attachment,
+      ...childrenWithoutAttachment.slice(repairIndex + 1),
+    ];
+
+    const result = planWorkflowProposal({
+      ...planned.value.proposal,
+      source: { ...source, root: { ...source.root, children: delayedChildren } },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'jira-repair-requires-published-reproduction' },
+      }),
+    );
+  });
+
   it('rejects a Jira workflow that reaches code review before Jira review readiness', () => {
     const planned = planTaskWorkflow({
       ...fixture('avia-12536-feature-review'),

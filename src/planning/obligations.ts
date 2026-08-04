@@ -2,7 +2,8 @@ import type { TaskFixture } from './fixtures.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import {
   getHarnessPack,
-  harnessPolicyAppliesToOrigin,
+  harnessPolicyAppliesToTask,
+  harnessPolicyStepMarkerMatches,
   type HarnessPolicyManifest,
   type HarnessPolicyMarker,
 } from '../harness/index.js';
@@ -113,6 +114,12 @@ const markerMatches = (marker: ExecutionMarker, required: HarnessPolicyMarker): 
       M1_WORKFLOW_CONTRACTS.stepTypes
         .get(marker.reference)
         ?.allowedEffects.includes(required.reference) === true
+    );
+  }
+  if (required.kind === 'step') {
+    return (
+      marker.kind === 'step' &&
+      harnessPolicyStepMarkerMatches(required, marker.reference, marker.input)
     );
   }
   return marker.kind === required.kind && marker.reference === required.reference;
@@ -246,7 +253,7 @@ export const validateWorkflowObligations = (
   }
 
   const applicablePolicies = policies.filter((policy) =>
-    harnessPolicyAppliesToOrigin(policy, fixture.origin),
+    harnessPolicyAppliesToTask(policy, fixture),
   );
   const applicablePolicyIds = new Set(applicablePolicies.map(({ id }) => id));
 

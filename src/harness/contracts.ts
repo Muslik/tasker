@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import type { StepTypeContract } from '../workflow/contracts.js';
 import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const PolicyIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
@@ -85,6 +85,7 @@ const HarnessPolicyMarkerSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('step'),
       reference: VersionedReferenceSchema,
+      with: z.record(z.string(), JsonValueSchema).optional(),
     })
     .strict(),
   z
@@ -126,7 +127,10 @@ export const HarnessPolicyManifestSchema = z
     enabled: z.boolean(),
     description: z.string().min(1),
     appliesTo: z
-      .object({ taskOrigins: z.array(z.string().min(1)).min(1) })
+      .object({
+        taskOrigins: z.array(z.string().min(1)).min(1),
+        taskFamilies: z.array(z.string().min(1)).min(1).optional(),
+      })
       .strict()
       .optional(),
     configuration: JsonValueSchema,
@@ -229,10 +233,34 @@ export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
 export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
 export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 
-export const harnessPolicyAppliesToOrigin = (
+export const harnessPolicyAppliesToTask = (
   policy: HarnessPolicyManifest,
-  taskOrigin: string,
-): boolean => policy.appliesTo === undefined || policy.appliesTo.taskOrigins.includes(taskOrigin);
+  task: { readonly origin: string; readonly family: string },
+): boolean =>
+  policy.appliesTo === undefined ||
+  (policy.appliesTo.taskOrigins.includes(task.origin) &&
+    (policy.appliesTo.taskFamilies === undefined ||
+      policy.appliesTo.taskFamilies.includes(task.family)));
+
+const matchesJson = (actual: JsonValue | undefined, expected: JsonValue): boolean => {
+  if (expected === null || typeof expected !== 'object') return actual === expected;
+  if (Array.isArray(expected)) {
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      expected.every((value, index) => matchesJson(actual[index], value))
+    );
+  }
+  if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+  return Object.entries(expected).every(([key, value]) => matchesJson(actual[key], value));
+};
+
+export const harnessPolicyStepMarkerMatches = (
+  marker: Extract<HarnessPolicyMarker, { readonly kind: 'step' }>,
+  reference: string,
+  input: JsonValue | undefined,
+): boolean =>
+  marker.reference === reference && (marker.with === undefined || matchesJson(input, marker.with));
 
 export interface LoadedPrompt {
   readonly content: string;

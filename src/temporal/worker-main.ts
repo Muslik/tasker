@@ -27,6 +27,7 @@ import {
   JenkinsBuildObserverAdapter,
   JiraLifecycleClient,
   JiraReviewReadyAdapter,
+  JiraReproductionEvidenceAdapter,
   JiraServerClient,
   JiraStartWorkAdapter,
   loadJenkinsBuildConfiguration,
@@ -131,6 +132,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       : [
           new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects),
           new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects),
+          new JiraReproductionEvidenceAdapter(jiraLifecycleClient, externalEffects),
         ]),
   ]);
   const repositoryCatalog = createManagedRepositoryStore(

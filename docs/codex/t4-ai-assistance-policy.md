@@ -97,6 +97,6 @@ restart.
 - Add TypeScript only for a new adapter behavior or a genuinely new named runtime data
   contract, not for another policy sequence.
 
-The next T4 slice is Jenkins observation/classification, followed by Bitbucket review
-ingestion and the bounded revision loop. The real mutation flag remains off until that
-local path and its crash matrix pass.
+The downstream Jenkins, Bitbucket review/revision, and Jira lifecycle/evidence slices
+now pass their local crash matrices. The real mutation flags remain off until one
+explicitly selected company pilot task is inspected and allowed.

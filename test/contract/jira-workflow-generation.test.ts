@@ -74,6 +74,7 @@ describe('Jira workflow generation', () => {
     expect(validSource.root.children).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: 'step', uses: 'jira.start-work@1' }),
+        expect.objectContaining({ kind: 'step', uses: 'jira.attach-reproduction@1' }),
         expect.objectContaining({ kind: 'step', uses: 'jira.review-ready@1' }),
       ]),
     );

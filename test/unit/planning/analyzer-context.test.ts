@@ -48,7 +48,7 @@ describe('workflow analyzer context', () => {
   });
 
   it('exposes Jira lifecycle policy only to Jira-origin task analysis', () => {
-    const source = findTaskFixture('avia-12536-feature-review');
+    const source = findTaskFixture('avia-13236-short-bug');
     if (source === undefined) throw new Error('Expected workflow fixture');
     const fixture = TaskFixtureSchema.parse({ ...source, origin: 'jira' });
 
@@ -69,11 +69,47 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
       'jira.review-ready@1',
     );
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
+      'jira.attach-reproduction@1',
+    );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain(
       'jira-admission-before-workspace-write',
     );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain(
       'jira-review-ready-before-code-review',
+    );
+    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
+      'jira-before-reproduction-media',
+    );
+    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
+      'jira-repair-requires-published-reproduction',
+    );
+  });
+
+  it('does not expose bug reproduction policy to a Jira feature task', () => {
+    const source = findTaskFixture('avia-12536-feature-review');
+    if (source === undefined) throw new Error('Expected workflow fixture');
+    const fixture = TaskFixtureSchema.parse({ ...source, origin: 'jira' });
+
+    const context = createWorkflowAnalyzerContext(fixture);
+    const plannerContext = z
+      .object({
+        buildingBlocks: z.object({
+          steps: z.array(z.object({ reference: z.string() }).loose()),
+        }),
+        obligations: z.array(z.object({ id: z.string() }).loose()),
+      })
+      .loose()
+      .parse(context.plannerContext);
+
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toContain(
+      'jira.attach-reproduction@1',
+    );
+    expect(plannerContext.obligations.map(({ id }) => id)).not.toContain(
+      'jira-before-reproduction-media',
+    );
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
+      'jira.start-work@1',
     );
   });
 });

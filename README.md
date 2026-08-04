@@ -56,8 +56,13 @@ reconciled revision/reply loop. Jira-origin workflows require the file-backed
 its assignment/status effects reconcile lost responses and pause on 400/403 without
 starting code. After PR publication and CI, `jira.review-ready@1` reconciles the Jira
 Code Review transition and one compact PR-link comment before the human review wait.
+For Jira bugs, the independent `jira-reproduction-evidence` policy inserts
+`jira.attach-reproduction@1` only after a successful before-reproduction step. The
+adapter uploads selected video/images from the managed worktree with content-addressed
+names and reconciles 403, lost responses, and partial multi-file progress without
+repeating reproduction or implementation.
 Jira and Bitbucket mutations remain separately disabled by default. Optional
-reproduction evidence attachment and the allowed real pilot are the remaining T4 work. See
+thread resolution and the allowed real pilot are the remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 

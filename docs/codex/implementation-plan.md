@@ -254,8 +254,15 @@ Implemented review-ready slice on 2026-08-04: the same file-backed policy requir
 follows the configured status path, and reconciles one compact PR-link comment through
 independent transition/comment intents and receipts. A 403 resumes only this node;
 lost responses and new operator attempts probe Jira first and do not repeat completed
-implementation or PR preparation. Optional reproduction attachment remains a separate
-block.
+implementation or PR preparation.
+
+Implemented reproduction-evidence slice on 2026-08-04: the independent file-backed
+`jira-reproduction-evidence` policy selects only `bug.reproduce@1` with `phase=before`
+and requires `jira.attach-reproduction@1` before repair. Reproduction output is typed by
+phase/outcome/evidence. The adapter accepts only safe managed-worktree media, uses
+content-addressed Jira filenames, journals each attachment separately, and reconciles
+403, lost responses, and partial batches without repeating reproduction or
+implementation. Disabling this policy removes only its owned block.
 
 ### 7.3 Bitbucket and PR review
 
@@ -408,9 +415,9 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-The Temporal cutover, local review/revision/reply lifecycle, Jira task admission, and
-Jira review-ready effect are complete. Add the optional before-reproduction evidence
-attachment block, then enable the explicit remote-effect flags for one allowed pilot task. The
-pilot path remains Jira intake -> managed worktree -> agent implementation -> targeted
+The Temporal cutover, local review/revision/reply lifecycle, Jira task admission,
+before-reproduction evidence attachment, and Jira review-ready effect are complete.
+Enable the explicit remote-effect flags for one allowed pilot task. The pilot path
+remains Jira intake -> managed worktree -> agent implementation -> targeted
 verification -> validated PR draft -> safe push/PR -> Jenkins classification -> human
 review/revision.
