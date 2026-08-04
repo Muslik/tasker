@@ -101,5 +101,7 @@ family in [`t4-external-effects.md`](t4-external-effects.md). The local Bitbucke
 review/revision/reply lifecycle is also complete. Jira admission is implemented behind
 `TASKER_ENABLE_JIRA_EFFECTS=true`; Jira review readiness uses the same guarded adapter
 family. Before-reproduction attachment is also complete as an independently removable
-Jira-origin policy. Next is one explicitly allowed real pilot. Future work must not
-reintroduce a second runtime.
+Jira-origin policy. Both Jira and Bitbucket mutation families additionally require the exact
+pilot task in `TASKER_EXTERNAL_EFFECT_TASKS`, so a shared Worker cannot mutate another queued
+task merely because a family flag is enabled. Next is one explicitly allowed real pilot. Future
+work must not reintroduce a second runtime.

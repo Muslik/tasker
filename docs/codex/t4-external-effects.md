@@ -31,6 +31,13 @@ to the Workflow interpreter.
 
 ## Jira admission
 
+Jira intake persists the optional repository override independently of a successful Jira
+snapshot. If the first fetch returns 403/VPN, the task remains visible with an `unavailable`
+snapshot and the resolved managed checkout; a later Sync may omit the repository and reuses that
+binding. Intake, sync, and repository-resolution audit events remain in the ledger but are not
+projected into the central Activity timeline. The task header/details own current sync status and
+last-check time, so repeated retries do not create operator-log noise.
+
 The file-backed `jira-lifecycle` policy applies only to tasks normalized with origin
 `jira`. Its effect-based path obligations require `plan.approved@1` and
 `jira.start-work@1` before any `workspace.write` or `command.run` product effect. This
@@ -46,8 +53,9 @@ reconciled from the live assignee/status; 400 is an admission error, while 403/V
 infrastructure wait. Neither reaches the next code step. Operator guidance retries only
 admission against the same prepared worktree.
 
-Registration additionally requires `TASKER_ENABLE_JIRA_EFFECTS=true`. Credentials alone
-never enable writes.
+Registration additionally requires `TASKER_ENABLE_JIRA_EFFECTS=true` and an exact Tasker
+task reference in `TASKER_EXTERNAL_EFFECT_TASKS`. Credentials alone never enable writes,
+and enabling the adapter family does not authorize unrelated tasks handled by the same Worker.
 
 ## Jira before-reproduction evidence
 
@@ -176,9 +184,13 @@ Worker registration additionally requires:
 
 ```text
 TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true
+TASKER_EXTERNAL_EFFECT_TASKS=jira:AVIA-12045
 ```
 
-The default remains disabled even when `BITBUCKET_TOKEN` exists. The company
+The allowlist is comma-separated when a deliberately bounded pilot contains more than one task.
+Worker startup fails closed when either Jira or Bitbucket mutations are enabled without at least
+one exact task reference. An unlisted task pauses at the integration boundary before the remote
+adapter is invoked. The default remains disabled even when `BITBUCKET_TOKEN` exists. The company
 `ai-assistance` rule is now represented as selectable workflow blocks and a path
 obligation; it is not hard-coded in this adapter. `pr.describe@1` produces a strict
 provider-neutral draft, the enabled policy validates its own required section, and

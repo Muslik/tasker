@@ -141,17 +141,39 @@ export const resolveJiraRepositoryBinding = async ({
     });
   }
 
+  return await resolveJiraIntakeRepositoryBinding({
+    issueKey: issue.issueKey,
+    intakeFallback,
+    previousBinding,
+    recordedAt,
+    catalog,
+  });
+};
+
+export const resolveJiraIntakeRepositoryBinding = async ({
+  issueKey,
+  intakeFallback,
+  previousBinding,
+  recordedAt,
+  catalog,
+}: {
+  readonly issueKey: string;
+  readonly intakeFallback?: string | undefined;
+  readonly previousBinding: JiraRepositoryBinding | null;
+  readonly recordedAt: string;
+  readonly catalog: RepositoryCatalog;
+}): Promise<JiraRepositoryBinding> => {
   const fallback = intakeFallback?.trim() || previousIntakeReference(previousBinding);
   if (fallback === null) {
     return JiraRepositoryBindingSchema.parse({
       status: 'missing',
-      issueKey: issue.issueKey,
+      issueKey,
       recordedAt,
     });
   }
   return await resolveReference({
     catalog,
-    issueKey: issue.issueKey,
+    issueKey,
     recordedAt,
     source: 'intake_fallback',
     reference: fallback,

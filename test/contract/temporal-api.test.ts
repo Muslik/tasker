@@ -635,10 +635,7 @@ describe('Temporal HTTP boundary', () => {
     expect(
       ledger.repository.listEvents('intake:jira:AVIA-13235').map(({ eventType }) => eventType),
     ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
-    expect(activity.entries.map(({ title }) => title)).toEqual([
-      'Jira issue imported',
-      'Repository mapped',
-    ]);
+    expect(activity.entries).toEqual([]);
 
     await api.close();
   });

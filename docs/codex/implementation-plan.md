@@ -417,7 +417,9 @@ Every milestone follows the same engineering order:
 
 The Temporal cutover, local review/revision/reply lifecycle, Jira task admission,
 before-reproduction evidence attachment, and Jira review-ready effect are complete.
-Enable the explicit remote-effect flags for one allowed pilot task. The pilot path
+Enable the explicit remote-effect flags together with `TASKER_EXTERNAL_EFFECT_TASKS` for one
+allowed pilot task. The Worker fails closed without the task allowlist, and an unlisted task is
+blocked before any remote adapter call. The pilot path
 remains Jira intake -> managed worktree -> agent implementation -> targeted
 verification -> validated PR draft -> safe push/PR -> Jenkins classification -> human
 review/revision.
