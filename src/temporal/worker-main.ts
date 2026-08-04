@@ -23,6 +23,7 @@ import {
   createJiraIssueService,
   ExternalEffectStore,
   IntegrationStepAdapterRegistry,
+  type IntegrationStepAdapter,
   JenkinsBuildClient,
   JenkinsBuildObserverAdapter,
   JiraLifecycleClient,
@@ -32,6 +33,8 @@ import {
   JiraStartWorkAdapter,
   loadJenkinsBuildConfiguration,
   loadJiraConfiguration,
+  loadExternalEffectTaskAuthorization,
+  TaskScopedIntegrationAdapter,
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
 import {
@@ -98,6 +101,17 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jenkinsConfiguration = loadJenkinsBuildConfiguration();
   const jiraConfiguration = loadJiraConfiguration();
   const jiraLifecycleEffectsEnabled = process.env.TASKER_ENABLE_JIRA_EFFECTS === 'true';
+  const externalEffectAuthorization = loadExternalEffectTaskAuthorization(
+    bitbucketPullRequestEffectsEnabled || jiraLifecycleEffectsEnabled,
+  );
+  const authorizeExternalEffect = (
+    adapter: IntegrationStepAdapter,
+  ): TaskScopedIntegrationAdapter => {
+    if (externalEffectAuthorization.kind !== 'allowlist') {
+      throw new Error('External effect adapter registration requires task authorization');
+    }
+    return new TaskScopedIntegrationAdapter(adapter, externalEffectAuthorization.taskReferences);
+  };
   const jiraLifecycleClient =
     jiraConfiguration === null ? null : new JiraLifecycleClient(jiraConfiguration);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
@@ -116,23 +130,29 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     ...(bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
       ? []
       : [
-          new BitbucketPullRequestAdapter(
-            bitbucketConfiguration,
-            nodeCommandRunner,
-            new BitbucketPullRequestClient(bitbucketConfiguration),
-            externalEffects,
+          authorizeExternalEffect(
+            new BitbucketPullRequestAdapter(
+              bitbucketConfiguration,
+              nodeCommandRunner,
+              new BitbucketPullRequestClient(bitbucketConfiguration),
+              externalEffects,
+            ),
           ),
-          new BitbucketReviewReplyAdapter(
-            new BitbucketReviewClient(bitbucketConfiguration),
-            externalEffects,
+          authorizeExternalEffect(
+            new BitbucketReviewReplyAdapter(
+              new BitbucketReviewClient(bitbucketConfiguration),
+              externalEffects,
+            ),
           ),
         ]),
     ...(jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
       ? []
       : [
-          new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects),
-          new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects),
-          new JiraReproductionEvidenceAdapter(jiraLifecycleClient, externalEffects),
+          authorizeExternalEffect(new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects)),
+          authorizeExternalEffect(new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects)),
+          authorizeExternalEffect(
+            new JiraReproductionEvidenceAdapter(jiraLifecycleClient, externalEffects),
+          ),
         ]),
   ]);
   const repositoryCatalog = createManagedRepositoryStore(

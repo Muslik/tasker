@@ -5,3 +5,4 @@ export * from './ai-assistance/index.js';
 export * from './effects.js';
 export * from './execution.js';
 export * from './pull-request-draft.js';
+export * from './task-scoped-adapter.js';

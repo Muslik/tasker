@@ -61,8 +61,10 @@ For Jira bugs, the independent `jira-reproduction-evidence` policy inserts
 adapter uploads selected video/images from the managed worktree with content-addressed
 names and reconciles 403, lost responses, and partial multi-file progress without
 repeating reproduction or implementation.
-Jira and Bitbucket mutations remain separately disabled by default. Optional
-thread resolution and the allowed real pilot are the remaining T4 work. See
+Jira and Bitbucket mutations remain separately disabled by default. Enabling either family also
+requires an exact comma-separated task allowlist in `TASKER_EXTERNAL_EFFECT_TASKS`; unlisted tasks
+stop before the remote adapter. Optional thread resolution and the allowed real pilot are the
+remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 
