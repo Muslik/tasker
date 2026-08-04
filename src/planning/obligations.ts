@@ -1,5 +1,6 @@
 import type { TaskFixture } from './fixtures.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
+import { getHarnessPack, type HarnessPolicyManifest } from '../harness/index.js';
 import type {
   CompiledWorkflow,
   CompiledWorkflowNode,
@@ -12,7 +13,7 @@ export const WORKFLOW_OBLIGATIONS = [
   {
     id: 'planning-boundary',
     trigger: 'every task',
-    requires: ['task.analyze@1 first', 'plan.approved@1 gate second'],
+    requires: ['task.analyze@1 immediately followed by the plan.approved@1 gate'],
     reason: 'Planning is mandatory even when human approval is disabled for the run.',
   },
   {
@@ -43,7 +44,7 @@ export const WORKFLOW_OBLIGATIONS = [
 
 interface ExecutionMarker {
   readonly id: string;
-  readonly kind: 'step' | 'wait';
+  readonly kind: 'gate' | 'step' | 'wait';
   readonly reference: string;
   readonly input?: JsonValue;
 }
@@ -60,6 +61,8 @@ const executionPaths = (node: CompiledWorkflowNode): readonly (readonly Executio
       return [[{ id: node.id, kind: 'step', reference: node.uses, input: node.with }]];
     case 'wait':
       return [[{ id: node.id, kind: 'wait', reference: node.for }]];
+    case 'gate':
+      return [[{ id: node.id, kind: 'gate', reference: node.resumeWhen }]];
     case 'sequence':
       return node.children.reduce<readonly (readonly ExecutionMarker[])[]>(
         (paths, child) => concatenatePaths(paths, executionPaths(child)),
@@ -70,7 +73,6 @@ const executionPaths = (node: CompiledWorkflowNode): readonly (readonly Executio
     case 'bounded_loop':
       return executionPaths(node.body);
     case 'finalize':
-    case 'gate':
       return [[]];
   }
 };
@@ -102,6 +104,7 @@ const phaseOf = (marker: ExecutionMarker): string | undefined => {
 export const validateWorkflowObligations = (
   graph: CompiledWorkflow,
   fixture: TaskFixture,
+  policies: readonly HarnessPolicyManifest[] = getHarnessPack().policies,
 ): ValidationReport => {
   const issues: ValidationIssue[] = [];
   const paths = executionPaths(graph.root);
@@ -110,7 +113,28 @@ export const validateWorkflowObligations = (
     path.forEach((marker, markerIndex) => {
       if (marker.kind !== 'step') return;
       const later = path.slice(markerIndex + 1);
+      const earlier = path.slice(0, markerIndex);
       const contract = M1_WORKFLOW_CONTRACTS.stepTypes.get(marker.reference);
+
+      for (const requiredArtifact of contract?.requiredArtifactContracts ?? []) {
+        const hasProducer = earlier.some((candidate) => {
+          if (candidate.kind !== 'step') return false;
+          return (
+            M1_WORKFLOW_CONTRACTS.stepTypes
+              .get(candidate.reference)
+              ?.artifactContracts.includes(requiredArtifact) === true
+          );
+        });
+        if (!hasProducer) {
+          issues.push(
+            issue(
+              'artifact-producer-before-consumer',
+              `Step ${marker.id} requires artifact ${requiredArtifact} from an earlier step on this execution path`,
+              ['root', 'executionPaths', pathIndex, marker.id],
+            ),
+          );
+        }
+      }
 
       if (
         contract?.allowedEffects.includes('workspace.write') === true &&
@@ -188,6 +212,57 @@ export const validateWorkflowObligations = (
           ),
         );
       }
+    }
+  }
+
+  for (const policy of policies) {
+    for (const obligation of policy.obligations) {
+      paths.forEach((path, pathIndex) => {
+        const triggered = path.some(
+          (marker) =>
+            marker.kind === obligation.trigger.kind &&
+            marker.reference === obligation.trigger.reference,
+        );
+        if (!triggered) return;
+
+        const positions = obligation.ordered.map((required) =>
+          path.flatMap((marker, markerIndex) =>
+            marker.kind === required.kind && marker.reference === required.reference
+              ? [markerIndex]
+              : [],
+          ),
+        );
+        const invalidCardinality = positions.findIndex((matches) => matches.length !== 1);
+        if (invalidCardinality >= 0) {
+          const required = obligation.ordered[invalidCardinality];
+          if (required === undefined) return;
+          issues.push(
+            issue(
+              obligation.id,
+              `Policy ${policy.id}@${policy.version} requires exactly one ${required.kind} ${required.reference} on this execution path`,
+              ['root', 'executionPaths', pathIndex],
+            ),
+          );
+          return;
+        }
+
+        const orderedPositions = positions.map(([position]) => position ?? -1);
+        const outOfOrder = orderedPositions.findIndex(
+          (position, index) => index > 0 && position <= (orderedPositions[index - 1] ?? -1),
+        );
+        if (outOfOrder >= 0) {
+          const current = obligation.ordered[outOfOrder];
+          const previous = obligation.ordered[outOfOrder - 1];
+          if (current === undefined || previous === undefined) return;
+          issues.push(
+            issue(
+              obligation.id,
+              `Policy ${policy.id}@${policy.version} requires ${previous.reference} before ${current.reference}`,
+              ['root', 'executionPaths', pathIndex],
+            ),
+          );
+        }
+      });
     }
   }
 

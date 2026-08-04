@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "reference": "ai.assistance.initialize@1",
+  "policy": "ai-assistance",
+  "description": "Create the versioned AI-assistance task workspace before implementation planning.",
+  "retryBudget": 2,
+  "inputContract": "task_input",
+  "outputContract": "integration_output",
+  "execution": {
+    "kind": "integration",
+    "adapter": "ai-assistance.initialize@1"
+  },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["policy_artifact.write"],
+  "requiredCapabilities": ["workspace.write"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["ai-assistance-readme"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "receipt" }
+}

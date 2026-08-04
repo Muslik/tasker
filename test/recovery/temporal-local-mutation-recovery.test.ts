@@ -263,6 +263,15 @@ describe('Temporal local mutation recovery', () => {
       };
 
       const createActivities = (agentRunner: TaskStepAgentRunner): TaskWorkflowActivities => {
+        const simulatedExternalBoundaries = new Set([
+          'ai.assistance.initialize@1',
+          'ai.assistance.record_plan@1',
+          'ai.assistance.finalize@1',
+          'pr.describe@1',
+          'ai.assistance.validate@1',
+          'pr.prepare@1',
+          'ci.observe@1',
+        ]);
         const execution = createTaskExecutionActivity({
           snapshots: planningStore,
           currentSteps: createCurrentStepRegistry(harnessPack),
@@ -272,17 +281,23 @@ describe('Temporal local mutation recovery', () => {
           commands: nodeCommandRunner,
         });
         const executeStep = (input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult> =>
-          input.uses === 'pr.prepare@1' || input.uses === 'ci.observe@1'
+          simulatedExternalBoundaries.has(input.uses)
             ? Promise.resolve(completedStep(input))
             : execution.executeStep(input);
+        const executeWorkspaceReconciledStep = (
+          input: ExecuteTaskStepInput,
+        ): Promise<ExecuteTaskStepResult> =>
+          simulatedExternalBoundaries.has(input.uses)
+            ? Promise.resolve(completedStep(input))
+            : execution.executeWorkspaceReconciledStep(input);
 
         return {
           ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
           ...createPlanningActivity(planning),
           executeStep,
-          executeWorkspaceReconciledStep: execution.executeWorkspaceReconciledStep,
+          executeWorkspaceReconciledStep,
           executeRemoteReconciledStep: (input) =>
-            input.uses === 'pr.prepare@1'
+            simulatedExternalBoundaries.has(input.uses)
               ? Promise.resolve(completedStep(input))
               : execution.executeRemoteReconciledStep(input),
           evaluatePredicate: execution.evaluatePredicate,

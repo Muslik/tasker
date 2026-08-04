@@ -85,13 +85,40 @@ const requiredCapabilitiesFromCompiledGraph = (
 };
 
 const validateRequiredPlanningBoundary = (graph: CompiledWorkflow): ValidationReport => {
-  const first = graph.root.kind === 'sequence' ? graph.root.children[0] : undefined;
-  const second = graph.root.kind === 'sequence' ? graph.root.children[1] : undefined;
+  const children = graph.root.kind === 'sequence' ? graph.root.children : [];
+  const analyzerIndexes = children.flatMap((node, index) =>
+    node.kind === 'step' && node.uses === 'task.analyze@1' ? [index] : [],
+  );
+  const analyzerIndex = analyzerIndexes[0];
+  const next = analyzerIndex === undefined ? undefined : children[analyzerIndex + 1];
+  const gateIndex = analyzerIndex === undefined ? -1 : analyzerIndex + 1;
+  const containsProductWrite = (node: CompiledWorkflow['root']): boolean => {
+    switch (node.kind) {
+      case 'step':
+        return (
+          M1_WORKFLOW_CONTRACTS.stepTypes
+            .get(node.uses)
+            ?.allowedEffects.includes('workspace.write') === true
+        );
+      case 'sequence':
+        return node.children.some(containsProductWrite);
+      case 'branch':
+        return containsProductWrite(node.then) || containsProductWrite(node.otherwise);
+      case 'bounded_loop':
+        return containsProductWrite(node.body);
+      case 'finalize':
+      case 'gate':
+      case 'wait':
+        return false;
+    }
+  };
+  const productWriteBeforePlan =
+    gateIndex >= 0 && children.slice(0, gateIndex).some(containsProductWrite);
   const valid =
-    first?.kind === 'step' &&
-    first.uses === 'task.analyze@1' &&
-    second?.kind === 'gate' &&
-    second.resumeWhen === 'plan.approved@1';
+    analyzerIndexes.length === 1 &&
+    next?.kind === 'gate' &&
+    next.resumeWhen === 'plan.approved@1' &&
+    !productWriteBeforePlan;
 
   return {
     workflowId: graph.metadata.workflowId,
@@ -101,7 +128,7 @@ const validateRequiredPlanningBoundary = (graph: CompiledWorkflow): ValidationRe
           {
             code: 'required_planning_boundary_missing',
             message:
-              'Task workflows must begin with task.analyze@1 followed by the plan.approved@1 gate',
+              'Task workflows must contain exactly one task.analyze@1 immediately followed by the plan.approved@1 gate',
             path: ['root'],
           },
         ],

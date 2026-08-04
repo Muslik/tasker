@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-import type { HarnessStepDefinition } from './contracts.js';
+import type { HarnessStepDefinition, HarnessStepManifest } from './contracts.js';
 import type { StepTypeContract } from '../workflow/index.js';
 
-const taskInputSchema = z
+export const taskInputSchema = z
   .object({
     objective: z.string().min(1),
     repository: z.string().min(1),
@@ -11,42 +11,105 @@ const taskInputSchema = z
   })
   .strict();
 
-const reproductionInputSchema = taskInputSchema.extend({ phase: z.enum(['before', 'after']) });
+export const reproductionInputSchema = taskInputSchema.extend({
+  phase: z.enum(['before', 'after']),
+});
 
-const verificationInputSchema = z
+export const verificationInputSchema = z
   .object({
     profile: z.string().min(1),
     taskId: z.string().min(1),
   })
   .strict();
 
-const processInputSchema = z
+export const processInputSchema = z
   .object({
     repository: z.string().min(1),
     taskId: z.string().min(1),
   })
   .strict();
 
-const agentOutputSchema = z
+const WorkspaceRelativePathSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), {
+    message: 'Expected a path relative to the managed worktree',
+  });
+
+export const pullRequestInputSchema = taskInputSchema.extend({
+  draftPath: WorkspaceRelativePathSchema,
+});
+
+export const agentOutputSchema = z
   .object({
     summary: z.string().min(1),
     artifacts: z.array(z.string().min(1)).default([]),
   })
   .strict();
 
-const processOutputSchema = z
+export const processOutputSchema = z
   .object({
     exitCode: z.number().int(),
     receiptId: z.string().min(1),
   })
   .strict();
 
-const integrationOutputSchema = z
+export const integrationOutputSchema = z
   .object({
     externalId: z.string().min(1),
     status: z.string().min(1),
   })
   .strict();
+
+const contractSchemas = {
+  agent_output: agentOutputSchema,
+  integration_output: integrationOutputSchema,
+  process_input: processInputSchema,
+  process_output: processOutputSchema,
+  pull_request_input: pullRequestInputSchema,
+  reproduction_input: reproductionInputSchema,
+  task_input: taskInputSchema,
+  verification_input: verificationInputSchema,
+} as const satisfies Readonly<Record<HarnessStepManifest['inputContract'], z.ZodType>>;
+
+const versionedIdentity = (
+  reference: string,
+): { readonly id: string; readonly version: string } => {
+  const separator = reference.lastIndexOf('@');
+  if (separator < 1 || separator === reference.length - 1) {
+    throw new Error(`Invalid harness step reference ${reference}`);
+  }
+  return { id: reference.slice(0, separator), version: reference.slice(separator + 1) };
+};
+
+export const stepDefinitionFromManifest = (
+  manifest: HarnessStepManifest,
+): HarnessStepDefinition => {
+  const identity = versionedIdentity(manifest.reference);
+  return {
+    reference: manifest.reference,
+    ...(manifest.policy === undefined ? {} : { policy: manifest.policy }),
+    description: manifest.description,
+    retryBudget: manifest.retryBudget,
+    execution: manifest.execution,
+    contract: {
+      ...identity,
+      retryPolicy: `bounded:${String(manifest.retryBudget)}`,
+      inputSchema: contractSchemas[manifest.inputContract],
+      outputSchema: contractSchemas[manifest.outputContract],
+      activityDelivery: { kind: manifest.activityDelivery },
+      allowedEffects: manifest.allowedEffects,
+      requiredCapabilities: manifest.requiredCapabilities,
+      resumeBoundary: manifest.resumeBoundary,
+      idempotency: manifest.idempotency,
+      waitKinds: manifest.waitKinds,
+      artifactContracts: manifest.artifactContracts,
+      requiredArtifactContracts: manifest.requiredArtifactContracts,
+      workflowChanges: manifest.workflowChanges,
+      ...(manifest.reconciliation === undefined ? {} : { reconciliation: manifest.reconciliation }),
+    },
+  };
+};
 
 const contract = (
   id: string,
@@ -66,6 +129,7 @@ const contract = (
   idempotency: options.idempotency,
   waitKinds: options.waitKinds,
   artifactContracts: options.artifactContracts,
+  requiredArtifactContracts: options.requiredArtifactContracts,
   workflowChanges: options.workflowChanges,
   ...(options.reconciliation === undefined ? {} : { reconciliation: options.reconciliation }),
 });
@@ -79,6 +143,7 @@ const agentStep = (
     readonly skills: readonly string[];
     readonly retryBudget: number;
     readonly artifactContracts: readonly string[];
+    readonly requiredArtifactContracts?: readonly string[];
     readonly allowedEffects?: readonly string[];
     readonly requiredCapabilities?: readonly string[];
     readonly workflowChanges?: StepTypeContract['workflowChanges'];
@@ -98,6 +163,7 @@ const agentStep = (
     idempotency: options.allowedEffects?.length ? 'key' : 'none',
     waitKinds: [],
     artifactContracts: [...options.artifactContracts],
+    requiredArtifactContracts: [...(options.requiredArtifactContracts ?? [])],
     workflowChanges: [...(options.workflowChanges ?? [])],
     activityDelivery: { kind: 'workspace_reconciled' },
     ...(options.allowedEffects?.length ? { reconciliation: { strategy: 'receipt' as const } } : {}),
@@ -114,6 +180,7 @@ const processStep = (
     readonly requiredCapabilities: readonly string[];
     readonly waitKinds?: readonly string[];
     readonly artifactContracts: readonly string[];
+    readonly requiredArtifactContracts?: readonly string[];
     readonly workflowChanges?: StepTypeContract['workflowChanges'];
   },
 ): HarnessStepDefinition => ({
@@ -131,6 +198,7 @@ const processStep = (
     idempotency: 'probe',
     waitKinds: [...(options.waitKinds ?? [])],
     artifactContracts: [...options.artifactContracts],
+    requiredArtifactContracts: [...(options.requiredArtifactContracts ?? [])],
     workflowChanges: [...(options.workflowChanges ?? [])],
     activityDelivery: { kind: 'single_attempt' },
     reconciliation: { strategy: 'probe' },
@@ -147,7 +215,9 @@ const integrationStep = (
     readonly requiredCapabilities: readonly string[];
     readonly waitKinds?: readonly string[];
     readonly artifactContracts: readonly string[];
+    readonly requiredArtifactContracts?: readonly string[];
     readonly activityDelivery?: StepTypeContract['activityDelivery'];
+    readonly inputSchema?: z.ZodType;
   },
 ): HarnessStepDefinition => ({
   reference: `${id}@1`,
@@ -156,7 +226,7 @@ const integrationStep = (
   execution: { kind: 'integration', adapter: options.adapter },
   contract: contract(id, {
     retryBudget: options.retryBudget,
-    inputSchema: taskInputSchema,
+    inputSchema: options.inputSchema ?? taskInputSchema,
     outputSchema: integrationOutputSchema,
     allowedEffects: [...options.allowedEffects],
     requiredCapabilities: [...options.requiredCapabilities],
@@ -164,6 +234,7 @@ const integrationStep = (
     idempotency: 'probe',
     waitKinds: [...(options.waitKinds ?? [])],
     artifactContracts: [...options.artifactContracts],
+    requiredArtifactContracts: [...(options.requiredArtifactContracts ?? [])],
     workflowChanges: [],
     activityDelivery: options.activityDelivery ?? { kind: 'single_attempt' },
     reconciliation: { strategy: 'probe' },
@@ -282,7 +353,9 @@ export const TWIKET_HARNESS_STEPS = [
     allowedEffects: ['git.write'],
     requiredCapabilities: ['git.write'],
     waitKinds: ['code_review@1'],
-    artifactContracts: ['pull-request-draft'],
+    artifactContracts: ['pull-request'],
+    requiredArtifactContracts: ['pull-request-draft'],
+    inputSchema: pullRequestInputSchema,
     activityDelivery: { kind: 'remote_reconciled' },
   }),
   integrationStep('ci.observe', {
@@ -308,6 +381,7 @@ export const TWIKET_HARNESS_STEPS = [
       idempotency: 'none',
       waitKinds: [],
       artifactContracts: [],
+      requiredArtifactContracts: [],
       workflowChanges: [],
       activityDelivery: { kind: 'single_attempt' },
     }),

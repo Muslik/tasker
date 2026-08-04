@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "ai-assistance",
+  "version": "1",
+  "enabled": true,
+  "description": "Every pull request carries auditable AI-assistance artifacts and a matching PR section.",
+  "configuration": {
+    "artifactsRoot": ".ai/workspace",
+    "draftPath": ".tasker/pull-request/draft.json",
+    "sectionPath": ".tasker/pull-request/ai-assistance.md",
+    "defaultLevel": "Full Generation (>80%)",
+    "author": "dzhabrail.markhiev",
+    "tools": ["Codex"]
+  },
+  "obligations": [
+    {
+      "id": "pr-requires-ai-assistance",
+      "kind": "path_sequence",
+      "trigger": { "kind": "step", "reference": "pr.prepare@1" },
+      "ordered": [
+        { "kind": "step", "reference": "ai.assistance.initialize@1" },
+        { "kind": "step", "reference": "task.analyze@1" },
+        { "kind": "gate", "reference": "plan.approved@1" },
+        { "kind": "step", "reference": "ai.assistance.record_plan@1" },
+        { "kind": "step", "reference": "ai.assistance.finalize@1" },
+        { "kind": "step", "reference": "pr.describe@1" },
+        { "kind": "step", "reference": "ai.assistance.validate@1" },
+        { "kind": "step", "reference": "pr.prepare@1" }
+      ],
+      "reason": "The accepted plan must predate implementation, and the validated AI record must be on the same branch before PR publication."
+    }
+  ]
+}

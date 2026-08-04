@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   HarnessCompanyManifestSchema,
+  HarnessPolicyManifestSchema,
   HarnessProjectManifestSchema,
 } from '../harness/contracts.js';
 import { TaskFixtureSchema } from './fixtures.js';
@@ -53,7 +54,7 @@ const SnapshottedStepSchema = z
 
 export const RunPlanningSnapshotSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     taskReference: z.string().min(1),
     workflowHash: ContentHashSchema,
     task: TaskFixtureSchema,
@@ -77,6 +78,7 @@ export const RunPlanningSnapshotSchema = z
           .strict()
           .nullable(),
         implementationPlannerPrompt: SnapshottedPromptSchema,
+        policies: z.array(HarnessPolicyManifestSchema),
         steps: z.array(SnapshottedStepSchema),
       })
       .strict(),

@@ -298,6 +298,20 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
     },
   ];
 
+  const aiAssistancePolicy = getHarnessPack().policies.find(
+    (policy) => policy.id === 'ai-assistance',
+  );
+  if (aiAssistancePolicy !== undefined) {
+    decisions.push({
+      id: 'ai-assistance-policy',
+      title: 'AI-assistance evidence required',
+      source: `policy:${aiAssistancePolicy.id}@${aiAssistancePolicy.version}`,
+      reason: aiAssistancePolicy.description,
+      effect:
+        'Initialize and record the accepted plan before implementation, then finalize and validate the evidence before PR publication.',
+    });
+  }
+
   switch (fixture.family) {
     case 'short_bugfix':
       decisions.push({

@@ -570,6 +570,7 @@ const snapshotHarness = (
     company: pack.company,
     project: snapshottedProject,
     implementationPlannerPrompt: snapshotPrompt(pack.prompts.implementationPlanner),
+    policies: pack.policies,
     steps,
   };
 };
@@ -652,7 +653,7 @@ export class ImplementationPlanningCoordinator {
     const graph = JsonValueSchema.safeParse(workflow.value.view.workflow.graph);
     if (!graph.success) return err({ kind: 'workflow_not_ready', taskReference });
     const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,

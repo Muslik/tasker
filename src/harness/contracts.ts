@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
-import type { StepTypeContract } from '../workflow/index.js';
+import type { StepTypeContract } from '../workflow/contracts.js';
+import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
+import { JsonValueSchema } from '../workflow/schema.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
+const PolicyIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
 const RelativePathSchema = z
   .string()
   .min(1)
@@ -10,6 +13,108 @@ const RelativePathSchema = z
     message: 'Expected a path relative to the harness pack',
   });
 const ProcessCommandsSchema = z.record(VersionedReferenceSchema, z.string().trim().min(1));
+
+export const HarnessContractNameSchema = z.enum([
+  'agent_output',
+  'integration_output',
+  'process_input',
+  'process_output',
+  'pull_request_input',
+  'reproduction_input',
+  'task_input',
+  'verification_input',
+]);
+
+const HarnessStepExecutionManifestSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('agent'),
+      prompt: RelativePathSchema,
+      skills: z.array(z.string().min(1)),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('process'),
+      executor: VersionedReferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('integration'),
+      adapter: VersionedReferenceSchema,
+    })
+    .strict(),
+]);
+
+export const HarnessStepManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    reference: VersionedReferenceSchema,
+    policy: PolicyIdSchema.optional(),
+    description: z.string().min(1),
+    retryBudget: z.number().int().nonnegative(),
+    inputContract: HarnessContractNameSchema,
+    outputContract: HarnessContractNameSchema,
+    execution: HarnessStepExecutionManifestSchema,
+    activityDelivery: z.enum(['single_attempt', 'workspace_reconciled', 'remote_reconciled']),
+    allowedEffects: z.array(z.string().min(1)),
+    requiredCapabilities: z.array(z.string().min(1)),
+    resumeBoundary: z.enum(['none', 'attempt', 'step']),
+    idempotency: z.enum(['none', 'key', 'probe']),
+    waitKinds: z.array(VersionedReferenceSchema),
+    artifactContracts: z.array(z.string().min(1)),
+    requiredArtifactContracts: z.array(z.string().min(1)).default([]),
+    workflowChanges: z.array(WorkflowChangeKindSchema),
+    reconciliation: z
+      .object({ strategy: z.enum(['probe', 'receipt']) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const HarnessPolicyMarkerSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('step'),
+      reference: VersionedReferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('gate'),
+      reference: VersionedReferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('wait'),
+      reference: VersionedReferenceSchema,
+    })
+    .strict(),
+]);
+
+const HarnessPathSequenceObligationSchema = z
+  .object({
+    id: PolicyIdSchema,
+    kind: z.literal('path_sequence'),
+    trigger: HarnessPolicyMarkerSchema,
+    ordered: z.array(HarnessPolicyMarkerSchema).min(2),
+    reason: z.string().min(1),
+  })
+  .strict();
+
+export const HarnessPolicyManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    version: z.string().min(1),
+    enabled: z.boolean(),
+    description: z.string().min(1),
+    configuration: JsonValueSchema,
+    obligations: z.array(HarnessPathSequenceObligationSchema).min(1),
+  })
+  .strict();
 
 export type HarnessExecutionBinding =
   | {
@@ -28,6 +133,7 @@ export type HarnessExecutionBinding =
 
 export interface HarnessStepDefinition {
   readonly reference: string;
+  readonly policy?: string;
   readonly description: string;
   readonly retryBudget: number;
   readonly contract: StepTypeContract;
@@ -90,6 +196,9 @@ export const HarnessCompanyManifestSchema = z
 
 export type HarnessProjectManifest = z.infer<typeof HarnessProjectManifestSchema>;
 export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema>;
+export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
+export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
+export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 
 export interface LoadedPrompt {
   readonly content: string;
@@ -109,6 +218,7 @@ export interface LoadedHarnessPack {
   readonly rootPath: string;
   readonly company: HarnessCompanyManifest;
   readonly steps: readonly LoadedHarnessStep[];
+  readonly policies: readonly HarnessPolicyManifest[];
   readonly projects: readonly LoadedHarnessProject[];
   readonly prompts: {
     readonly implementationPlanner: LoadedPrompt;

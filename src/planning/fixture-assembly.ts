@@ -15,6 +15,7 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
+import { getHarnessPack } from '../harness/index.js';
 
 interface TaskContext {
   readonly description: string;
@@ -74,10 +75,62 @@ const planBoundary = (task: TaskContext): WorkflowNodeSource =>
     with: { taskId: task.taskId },
   });
 
+const aiAssistanceEnabled = (): boolean =>
+  getHarnessPack().policies.some((policy) => policy.id === 'ai-assistance');
+
+const aiAssistancePrelude = (task: TaskContext): readonly WorkflowNodeSource[] =>
+  aiAssistanceEnabled()
+    ? [
+        step('initialize-ai-assistance', {
+          uses: 'ai.assistance.initialize@1',
+          with: taskInput(task, 'Initialize the required AI-assistance evidence for this task.'),
+        }),
+      ]
+    : [];
+
+const acceptedPlanRecord = (task: TaskContext): readonly WorkflowNodeSource[] =>
+  aiAssistanceEnabled()
+    ? [
+        step('record-accepted-plan', {
+          uses: 'ai.assistance.record_plan@1',
+          with: taskInput(task, 'Persist the accepted implementation plan before product changes.'),
+        }),
+      ]
+    : [];
+
 const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] => [
+  ...(aiAssistanceEnabled()
+    ? [
+        step('finalize-ai-assistance', {
+          uses: 'ai.assistance.finalize@1',
+          with: taskInput(task, 'Harvest the actual result and verification evidence.'),
+        }),
+      ]
+    : []),
+  step('describe-pr', {
+    uses: 'pr.describe@1',
+    with: {
+      ...taskInput(task, 'Compose the provider-neutral pull-request draft.'),
+      draftPath: '.tasker/pull-request/draft.json',
+    },
+  }),
+  ...(aiAssistanceEnabled()
+    ? [
+        step('validate-ai-assistance', {
+          uses: 'ai.assistance.validate@1',
+          with: {
+            ...taskInput(task, 'Validate the branch artifacts and pull-request AI section.'),
+            draftPath: '.tasker/pull-request/draft.json',
+          },
+        }),
+      ]
+    : []),
   step('prepare-pr', {
     uses: 'pr.prepare@1',
-    with: taskInput(task, 'Prepare the implementation for code review.'),
+    with: {
+      ...taskInput(task, 'Prepare the implementation for code review.'),
+      draftPath: '.tasker/pull-request/draft.json',
+    },
   }),
   step('observe-ci', {
     uses: 'ci.observe@1',
@@ -88,11 +141,13 @@ const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] 
 
 const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
+    ...aiAssistancePrelude(task),
     step('analyze-task', {
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
     planBoundary(task),
+    ...acceptedPlanRecord(task),
     step('reproduce-before', {
       uses: 'bug.reproduce@1',
       with: reproductionInput(
@@ -132,11 +187,13 @@ const featureWithReviewRoot = (
   options: { readonly includeVisualCheck: boolean },
 ): WorkflowNodeSource =>
   sequence('feature-delivery', [
+    ...aiAssistancePrelude(task),
     step('analyze-task', {
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
     planBoundary(task),
+    ...acceptedPlanRecord(task),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -195,11 +252,13 @@ const sharedComponentRoot = (
       : [];
 
   return sequence('shared-component-delivery', [
+    ...aiAssistancePrelude(task),
     step('analyze-task', {
       uses: 'task.analyze@1',
       with: taskInput(task, task.description),
     }),
     planBoundary(task),
+    ...acceptedPlanRecord(task),
     bounded_loop('component-implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',

@@ -16,7 +16,7 @@ Workflow code.
 |---|---|---|
 | Workflow IR/compiler/validator | `src/workflow/` | generic graph syntax, hashes, ABI, deterministic invariants |
 | Temporal interpreter | `src/temporal/workflows/` | genuinely new generic control-flow semantics only |
-| Block catalog | `src/harness/step-definitions.ts` today | versioned task capabilities and Activity bindings |
+| Block catalog | `harness/steps/*.json` plus the small built-in catalog | versioned task capabilities and Activity bindings |
 | Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
 | Agent prompts | `harness/prompts/` | readable analyzer/planner/step instructions |
 | Company policy | `harness/company.json` | reusable organization-wide workflow facts |
@@ -69,7 +69,8 @@ Waits and gates are graph nodes/messages, not fake executors.
 
 To add `fill-test-ops-plan`:
 
-1. register a versioned block definition;
+1. add a versioned `harness/steps/*.json` manifest (use code only when introducing a
+   genuinely new runtime input/output contract);
 2. define Zod input/output schemas;
 3. declare capabilities, effects, artifacts, timeout, heartbeat, retry, cancellation,
    idempotency/reconciliation, and allowed outcomes;
@@ -186,8 +187,9 @@ Use global policy for reusable workflow knowledge, for example:
 Do not encode a full graph in company policy. It contributes facts, block availability,
 and obligations; the task analyzer still assembles the graph specifically for the task.
 
-For example, a company-wide `ai-assistance` requirement is an optional policy pack,
-not kernel behavior. It may expose blocks such as:
+For example, the company-wide `ai-assistance` requirement is the file-backed
+`harness/policies/ai-assistance.json` pack, not kernel behavior. It exposes blocks such
+as:
 
 - `ai.assistance.initialize@1` to create the task README;
 - `ai.assistance.record_plan@1` to persist the accepted plan before implementation;
@@ -195,8 +197,18 @@ not kernel behavior. It may expose blocks such as:
 - `ai.assistance.validate@1` as the deterministic pre-PR gate.
 
 When the policy is enabled, the analyzer selects those ordinary blocks and the
-validator enforces the declared obligation. Removing it later makes new task graphs
-omit them. No Temporal Workflow, API route, or integration adapter changes.
+validator enforces its exact per-path sequence. Step manifests additionally declare
+`artifactContracts` and `requiredArtifactContracts`, so a consumer cannot precede its
+producer. A policy-owned step declares its policy ID in the manifest; disabled-policy
+steps are removed from the analyzer catalog. Disabling the policy and restarting Tasker
+makes future task graphs omit its blocks; snapshotted running graphs remain unchanged. The generic `pr.describe@1` and
+`pr.prepare@1` blocks do not require AI policy artifacts. No Temporal Workflow, API
+route, or Bitbucket adapter changes when this policy is removed.
+
+The current file-backed manifest vocabulary deliberately reuses named runtime schemas
+(`task_input`, `pull_request_input`, `agent_output`, and so on). Add a schema name in
+TypeScript only when the data shape is new; adding another prompt, skill selection,
+adapter binding, effect declaration, retry budget, or artifact dependency is JSON-only.
 
 ## 7. Worktree harness bootstrap
 

@@ -7,12 +7,14 @@ import type { z } from 'zod';
 
 import {
   HarnessCompanyManifestSchema,
+  HarnessPolicyManifestSchema,
   HarnessProjectManifestSchema,
+  HarnessStepManifestSchema,
   parseVersionedReference,
   type LoadedHarnessPack,
   type LoadedPrompt,
 } from './contracts.js';
-import { TWIKET_HARNESS_STEPS } from './step-definitions.js';
+import { stepDefinitionFromManifest, TWIKET_HARNESS_STEPS } from './step-definitions.js';
 import { toContractReference } from '../workflow/index.js';
 
 const DEFAULT_HARNESS_ROOT = fileURLToPath(new URL('../../harness/', import.meta.url));
@@ -92,6 +94,34 @@ const loadProjects = (root: string) => {
     });
 };
 
+const loadStepManifests = (root: string) => {
+  const stepsRoot = join(root, 'steps');
+  if (!existsSync(stepsRoot)) return [];
+
+  return readdirSync(stepsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) =>
+      stepDefinitionFromManifest(parseFile(HarnessStepManifestSchema, join(stepsRoot, entry.name))),
+    );
+};
+
+const loadPolicies = (root: string) => {
+  const policiesRoot = join(root, 'policies');
+  if (!existsSync(policiesRoot)) return [];
+
+  const policies = readdirSync(policiesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => parseFile(HarnessPolicyManifestSchema, join(policiesRoot, entry.name)))
+    .filter((policy) => policy.enabled);
+  const duplicate = policies.find(
+    (policy, index) => policies.findIndex((candidate) => candidate.id === policy.id) !== index,
+  );
+  if (duplicate !== undefined) throw new Error(`Duplicate harness policy ${duplicate.id}`);
+  return policies;
+};
+
 export const resolveHarnessRoot = (configuredPath = process.env.TASKER_HARNESS_PATH): string => {
   const root = realpathSync(configuredPath ?? DEFAULT_HARNESS_ROOT);
   if (!statSync(root).isDirectory()) {
@@ -104,6 +134,8 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   const rootPath = resolveHarnessRoot(configuredPath);
   const company = parseFile(HarnessCompanyManifestSchema, join(rootPath, 'company.json'));
   const projects = loadProjects(rootPath);
+  const policies = loadPolicies(rootPath);
+  const enabledPolicies = new Set(policies.map(({ id }) => id));
   const seenRepositories = new Set<string>();
   for (const project of projects) {
     if (seenRepositories.has(project.repository)) {
@@ -113,7 +145,12 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   }
 
   const seenSteps = new Set<string>();
-  const steps = TWIKET_HARNESS_STEPS.map((step) => {
+  const steps = [
+    ...TWIKET_HARNESS_STEPS,
+    ...loadStepManifests(rootPath).filter(
+      (step) => step.policy === undefined || enabledPolicies.has(step.policy),
+    ),
+  ].map((step) => {
     parseVersionedReference(step.reference);
     if (step.reference !== toContractReference(step.contract)) {
       throw new Error(
@@ -136,10 +173,23 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
     });
   });
 
+  for (const policy of policies) {
+    for (const obligation of policy.obligations) {
+      for (const marker of [obligation.trigger, ...obligation.ordered]) {
+        if (marker.kind === 'step' && !seenSteps.has(marker.reference)) {
+          throw new Error(
+            `Harness policy ${policy.id}@${policy.version} references unavailable step ${marker.reference}`,
+          );
+        }
+      }
+    }
+  }
+
   return Object.freeze({
     rootPath,
     company,
     steps: Object.freeze(steps),
+    policies: Object.freeze(policies),
     projects: Object.freeze(projects),
     prompts: Object.freeze({
       implementationPlanner: loadPrompt(rootPath, company.systemPrompts.implementationPlanner),

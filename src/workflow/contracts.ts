@@ -37,6 +37,7 @@ export const StepTypeContractSchema = z.object({
   activityDelivery: StepActivityDeliverySchema.default({ kind: 'single_attempt' }),
   waitKinds: z.array(WaitReferenceSchema).default([]),
   artifactContracts: z.array(ArtifactKindSchema).default([]),
+  requiredArtifactContracts: z.array(ArtifactKindSchema).default([]),
   workflowChanges: z.array(WorkflowChangeKindSchema).default([]),
   redactionPolicy: z.string().min(1).optional(),
   reconciliation: ReconciliationContractSchema.optional(),

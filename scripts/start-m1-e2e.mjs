@@ -213,6 +213,14 @@ const planningActivity = temporal.createPlanningActivity(implementationPlanning)
 const workspaceIdFor = (taskReference) =>
   Buffer.from(taskReference).toString('hex').slice(0, 24).padEnd(24, '0');
 
+const completeStep = async (input) => ({
+  status: 'completed',
+  summary: `${input.uses} completed`,
+  predicateResults: { 'attempt.succeeded@1': true },
+  artifactIds: [],
+  transcriptId: null,
+});
+
 const workflowActivities = {
   ...planningActivity,
   prepareTaskWorkspace: async (input) => {
@@ -265,13 +273,9 @@ const workflowActivities = {
       planningSnapshot: planningSnapshot.value,
     };
   },
-  executeStep: async (input) => ({
-    status: 'completed',
-    summary: `${input.uses} completed`,
-    predicateResults: { 'attempt.succeeded@1': true },
-    artifactIds: [],
-    transcriptId: null,
-  }),
+  executeStep: completeStep,
+  executeWorkspaceReconciledStep: completeStep,
+  executeRemoteReconciledStep: completeStep,
   evaluatePredicate: async (input) => input.facts[input.reference] ?? true,
   linkWorkflowContinuation: async (input) => {
     const linked = workflowContinuation.linkExecution(input.parentTaskReference, {

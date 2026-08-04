@@ -1,7 +1,7 @@
 # Tasker design package
 
-Status: **Temporal-only runtime, T3 managed execution, and the first gated T4 remote
-effect adapter implemented**, 2026-08-04.
+Status: **Temporal-only runtime, T3 managed execution, and the first T4 company-policy
+to reconciled-PR boundary implemented**, 2026-08-04.
 
 ## Canonical documents
 
@@ -29,6 +29,8 @@ Read these for decisions and future implementation:
    correction.
 10. [`t4-external-effects.md`](t4-external-effects.md) — remote-effect protocol,
     Bitbucket branch/PR reconciliation, pilot gate, and remaining T4 work.
+11. [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) — file-backed blocks,
+    path obligations, durable evidence flow, same-branch artifacts, and PR draft boundary.
 
 These documents are the source of truth. Older `.omx` plans are audit history only.
 
@@ -49,9 +51,13 @@ workspace preparation, and registered agent/process step execution all run throu
 Temporal. Planning questions, plan review/revision, provider retry, workspace retry,
 execution-time workflow change review, and child-workflow continuation have recovery
 coverage. Local mutation now also survives Worker replacement after a dirty worktree is
-created but before its Activity response is acknowledged. The first Bitbucket branch/PR
-adapter now has effect and recovery coverage but is disabled by default behind an
-explicit pilot flag. Jira lifecycle and Jenkins mutation/observation remain disabled.
+created but before its Activity response is acknowledged. File-backed company policy
+now adds the `ai-assistance` sequence to each relevant task graph without entering
+Temporal or Bitbucket code. Its deterministic Activities initialize and record the
+accepted plan, agent blocks harvest actual evidence and compose the PR draft, and a
+final validator fails closed before the reconciled Bitbucket boundary. The Bitbucket
+adapter remains disabled by default behind an explicit real-mutation flag. Jira
+lifecycle and Jenkins mutation/observation remain disabled.
 
 ## Historical implementation records
 
@@ -76,8 +82,9 @@ Temporal public recovery/integration tests after parity.
 ## Immediate implementation target
 
 T3 managed execution is implemented in
-[`t3-managed-execution.md`](t3-managed-execution.md). T4 has started with the gated
-Bitbucket effect family in [`t4-external-effects.md`](t4-external-effects.md). Next are
-the `ai-assistance` workflow policy block, Jenkins/CI classification, review/revision,
-and Jira lifecycle effects before a real pilot. Future work must not reintroduce a
-second runtime.
+[`t3-managed-execution.md`](t3-managed-execution.md). T4 now includes the company
+policy-to-PR boundary described in
+[`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) and the gated Bitbucket effect
+family in [`t4-external-effects.md`](t4-external-effects.md). Next are Jenkins/CI
+classification, review/revision, and Jira lifecycle effects before a real pilot. Future
+work must not reintroduce a second runtime.

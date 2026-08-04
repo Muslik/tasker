@@ -525,7 +525,9 @@ export class HarnessProfileWorkspaceBootstrapAdapter implements WorkspaceBootstr
       }
       if (!insideManagedBlock) retained.push(line);
     }
-    const patterns = new Set<string>([`/${SELECTION_PATH}`]);
+    // Runtime coordination artifacts must never become part of the product branch. Policy
+    // artifacts under `.ai/` remain trackable and are deliberately not covered by this rule.
+    const patterns = new Set<string>(['/.tasker/']);
     for (const file of plan) {
       if (!tracked.has(file.destination)) patterns.add(`/${file.destination}`);
     }

@@ -64,6 +64,11 @@ export const createWorkflowAnalyzerContext = (
       harness: {
         companyId: pack.company.id,
         companyVersion: pack.company.version,
+        policies: pack.policies.map((policy) => ({
+          id: policy.id,
+          version: policy.version,
+          description: policy.description,
+        })),
         rootPath: pack.rootPath,
       },
       policies: {
@@ -79,7 +84,15 @@ export const createWorkflowAnalyzerContext = (
         projectHarnessVersion: harnessProject?.version ?? null,
         publication,
       },
-      obligations: WORKFLOW_OBLIGATIONS,
+      obligations: [
+        ...WORKFLOW_OBLIGATIONS,
+        ...pack.policies.flatMap((policy) =>
+          policy.obligations.map((obligation) => ({
+            ...obligation,
+            source: `policy:${policy.id}@${policy.version}`,
+          })),
+        ),
+      ],
       buildingBlocks: {
         nodeKinds: ['sequence', 'step', 'branch', 'bounded_loop', 'wait', 'gate', 'finalize'],
         predicates: M1_WORKFLOW_CONTRACTS.predicates.entries.map((contract) => ({
@@ -93,6 +106,7 @@ export const createWorkflowAnalyzerContext = (
           outputSchema: inputContract(contract.outputSchema),
           allowedEffects: contract.allowedEffects,
           artifactContracts: contract.artifactContracts,
+          requiredArtifactContracts: contract.requiredArtifactContracts,
           requiredCapabilities: contract.requiredCapabilities,
           workflowChanges: contract.workflowChanges,
           ...stepHarnessMetadata(toContractReference(contract)),

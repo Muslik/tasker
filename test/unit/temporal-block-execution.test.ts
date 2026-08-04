@@ -122,7 +122,7 @@ const makeSnapshot = (
             },
           };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     taskReference: 'task-ref',
     workflowHash: 'a'.repeat(64),
     task,
@@ -140,6 +140,7 @@ const makeSnapshot = (
         guidance,
       },
       implementationPlannerPrompt: pack.prompts.implementationPlanner,
+      policies: pack.policies,
       steps: [step],
     },
     createdAt: '2026-08-03T00:00:00.000Z',
@@ -561,6 +562,7 @@ describe('temporal block execution activity', () => {
         objective: fixture.title,
         repository: fixture.repository,
         taskId: fixture.taskId,
+        draftPath: '.tasker/pull-request/draft.json',
       },
     };
     const dependencies = {

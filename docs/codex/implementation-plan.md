@@ -250,8 +250,11 @@ blocked. Neither restarts code work.
 
 Steps 1-2 are implemented behind `TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true`. Local-git
 and fake-port tests cover lost push response, lost PR-create response, 403 resume, and
-existing-PR reuse. The flag defaults off until the company `ai-assistance` policy is an
-ordinary graph block. Steps 3-7 and a real Bitbucket pilot remain open.
+existing-PR reuse. The company `ai-assistance` requirement is now an ordinary
+file-backed graph policy: it persists the accepted plan before implementation, harvests
+actual evidence, validates same-branch artifacts, and produces the provider-neutral
+draft consumed by Bitbucket. The real-mutation flag remains off until the remaining
+local T4 path and an explicit pilot are ready. Steps 3-7 remain open.
 
 ### 7.4 Jenkins and Allure
 
@@ -363,9 +366,10 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-Add the company `ai-assistance` policy as selectable workflow blocks/obligations, then
-connect Jenkins observation and Bitbucket review ingestion to the now-reconciled PR
-boundary. After the local crash matrix is complete, enable the explicit pilot flag for
-one allowed Jira task. The pilot path remains Jira intake -> managed worktree -> agent
-implementation -> targeted verification -> safe push/PR -> Jenkins classification ->
-human review/revision.
+Connect Jenkins observation and failure classification to the provider-neutral PR
+boundary, then ingest Bitbucket review threads with provenance and execute a bounded
+revision/push/CI loop. After that local crash matrix is complete, add policy-controlled
+Jira lifecycle effects and enable the explicit Bitbucket flag for one allowed pilot
+task. The pilot path remains Jira intake -> managed worktree -> agent implementation ->
+targeted verification -> validated PR draft -> safe push/PR -> Jenkins classification
+-> human review/revision.

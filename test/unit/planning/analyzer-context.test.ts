@@ -27,9 +27,15 @@ describe('workflow analyzer context', () => {
       expect.arrayContaining(['sequence', 'step', 'bounded_loop', 'wait']),
     );
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toEqual(
-      expect.arrayContaining(['bug.reproduce@1', 'ci.observe@1']),
+      expect.arrayContaining([
+        'bug.reproduce@1',
+        'ci.observe@1',
+        'ai.assistance.initialize@1',
+        'ai.assistance.validate@1',
+      ]),
     );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ci-and-review');
+    expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ai-assistance');
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');
     expect(JSON.stringify(context.plannerContext)).not.toContain('workflowTemplates');
   });

@@ -27,8 +27,10 @@ contract in
 [`docs/codex/customization-guide.md`](docs/codex/customization-guide.md).
 
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
-Typed step contracts currently live in
-[`src/harness/step-definitions.ts`](src/harness/step-definitions.ts).
+Company blocks and policies are file-backed under [`harness/steps`](harness/steps) and
+[`harness/policies`](harness/policies); the small built-in catalog in
+[`src/harness/step-definitions.ts`](src/harness/step-definitions.ts) contains only the
+current generic/product blocks and shared runtime schemas.
 The versioned multi-project agent configuration copied into managed worktrees lives in
 [`harness/workspace`](harness/workspace/README.md); credentials remain outside that pack.
 
@@ -42,10 +44,12 @@ start validated Child Workflows without rewriting the accepted parent graph.
 
 The current vertical slice covers dynamic graph generation, managed workspace setup,
 implementation planning/revision, durable waits, recovery/replay, parallel task runs,
-and the three-pane operator console. A gated Bitbucket branch/PR adapter now implements
-intent/probe/receipt reconciliation and its local crash matrix; it remains disabled by
-default until the company PR-policy block is in the graph. Jira lifecycle,
-Jenkins/Allure, and review/revision are the remaining T4 work. See
+and the three-pane operator console. The company `ai-assistance` policy now contributes
+ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
+flow into same-branch artifacts and a validated provider-neutral PR draft. The gated
+Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and
+passes its local crash matrix. Real Bitbucket mutation remains disabled by default.
+Jira lifecycle, Jenkins/Allure, and review/revision are the remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 

@@ -9,6 +9,7 @@ import type { LoadedHarnessPack, LoadedHarnessStep } from '../../harness/index.j
 import {
   emptyIntegrationStepAdapterRegistry,
   type IntegrationStepAdapterRegistry,
+  type TaskRunEvidence,
 } from '../../integrations/index.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
 import {
@@ -427,6 +428,53 @@ export class TemporalTaskStepTraceStore {
         });
   }
 
+  public readRunStepEvidence(
+    workflowId: string,
+  ): Outcome<TaskRunEvidence['completedSteps'], TemporalTaskStepTraceStoreError> {
+    const prefix = `task-step-output:${workflowId}:`;
+    const steps: TaskRunEvidence['completedSteps'][number][] = [];
+    for (const event of this.ledger.listEvents()) {
+      if (event.eventType !== 'TaskStepOutputRecorded' || !event.aggregateId.startsWith(prefix)) {
+        continue;
+      }
+      const pointer = z.object({ artifactId: z.string().min(1) }).safeParse(event.payload);
+      if (!pointer.success) {
+        return err({
+          kind: 'output_corrupt',
+          artifactId: event.aggregateId,
+          issues: pointer.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+      }
+      const artifact = this.ledger.readArtifact(pointer.data.artifactId);
+      if (artifact === null) {
+        return err({ kind: 'artifact_missing', artifactId: pointer.data.artifactId });
+      }
+      const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
+      if (!parsed.success) {
+        return err({
+          kind: 'output_corrupt',
+          artifactId: pointer.data.artifactId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+      }
+      steps.push({
+        operationId: parsed.data.operationId,
+        nodeId: parsed.data.nodeId,
+        stepReference: parsed.data.stepReference,
+        status: parsed.data.status,
+        summary: parsed.data.result?.summary ?? null,
+        artifactIds: parsed.data.result?.artifactIds ?? [],
+        details: parsed.data.details,
+        recordedAt: parsed.data.recordedAt,
+      });
+    }
+    return ok(steps);
+  }
+
   public append(
     operationId: string,
     providerAttempt: number,
@@ -723,6 +771,7 @@ const promptForAgentStep = (input: {
   readonly skills: readonly string[];
   readonly recovery: TaskStepRecoveryContext;
   readonly operatorGuidance: string | null;
+  readonly evidence: TaskRunEvidence;
 }): string =>
   [
     input.snapshottedPrompt.trim(),
@@ -743,6 +792,7 @@ const promptForAgentStep = (input: {
         preferredSkills: input.skills,
         activityRecovery: input.recovery,
         operatorGuidance: input.operatorGuidance,
+        runEvidence: input.evidence,
       },
       null,
       2,
@@ -849,6 +899,44 @@ export interface TaskExecutionActivityDependencies {
   readonly agentRunner: TaskStepAgentRunner;
   readonly commands: CommandRunner;
   readonly integrations?: IntegrationStepAdapterRegistry;
+  readonly evidence?: TaskRunEvidenceSource;
+}
+
+export interface TaskRunEvidenceSource {
+  read(
+    taskReference: string,
+    workflowId: string,
+  ): Outcome<TaskRunEvidence, { readonly kind: string }>;
+}
+
+export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
+  public constructor(
+    private readonly planning: Pick<ImplementationPlanningStore, 'read'>,
+    private readonly traces: TemporalTaskStepTraceStore,
+  ) {}
+
+  public read(
+    taskReference: string,
+    workflowId: string,
+  ): Outcome<TaskRunEvidence, { readonly kind: string }> {
+    const planning = this.planning.read(taskReference);
+    if (!planning.ok) return err({ kind: `planning_${planning.error.kind}` });
+    const completedSteps = this.traces.readRunStepEvidence(workflowId);
+    if (!completedSteps.ok) return err({ kind: completedSteps.error.kind });
+    const record = planning.value;
+    return ok({
+      acceptedPlan:
+        record?.status === 'ready'
+          ? asJson({
+              artifactId: record.artifactId,
+              attempt: record.attempt,
+              selectedStrategy: record.selectedStrategy,
+              plan: record.decision.plan,
+            })
+          : null,
+      completedSteps: completedSteps.value,
+    });
+  }
 }
 
 export const executeRegisteredTaskStep = async (
@@ -875,6 +963,15 @@ export const executeRegisteredTaskStep = async (
     );
   }
   const snapshot = loaded.value;
+  const evidence =
+    dependencies.evidence?.read(input.taskReference, input.workflowId) ??
+    ok({ acceptedPlan: null, completedSteps: [] });
+  if (!evidence.ok) {
+    return block(
+      `Execution evidence for ${input.uses} is unavailable: ${evidence.error.kind}`,
+      blockingWaitKindFor(input.uses),
+    );
+  }
   const snapshottedStep = snapshottedStepFrom(snapshot, input.uses);
   if (snapshottedStep === null) {
     return block(
@@ -946,12 +1043,15 @@ export const executeRegisteredTaskStep = async (
     });
     const execution = await adapter.execute({
       operationId: executionOperationId(input),
+      stepReference: input.uses,
       taskReference: input.taskReference,
       task: snapshot.task,
       taskSnapshot: snapshot.taskSnapshot,
       stepInput: JsonValueSchema.parse(validatedInput.data),
       workspace: input.workspace,
       operatorGuidance: input.operatorGuidance,
+      evidence: evidence.value,
+      policies: snapshot.harness.policies,
       runtime,
     });
     if (execution.status === 'blocked') {
@@ -1081,6 +1181,7 @@ export const executeRegisteredTaskStep = async (
       skills: snapshottedStep.execution.skills,
       recovery,
       operatorGuidance: input.operatorGuidance,
+      evidence: evidence.value,
     });
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),

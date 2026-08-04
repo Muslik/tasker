@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const WORKFLOW_IR_VERSION = 'm1';
-export const WORKFLOW_COMPILER_VERSION = 2;
+export const WORKFLOW_COMPILER_VERSION = 3;
 
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };

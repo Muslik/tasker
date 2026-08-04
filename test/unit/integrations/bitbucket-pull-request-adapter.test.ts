@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -91,6 +91,17 @@ const createGitWorkspace = () => {
   const branch = 'tasker/avia-13236/run-1';
   git(workspace, ['checkout', '-b', branch]);
   writeFileSync(join(workspace, 'feature.ts'), 'export const value = 2;\n', 'utf8');
+  mkdirSync(join(workspace, '.tasker/pull-request'), { recursive: true });
+  writeFileSync(
+    join(workspace, '.tasker/pull-request/draft.json'),
+    `${JSON.stringify({
+      title: `${task.taskId}: ${task.title}`,
+      description: task.description,
+      branchArtifacts: ['feature.ts'],
+    })}\n`,
+    'utf8',
+  );
+  writeFileSync(join(workspace, '.git/info/exclude'), '/.tasker/\n', 'utf8');
   return { remote, workspace, baseCommit, branch };
 };
 
@@ -105,6 +116,7 @@ const requestFor = (
   operationId: string,
 ): IntegrationStepExecutionRequest => ({
   operationId,
+  stepReference: 'pr.prepare@1',
   taskReference: task.fixtureId,
   task,
   taskSnapshot: task,
@@ -112,6 +124,7 @@ const requestFor = (
     objective: task.title,
     repository: task.repository,
     taskId: task.taskId,
+    draftPath: '.tasker/pull-request/draft.json',
   },
   workspace: {
     schemaVersion: 1,
@@ -131,6 +144,8 @@ const requestFor = (
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
+  evidence: { acceptedPlan: null, completedSteps: [] },
+  policies: [],
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,
@@ -149,6 +164,38 @@ const adapterFor = (commands: CommandRunner, pullRequests: BitbucketPullRequestP
 };
 
 describe('Bitbucket pull request effect adapter', () => {
+  it('refuses remote publication when a declared branch artifact is not committed', async () => {
+    const workspace = createGitWorkspace();
+    writeFileSync(
+      join(workspace.workspace, '.tasker/pull-request/draft.json'),
+      `${JSON.stringify({
+        title: `${task.taskId}: ${task.title}`,
+        description: task.description,
+        branchArtifacts: ['.ai/workspace/AVIA-13236/verification.md'],
+      })}\n`,
+      'utf8',
+    );
+    const pullRequests = new StatefulPullRequestPort();
+    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+
+    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      kind: 'invalid_request',
+      details: { missing: ['.ai/workspace/AVIA-13236/verification.md'] },
+    });
+    expect(pullRequests.createCalls).toBe(0);
+    expect(
+      git(workspace.workspace, [
+        'ls-remote',
+        '--heads',
+        'origin',
+        `refs/heads/${workspace.branch}`,
+      ]),
+    ).toBe('');
+  });
+
   it('reconciles a successful push and PR creation after both responses are lost', async () => {
     const workspace = createGitWorkspace();
     let pushResponsesLost = 0;

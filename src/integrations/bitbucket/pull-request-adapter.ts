@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { relative, resolve, sep } from 'node:path';
+
 import { z } from 'zod';
 
 import type { CommandResult, CommandRunner } from '../../providers/command-runner.js';
@@ -9,6 +13,7 @@ import type {
   IntegrationStepExecutionResult,
 } from '../execution.js';
 import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.js';
+import { PullRequestDraftSchema, type PullRequestDraft } from '../pull-request-draft.js';
 import type {
   BitbucketPullRequest,
   BitbucketPullRequestPort,
@@ -21,6 +26,15 @@ const PullRequestReceiptResultSchema = z
     url: z.url().nullable(),
     sourceBranch: z.string().min(1),
     targetBranch: z.string().min(1),
+  })
+  .strict();
+
+const PullRequestStepInputSchema = z
+  .object({
+    objective: z.string().min(1),
+    repository: z.string().min(1),
+    taskId: z.string().min(1),
+    draftPath: z.string().min(1),
   })
   .strict();
 
@@ -121,6 +135,8 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
   public async execute(
     request: IntegrationStepExecutionRequest,
   ): Promise<IntegrationStepExecutionResult> {
+    const draft = await this.loadDraft(request);
+    if (draft.status === 'blocked') return draft.result;
     const repository = qualifiedRepository(request.workspace.repository.reference);
     if (repository === null) {
       return {
@@ -136,6 +152,12 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
     if (targetBranch.status === 'blocked') return targetBranch.result;
     const localCommit = await this.commitWorkspace(request);
     if (localCommit.status === 'blocked') return localCommit.result;
+    const artifactCheck = await this.verifyBranchArtifacts(
+      request,
+      localCommit.commit,
+      draft.value.branchArtifacts,
+    );
+    if (artifactCheck !== null) return artifactCheck;
     const sourceRef = `refs/heads/${request.workspace.branch}`;
     const targetRef = `refs/heads/${targetBranch.branch}`;
     const pushed = await this.pushBranch(request, sourceRef, localCommit.commit);
@@ -148,7 +170,81 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       sourceBranch: request.workspace.branch,
       targetBranch: targetBranch.branch,
       artifactIds: pushed.artifactIds,
+      draft: draft.value,
     });
+  }
+
+  private async loadDraft(
+    request: IntegrationStepExecutionRequest,
+  ): Promise<
+    | { readonly status: 'ready'; readonly value: PullRequestDraft }
+    | { readonly status: 'blocked'; readonly result: IntegrationStepExecutionResult }
+  > {
+    const input = PullRequestStepInputSchema.safeParse(request.stepInput);
+    if (!input.success) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'invalid_request',
+          summary: 'Pull request preparation has no valid draft reference',
+          details: {
+            issues: input.error.issues.map(
+              (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+            ),
+          },
+          artifactIds: [],
+        },
+      };
+    }
+    const path = resolve(request.workspace.path, input.data.draftPath);
+    const difference = relative(request.workspace.path, path);
+    if (difference === '..' || difference.startsWith(`..${sep}`)) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'invalid_request',
+          summary: 'Pull request draft path escapes the managed worktree',
+          details: { draftPath: input.data.draftPath },
+          artifactIds: [],
+        },
+      };
+    }
+    try {
+      const parsed = PullRequestDraftSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+      return parsed.success
+        ? { status: 'ready', value: parsed.data }
+        : {
+            status: 'blocked',
+            result: {
+              status: 'blocked',
+              kind: 'invalid_request',
+              summary: 'Pull request draft is invalid',
+              details: {
+                draftPath: input.data.draftPath,
+                issues: parsed.error.issues.map(
+                  (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+                ),
+              },
+              artifactIds: [],
+            },
+          };
+    } catch (error) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'invalid_request',
+          summary: 'Pull request draft cannot be read',
+          details: {
+            draftPath: input.data.draftPath,
+            message: error instanceof Error ? error.message : 'Unknown read failure',
+          },
+          artifactIds: [],
+        },
+      };
+    }
   }
 
   private gitEnvironment(): Readonly<Record<string, string>> {
@@ -345,6 +441,40 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
     };
   }
 
+  private async verifyBranchArtifacts(
+    request: IntegrationStepExecutionRequest,
+    commit: string,
+    branchArtifacts: readonly string[],
+  ): Promise<IntegrationStepExecutionResult | null> {
+    if (branchArtifacts.length === 0) return null;
+    const listed = await this.runGit(request, 'verify_branch_artifacts', [
+      'ls-tree',
+      '-z',
+      '--name-only',
+      commit,
+      '--',
+      ...branchArtifacts,
+    ]);
+    if (!commandSucceeded(listed)) {
+      return this.gitBlocked(
+        'Cannot verify required pull-request branch artifacts',
+        'configuration',
+        listed,
+      ).result;
+    }
+    const committed = new Set(parseNullSeparated(listed.stdout));
+    const missing = branchArtifacts.filter((path) => !committed.has(path));
+    return missing.length === 0
+      ? null
+      : {
+          status: 'blocked',
+          kind: 'invalid_request',
+          summary: 'Required pull-request artifacts are not committed on the task branch',
+          details: { commit, missing },
+          artifactIds: [],
+        };
+  }
+
   private async probeRemoteBranch(
     request: IntegrationStepExecutionRequest,
     sourceRef: string,
@@ -513,11 +643,11 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       readonly sourceBranch: string;
       readonly targetBranch: string;
       readonly artifactIds: readonly string[];
+      readonly draft: PullRequestDraft;
     },
   ): Promise<IntegrationStepExecutionResult> {
     const effectId = 'create-pull-request';
-    const title = `${request.task.taskId}: ${request.task.title.replaceAll(/\s+/gu, ' ').trim()}`;
-    const description = request.task.description.trim();
+    const { title, description } = input.draft;
     const intent = this.effects.prepare({
       operationId: request.operationId,
       effectId,
@@ -528,6 +658,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
         sourceRef: input.sourceRef,
         targetRef: input.targetRef,
         title,
+        descriptionSha256: createHash('sha256').update(description).digest('hex'),
       },
     });
     const intentArtifactId = this.effects.intentArtifactId(request.operationId, effectId);

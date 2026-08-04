@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "reference": "ai.assistance.validate@1",
+  "policy": "ai-assistance",
+  "description": "Deterministically validate AI-assistance artifacts and the pull-request section.",
+  "retryBudget": 1,
+  "inputContract": "pull_request_input",
+  "outputContract": "integration_output",
+  "execution": {
+    "kind": "integration",
+    "adapter": "ai-assistance.validate@1"
+  },
+  "activityDelivery": "single_attempt",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "attempt",
+  "idempotency": "none",
+  "waitKinds": [],
+  "artifactContracts": ["ai-assistance-compliance"],
+  "requiredArtifactContracts": [
+    "ai-assistance-plan",
+    "ai-assistance-pr-section",
+    "ai-assistance-readme",
+    "ai-assistance-result",
+    "ai-assistance-verification",
+    "pull-request-draft"
+  ],
+  "workflowChanges": []
+}

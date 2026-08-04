@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "reference": "pr.describe@1",
+  "description": "Compose a provider-neutral pull-request draft from task and durable run evidence.",
+  "retryBudget": 2,
+  "inputContract": "pull_request_input",
+  "outputContract": "agent_output",
+  "execution": {
+    "kind": "agent",
+    "prompt": "prompts/steps/pr-describe.md",
+    "skills": []
+  },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["run_artifact.write"],
+  "requiredCapabilities": ["repository.read", "workspace.write"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["pull-request-draft"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "receipt" }
+}

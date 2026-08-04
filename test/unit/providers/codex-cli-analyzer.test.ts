@@ -130,9 +130,9 @@ describe('Codex CLI workflow analyzer', () => {
     expect(executionRequest?.stdin).toContain('NEVER return top-level keys such as schemaVersion');
     expect(executionRequest?.stdin).not.toContain('copying plannerContext.baseTemplate');
     expect(executionRequest?.stdin).toContain(
-      'task.analyze@1 as the first root-sequence child and a',
+      'exactly one task.analyze@1 immediately followed by a',
     );
-    expect(executionRequest?.stdin).toContain('plan.approved@1 gate as the second');
+    expect(executionRequest?.stdin).toContain('Policy prelude blocks may precede that pair');
     expect(runner.requests[1]?.args).toEqual(
       expect.arrayContaining([
         'exec',

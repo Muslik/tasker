@@ -12,6 +12,9 @@ import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-gener
 import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
+  AiAssistanceInitializeAdapter,
+  AiAssistanceRecordPlanAdapter,
+  AiAssistanceValidateAdapter,
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
   createJiraIssueService,
@@ -55,6 +58,7 @@ import {
   CodexCliTaskStepAgentRunner,
   createCurrentStepRegistry,
   createTaskExecutionActivity,
+  LedgerTaskRunEvidenceSource,
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
@@ -81,8 +85,11 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const bitbucketPullRequestEffectsEnabled =
     process.env.TASKER_ENABLE_BITBUCKET_PR_EFFECTS === 'true';
   const externalEffects = new ExternalEffectStore(ledger.repository, systemClock);
-  const integrationAdapters = new IntegrationStepAdapterRegistry(
-    bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
+  const integrationAdapters = new IntegrationStepAdapterRegistry([
+    new AiAssistanceInitializeAdapter(externalEffects),
+    new AiAssistanceRecordPlanAdapter(externalEffects),
+    new AiAssistanceValidateAdapter(),
+    ...(bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
       ? []
       : [
           new BitbucketPullRequestAdapter(
@@ -91,8 +98,8 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
             new BitbucketPullRequestClient(bitbucketConfiguration),
             externalEffects,
           ),
-        ],
-  );
+        ]),
+  ]);
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
     bitbucketConfiguration,
@@ -190,6 +197,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         agentRunner: new CodexCliTaskStepAgentRunner(nodeCommandRunner),
         commands: nodeCommandRunner,
         integrations: integrationAdapters,
+        evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces),
       }),
     });
     try {

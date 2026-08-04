@@ -1,9 +1,9 @@
 # T4 external effects and Bitbucket PR preparation
 
-Status: generic effect journal, `remote_reconciled` Temporal delivery, and the first
-Bitbucket branch/PR adapter implemented behind an explicit pilot flag on 2026-08-04.
-Jira lifecycle mutation, Jenkins/Allure observation, review ingestion/revision, and the
-real company pilot remain open.
+Status: generic effect journal, `remote_reconciled` Temporal delivery, validated
+provider-neutral PR draft, and the first Bitbucket branch/PR adapter implemented behind
+an explicit pilot flag on 2026-08-04. Jira lifecycle mutation, Jenkins/Allure
+observation, review ingestion/revision, and the real company pilot remain open.
 
 ## Boundary
 
@@ -22,9 +22,9 @@ Delivery classes now mean:
 Only `pr.prepare@1` uses `remote_reconciled` today. Adding an integration does not add a
 vendor branch to the Workflow interpreter.
 
-Because the compiled step delivery union changed, the compiler/IR markers advance to
-compiler `2` and IR `m1`; new runs cannot silently mistake the older schema for this
-recovery contract.
+Because step artifact dependencies are now part of the compiled contract, the current
+compiler/IR markers are compiler `3` and IR `m1`; new runs cannot silently mistake an
+older graph for the current recovery and dataflow contract.
 
 ## Effect protocol
 
@@ -46,17 +46,20 @@ state into a blind second write.
 
 ## Bitbucket adapter
 
-`bitbucket.pull-request@1` currently:
+`bitbucket.pull-request@1` first loads the strict PR draft referenced by the step input
+and refuses to commit or push when that draft is missing, invalid, or escapes the
+managed worktree. It then:
 
 1. resolves the target branch from `refs/remotes/origin/HEAD`;
 2. refuses unresolved merge conflicts;
 3. stages only paths reported by Git and creates one local task commit when needed;
-4. prepares a push intent and probes the exact remote branch ref;
-5. pushes only when the ref is absent and refuses to overwrite a different commit;
-6. probes again after timeout/failed response and accepts a matching remote commit;
-7. prepares a PR intent and finds an existing open PR by exact source/target refs;
-8. creates the PR only when absent, then reconciles after conflict or response loss;
-9. persists push, PR, and Activity output receipts before returning completion.
+4. verifies every `branchArtifacts` path declared by the draft exists in that commit;
+5. prepares a push intent and probes the exact remote branch ref;
+6. pushes only when the ref is absent and refuses to overwrite a different commit;
+7. probes again after timeout/failed response and accepts a matching remote commit;
+8. prepares a PR intent and finds an existing open PR by exact source/target refs;
+9. creates the PR only when absent, then reconciles after conflict or response loss;
+10. persists push, PR, and Activity output receipts before returning completion.
 
 A 403 or unavailable preflight opens an infrastructure wait. Operator resume creates a
 new logical step attempt against the same worktree; completed implementation and
@@ -75,15 +78,12 @@ Worker registration additionally requires:
 TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true
 ```
 
-The default is disabled even when `BITBUCKET_TOKEN` exists. This is deliberate: the
-company `ai-assistance` rule must first be represented as a selectable workflow block
-that produces the required branch artifacts and PR section. Hard-coding that rule in
-the Bitbucket adapter would violate the customization boundary. Until that block and
-its graph obligation are implemented, the pilot flag must remain off for company work.
-
-The current PR title/description are derived from the normalized task. A later
-policy/description block may provide richer reviewed content without changing the
-effect protocol or Temporal interpreter.
+The default remains disabled even when `BITBUCKET_TOKEN` exists. The company
+`ai-assistance` rule is now represented as selectable workflow blocks and a path
+obligation; it is not hard-coded in this adapter. `pr.describe@1` produces a strict
+provider-neutral draft, the enabled policy validates its own required section, and
+Bitbucket consumes only the draft title/description. This keeps future policy packs and
+other SCM providers outside one another's code.
 
 ## Evidence
 
@@ -91,6 +91,7 @@ Automated tests prove:
 
 - intent reuse, applied receipts, and changed-identity rejection;
 - exact Bitbucket REST source/target payloads and 403 classification;
+- a declared but uncommitted branch artifact blocks before any push or PR request;
 - successful remote push followed by a simulated lost response is reconciled by ref;
 - successful PR creation followed by a simulated lost response is reconciled by lookup;
 - 403 leaves one local commit, and a later attempt publishes that exact commit without
@@ -107,10 +108,8 @@ selected task/repository.
 
 ## Remaining T4 sequence
 
-1. model `ai-assistance` as ordinary policy blocks/obligations and generate reviewed PR
-   description evidence;
-2. run a disposable/local end-to-end PR simulation through the real Worker adapter;
-3. implement Jenkins observation and CI classification;
-4. ingest Bitbucket review threads with provenance and execute revision/push/CI loops;
-5. add Jira assignment/status/comment/attachment effects under project policy;
-6. enable the real flag for one allowed task and complete the T4 exit gate.
+1. run a disposable/local end-to-end PR simulation through the real Worker adapter;
+2. implement Jenkins observation and CI classification;
+3. ingest Bitbucket review threads with provenance and execute revision/push/CI loops;
+4. add Jira assignment/status/comment/attachment effects under project policy;
+5. enable the real flag for one allowed task and complete the T4 exit gate.

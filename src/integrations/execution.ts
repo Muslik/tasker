@@ -1,6 +1,23 @@
 import type { TaskFixture } from '../planning/fixtures.js';
+import type { HarnessPolicyManifest } from '../harness/index.js';
 import type { JsonValue } from '../workflow/schema.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
+
+export interface TaskRunStepEvidence {
+  readonly operationId: string;
+  readonly nodeId: string;
+  readonly stepReference: string;
+  readonly status: 'blocked' | 'completed' | 'workflow_change_required';
+  readonly summary: string | null;
+  readonly artifactIds: readonly string[];
+  readonly details: JsonValue;
+  readonly recordedAt: string;
+}
+
+export interface TaskRunEvidence {
+  readonly acceptedPlan: JsonValue | null;
+  readonly completedSteps: readonly TaskRunStepEvidence[];
+}
 
 export interface IntegrationStepRuntime {
   readonly attempt: number;
@@ -10,12 +27,15 @@ export interface IntegrationStepRuntime {
 
 export interface IntegrationStepExecutionRequest {
   readonly operationId: string;
+  readonly stepReference: string;
   readonly taskReference: string;
   readonly task: TaskFixture;
   readonly taskSnapshot: JsonValue;
   readonly stepInput: JsonValue;
   readonly workspace: WorkspaceLocator;
   readonly operatorGuidance: string | null;
+  readonly evidence: TaskRunEvidence;
+  readonly policies: readonly HarnessPolicyManifest[];
   readonly runtime: IntegrationStepRuntime;
 }
 
