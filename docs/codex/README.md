@@ -63,8 +63,11 @@ Bitbucket review intake imports unresolved human threads into immutable evidence
 typed review decision either completes the task or enters a bounded
 revise/verify/publish/CI/reply loop; exhaustion asks the operator for guidance and
 continues without discarding the worktree. Per-thread reply effects reconcile partial
-403 and lost-response outcomes without duplicates. Jira lifecycle mutation and the real
-company pilot remain disabled.
+403 and lost-response outcomes without duplicates. Jira task admission is now a
+file-backed, origin-scoped policy plus a reconciled assignment/status adapter. It runs
+after plan acceptance, blocks product execution on ineligible tasks or 400/403, and
+resumes in the same worktree. The real Jira flag remains disabled; review/evidence
+tracker effects and the company pilot are still open.
 
 ## Historical implementation records
 
@@ -93,6 +96,6 @@ T3 managed execution is implemented in
 policy-to-PR boundary described in
 [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) and the gated Bitbucket effect
 family in [`t4-external-effects.md`](t4-external-effects.md). The local Bitbucket
-review/revision/reply lifecycle is also complete. Next are the Jira lifecycle effects
-and one explicitly allowed real pilot. Future work must not reintroduce a second
-runtime.
+review/revision/reply lifecycle is also complete. Jira admission is implemented behind
+`TASKER_ENABLE_JIRA_EFFECTS=true`; next are compact code-review/evidence tracker effects
+and one explicitly allowed real pilot. Future work must not reintroduce a second runtime.

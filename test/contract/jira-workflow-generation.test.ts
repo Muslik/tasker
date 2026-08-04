@@ -51,6 +51,7 @@ describe('Jira workflow generation', () => {
     expect(synced.ok).toBe(true);
 
     const task = TaskFixtureSchema.parse({
+      origin: 'jira',
       fixtureId: 'jira:AVIA-13235',
       taskId: 'AVIA-13235',
       title: 'Seat map uses the wrong color for the leg-space arrow',
@@ -67,7 +68,14 @@ describe('Jira workflow generation', () => {
     const proposal = analyzeTaskFixture(task);
     if (!proposal.ok) throw new Error('Expected a valid analyzer fixture');
     const validSource = WorkflowSourceSchema.parse(proposal.value.source);
-    if (validSource.root.kind !== 'sequence') throw new Error('Expected a sequence workflow');
+    if (validSource.root.kind !== 'sequence') {
+      throw new Error('Expected a sequence workflow');
+    }
+    expect(validSource.root.children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'step', uses: 'jira.start-work@1' }),
+      ]),
+    );
     const invalidSource = WorkflowSourceSchema.parse({
       ...validSource,
       root: {

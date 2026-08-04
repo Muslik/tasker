@@ -25,7 +25,9 @@ import {
   IntegrationStepAdapterRegistry,
   JenkinsBuildClient,
   JenkinsBuildObserverAdapter,
+  JiraLifecycleClient,
   JiraServerClient,
+  JiraStartWorkAdapter,
   loadJenkinsBuildConfiguration,
   loadJiraConfiguration,
 } from '../integrations/index.js';
@@ -92,6 +94,8 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     process.env.TASKER_ENABLE_BITBUCKET_PR_EFFECTS === 'true';
   const externalEffects = new ExternalEffectStore(ledger.repository, systemClock);
   const jenkinsConfiguration = loadJenkinsBuildConfiguration();
+  const jiraConfiguration = loadJiraConfiguration();
+  const jiraLifecycleEffectsEnabled = process.env.TASKER_ENABLE_JIRA_EFFECTS === 'true';
   const integrationAdapters = new IntegrationStepAdapterRegistry([
     new AiAssistanceInitializeAdapter(externalEffects),
     new AiAssistanceRecordPlanAdapter(externalEffects),
@@ -119,6 +123,9 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
             externalEffects,
           ),
         ]),
+    ...(jiraConfiguration === null || !jiraLifecycleEffectsEnabled
+      ? []
+      : [new JiraStartWorkAdapter(new JiraLifecycleClient(jiraConfiguration), externalEffects)]),
   ]);
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
@@ -130,7 +137,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jiraIssueService = createJiraIssueService(
     ledger.repository,
     systemClock,
-    new JiraServerClient(loadJiraConfiguration()),
+    new JiraServerClient(jiraConfiguration),
     { repositoryCatalog },
   );
   const subjects = new WorkflowGenerationSubjectSource(

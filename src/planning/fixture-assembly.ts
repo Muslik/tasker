@@ -15,7 +15,7 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
-import { getHarnessPack } from '../harness/index.js';
+import { getHarnessPack, harnessPolicyAppliesToOrigin } from '../harness/index.js';
 
 interface TaskContext {
   readonly description: string;
@@ -98,6 +98,43 @@ const acceptedPlanRecord = (task: TaskContext): readonly WorkflowNodeSource[] =>
       ]
     : [];
 
+const postPlanPolicySteps = (
+  task: TaskContext & { readonly origin: string },
+): readonly WorkflowNodeSource[] => {
+  const pack = getHarnessPack();
+  const references = pack.policies
+    .filter((policy) => harnessPolicyAppliesToOrigin(policy, task.origin))
+    .flatMap((policy) =>
+      policy.obligations.flatMap((obligation) => {
+        if (obligation.direction !== 'before' || obligation.trigger.kind !== 'effect') return [];
+        const planIndex = obligation.ordered.findIndex(
+          (marker) => marker.kind === 'gate' && marker.reference === 'plan.approved@1',
+        );
+        if (planIndex < 0) return [];
+        return obligation.ordered
+          .slice(planIndex + 1)
+          .filter(
+            (marker) =>
+              marker.kind === 'step' &&
+              pack.steps.find((candidate) => candidate.reference === marker.reference)?.policy ===
+                policy.id,
+          )
+          .map((marker) => ({ policy, reference: marker.reference }));
+      }),
+    )
+    .filter(
+      (candidate, index, candidates) =>
+        candidates.findIndex(({ reference }) => reference === candidate.reference) === index,
+    );
+
+  return references.map(({ policy, reference }) =>
+    step(`policy-${policy.id}-${reference.split('@')[0]?.replaceAll('.', '-') ?? 'step'}`, {
+      uses: reference,
+      with: taskInput(task, policy.description),
+    }),
+  );
+};
+
 const pullRequestPublication = (
   task: TaskContext,
   prefix: '' | 'review-',
@@ -168,7 +205,7 @@ const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] 
   }),
 ];
 
-const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
+const shortBugfixRoot = (task: TaskContext & { readonly origin: string }): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
     ...aiAssistancePrelude(task),
     step('analyze-task', {
@@ -176,6 +213,7 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
       with: taskInput(task, task.description),
     }),
     planBoundary(task),
+    ...postPlanPolicySteps(task),
     ...acceptedPlanRecord(task),
     step('reproduce-before', {
       uses: 'bug.reproduce@1',
@@ -212,7 +250,10 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
   ]);
 
 const featureWithReviewRoot = (
-  task: TaskContext & { readonly translationIntent: 'copy_change' | 'none' },
+  task: TaskContext & {
+    readonly origin: string;
+    readonly translationIntent: 'copy_change' | 'none';
+  },
   options: { readonly includeVisualCheck: boolean },
 ): WorkflowNodeSource =>
   sequence('feature-delivery', [
@@ -222,6 +263,7 @@ const featureWithReviewRoot = (
       with: taskInput(task, task.description),
     }),
     planBoundary(task),
+    ...postPlanPolicySteps(task),
     ...acceptedPlanRecord(task),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
@@ -287,6 +329,7 @@ const sharedComponentRoot = (
       with: taskInput(task, task.description),
     }),
     planBoundary(task),
+    ...postPlanPolicySteps(task),
     ...acceptedPlanRecord(task),
     bounded_loop('component-implementation-loop', {
       maxAttempts: 3,

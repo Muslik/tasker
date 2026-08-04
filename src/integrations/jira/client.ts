@@ -13,12 +13,14 @@ import {
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024;
 
-const JiraConfigurationSchema = z
+export const JiraConfigurationSchema = z
   .object({
     baseUrl: z.url(),
     token: z.string().min(1),
   })
   .strict();
+
+export type JiraConfiguration = z.infer<typeof JiraConfigurationSchema>;
 
 const RawPersonSchema = z
   .object({
@@ -115,7 +117,7 @@ type FetchImplementation = typeof fetch;
 
 export const loadJiraConfiguration = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
-): z.infer<typeof JiraConfigurationSchema> | null => {
+): JiraConfiguration | null => {
   const defaults = loadHarnessEnvironmentDefaults(environment);
   const baseUrl = environment.JIRA_BASE_URL ?? defaults.JIRA_BASE_URL;
   const token = environment.JIRA_TOKEN ?? defaults.JIRA_TOKEN;
@@ -235,7 +237,7 @@ const normalizeIssue = (
 
 export class JiraServerClient implements JiraIssuePort {
   public constructor(
-    private readonly configuration: z.infer<typeof JiraConfigurationSchema> | null,
+    private readonly configuration: JiraConfiguration | null,
     private readonly fetchImplementation: FetchImplementation = fetch,
     private readonly requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
     private readonly maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES,

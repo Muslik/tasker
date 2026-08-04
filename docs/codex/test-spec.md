@@ -297,6 +297,8 @@ same built-in-profile worktree, runs the task test and build, and reaches
 ### T4 gate
 
 - allowed Jira task reaches PR code review;
+- Jira admission rejects ineligible ownership/status before code, classifies 400/403,
+  reconciles lost responses, and resumes in the same worktree;
 - 403 during push resumes only push/reconciliation;
 - CI classifications and PR revise loop pass;
 - external-effect crash matrix is green for enabled mutations.

@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 
-import { loadHarnessPack } from '../harness/index.js';
+import { harnessPolicyAppliesToOrigin, loadHarnessPack } from '../harness/index.js';
 import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
@@ -525,6 +525,7 @@ const snapshotHarness = (
   pack: LoadedHarnessPack,
   repositoryReference: string,
   workflowGraph: JsonValue,
+  taskOrigin: string,
 ) => {
   const graph = CompiledWorkflowSchema.parse(workflowGraph);
   const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
@@ -570,7 +571,7 @@ const snapshotHarness = (
     company: pack.company,
     project: snapshottedProject,
     implementationPlannerPrompt: snapshotPrompt(pack.prompts.implementationPlanner),
-    policies: pack.policies,
+    policies: pack.policies.filter((policy) => harnessPolicyAppliesToOrigin(policy, taskOrigin)),
     steps,
   };
 };
@@ -664,7 +665,12 @@ export class ImplementationPlanningCoordinator {
         reference: subject.value.task.repository,
         path: workspace.path,
       },
-      harness: snapshotHarness(this.harnessPackSource(), subject.value.task.repository, graph.data),
+      harness: snapshotHarness(
+        this.harnessPackSource(),
+        subject.value.task.repository,
+        graph.data,
+        subject.value.task.origin,
+      ),
       createdAt: this.store.now(),
     });
     const stored = this.store.createRunSnapshot(snapshot);

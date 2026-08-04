@@ -4,7 +4,11 @@ import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { findTaskFixture, planTaskWorkflow } from '../../src/planning/index.js';
+import {
+  findTaskFixture,
+  planTaskWorkflow,
+  planWorkflowProposal,
+} from '../../src/planning/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import {
   LedgerTemporalRunRegistry,
@@ -13,7 +17,7 @@ import {
   type TaskWorkflowPublicState,
 } from '../../src/temporal/index.js';
 import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
-import { JsonValueSchema } from '../../src/workflow/index.js';
+import { JsonValueSchema, WorkflowSourceSchema } from '../../src/workflow/index.js';
 
 const workflowsPath = fileURLToPath(
   new URL('../../src/temporal/workflows/task-workflow.ts', import.meta.url),
@@ -34,6 +38,37 @@ const workflowInput = (
     workflowHash: planned.value.compiled.hash,
     graph: planned.value.compiled.graph,
     settings: { planApproval, planningStrategy: 'auto' },
+  } as const;
+};
+
+const jiraWorkflowInput = (taskReference: string) => {
+  const fixture = findTaskFixture('avia-12536-feature-review');
+  if (fixture === undefined) throw new Error('Missing Jira workflow fixture');
+  const planned = planTaskWorkflow(fixture);
+  if (!planned.ok) throw new Error('Jira workflow fixture did not compile');
+  const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+  if (source.root.kind !== 'sequence') throw new Error('Expected a sequence workflow');
+  const planGateIndex = source.root.children.findIndex(
+    (node) => node.kind === 'gate' && node.resumeWhen === 'plan.approved@1',
+  );
+  const children = [...source.root.children];
+  children.splice(planGateIndex + 1, 0, {
+    id: 'admit-jira-work',
+    kind: 'step',
+    uses: 'jira.start-work@1',
+    with: { objective: fixture.title, repository: fixture.repository, taskId: fixture.taskId },
+  });
+  const jiraPlan = planWorkflowProposal({
+    ...planned.value.proposal,
+    fixture: { ...planned.value.proposal.fixture, origin: 'jira' },
+    source: { ...source, root: { ...source.root, children } },
+  });
+  if (!jiraPlan.ok) throw new Error('Jira admission workflow did not compile');
+  return {
+    taskReference,
+    workflowHash: jiraPlan.value.compiled.hash,
+    graph: jiraPlan.value.compiled.graph,
+    settings: { planApproval: 'automatic', planningStrategy: 'auto' },
   } as const;
 };
 
@@ -266,6 +301,65 @@ describe('Temporal task workflow', () => {
     expect(pullRequestDeliveries).toBe(2);
     expect([...workspaceCalls.values()]).toEqual([...workspaceCalls.values()].map(() => 1));
     expect([...workspaceCalls.keys()]).toContain('implement-fix');
+  }, 30_000);
+
+  it('does not start product code when Jira admission blocks and resumes in the same workspace', async () => {
+    const taskReference = `jira-admission-${String(Date.now())}`;
+    let admissionCalls = 0;
+    let implementationCalls = 0;
+    const workspacePaths = new Set<string>();
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      executeRemoteReconciledStep: (input) => {
+        if (input.uses !== 'jira.start-work@1') {
+          return testTaskWorkflowActivities.executeRemoteReconciledStep(input);
+        }
+        admissionCalls += 1;
+        workspacePaths.add(input.workspace.path);
+        return Promise.resolve(
+          admissionCalls === 1
+            ? {
+                status: 'blocked' as const,
+                summary: 'Jira rejected the lifecycle mutation with HTTP 400',
+                waitKind: 'jira.start-work.1.blocked@1',
+                artifactIds: ['jira-admission:intent'],
+                transcriptId: null,
+              }
+            : {
+                status: 'completed' as const,
+                summary: 'Jira admitted the task',
+                predicateResults: { 'attempt.succeeded@1': true },
+                artifactIds: ['jira-admission:receipt'],
+                transcriptId: null,
+              },
+        );
+      },
+      executeWorkspaceReconciledStep: (input) => {
+        if (input.uses === 'code.implement@1') {
+          implementationCalls += 1;
+          workspacePaths.add(input.workspace.path);
+        }
+        return testTaskWorkflowActivities.executeWorkspaceReconciledStep(input);
+      },
+    });
+
+    const started = await service.start(jiraWorkflowInput(taskReference));
+
+    expect(started.ok).toBe(true);
+    await waitForWait(service, taskReference, 'jira.start-work.1.blocked@1');
+    expect(implementationCalls).toBe(0);
+
+    const resumed = await service.resolveWait(taskReference, {
+      nodeId: 'admit-jira-work',
+      waitKind: 'jira.start-work.1.blocked@1',
+      resolution: { guidance: 'The Jira prerequisite was repaired; reconcile and continue.' },
+    });
+    expect(resumed.ok).toBe(true);
+    await waitForWait(service, taskReference, 'code_review@1');
+    expect(admissionCalls).toBe(2);
+    expect(implementationCalls).toBe(1);
+    expect(workspacePaths.size).toBe(1);
   }, 30_000);
 
   it('redelivers a read-only CI observation after Worker failure', async () => {

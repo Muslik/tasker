@@ -1,6 +1,6 @@
 import { JsonValueSchema, toContractReference, type JsonValue } from '../workflow/index.js';
 import { z } from 'zod';
-import { getHarnessPack } from '../harness/index.js';
+import { getHarnessPack, harnessPolicyAppliesToOrigin } from '../harness/index.js';
 import { M1_AVAILABLE_CAPABILITIES } from './proposal.js';
 import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import type { TaskFixture } from './fixtures.js';
@@ -53,6 +53,18 @@ export const createWorkflowAnalyzerContext = (
       : { kind: 'none' as const };
 
   const pack = getHarnessPack();
+  const policies = pack.policies.filter((policy) =>
+    harnessPolicyAppliesToOrigin(policy, fixture.origin),
+  );
+  const availableSteps = new Set(
+    pack.steps
+      .filter((step) => {
+        if (step.policy === undefined) return true;
+        const owner = pack.policies.find((policy) => policy.id === step.policy);
+        return owner !== undefined && harnessPolicyAppliesToOrigin(owner, fixture.origin);
+      })
+      .map(({ reference }) => reference),
+  );
   const harnessProject = pack.projects.find(
     (candidate) => candidate.repository === targetRepository,
   );
@@ -64,7 +76,7 @@ export const createWorkflowAnalyzerContext = (
       harness: {
         companyId: pack.company.id,
         companyVersion: pack.company.version,
-        policies: pack.policies.map((policy) => ({
+        policies: policies.map((policy) => ({
           id: policy.id,
           version: policy.version,
           description: policy.description,
@@ -86,7 +98,7 @@ export const createWorkflowAnalyzerContext = (
       },
       obligations: [
         ...WORKFLOW_OBLIGATIONS,
-        ...pack.policies.flatMap((policy) =>
+        ...policies.flatMap((policy) =>
           policy.obligations.map((obligation) => ({
             ...obligation,
             source: `policy:${policy.id}@${policy.version}`,
@@ -100,17 +112,19 @@ export const createWorkflowAnalyzerContext = (
           inputSchema: inputContract(contract.inputSchema),
           ...(contract.description === undefined ? {} : { description: contract.description }),
         })),
-        steps: M1_WORKFLOW_CONTRACTS.stepTypes.entries.map((contract) => ({
-          reference: toContractReference(contract),
-          inputSchema: inputContract(contract.inputSchema),
-          outputSchema: inputContract(contract.outputSchema),
-          allowedEffects: contract.allowedEffects,
-          artifactContracts: contract.artifactContracts,
-          requiredArtifactContracts: contract.requiredArtifactContracts,
-          requiredCapabilities: contract.requiredCapabilities,
-          workflowChanges: contract.workflowChanges,
-          ...stepHarnessMetadata(toContractReference(contract)),
-        })),
+        steps: M1_WORKFLOW_CONTRACTS.stepTypes.entries
+          .filter((contract) => availableSteps.has(toContractReference(contract)))
+          .map((contract) => ({
+            reference: toContractReference(contract),
+            inputSchema: inputContract(contract.inputSchema),
+            outputSchema: inputContract(contract.outputSchema),
+            allowedEffects: contract.allowedEffects,
+            artifactContracts: contract.artifactContracts,
+            requiredArtifactContracts: contract.requiredArtifactContracts,
+            requiredCapabilities: contract.requiredCapabilities,
+            workflowChanges: contract.workflowChanges,
+            ...stepHarnessMetadata(toContractReference(contract)),
+          })),
         waits: M1_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
           reference: toContractReference(contract),
           artifactContracts: contract.artifactContracts ?? [],

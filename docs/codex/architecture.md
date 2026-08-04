@@ -129,6 +129,12 @@ Examples of deterministic obligations:
 - every effect has the required capability and reconciliation policy;
 - terminal paths end in an allowed final state or explicit durable wait.
 
+Policy applicability is task-origin data, not a vendor branch in the compiler. A
+Jira-origin policy can expose `jira.start-work@1` and require it before any step that
+declares a product effect such as `workspace.write` or `command.run`; a fixture or
+future GitLab-origin task does not see that block. Effect selectors protect future
+blocks without enumerating their names in the policy.
+
 The accepted compiled graph, run policy, and hashes become immutable Temporal Workflow
 input. Large prompts, repository snapshots, transcripts, videos, and screenshots stay
 in the Tasker artifact store; history contains stable IDs, hashes, metadata, and bounded

@@ -51,8 +51,11 @@ Bitbucket branch/PR adapter consumes that draft through its generic effect bound
 passes its local crash matrix. The file-backed Jenkins block observes the exact task
 commit, classifies pipeline/Allure evidence, and resumes at CI after Worker/VPN failure.
 Real Bitbucket mutation remains disabled by default. Review comments now run through a
-reconciled revision/reply loop; Jira lifecycle and the allowed real pilot are the
-remaining T4 work. See
+reconciled revision/reply loop. Jira-origin workflows require the file-backed
+`jira.start-work@1` admission block after plan acceptance and before product effects;
+its assignment/status effects reconcile lost responses and pause on 400/403 without
+starting code. Jira and Bitbucket mutations remain separately disabled by default.
+Tracker review/evidence updates and the allowed real pilot are the remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 

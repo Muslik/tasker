@@ -312,6 +312,19 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
     });
   }
 
+  for (const policy of getHarnessPack().policies.filter(
+    (candidate) =>
+      candidate.appliesTo !== undefined && candidate.appliesTo.taskOrigins.includes(fixture.origin),
+  )) {
+    decisions.push({
+      id: `origin-policy-${policy.id}`,
+      title: `${policy.id} policy applied`,
+      source: `policy:${policy.id}@${policy.version}`,
+      reason: policy.description,
+      effect: 'Add the policy-owned boundary steps required for this task origin.',
+    });
+  }
+
   switch (fixture.family) {
     case 'short_bugfix':
       decisions.push({

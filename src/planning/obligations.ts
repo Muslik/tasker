@@ -1,6 +1,11 @@
 import type { TaskFixture } from './fixtures.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
-import { getHarnessPack, type HarnessPolicyManifest } from '../harness/index.js';
+import {
+  getHarnessPack,
+  harnessPolicyAppliesToOrigin,
+  type HarnessPolicyManifest,
+  type HarnessPolicyMarker,
+} from '../harness/index.js';
 import type {
   CompiledWorkflow,
   CompiledWorkflowNode,
@@ -99,6 +104,18 @@ const phaseOf = (marker: ExecutionMarker): string | undefined => {
   }
   const phase = marker.input.phase;
   return typeof phase === 'string' ? phase : undefined;
+};
+
+const markerMatches = (marker: ExecutionMarker, required: HarnessPolicyMarker): boolean => {
+  if (required.kind === 'effect') {
+    return (
+      marker.kind === 'step' &&
+      M1_WORKFLOW_CONTRACTS.stepTypes
+        .get(marker.reference)
+        ?.allowedEffects.includes(required.reference) === true
+    );
+  }
+  return marker.kind === required.kind && marker.reference === required.reference;
 };
 
 export const validateWorkflowObligations = (
@@ -228,14 +245,32 @@ export const validateWorkflowObligations = (
     }
   }
 
-  for (const policy of policies) {
+  const applicablePolicies = policies.filter((policy) =>
+    harnessPolicyAppliesToOrigin(policy, fixture.origin),
+  );
+  const applicablePolicyIds = new Set(applicablePolicies.map(({ id }) => id));
+
+  paths.flat().forEach((marker) => {
+    if (marker.kind !== 'step') return;
+    const owner = getHarnessPack().steps.find(
+      ({ reference }) => reference === marker.reference,
+    )?.policy;
+    if (owner !== undefined && !applicablePolicyIds.has(owner)) {
+      issues.push(
+        issue(
+          'policy-owned-step-not-applicable',
+          `Step ${marker.reference} belongs to policy ${owner}, which does not apply to task origin ${fixture.origin}`,
+          ['root', marker.id],
+        ),
+      );
+    }
+  });
+
+  for (const policy of applicablePolicies) {
     for (const obligation of policy.obligations) {
       paths.forEach((path, pathIndex) => {
         const triggerPositions = path.flatMap((marker, markerIndex) =>
-          marker.kind === obligation.trigger.kind &&
-          marker.reference === obligation.trigger.reference
-            ? [markerIndex]
-            : [],
+          markerMatches(marker, obligation.trigger) ? [markerIndex] : [],
         );
         for (const triggerPosition of triggerPositions) {
           let missing: (typeof obligation.ordered)[number] | undefined;
@@ -243,10 +278,7 @@ export const validateWorkflowObligations = (
             let after = triggerPosition + 1;
             for (const required of obligation.ordered) {
               const match = path.findIndex(
-                (marker, candidate) =>
-                  candidate >= after &&
-                  marker.kind === required.kind &&
-                  marker.reference === required.reference,
+                (marker, candidate) => candidate >= after && markerMatches(marker, required),
               );
               if (match < 0) {
                 missing = required;
@@ -262,11 +294,7 @@ export const validateWorkflowObligations = (
               let match = -1;
               for (let candidate = before - 1; candidate >= 0; candidate -= 1) {
                 const marker = path[candidate];
-                if (
-                  marker !== undefined &&
-                  marker.kind === required.kind &&
-                  marker.reference === required.reference
-                ) {
+                if (marker !== undefined && markerMatches(marker, required)) {
                   match = candidate;
                   break;
                 }

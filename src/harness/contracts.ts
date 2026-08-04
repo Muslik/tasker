@@ -99,6 +99,12 @@ const HarnessPolicyMarkerSchema = z.discriminatedUnion('kind', [
       reference: VersionedReferenceSchema,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('effect'),
+      reference: z.string().min(1),
+    })
+    .strict(),
 ]);
 
 const HarnessPathSequenceObligationSchema = z
@@ -107,7 +113,7 @@ const HarnessPathSequenceObligationSchema = z
     kind: z.literal('path_sequence'),
     direction: z.enum(['before', 'after']).default('before'),
     trigger: HarnessPolicyMarkerSchema,
-    ordered: z.array(HarnessPolicyMarkerSchema).min(2),
+    ordered: z.array(HarnessPolicyMarkerSchema).min(1),
     reason: z.string().min(1),
   })
   .strict();
@@ -119,6 +125,10 @@ export const HarnessPolicyManifestSchema = z
     version: z.string().min(1),
     enabled: z.boolean(),
     description: z.string().min(1),
+    appliesTo: z
+      .object({ taskOrigins: z.array(z.string().min(1)).min(1) })
+      .strict()
+      .optional(),
     configuration: JsonValueSchema,
     obligations: z.array(HarnessPathSequenceObligationSchema).min(1),
   })
@@ -218,6 +228,11 @@ export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema
 export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
 export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
 export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
+
+export const harnessPolicyAppliesToOrigin = (
+  policy: HarnessPolicyManifest,
+  taskOrigin: string,
+): boolean => policy.appliesTo === undefined || policy.appliesTo.taskOrigins.includes(taskOrigin);
 
 export interface LoadedPrompt {
   readonly content: string;

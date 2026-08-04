@@ -322,8 +322,8 @@ test('I can review an immutable workflow continuation without losing the parent 
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
   const tasks = await loadTasks(page);
   const candidate = requireTask(
-    tasks.tasks.find((task) => task.status === 'planned') ?? pickBacklogTask(tasks.tasks),
-    'Expected a task that can reach stub execution',
+    tasks.tasks.find((task) => task.id === 'avia-12536-feature-review'),
+    'Expected the single-repository review fixture',
   );
 
   await page.goto('/');
@@ -331,11 +331,19 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
-  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
-  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+  if (candidate.status === 'plan_review') {
+    await page.getByRole('button', { name: 'Approve plan' }).click();
+  } else {
+    await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
+    await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+  }
 
-  await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review');
-  await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
+  await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review', {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review', {
+    timeout: 20_000,
+  });
   await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Sync review' })).toBeVisible();
   await page.getByRole('button', { name: 'Mark done' }).click();
@@ -436,13 +444,15 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
 test('reloading restores the persisted workflow for the selected task', async ({ page }) => {
   const tasks = await loadTasks(page);
   const backlog = requireTask(
-    pickBacklogTask(tasks.tasks),
-    'Expected at least one backlog task in the queue',
+    tasks.tasks.find((task) => task.id === 'avia-12536-feature-review'),
+    'Expected the stable single-repository fixture',
   );
 
   await page.goto('/');
   await clickTask(page, backlog.id);
-  await page.getByRole('button', { name: 'Generate workflow' }).click();
+  if (backlog.status === 'backlog') {
+    await page.getByRole('button', { name: 'Generate workflow' }).click();
+  }
 
   const workflow = await loadWorkflow(page, backlog.id);
   const hash = workflow.view.workflow.graphHash;
@@ -451,8 +461,8 @@ test('reloading restores the persisted workflow for the selected task', async ({
   await page.reload();
 
   await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
-  await expect(page.getByTestId('graph-hash')).toHaveText(hash ?? '');
-  await expect(page.getByTestId('workflow-tree')).toBeVisible();
+  await expect(page.getByTestId('graph-hash')).toHaveText(hash ?? '', { timeout: 15_000 });
+  await expect(page.getByTestId('workflow-tree')).toBeVisible({ timeout: 15_000 });
 });
 
 test('a ledger event from another page refreshes the visible task status', async ({

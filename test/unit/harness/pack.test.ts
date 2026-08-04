@@ -157,6 +157,7 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('ci.observe@1')).toEqual({ kind: 'read_only' });
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
+    expect(deliveryFor('jira.start-work@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
       kind: 'workspace_reconciled',
     });
@@ -183,7 +184,7 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(root);
     const references = pack.steps.map(({ reference }) => reference);
 
-    expect(pack.policies.map(({ id }) => id)).toEqual(['review-feedback']);
+    expect(pack.policies.map(({ id }) => id)).toEqual(['jira-lifecycle', 'review-feedback']);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
     expect(references).toContain('pr.describe@1');

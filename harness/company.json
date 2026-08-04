@@ -9,6 +9,7 @@
     "git.write",
     "package.publish",
     "repository.read",
+    "tracker.write",
     "workspace.write"
   ],
   "processCommands": {

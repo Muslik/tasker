@@ -50,6 +50,7 @@ const taskFromJira = (
 
   const isBug = issue.issue.issueType.toLocaleLowerCase('en-US') === 'bug';
   const task = TaskFixtureSchema.parse({
+    origin: 'jira',
     fixtureId: reference,
     taskId: issue.issue.issueKey,
     title: issue.issue.summary,

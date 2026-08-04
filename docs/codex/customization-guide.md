@@ -162,6 +162,13 @@ PR publication. Use `after` for continuations such as revision -> PR update -> C
 thread acknowledgement -> review. This validates a dynamically assembled graph without
 turning the sequence into a Temporal branch.
 
+A policy may declare `appliesTo.taskOrigins`, so Jira-only blocks are absent from local
+fixtures or a future GitLab Issue analyzer context. A marker with `kind: "effect"`
+matches any registered step declaring that effect. The Jira admission policy therefore
+protects new `workspace.write` and `command.run` blocks without listing every step name.
+Use a step marker when exact ordering matters; use an effect marker for a capability
+boundary that future blocks must not bypass.
+
 ## 5. Project policy
 
 Project policy describes workflow peculiarities, not source architecture. Good facts:
@@ -305,6 +312,12 @@ Moving to GitLab Issues and GitLab CI should require:
 It should not require changing the Temporal interpreter, Workflow messaging model,
 generic IR, plan/question semantics, or retrospective model. If `JiraIssue` or a
 Bitbucket response shape appears in Workflow input, the boundary is broken.
+
+The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. Its
+account, eligible issue types, excluded labels, and status path live in
+`harness/policies/jira-lifecycle.json`; changing those rules does not change adapter or
+Temporal code. Keep the flag off until a selected pilot task and its transition
+requirements have been inspected.
 
 ## 9. Add another agent provider
 

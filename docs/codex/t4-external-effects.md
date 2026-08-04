@@ -1,9 +1,9 @@
 # T4 external effects, Bitbucket PR preparation, and Jenkins observation
 
 Status: generic effect journal, reconciled Bitbucket PR publication, Jenkins/Allure
-observation, and the human-review/revision/reply lifecycle implemented behind an
-explicit pilot flag on 2026-08-04. Jira lifecycle mutation and the real company pilot
-remain open. Thread resolution is not implemented because the supported local
+observation, human-review/revision/reply lifecycle, and Jira task admission implemented
+behind explicit pilot flags on 2026-08-04. Compact Jira review/evidence mutation and
+the real company pilot remain open. Thread resolution is not implemented because the supported local
 Bitbucket contract exposes replies but no verified resolve endpoint.
 
 ## Boundary
@@ -22,9 +22,31 @@ Delivery classes now mean:
 - `remote_reconciled`: a typed adapter owns read-before-write reconciliation and may be
   redelivered after Worker/process failure.
 
-`pr.prepare@1` and `review.acknowledge@1` use `remote_reconciled`; `ci.observe@1` uses
-`read_only`. Adding these integrations did not add a vendor branch to the Workflow
+`pr.prepare@1`, `review.acknowledge@1`, and `jira.start-work@1` use
+`remote_reconciled`; `ci.observe@1` uses `read_only`. Adding these integrations did not add a vendor branch to the Workflow
 interpreter.
+
+## Jira admission
+
+The file-backed `jira-lifecycle` policy applies only to tasks normalized with origin
+`jira`. Its effect-based path obligations require `plan.approved@1` and
+`jira.start-work@1` before any `workspace.write` or `command.run` product effect. This
+keeps the graph dynamic while making a future block unable to bypass admission merely
+because it has a new name.
+
+The adapter reads eligibility before mutation: issue type and status must be permitted,
+excluded labels must be absent, and an existing assignee must match the configured
+operator. It then assigns an unowned issue and traverses the policy-owned status path by
+querying Jira's currently available transitions rather than hard-coding transition IDs.
+Each assignment and status edge has its own intent/probe/receipt. Lost responses are
+reconciled from the live assignee/status; 400 is an admission error, while 403/VPN is an
+infrastructure wait. Neither reaches the next code step. Operator guidance retries only
+admission against the same prepared worktree.
+
+Registration additionally requires `TASKER_ENABLE_JIRA_EFFECTS=true`. Credentials alone
+never enable writes. Comment/status updates for code review and optional reproduction
+attachments remain separate future blocks because they have different identities and
+proof surfaces.
 
 Because wait-result mappings and recoverable loop exhaustion are now part of the
 compiled contract, the current compiler/IR markers are compiler `4` and IR `m2`; new
@@ -186,13 +208,13 @@ Automated tests prove:
 - a remote task-branch revision advances only through an exact lease after proving the
   remote commit is an ancestor of the local commit.
 
-No request was sent to company Bitbucket or Jenkins in this milestone. The first real
+No request was sent to company Jira, Bitbucket, or Jenkins in this milestone. The first real
 pilot still requires the policy block, explicit flag, and operator-visible confirmation
 of the selected task/repository.
 
 ## Remaining T4 sequence
 
-1. add Jira assignment/status/comment/attachment effects under project policy;
+1. add compact Jira code-review comment/status and optional reproduction attachment blocks;
 2. enable the real flags for one allowed task and complete the T4 exit gate;
 3. add automatic Bitbucket thread resolution only if a supported company endpoint and
    desired review policy are verified during the pilot.

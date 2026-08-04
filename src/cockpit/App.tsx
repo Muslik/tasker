@@ -41,6 +41,7 @@ import {
   jiraAttachmentUrl,
   listOperatorTasks,
   listRepositories,
+  loadExecutionRun,
   loadImplementationPlan,
   loadPlanningTranscript,
   loadWorkflowContinuation,
@@ -2210,6 +2211,37 @@ export const App = () => {
       window.clearInterval(poll);
     };
   }, [planningInProgress, selectedId]);
+
+  useEffect(() => {
+    if (selectedId.length === 0 || selectedTask?.status !== 'running') return;
+    const lifecycle = { active: true };
+    let inFlight = false;
+
+    const refreshAtNextBoundary = async (): Promise<void> => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const run = await loadExecutionRun(selectedId);
+        if (!lifecycle.active || run.status === 'running') return;
+        await refreshTasks();
+        if (selectedIdRef.current === selectedId) {
+          await refreshSelection(selectedId);
+        }
+      } catch {
+        // The normal task refresh surfaces runtime failures; this poll only closes the
+        // observability gap between an accepted Temporal update and its next durable boundary.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void refreshAtNextBoundary();
+    const poll = window.setInterval(() => void refreshAtNextBoundary(), 750);
+    return () => {
+      lifecycle.active = false;
+      window.clearInterval(poll);
+    };
+  }, [selectedId, selectedTask?.status]);
 
   useEffect(() => {
     if (selectedId.length === 0) {

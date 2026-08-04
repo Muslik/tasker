@@ -169,6 +169,52 @@ describe('M1 task workflow planning', () => {
     );
   });
 
+  it('rejects a Jira workflow that mutates the repository before tracker admission', () => {
+    const planned = planTaskWorkflow(fixture('avia-12536-feature-review'));
+    if (!planned.ok) throw new Error('Expected the feature fixture to produce a proposal');
+
+    const result = planWorkflowProposal({
+      ...planned.value.proposal,
+      fixture: { ...planned.value.proposal.fixture, origin: 'jira' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'jira-admission-before-workspace-write' },
+      }),
+    );
+  });
+
+  it('accepts Jira admission after plan approval and before operational effects', () => {
+    const planned = planTaskWorkflow(fixture('avia-12536-feature-review'));
+    if (!planned.ok) throw new Error('Expected the feature fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+    if (source.root.kind !== 'sequence') throw new Error('Expected a sequence proposal');
+    const gateIndex = source.root.children.findIndex((child) => child.kind === 'gate');
+    const children = [...source.root.children];
+    children.splice(gateIndex + 1, 0, {
+      id: 'admit-jira-work',
+      kind: 'step',
+      uses: 'jira.start-work@1',
+      with: {
+        objective: planned.value.proposal.fixture.title,
+        repository: planned.value.proposal.fixture.repository,
+        taskId: planned.value.proposal.fixture.taskId,
+      },
+    });
+
+    const result = planWorkflowProposal({
+      ...planned.value.proposal,
+      fixture: { ...planned.value.proposal.fixture, origin: 'jira' },
+      source: { ...source, root: { ...source.root, children } },
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it('rejects a review revision that is not acknowledged before returning to review', () => {
     const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
     if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');

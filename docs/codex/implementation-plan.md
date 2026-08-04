@@ -238,6 +238,17 @@ default behavior:
 A Jira 400 is a typed task-admission/integration error. A VPN/403 is infrastructure
 blocked. Neither restarts code work.
 
+Implemented admission slice on 2026-08-04: `jira.start-work@1` is a file-backed,
+Jira-origin-only `remote_reconciled` block. The policy requires it after
+`plan.approved@1` and before any `workspace.write` or `command.run` effect. Its adapter
+rejects disallowed issue types/statuses/labels and tasks assigned to somebody else,
+assigns an unowned issue to the configured operator, discovers each configured status
+edge from Jira transitions, and journals every assignment/transition separately. A
+400/403 opens the existing step wait; operator guidance redelivers only admission in
+the same worktree. The Worker registers the adapter only with
+`TASKER_ENABLE_JIRA_EFFECTS=true`. Compact code-review comment/status and optional
+reproduction attachment effects remain separate follow-up blocks.
+
 ### 7.3 Bitbucket and PR review
 
 1. Reconcile branch existence, then push.
@@ -389,9 +400,9 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-The Temporal cutover and local review/revision/reply lifecycle are complete. Add
-policy-controlled Jira lifecycle effects, then enable the explicit remote-effect flags
-for one allowed pilot task. The
+The Temporal cutover, local review/revision/reply lifecycle, and Jira task-admission
+effect are complete. Add compact Jira review/evidence effects, then enable the explicit
+remote-effect flags for one allowed pilot task. The
 pilot path remains Jira intake -> managed worktree -> agent implementation -> targeted
 verification -> validated PR draft -> safe push/PR -> Jenkins classification -> human
 review/revision.

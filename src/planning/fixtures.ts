@@ -10,6 +10,7 @@ const RepositorySchema = z.string().regex(/^[a-z0-9._-]+\/[a-z0-9._-]+$/u);
 
 const CommonFixtureSchema = z
   .object({
+    origin: z.string().min(1).default('fixture'),
     fixtureId: FixtureIdSchema,
     taskId: TaskIdSchema,
     title: z.string().min(1),

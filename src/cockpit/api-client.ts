@@ -288,6 +288,14 @@ export const startWorkflow = async (
   return parsed.data;
 };
 
+export const loadExecutionRun = async (fixtureId: string): Promise<ExecutionRunView> => {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/run`);
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Execution run does not match the cockpit contract');
+  return parsed.data;
+};
+
 export const resumeWorkflow = async (
   fixtureId: string,
   commandInput: ResumeRunCommand = {},
