@@ -147,6 +147,7 @@ const integrationStep = (
     readonly requiredCapabilities: readonly string[];
     readonly waitKinds?: readonly string[];
     readonly artifactContracts: readonly string[];
+    readonly activityDelivery?: StepTypeContract['activityDelivery'];
   },
 ): HarnessStepDefinition => ({
   reference: `${id}@1`,
@@ -164,7 +165,7 @@ const integrationStep = (
     waitKinds: [...(options.waitKinds ?? [])],
     artifactContracts: [...options.artifactContracts],
     workflowChanges: [],
-    activityDelivery: { kind: 'single_attempt' },
+    activityDelivery: options.activityDelivery ?? { kind: 'single_attempt' },
     reconciliation: { strategy: 'probe' },
   }),
 });
@@ -282,6 +283,7 @@ export const TWIKET_HARNESS_STEPS = [
     requiredCapabilities: ['git.write'],
     waitKinds: ['code_review@1'],
     artifactContracts: ['pull-request-draft'],
+    activityDelivery: { kind: 'remote_reconciled' },
   }),
   integrationStep('ci.observe', {
     adapter: 'jenkins.build@1',

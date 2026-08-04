@@ -97,6 +97,7 @@ export const testTaskWorkflowActivities = {
   prepareTaskWorkspace,
   executeStep,
   executeWorkspaceReconciledStep: executeStep,
+  executeRemoteReconciledStep: executeStep,
   evaluatePredicate,
   planTaskImplementation,
   linkWorkflowContinuation,

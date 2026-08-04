@@ -1,7 +1,7 @@
 # Tasker design package
 
-Status: **Temporal-only runtime cutover and T3 managed execution implemented**,
-2026-08-04.
+Status: **Temporal-only runtime, T3 managed execution, and the first gated T4 remote
+effect adapter implemented**, 2026-08-04.
 
 ## Canonical documents
 
@@ -27,8 +27,10 @@ Read these for decisions and future implementation:
    rewriting the runtime.
 9. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
    correction.
+10. [`t4-external-effects.md`](t4-external-effects.md) — remote-effect protocol,
+    Bitbucket branch/PR reconciliation, pilot gate, and remaining T4 work.
 
-These eight files are the source of truth. Older `.omx` plans are audit history only.
+These documents are the source of truth. Older `.omx` plans are audit history only.
 
 ## Current code versus target
 
@@ -47,8 +49,9 @@ workspace preparation, and registered agent/process step execution all run throu
 Temporal. Planning questions, plan review/revision, provider retry, workspace retry,
 execution-time workflow change review, and child-workflow continuation have recovery
 coverage. Local mutation now also survives Worker replacement after a dirty worktree is
-created but before its Activity response is acknowledged. Jira/Bitbucket/Jenkins
-mutation remains disabled.
+created but before its Activity response is acknowledged. The first Bitbucket branch/PR
+adapter now has effect and recovery coverage but is disabled by default behind an
+explicit pilot flag. Jira lifecycle and Jenkins mutation/observation remain disabled.
 
 ## Historical implementation records
 
@@ -72,8 +75,9 @@ Temporal public recovery/integration tests after parity.
 
 ## Immediate implementation target
 
-T3 managed execution is now implemented in
-[`t3-managed-execution.md`](t3-managed-execution.md). The next runtime milestone is
-T4: real external integrations and PR/CI lifecycle behind explicit effect and recovery
-contracts. The Temporal cutover, full release verification, and browser parity are
-complete; future work must not reintroduce a second runtime.
+T3 managed execution is implemented in
+[`t3-managed-execution.md`](t3-managed-execution.md). T4 has started with the gated
+Bitbucket effect family in [`t4-external-effects.md`](t4-external-effects.md). Next are
+the `ai-assistance` workflow policy block, Jenkins/CI classification, review/revision,
+and Jira lifecycle effects before a real pilot. Future work must not reintroduce a
+second runtime.

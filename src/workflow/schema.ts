@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-export const WORKFLOW_IR_VERSION = 'm0';
-export const WORKFLOW_COMPILER_VERSION = 1;
+export const WORKFLOW_IR_VERSION = 'm1';
+export const WORKFLOW_COMPILER_VERSION = 2;
 
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
@@ -22,6 +22,7 @@ export interface StepNodeSource {
 export const StepActivityDeliverySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('single_attempt') }).strict(),
   z.object({ kind: z.literal('workspace_reconciled') }).strict(),
+  z.object({ kind: z.literal('remote_reconciled') }).strict(),
 ]);
 
 export type StepActivityDelivery = z.infer<typeof StepActivityDeliverySchema>;

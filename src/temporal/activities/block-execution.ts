@@ -6,6 +6,10 @@ import { Context } from '@temporalio/activity';
 import { z } from 'zod';
 
 import type { LoadedHarnessPack, LoadedHarnessStep } from '../../harness/index.js';
+import {
+  emptyIntegrationStepAdapterRegistry,
+  type IntegrationStepAdapterRegistry,
+} from '../../integrations/index.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
 import {
   planningTranscriptIdFor,
@@ -75,7 +79,7 @@ const TaskStepOutputArtifactSchema = z
     nodeId: z.string().min(1),
     stepReference: z.string().min(1),
     stepAttempt: z.number().int().positive(),
-    runner: z.enum(['agent', 'process', 'system']),
+    runner: z.enum(['agent', 'integration', 'process', 'system']),
     command: z.string().nullable(),
     args: z.array(z.string()),
     cwd: z.string().min(1),
@@ -499,7 +503,7 @@ export class TemporalTaskStepTraceStore {
     readonly nodeId: string;
     readonly stepReference: string;
     readonly stepAttempt: number;
-    readonly runner: 'agent' | 'process' | 'system';
+    readonly runner: 'agent' | 'integration' | 'process' | 'system';
     readonly command: string | null;
     readonly args: readonly string[];
     readonly cwd: string;
@@ -767,7 +771,7 @@ const readRepositoryFromInput = (value: unknown): string | null =>
 const persistBlockedArtifact = (
   traces: TemporalTaskStepTraceStore,
   input: ExecuteTaskStepInput,
-  runner: 'agent' | 'process' | 'system',
+  runner: 'agent' | 'integration' | 'process' | 'system',
   details: unknown,
   stdout = '',
   stderr = '',
@@ -844,6 +848,7 @@ export interface TaskExecutionActivityDependencies {
   readonly mutationRecovery: Pick<WorkspaceMutationRecoveryStore, 'prepare'>;
   readonly agentRunner: TaskStepAgentRunner;
   readonly commands: CommandRunner;
+  readonly integrations?: IntegrationStepAdapterRegistry;
 }
 
 export const executeRegisteredTaskStep = async (
@@ -906,15 +911,122 @@ export const executeRegisteredTaskStep = async (
   }
 
   if (snapshottedStep.execution.kind === 'integration') {
-    const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
-      kind: 'integration_not_supported',
-      adapter: snapshottedStep.execution.adapter,
-    });
-    return block(
-      `Integration step ${input.uses} is not executable in the T3 worker yet`,
-      blockingWaitKindFor(input.uses),
-      artifactIds,
+    if (
+      current.execution.kind !== 'integration' ||
+      current.execution.adapter !== snapshottedStep.execution.adapter
+    ) {
+      const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
+        kind: 'integration_binding_changed',
+        snapshottedAdapter: snapshottedStep.execution.adapter,
+      });
+      return block(
+        `Integration binding for ${input.uses} changed after planning`,
+        blockingWaitKindFor(input.uses),
+        artifactIds,
+      );
+    }
+    const adapter = (dependencies.integrations ?? emptyIntegrationStepAdapterRegistry).get(
+      snapshottedStep.execution.adapter,
     );
+    if (adapter === undefined) {
+      const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
+        kind: 'integration_adapter_unavailable',
+        adapter: snapshottedStep.execution.adapter,
+      });
+      return block(
+        `Integration adapter ${snapshottedStep.execution.adapter} is not configured`,
+        blockingWaitKindFor(input.uses),
+        artifactIds,
+      );
+    }
+    runtime.heartbeat({
+      phase: 'integration',
+      adapter: snapshottedStep.execution.adapter,
+      nodeId: input.nodeId,
+    });
+    const execution = await adapter.execute({
+      operationId: executionOperationId(input),
+      taskReference: input.taskReference,
+      task: snapshot.task,
+      taskSnapshot: snapshot.taskSnapshot,
+      stepInput: JsonValueSchema.parse(validatedInput.data),
+      workspace: input.workspace,
+      operatorGuidance: input.operatorGuidance,
+      runtime,
+    });
+    if (execution.status === 'blocked') {
+      const result = block(
+        execution.summary,
+        blockingWaitKindFor(input.uses),
+        execution.artifactIds,
+      );
+      const persisted = dependencies.traces.persistOutputArtifact({
+        operationId: executionOperationId(input),
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        nodeId: input.nodeId,
+        stepReference: input.uses,
+        stepAttempt: input.stepAttempt,
+        runner: 'integration',
+        command: adapter.id,
+        args: [],
+        cwd: input.workspace.path,
+        exitCode: null,
+        status: 'blocked',
+        stdout: '',
+        stderr: '',
+        details: { kind: execution.kind, details: execution.details },
+        result,
+      });
+      if (!persisted.ok || persisted.value.result === null) {
+        throw new Error(`Integration block receipt persistence failed for ${input.uses}`);
+      }
+      return persisted.value.result;
+    }
+    const validatedOutput = current.contract.outputSchema.safeParse(execution.output);
+    if (!validatedOutput.success) {
+      const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'integration', {
+        kind: 'invalid_integration_output',
+        adapter: adapter.id,
+        issues: validatedOutput.error.issues.map(
+          (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+        ),
+      });
+      return block(
+        `Integration adapter ${adapter.id} returned invalid output`,
+        blockingWaitKindFor(input.uses),
+        [...execution.artifactIds, ...artifactIds],
+      );
+    }
+    const result = ExecuteTaskStepResultSchema.parse({
+      status: 'completed',
+      summary: execution.summary,
+      predicateResults: { 'attempt.succeeded@1': true },
+      artifactIds: execution.artifactIds,
+      transcriptId: null,
+    });
+    const persisted = dependencies.traces.persistOutputArtifact({
+      operationId: executionOperationId(input),
+      workflowId: input.workflowId,
+      workflowRunId: input.workflowRunId,
+      nodeId: input.nodeId,
+      stepReference: input.uses,
+      stepAttempt: input.stepAttempt,
+      runner: 'integration',
+      command: adapter.id,
+      args: [],
+      cwd: input.workspace.path,
+      exitCode: 0,
+      status: 'completed',
+      stdout: '',
+      stderr: '',
+      details: { output: validatedOutput.data },
+      result,
+    });
+    if (!persisted.ok || persisted.value.result === null) {
+      throw new Error(`Integration completion receipt persistence failed for ${input.uses}`);
+    }
+    return persisted.value.result;
   }
 
   if (snapshottedStep.execution.kind === 'agent') {
@@ -1247,10 +1359,15 @@ export const createTaskExecutionActivity = (
   dependencies: TaskExecutionActivityDependencies,
 ): Pick<
   TaskWorkflowActivities,
-  'evaluatePredicate' | 'executeStep' | 'executeWorkspaceReconciledStep'
+  | 'evaluatePredicate'
+  | 'executeStep'
+  | 'executeWorkspaceReconciledStep'
+  | 'executeRemoteReconciledStep'
 > => ({
   executeStep: async (input) => executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
   executeWorkspaceReconciledStep: async (input) =>
+    executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
+  executeRemoteReconciledStep: async (input) =>
     executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
   evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? true),
 });

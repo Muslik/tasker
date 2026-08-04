@@ -66,9 +66,12 @@ interpreter:
   tracked diff hash, and changed paths. A replacement Activity delivery inspects the
   same worktree and receives both the baseline and current state in its execution
   context.
-- `single_attempt` is used by process and integration blocks until their specific
-  effect adapters can prove read-before-write reconciliation. Temporal does not retry
-  these effects merely because a Worker response was lost.
+- `single_attempt` is used by process blocks and integrations that cannot yet prove
+  read-before-write reconciliation. Temporal does not retry these effects merely
+  because a Worker response was lost.
+- `remote_reconciled` is introduced in T4 for an integration whose versioned adapter
+  persists intent, probes the remote system, and records an applied receipt. The first
+  user is `pr.prepare@1`; see `t4-external-effects.md`.
 
 Agent completion, controlled block, and workflow-change results are persisted as exact
 Activity output receipts before returning to Temporal. If the receipt is committed but

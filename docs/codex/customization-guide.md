@@ -244,6 +244,17 @@ An integration adapter has read and mutation surfaces. Read-only intake normaliz
 vendor data. Mutation Activities additionally implement prepare/execute/reconcile and
 stable operation IDs.
 
+Choose Activity delivery from evidence, not convenience:
+
+- use `single_attempt` when the effect has no safe remote proof yet;
+- use `remote_reconciled` only when the adapter persists intent, probes the exact remote
+  identity before writing, reconciles ambiguous responses, records an applied receipt,
+  and returns `unknown_outcome` instead of blindly repeating.
+
+The generic external-effect journal is reusable, but reconciliation remains
+effect-specific. A Git ref, Jira comment, package version, and PR thread have different
+proof surfaces; do not hide them behind a generic “exactly once” claim.
+
 Moving to GitLab Issues and GitLab CI should require:
 
 1. a tracker adapter that produces the normalized task snapshot;

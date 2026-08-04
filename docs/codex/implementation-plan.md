@@ -218,6 +218,12 @@ For each mutation define:
 
 Do not enable generic Temporal retries before these contracts exist.
 
+Implemented first slice on 2026-08-04: immutable external-effect intent/applied
+receipts, adapter registry, `remote_reconciled` Activity delivery, controlled
+`unknown_outcome`, and output-receipt replay. Automatic retries are enabled only for
+the `pr.prepare@1` adapter boundary; other integration/process blocks remain
+`single_attempt`.
+
 ### 7.2 Jira lifecycle
 
 Add policy-controlled Activities for assignment/status/comment/attachment. Recommended
@@ -241,6 +247,11 @@ blocked. Neither restarts code work.
 5. Start a revision Activity with exact comment provenance.
 6. Push amendments, re-observe CI, reply/resolve through explicit policy.
 7. If no comments appear, the operator may mark done; Tasker does not auto-merge.
+
+Steps 1-2 are implemented behind `TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true`. Local-git
+and fake-port tests cover lost push response, lost PR-create response, 403 resume, and
+existing-PR reuse. The flag defaults off until the company `ai-assistance` policy is an
+ordinary graph block. Steps 3-7 and a real Bitbucket pilot remain open.
 
 ### 7.4 Jenkins and Allure
 
@@ -352,8 +363,9 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-Finish browser/full-suite cutover verification, then implement T4 one external effect
-family at a time. The first real pilot path is Jira intake -> managed worktree -> agent
+Add the company `ai-assistance` policy as selectable workflow blocks/obligations, then
+connect Jenkins observation and Bitbucket review ingestion to the now-reconciled PR
+boundary. After the local crash matrix is complete, enable the explicit pilot flag for
+one allowed Jira task. The pilot path remains Jira intake -> managed worktree -> agent
 implementation -> targeted verification -> safe push/PR -> Jenkins classification ->
-human review/revision. Every remote mutation needs an idempotency/reconciliation
-contract before Temporal retries are enabled.
+human review/revision.

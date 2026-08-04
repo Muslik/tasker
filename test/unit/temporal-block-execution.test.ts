@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadHarnessPack } from '../../src/harness/index.js';
+import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { findTaskFixture } from '../../src/planning/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
@@ -528,5 +529,72 @@ describe('temporal block execution activity', () => {
         cwd: componentWorkspace.path,
       }),
     );
+  });
+
+  it('persists a reconciled integration result before returning it to Temporal', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const execute = vi.fn(() =>
+      Promise.resolve({
+        status: 'completed' as const,
+        summary: 'Pull request 73 is ready for review',
+        output: { externalId: '73', status: 'open' },
+        artifactIds: ['external-effect:prepare-pr:receipt'],
+      }),
+    );
+    const input = {
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: stubWorkspace.workflowHash,
+      nodeId: 'prepare-pr',
+      stepAttempt: 1,
+      uses: 'pr.prepare@1',
+      activityDelivery: { kind: 'remote_reconciled' as const },
+      workspace: stubWorkspace,
+      planningSnapshot: {
+        artifactId: 'planning-snapshot:test',
+        checksum: 'd'.repeat(64),
+      },
+      operatorGuidance: null,
+      input: {
+        objective: fixture.title,
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+    const dependencies = {
+      snapshots: { readRunSnapshot: () => ok(makeSnapshot('pr.prepare@1')) },
+      currentSteps: createCurrentStepRegistry(pack),
+      traces,
+      mutationRecovery,
+      agentRunner: { provider: 'codex' as const, run: vi.fn() },
+      commands: { run: vi.fn() },
+      integrations: new IntegrationStepAdapterRegistry([
+        { id: 'bitbucket.pull-request@1', execute },
+      ]),
+    };
+    const runtime = {
+      attempt: 1,
+      cancellationSignal: new AbortController().signal,
+      heartbeat: () => {},
+    };
+
+    const first = await executeRegisteredTaskStep(input, dependencies, runtime);
+    const redelivered = await executeRegisteredTaskStep(input, dependencies, {
+      ...runtime,
+      attempt: 2,
+    });
+
+    expect(redelivered).toEqual(first);
+    expect(first).toMatchObject({
+      status: 'completed',
+      summary: 'Pull request 73 is ready for review',
+      artifactIds: [
+        'task-step-output:tasker:task-ref:prepare-pr:attempt-1:artifact',
+        'external-effect:prepare-pr:receipt',
+      ],
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });

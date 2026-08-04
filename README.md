@@ -42,8 +42,10 @@ start validated Child Workflows without rewriting the accepted parent graph.
 
 The current vertical slice covers dynamic graph generation, managed workspace setup,
 implementation planning/revision, durable waits, recovery/replay, parallel task runs,
-and the three-pane operator console. Real Jira/Bitbucket/Jenkins mutation Activities
-and their effect-reconciliation crash matrix are the next product milestone. See
+and the three-pane operator console. A gated Bitbucket branch/PR adapter now implements
+intent/probe/receipt reconciliation and its local crash matrix; it remains disabled by
+default until the company PR-policy block is in the graph. Jira lifecycle,
+Jenkins/Allure, and review/revision are the remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 

@@ -53,6 +53,19 @@ const workspaceReconciledExecutionActivities = proxyActivities<
   },
 });
 
+const remoteReconciledExecutionActivities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'executeRemoteReconciledStep'>
+>({
+  startToCloseTimeout: '35 minutes',
+  scheduleToCloseTimeout: '2 hours',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
+    maximumAttempts: 3,
+  },
+});
+
 const planningActivities = proxyActivities<Pick<TaskWorkflowActivities, 'planTaskImplementation'>>({
   startToCloseTimeout: '35 minutes',
   scheduleToCloseTimeout: '2 hours',
@@ -527,10 +540,16 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             );
           }
           attempts[node.id] = (attempts[node.id] ?? 0) + 1;
-          const execute =
-            node.activityDelivery.kind === 'workspace_reconciled'
-              ? workspaceReconciledExecutionActivities.executeWorkspaceReconciledStep
-              : executionActivities.executeStep;
+          const execute = (() => {
+            switch (node.activityDelivery.kind) {
+              case 'single_attempt':
+                return executionActivities.executeStep;
+              case 'workspace_reconciled':
+                return workspaceReconciledExecutionActivities.executeWorkspaceReconciledStep;
+              case 'remote_reconciled':
+                return remoteReconciledExecutionActivities.executeRemoteReconciledStep;
+            }
+          })();
           const result = await execute({
             taskReference: input.taskReference,
             workflowId: execution.workflowId,

@@ -237,6 +237,37 @@ describe('Temporal task workflow', () => {
     expect(completed.ok).toBe(true);
   }, 30_000);
 
+  it('redelivers a remote-reconciled step without repeating completed workspace steps', async () => {
+    const taskReference = `remote-effect-retry-${String(Date.now())}`;
+    const workspaceCalls = new Map<string, number>();
+    let pullRequestDeliveries = 0;
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      executeWorkspaceReconciledStep: (input) => {
+        workspaceCalls.set(input.nodeId, (workspaceCalls.get(input.nodeId) ?? 0) + 1);
+        return testTaskWorkflowActivities.executeWorkspaceReconciledStep(input);
+      },
+      executeRemoteReconciledStep: (input) => {
+        pullRequestDeliveries += 1;
+        if (pullRequestDeliveries === 1) {
+          throw new Error('worker stopped after the remote request');
+        }
+        return testTaskWorkflowActivities.executeRemoteReconciledStep(input);
+      },
+    });
+
+    const started = await service.start(
+      workflowInput('avia-13236-short-bug', taskReference, 'automatic'),
+    );
+
+    expect(started.ok).toBe(true);
+    await waitForWait(service, taskReference, 'code_review@1');
+    expect(pullRequestDeliveries).toBe(2);
+    expect([...workspaceCalls.values()]).toEqual([...workspaceCalls.values()].map(() => 1));
+    expect([...workspaceCalls.keys()]).toContain('implement-fix');
+  }, 30_000);
+
   it('keeps the run waiting until workspace preparation can resume', async () => {
     const taskReference = `workspace-retry-${String(Date.now())}`;
     let preparationAttempts = 0;

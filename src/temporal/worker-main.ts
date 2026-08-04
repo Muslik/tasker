@@ -12,7 +12,11 @@ import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-gener
 import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
+  BitbucketPullRequestAdapter,
+  BitbucketPullRequestClient,
   createJiraIssueService,
+  ExternalEffectStore,
+  IntegrationStepAdapterRegistry,
   JiraServerClient,
   loadJiraConfiguration,
 } from '../integrations/index.js';
@@ -74,6 +78,21 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const workflowService = createM1WorkflowService(ledger.repository, systemClock);
   const harnessPack = loadHarnessPack();
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
+  const bitbucketPullRequestEffectsEnabled =
+    process.env.TASKER_ENABLE_BITBUCKET_PR_EFFECTS === 'true';
+  const externalEffects = new ExternalEffectStore(ledger.repository, systemClock);
+  const integrationAdapters = new IntegrationStepAdapterRegistry(
+    bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
+      ? []
+      : [
+          new BitbucketPullRequestAdapter(
+            bitbucketConfiguration,
+            nodeCommandRunner,
+            new BitbucketPullRequestClient(bitbucketConfiguration),
+            externalEffects,
+          ),
+        ],
+  );
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),
     bitbucketConfiguration,
@@ -170,6 +189,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         mutationRecovery,
         agentRunner: new CodexCliTaskStepAgentRunner(nodeCommandRunner),
         commands: nodeCommandRunner,
+        integrations: integrationAdapters,
       }),
     });
     try {

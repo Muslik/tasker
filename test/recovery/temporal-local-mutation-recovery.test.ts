@@ -281,6 +281,10 @@ describe('Temporal local mutation recovery', () => {
           ...createPlanningActivity(planning),
           executeStep,
           executeWorkspaceReconciledStep: execution.executeWorkspaceReconciledStep,
+          executeRemoteReconciledStep: (input) =>
+            input.uses === 'pr.prepare@1'
+              ? Promise.resolve(completedStep(input))
+              : execution.executeRemoteReconciledStep(input),
           evaluatePredicate: execution.evaluatePredicate,
           linkWorkflowContinuation: () => Promise.resolve({ linked: true }),
         };

@@ -166,8 +166,8 @@ describe('workflow compiler', () => {
 
     expect(result.value.hash).toMatch(/^[a-f0-9]{64}$/u);
     expect(result.value.graph.metadata).toEqual({
-      compilerVersion: 1,
-      irVersion: 'm0',
+      compilerVersion: 2,
+      irVersion: 'm1',
       references: {
         predicates: [
           'change.needs_visual_verification@1',
