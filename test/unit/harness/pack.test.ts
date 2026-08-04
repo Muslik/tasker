@@ -158,6 +158,7 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.start-work@1')).toEqual({ kind: 'remote_reconciled' });
+    expect(deliveryFor('jira.review-ready@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
       kind: 'workspace_reconciled',
     });
@@ -203,6 +204,21 @@ describe('file-backed harness pack', () => {
 
     expect(pack.policies.map(({ id }) => id)).not.toContain('review-feedback');
     expect(pack.steps.map(({ reference }) => reference)).not.toContain('review.acknowledge@1');
+  });
+
+  it('removes every Jira lifecycle block when its origin policy is disabled', async () => {
+    const root = await createTemporaryPack();
+    const policyPath = join(root, 'policies/jira-lifecycle.json');
+    const policy = JSON.parse(await readFile(policyPath, 'utf8')) as { enabled: boolean };
+    policy.enabled = false;
+    await writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
+
+    const pack = loadHarnessPack(root);
+    const references = pack.steps.map(({ reference }) => reference);
+
+    expect(pack.policies.map(({ id }) => id)).not.toContain('jira-lifecycle');
+    expect(references).not.toContain('jira.start-work@1');
+    expect(references).not.toContain('jira.review-ready@1');
   });
 
   it('binds visual evidence guidance only to reproduction and visual verification', () => {

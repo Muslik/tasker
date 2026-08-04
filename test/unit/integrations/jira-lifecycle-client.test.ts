@@ -62,4 +62,33 @@ describe('Jira lifecycle client', () => {
       problem: { kind: 'access_blocked', retryable: true, httpStatus: 403 },
     });
   });
+
+  it('reads and publishes Jira Server comments without leaking the token', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>((_input, init) =>
+      Promise.resolve(
+        init?.method === 'GET'
+          ? Response.json({ comments: [{ id: '9', body: 'Existing comment' }] })
+          : new Response(null, { status: 201 }),
+      ),
+    );
+    const client = new JiraLifecycleClient(configuration, fetchImplementation);
+
+    const observed = await client.listComments('AVIA-12536');
+    const published = await client.comment('AVIA-12536', 'PR ready: [73|https://example/pr/73]');
+
+    expect(observed).toEqual({
+      status: 'observed',
+      comments: [{ id: '9', body: 'Existing comment' }],
+    });
+    expect(published).toEqual({ status: 'accepted' });
+    const [read, write] = fetchImplementation.mock.calls;
+    expect(read?.[0]).toBe(
+      'https://jira.example/rest/api/2/issue/AVIA-12536/comment?maxResults=1000',
+    );
+    expect(write?.[0]).toBe('https://jira.example/rest/api/2/issue/AVIA-12536/comment');
+    const requestBody = write?.[1]?.body;
+    expect(requestBody).toBe(JSON.stringify({ body: 'PR ready: [73|https://example/pr/73]' }));
+    if (typeof requestBody !== 'string') throw new Error('Expected a JSON request body');
+    expect(requestBody).not.toContain('secret-token');
+  });
 });

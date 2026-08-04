@@ -314,7 +314,8 @@ generic IR, plan/question semantics, or retrospective model. If `JiraIssue` or a
 Bitbucket response shape appears in Workflow input, the boundary is broken.
 
 The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. Its
-account, eligible issue types, excluded labels, and status path live in
+account, eligible issue types, excluded labels, admission/review status paths, and
+compact review comment prefix live in
 `harness/policies/jira-lifecycle.json`; changing those rules does not change adapter or
 Temporal code. Keep the flag off until a selected pilot task and its transition
 requirements have been inspected.

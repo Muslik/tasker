@@ -10,7 +10,7 @@ import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.j
 import { JiraIssueKeySchema, type JiraIssueKey } from './contracts.js';
 import type { JiraConfiguration } from './client.js';
 
-const JiraLifecyclePolicyConfigurationSchema = z
+export const JiraLifecyclePolicyConfigurationSchema = z
   .object({
     provider: z.literal('jira'),
     admission: z
@@ -19,6 +19,12 @@ const JiraLifecyclePolicyConfigurationSchema = z
         allowedIssueTypes: z.array(z.string().min(1)).min(1),
         deniedLabels: z.array(z.string().min(1)),
         statusPath: z.array(z.string().min(1)).min(1),
+      })
+      .strict(),
+    reviewReady: z
+      .object({
+        statusPath: z.array(z.string().min(1)).min(1),
+        commentPrefix: z.string().trim().min(1),
       })
       .strict(),
   })
@@ -52,6 +58,19 @@ const RawTransitionsSchema = z
           id: z.string().min(1),
           name: z.string().min(1),
           to: z.object({ name: z.string().min(1) }).loose(),
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+
+const RawCommentsSchema = z
+  .object({
+    comments: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          body: z.string(),
         })
         .loose(),
     ),
@@ -93,6 +112,13 @@ export type JiraTransitionObservation =
   | { readonly status: 'observed'; readonly transitions: readonly JiraLifecycleTransition[] }
   | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
 
+export type JiraCommentObservation =
+  | {
+      readonly status: 'observed';
+      readonly comments: readonly { readonly id: string; readonly body: string }[];
+    }
+  | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
+
 export type JiraLifecycleMutation =
   | { readonly status: 'accepted' }
   | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
@@ -100,8 +126,10 @@ export type JiraLifecycleMutation =
 export interface JiraLifecyclePort {
   observeIssue(issueKey: JiraIssueKey): Promise<JiraLifecycleObservation>;
   listTransitions(issueKey: JiraIssueKey): Promise<JiraTransitionObservation>;
+  listComments(issueKey: JiraIssueKey): Promise<JiraCommentObservation>;
   assign(issueKey: JiraIssueKey, accountName: string): Promise<JiraLifecycleMutation>;
   transition(issueKey: JiraIssueKey, transitionId: string): Promise<JiraLifecycleMutation>;
+  comment(issueKey: JiraIssueKey, body: string): Promise<JiraLifecycleMutation>;
 }
 
 type FetchImplementation = typeof fetch;
@@ -225,6 +253,31 @@ export class JiraLifecycleClient implements JiraLifecyclePort {
     };
   }
 
+  public async listComments(issueKey: JiraIssueKey): Promise<JiraCommentObservation> {
+    const response = await this.request(
+      'GET',
+      `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment?maxResults=1000`,
+    );
+    if (response.status === 'failed') return response;
+    const payload = await this.json(
+      response.response,
+      'Jira returned an invalid comments response',
+    );
+    if (payload.status === 'failed') return payload;
+    const parsed = RawCommentsSchema.safeParse(payload.value);
+    if (!parsed.success) {
+      return {
+        status: 'failed',
+        problem: {
+          kind: 'invalid_response',
+          message: 'Jira comments response did not match its contract',
+          retryable: false,
+        },
+      };
+    }
+    return { status: 'observed', comments: parsed.data.comments };
+  }
+
   public assign(issueKey: JiraIssueKey, accountName: string): Promise<JiraLifecycleMutation> {
     return this.mutate('PUT', `/rest/api/2/issue/${encodeURIComponent(issueKey)}`, {
       fields: { assignee: { name: accountName } },
@@ -234,6 +287,12 @@ export class JiraLifecycleClient implements JiraLifecyclePort {
   public transition(issueKey: JiraIssueKey, transitionId: string): Promise<JiraLifecycleMutation> {
     return this.mutate('POST', `/rest/api/2/issue/${encodeURIComponent(issueKey)}/transitions`, {
       transition: { id: transitionId },
+    });
+  }
+
+  public comment(issueKey: JiraIssueKey, body: string): Promise<JiraLifecycleMutation> {
+    return this.mutate('POST', `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment`, {
+      body,
     });
   }
 
@@ -296,10 +355,10 @@ export class JiraLifecycleClient implements JiraLifecyclePort {
   }
 }
 
-const same = (left: string, right: string): boolean =>
+export const sameJiraValue = (left: string, right: string): boolean =>
   left.localeCompare(right, 'en-US', { sensitivity: 'base' }) === 0;
 
-const policyConfiguration = (request: IntegrationStepExecutionRequest) => {
+export const jiraLifecyclePolicyConfiguration = (request: IntegrationStepExecutionRequest) => {
   const policy = request.policies.find(({ id }) => id === 'jira-lifecycle');
   return JiraLifecyclePolicyConfigurationSchema.safeParse(policy?.configuration);
 };
@@ -346,7 +405,7 @@ const blocked = (
 ): BlockedIntegrationResult => ({ status: 'blocked', kind, summary, details, artifactIds });
 
 const statusIndex = (path: readonly string[], status: string): number =>
-  path.findIndex((candidate) => same(candidate, status));
+  path.findIndex((candidate) => sameJiraValue(candidate, status));
 
 const assignmentReceipt = (issueKey: JiraIssueKey, accountName: string): JsonValue => ({
   issueKey,
@@ -371,7 +430,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
   public async execute(
     request: IntegrationStepExecutionRequest,
   ): Promise<IntegrationStepExecutionResult> {
-    const configured = policyConfiguration(request);
+    const configured = jiraLifecyclePolicyConfiguration(request);
     if (!configured.success) {
       return blocked('configuration', 'Jira lifecycle policy is missing or invalid', {
         issues: configured.error.issues.map((issue) => issue.message),
@@ -412,7 +471,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
     if (targetStatus === undefined) {
       return blocked('configuration', 'Jira lifecycle status path is empty', {}, artifactIds);
     }
-    while (!same(issue.status, targetStatus)) {
+    while (!sameJiraValue(issue.status, targetStatus)) {
       const fromIndex = statusIndex(admission.statusPath, issue.status);
       const toStatus = admission.statusPath[fromIndex + 1];
       if (fromIndex < 0 || toStatus === undefined) {
@@ -447,7 +506,9 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
     issue: JiraLifecycleIssue,
     admission: z.infer<typeof JiraLifecyclePolicyConfigurationSchema>['admission'],
   ): IntegrationStepExecutionResult | null {
-    if (!admission.allowedIssueTypes.some((candidate) => same(candidate, issue.issueType))) {
+    if (
+      !admission.allowedIssueTypes.some((candidate) => sameJiraValue(candidate, issue.issueType))
+    ) {
       return blocked(
         'invalid_request',
         `Jira issue type ${issue.issueType} is not agent-eligible`,
@@ -458,7 +519,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       );
     }
     const deniedLabel = issue.labels.find((label) =>
-      admission.deniedLabels.some((candidate) => same(candidate, label)),
+      admission.deniedLabels.some((candidate) => sameJiraValue(candidate, label)),
     );
     if (deniedLabel !== undefined) {
       return blocked('invalid_request', `Jira issue is excluded by label ${deniedLabel}`, {
@@ -466,7 +527,10 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
         deniedLabel,
       });
     }
-    if (issue.assignee !== null && !same(issue.assignee.accountName, admission.accountName)) {
+    if (
+      issue.assignee !== null &&
+      !sameJiraValue(issue.assignee.accountName, admission.accountName)
+    ) {
       return blocked('invalid_request', 'Jira issue is assigned to another person', {
         issueKey: issue.issueKey,
         assignee: issue.assignee.accountName,
@@ -515,7 +579,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       if (
         reconciled.status !== 'observed' ||
         reconciled.issue.assignee === null ||
-        !same(reconciled.issue.assignee.accountName, accountName)
+        !sameJiraValue(reconciled.issue.assignee.accountName, accountName)
       ) {
         return mutation.status === 'failed'
           ? problemResult(mutation.problem, artifactIds, true)
@@ -539,7 +603,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
     if (observed.status === 'failed') return problemResult(observed.problem, artifactIds, true);
     if (
       observed.issue.assignee === null ||
-      !same(observed.issue.assignee.accountName, accountName)
+      !sameJiraValue(observed.issue.assignee.accountName, accountName)
     ) {
       return blocked(
         'remote_conflict',
@@ -578,7 +642,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       const transitions = await this.jira.listTransitions(issue.issueKey);
       if (transitions.status === 'failed') return problemResult(transitions.problem, artifactIds);
       const matches = transitions.transitions.filter((candidate) =>
-        same(candidate.toStatus, toStatus),
+        sameJiraValue(candidate.toStatus, toStatus),
       );
       if (matches.length !== 1) {
         return blocked(

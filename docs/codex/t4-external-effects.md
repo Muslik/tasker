@@ -2,8 +2,9 @@
 
 Status: generic effect journal, reconciled Bitbucket PR publication, Jenkins/Allure
 observation, human-review/revision/reply lifecycle, and Jira task admission implemented
-behind explicit pilot flags on 2026-08-04. Compact Jira review/evidence mutation and
-the real company pilot remain open. Thread resolution is not implemented because the supported local
+behind explicit pilot flags on 2026-08-04. Jira review readiness was added behind the
+same Jira flag on 2026-08-04. Optional reproduction evidence mutation and the real
+company pilot remain open. Thread resolution is not implemented because the supported local
 Bitbucket contract exposes replies but no verified resolve endpoint.
 
 ## Boundary
@@ -22,7 +23,8 @@ Delivery classes now mean:
 - `remote_reconciled`: a typed adapter owns read-before-write reconciliation and may be
   redelivered after Worker/process failure.
 
-`pr.prepare@1`, `review.acknowledge@1`, and `jira.start-work@1` use
+`pr.prepare@1`, `review.acknowledge@1`, `jira.start-work@1`, and
+`jira.review-ready@1` use
 `remote_reconciled`; `ci.observe@1` uses `read_only`. Adding these integrations did not add a vendor branch to the Workflow
 interpreter.
 
@@ -44,9 +46,24 @@ infrastructure wait. Neither reaches the next code step. Operator guidance retri
 admission against the same prepared worktree.
 
 Registration additionally requires `TASKER_ENABLE_JIRA_EFFECTS=true`. Credentials alone
-never enable writes. Comment/status updates for code review and optional reproduction
-attachments remain separate future blocks because they have different identities and
-proof surfaces.
+never enable writes. Optional reproduction attachments remain a separate future block
+because media upload has a different identity and proof surface.
+
+## Jira review readiness
+
+The same file-backed policy requires `pr.prepare@1`, `ci.observe@1`, and
+`jira.review-ready@1`, in that order, before every `code_review@1` wait in a Jira-origin
+graph. The workflow analyzer remains free to assemble the rest of the task graph; the
+deterministic validator rejects any initial or revised PR path that bypasses this
+boundary.
+
+`jira.review-ready@1` reads the latest durable provider-neutral PR output, requires a
+concrete URL, follows the configured Jira status path to Code Review, and publishes one
+compact Jira-wiki link. It never imports Bitbucket code or response types. Both the
+transition and comment have independent intent/probe/receipt identities. A repeated
+Activity or a later operator-resumed attempt observes the live issue and comments first,
+so an existing transition or link is not repeated. A 403 pauses only this block; a lost
+response is accepted only when the post-write observation proves the result.
 
 Because wait-result mappings and recoverable loop exhaustion are now part of the
 compiled contract, the current compiler/IR markers are compiler `4` and IR `m2`; new
@@ -207,6 +224,9 @@ Automated tests prove:
   a later human follow-up makes the thread actionable again;
 - a remote task-branch revision advances only through an exact lease after proving the
   remote commit is an ancestor of the local commit.
+- Jira review readiness rejects missing PR evidence before mutation, reconciles lost
+  comment responses, deduplicates the PR link across attempts, and resumes a 403 at the
+  same Temporal node without repeating implementation or PR preparation.
 
 No request was sent to company Jira, Bitbucket, or Jenkins in this milestone. The first real
 pilot still requires the policy block, explicit flag, and operator-visible confirmation
@@ -214,7 +234,7 @@ of the selected task/repository.
 
 ## Remaining T4 sequence
 
-1. add compact Jira code-review comment/status and optional reproduction attachment blocks;
+1. add the optional Jira before-reproduction attachment block;
 2. enable the real flags for one allowed task and complete the T4 exit gate;
 3. add automatic Bitbucket thread resolution only if a supported company endpoint and
    desired review policy are verified during the pilot.

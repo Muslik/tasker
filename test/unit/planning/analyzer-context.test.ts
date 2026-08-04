@@ -66,8 +66,14 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
       'jira.start-work@1',
     );
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
+      'jira.review-ready@1',
+    );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain(
       'jira-admission-before-workspace-write',
+    );
+    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
+      'jira-review-ready-before-code-review',
     );
   });
 });

@@ -14,6 +14,10 @@
       "allowedIssueTypes": ["Bug", "Task", "Story", "Sub-task"],
       "deniedLabels": ["agent-disabled"],
       "statusPath": ["Backlog", "Open", "In Progress"]
+    },
+    "reviewReady": {
+      "statusPath": ["In Progress", "Code Review"],
+      "commentPrefix": "PR ready for review"
     }
   },
   "obligations": [
@@ -38,6 +42,18 @@
         { "kind": "step", "reference": "jira.start-work@1" }
       ],
       "reason": "A Jira task must be admitted before reproduction, verification, or another project command runs."
+    },
+    {
+      "id": "jira-review-ready-before-code-review",
+      "kind": "path_sequence",
+      "direction": "before",
+      "trigger": { "kind": "wait", "reference": "code_review@1" },
+      "ordered": [
+        { "kind": "step", "reference": "pr.prepare@1" },
+        { "kind": "step", "reference": "ci.observe@1" },
+        { "kind": "step", "reference": "jira.review-ready@1" }
+      ],
+      "reason": "A Jira task reaches human review only after its pull request, CI evidence, compact Jira comment, and review status are durable."
     }
   ]
 }

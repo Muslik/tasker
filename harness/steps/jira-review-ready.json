@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "reference": "jira.review-ready@1",
+  "policy": "jira-lifecycle",
+  "description": "Move an admitted Jira issue to code review and publish one compact pull-request link.",
+  "retryBudget": 3,
+  "inputContract": "task_input",
+  "outputContract": "integration_output",
+  "execution": {
+    "kind": "integration",
+    "adapter": "jira.review-ready@1"
+  },
+  "activityDelivery": "remote_reconciled",
+  "allowedEffects": ["tracker.transition", "tracker.comment"],
+  "requiredCapabilities": ["tracker.write"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["tracker-review-ready"],
+  "requiredArtifactContracts": ["pull-request"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

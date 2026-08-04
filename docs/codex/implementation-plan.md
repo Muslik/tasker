@@ -245,9 +245,17 @@ rejects disallowed issue types/statuses/labels and tasks assigned to somebody el
 assigns an unowned issue to the configured operator, discovers each configured status
 edge from Jira transitions, and journals every assignment/transition separately. A
 400/403 opens the existing step wait; operator guidance redelivers only admission in
-the same worktree. The Worker registers the adapter only with
-`TASKER_ENABLE_JIRA_EFFECTS=true`. Compact code-review comment/status and optional
-reproduction attachment effects remain separate follow-up blocks.
+the same worktree. The Worker registers Jira mutation adapters only with
+`TASKER_ENABLE_JIRA_EFFECTS=true`.
+
+Implemented review-ready slice on 2026-08-04: the same file-backed policy requires
+`pr.prepare@1` -> `ci.observe@1` -> `jira.review-ready@1` before every Jira-origin
+`code_review@1` wait. The adapter consumes only provider-neutral durable PR evidence,
+follows the configured status path, and reconciles one compact PR-link comment through
+independent transition/comment intents and receipts. A 403 resumes only this node;
+lost responses and new operator attempts probe Jira first and do not repeat completed
+implementation or PR preparation. Optional reproduction attachment remains a separate
+block.
 
 ### 7.3 Bitbucket and PR review
 
@@ -400,9 +408,9 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-The Temporal cutover, local review/revision/reply lifecycle, and Jira task-admission
-effect are complete. Add compact Jira review/evidence effects, then enable the explicit
-remote-effect flags for one allowed pilot task. The
+The Temporal cutover, local review/revision/reply lifecycle, Jira task admission, and
+Jira review-ready effect are complete. Add the optional before-reproduction evidence
+attachment block, then enable the explicit remote-effect flags for one allowed pilot task. The
 pilot path remains Jira intake -> managed worktree -> agent implementation -> targeted
 verification -> validated PR draft -> safe push/PR -> Jenkins classification -> human
 review/revision.

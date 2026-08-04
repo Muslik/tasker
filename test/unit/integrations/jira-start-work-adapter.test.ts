@@ -8,6 +8,7 @@ import {
   type JiraLifecycleMutation,
   type JiraLifecycleObservation,
   type JiraLifecyclePort,
+  type JiraCommentObservation,
   type JiraTransitionObservation,
 } from '../../../src/integrations/index.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
@@ -89,6 +90,10 @@ class StatefulJiraLifecyclePort implements JiraLifecyclePort {
     return Promise.resolve({ status: 'observed', transitions });
   }
 
+  public listComments(): Promise<JiraCommentObservation> {
+    return Promise.resolve({ status: 'observed', comments: [] });
+  }
+
   public assign(_issueKey: string, accountName: string): Promise<JiraLifecycleMutation> {
     this.assignmentCalls.push(accountName);
     this.issue = {
@@ -138,6 +143,10 @@ class StatefulJiraLifecyclePort implements JiraLifecyclePort {
           }
         : { status: 'accepted' },
     );
+  }
+
+  public comment(): Promise<JiraLifecycleMutation> {
+    return Promise.resolve({ status: 'accepted' });
   }
 }
 

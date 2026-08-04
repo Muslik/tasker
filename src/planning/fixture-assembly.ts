@@ -135,6 +135,48 @@ const postPlanPolicySteps = (
   );
 };
 
+const beforeCodeReviewPolicySteps = (
+  task: TaskContext & { readonly origin: string },
+  prefix: '' | 'review-',
+): readonly WorkflowNodeSource[] => {
+  const pack = getHarnessPack();
+  const references = pack.policies
+    .filter((policy) => harnessPolicyAppliesToOrigin(policy, task.origin))
+    .flatMap((policy) =>
+      policy.obligations
+        .filter(
+          (obligation) =>
+            obligation.direction === 'before' &&
+            obligation.trigger.kind === 'wait' &&
+            obligation.trigger.reference === 'code_review@1',
+        )
+        .flatMap((obligation) =>
+          obligation.ordered
+            .filter(
+              (marker) =>
+                marker.kind === 'step' &&
+                pack.steps.find((candidate) => candidate.reference === marker.reference)?.policy ===
+                  policy.id,
+            )
+            .map((marker) => ({ policy, reference: marker.reference })),
+        ),
+    )
+    .filter(
+      (candidate, index, candidates) =>
+        candidates.findIndex(({ reference }) => reference === candidate.reference) === index,
+    );
+
+  return references.map(({ policy, reference }) =>
+    step(
+      `${prefix}policy-${policy.id}-${reference.split('@')[0]?.replaceAll('.', '-') ?? 'step'}`,
+      {
+        uses: reference,
+        with: taskInput(task, policy.description),
+      },
+    ),
+  );
+};
+
 const pullRequestPublication = (
   task: TaskContext,
   prefix: '' | 'review-',
@@ -178,8 +220,11 @@ const pullRequestPublication = (
   }),
 ];
 
-const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] => [
+const pullRequestReadiness = (
+  task: TaskContext & { readonly origin: string },
+): readonly WorkflowNodeSource[] => [
   ...pullRequestPublication(task, ''),
+  ...beforeCodeReviewPolicySteps(task, ''),
   wait('wait-for-code-review', { for: 'code_review@1' }),
   bounded_loop('code-review-revision-loop', {
     maxAttempts: 3,
@@ -200,6 +245,7 @@ const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] 
         uses: 'review.acknowledge@1',
         with: taskInput(task, 'Acknowledge the pull-request threads addressed by this revision.'),
       }),
+      ...beforeCodeReviewPolicySteps(task, 'review-'),
       wait('wait-for-revised-code-review', { for: 'code_review@1' }),
     ]),
   }),

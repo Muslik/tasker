@@ -209,6 +209,8 @@ For a representative run, inspect Event History and Search Attributes:
 - VPN/403 sync failure updates health without erasing cached task;
 - Jira 400 on take-into-work is classified and does not start code Activity;
 - non-agent task policy prevents assignment/status mutation;
+- code-review transition/comment requires durable PR evidence and follows CI;
+- Jira review-ready 403 resumes only that node without repeating code or PR preparation;
 - repeated comment/attachment Activity reconciles existing remote result;
 - before-reproduction media attaches only when explicit policy permits it.
 
@@ -299,6 +301,8 @@ same built-in-profile worktree, runs the task test and build, and reaches
 - allowed Jira task reaches PR code review;
 - Jira admission rejects ineligible ownership/status before code, classifies 400/403,
   reconciles lost responses, and resumes in the same worktree;
+- Jira review readiness transitions and publishes one PR link before the review wait,
+  reconciling 403 and lost responses without duplicate comments;
 - 403 during push resumes only push/reconciliation;
 - CI classifications and PR revise loop pass;
 - external-effect crash matrix is green for enabled mutations.

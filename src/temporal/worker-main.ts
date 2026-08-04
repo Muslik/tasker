@@ -26,6 +26,7 @@ import {
   JenkinsBuildClient,
   JenkinsBuildObserverAdapter,
   JiraLifecycleClient,
+  JiraReviewReadyAdapter,
   JiraServerClient,
   JiraStartWorkAdapter,
   loadJenkinsBuildConfiguration,
@@ -96,6 +97,8 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jenkinsConfiguration = loadJenkinsBuildConfiguration();
   const jiraConfiguration = loadJiraConfiguration();
   const jiraLifecycleEffectsEnabled = process.env.TASKER_ENABLE_JIRA_EFFECTS === 'true';
+  const jiraLifecycleClient =
+    jiraConfiguration === null ? null : new JiraLifecycleClient(jiraConfiguration);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
     new AiAssistanceInitializeAdapter(externalEffects),
     new AiAssistanceRecordPlanAdapter(externalEffects),
@@ -123,9 +126,12 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
             externalEffects,
           ),
         ]),
-    ...(jiraConfiguration === null || !jiraLifecycleEffectsEnabled
+    ...(jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
       ? []
-      : [new JiraStartWorkAdapter(new JiraLifecycleClient(jiraConfiguration), externalEffects)]),
+      : [
+          new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects),
+          new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects),
+        ]),
   ]);
   const repositoryCatalog = createManagedRepositoryStore(
     loadRepositoryCatalogConfiguration(),

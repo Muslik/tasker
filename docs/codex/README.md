@@ -66,8 +66,9 @@ continues without discarding the worktree. Per-thread reply effects reconcile pa
 403 and lost-response outcomes without duplicates. Jira task admission is now a
 file-backed, origin-scoped policy plus a reconciled assignment/status adapter. It runs
 after plan acceptance, blocks product execution on ineligible tasks or 400/403, and
-resumes in the same worktree. The real Jira flag remains disabled; review/evidence
-tracker effects and the company pilot are still open.
+resumes in the same worktree. Jira review readiness transitions to Code Review and
+posts one reconciled PR link after CI. The real Jira flag remains disabled; optional
+reproduction attachment and the company pilot are still open.
 
 ## Historical implementation records
 
@@ -97,5 +98,6 @@ policy-to-PR boundary described in
 [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) and the gated Bitbucket effect
 family in [`t4-external-effects.md`](t4-external-effects.md). The local Bitbucket
 review/revision/reply lifecycle is also complete. Jira admission is implemented behind
-`TASKER_ENABLE_JIRA_EFFECTS=true`; next are compact code-review/evidence tracker effects
-and one explicitly allowed real pilot. Future work must not reintroduce a second runtime.
+`TASKER_ENABLE_JIRA_EFFECTS=true`; Jira review readiness uses the same guarded adapter
+family. Next are optional reproduction evidence attachment and one explicitly allowed
+real pilot. Future work must not reintroduce a second runtime.

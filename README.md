@@ -54,8 +54,10 @@ Real Bitbucket mutation remains disabled by default. Review comments now run thr
 reconciled revision/reply loop. Jira-origin workflows require the file-backed
 `jira.start-work@1` admission block after plan acceptance and before product effects;
 its assignment/status effects reconcile lost responses and pause on 400/403 without
-starting code. Jira and Bitbucket mutations remain separately disabled by default.
-Tracker review/evidence updates and the allowed real pilot are the remaining T4 work. See
+starting code. After PR publication and CI, `jira.review-ready@1` reconciles the Jira
+Code Review transition and one compact PR-link comment before the human review wait.
+Jira and Bitbucket mutations remain separately disabled by default. Optional
+reproduction evidence attachment and the allowed real pilot are the remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 
