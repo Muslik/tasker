@@ -5,6 +5,7 @@
   "availableCapabilities": [
     "ci.read",
     "command.run",
+    "code-review.write",
     "git.write",
     "package.publish",
     "repository.read",

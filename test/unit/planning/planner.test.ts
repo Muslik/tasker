@@ -6,7 +6,7 @@ import {
   planTaskWorkflow,
   planWorkflowProposal,
 } from '../../../src/planning/index.js';
-import { WorkflowSourceSchema } from '../../../src/workflow/index.js';
+import { WorkflowSourceSchema, type WorkflowNodeSource } from '../../../src/workflow/index.js';
 
 const fixture = (fixtureId: string) => {
   const value = findTaskFixture(fixtureId);
@@ -14,6 +14,31 @@ const fixture = (fixtureId: string) => {
     throw new Error(`Missing test fixture ${fixtureId}`);
   }
   return value;
+};
+
+const removeStep = (node: WorkflowNodeSource, reference: string): WorkflowNodeSource => {
+  switch (node.kind) {
+    case 'sequence':
+      return {
+        ...node,
+        children: node.children
+          .filter((child) => child.kind !== 'step' || child.uses !== reference)
+          .map((child) => removeStep(child, reference)),
+      };
+    case 'branch':
+      return {
+        ...node,
+        then: removeStep(node.then, reference),
+        otherwise: removeStep(node.otherwise, reference),
+      };
+    case 'bounded_loop':
+      return { ...node, body: removeStep(node.body, reference) };
+    case 'step':
+    case 'gate':
+    case 'wait':
+    case 'finalize':
+      return node;
+  }
 };
 
 describe('M1 task workflow planning', () => {
@@ -140,6 +165,25 @@ describe('M1 task workflow planning', () => {
       expect.objectContaining({
         code: 'unsatisfied_workflow_obligation',
         details: { obligationId: 'pr-requires-ai-assistance' },
+      }),
+    );
+  });
+
+  it('rejects a review revision that is not acknowledged before returning to review', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+    const result = planWorkflowProposal({
+      ...planned.value.proposal,
+      source: { ...source, root: removeStep(source.root, 'review.acknowledge@1') },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'publish-and-acknowledge-review-revision' },
       }),
     );
   });
@@ -284,6 +328,10 @@ describe('M1 task workflow planning', () => {
     expect(result.value.presentation.nodes['consume-published-version']).toMatchObject({
       kind: 'step',
       uses: 'component.consume_published@1',
+    });
+    expect(result.value.presentation.nodes['acknowledge-review-threads']).toMatchObject({
+      kind: 'step',
+      uses: 'review.acknowledge@1',
     });
     expect(result.value.proposal.waits.every((wait) => wait.resumeAt === undefined)).toBe(true);
     const publicationDecision = result.value.proposal.assemblyDecisions.find(

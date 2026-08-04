@@ -4,6 +4,7 @@ import {
   BitbucketReviewClient,
   BitbucketReviewCoordinator,
   PullRequestReviewEvidenceStore,
+  taskerReviewAcknowledgementMarker,
   type BitbucketReviewPort,
   type BitbucketReviewSnapshot,
   type TaskRunStepEvidence,
@@ -164,6 +165,118 @@ describe('Bitbucket review intake', () => {
     ).resolves.toMatchObject({
       status: 'failed',
       problem: { kind: 'access_blocked', retryable: true, httpStatus: 403 },
+    });
+  });
+
+  it('posts a reply to the root comment using the supported Bitbucket comments endpoint', async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response({ id: 142, text: 'reply' }));
+    const client = new BitbucketReviewClient(configuration, fetchImplementation);
+
+    const result = await client.reply({
+      projectKey: 'ONETWOTRIP',
+      repositorySlug: 'front-avia',
+      pullRequestId: 73,
+      rootCommentId: 41,
+      text: 'Changes applied.',
+    });
+
+    expect(result).toEqual({ status: 'replied', commentId: 142 });
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      'https://bitbucket.example/rest/api/1.0/projects/ONETWOTRIP/repos/front-avia/pull-requests/73/comments',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ text: 'Changes applied.', parent: { id: 41 } }),
+      }),
+    );
+  });
+
+  it('keeps a thread quiet while the Tasker acknowledgement is its latest comment', async () => {
+    const marker = taskerReviewAcknowledgementMarker(
+      'bitbucket:ONETWOTRIP/front-avia:73:review-hash',
+      41,
+    );
+    const acknowledged = {
+      ...humanComment,
+      comments: [
+        ...humanComment.comments,
+        {
+          id: 43,
+          text: `Changes applied.\n\n${marker}`,
+          author: { displayName: 'Tasker', slug: 'tasker' },
+          createdDate: Date.parse('2026-08-04T10:02:00.000Z'),
+          comments: [],
+        },
+      ],
+    };
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        response({ values: [{ action: 'COMMENTED', comment: acknowledged }], isLastPage: true }),
+      );
+    const client = new BitbucketReviewClient(configuration, fetchImplementation);
+
+    const result = await client.observe({
+      projectKey: 'ONETWOTRIP',
+      repositorySlug: 'front-avia',
+      pullRequestId: 73,
+      pullRequestUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      status: 'observed',
+      snapshot: { decision: 'pending', threads: [] },
+    });
+  });
+
+  it('makes an acknowledged thread actionable when a reviewer follows up', async () => {
+    const marker = taskerReviewAcknowledgementMarker(
+      'bitbucket:ONETWOTRIP/front-avia:73:review-hash',
+      41,
+    );
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      response({
+        values: [
+          {
+            action: 'COMMENTED',
+            comment: {
+              ...humanComment,
+              comments: [
+                ...humanComment.comments,
+                {
+                  id: 43,
+                  text: `Changes applied.\n\n${marker}`,
+                  author: { displayName: 'Tasker', slug: 'tasker' },
+                  createdDate: Date.parse('2026-08-04T10:02:00.000Z'),
+                  comments: [],
+                },
+                {
+                  id: 44,
+                  text: 'This is still broken on mobile',
+                  author: { displayName: 'Reviewer', slug: 'reviewer' },
+                  createdDate: Date.parse('2026-08-04T10:03:00.000Z'),
+                  comments: [],
+                },
+              ],
+            },
+          },
+        ],
+        isLastPage: true,
+      }),
+    );
+    const client = new BitbucketReviewClient(configuration, fetchImplementation);
+
+    const result = await client.observe({
+      projectKey: 'ONETWOTRIP',
+      repositorySlug: 'front-avia',
+      pullRequestId: 73,
+      pullRequestUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      status: 'observed',
+      snapshot: { decision: 'changes_requested', threads: [{ rootCommentId: 41 }] },
     });
   });
 

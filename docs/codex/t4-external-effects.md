@@ -1,9 +1,10 @@
 # T4 external effects, Bitbucket PR preparation, and Jenkins observation
 
 Status: generic effect journal, reconciled Bitbucket PR publication, Jenkins/Allure
-observation, and the local human-review/revision lifecycle implemented behind an
-explicit pilot flag on 2026-08-04. Jira lifecycle mutation, review-thread reply/resolve
-writes, and the real company pilot remain open.
+observation, and the human-review/revision/reply lifecycle implemented behind an
+explicit pilot flag on 2026-08-04. Jira lifecycle mutation and the real company pilot
+remain open. Thread resolution is not implemented because the supported local
+Bitbucket contract exposes replies but no verified resolve endpoint.
 
 ## Boundary
 
@@ -21,8 +22,9 @@ Delivery classes now mean:
 - `remote_reconciled`: a typed adapter owns read-before-write reconciliation and may be
   redelivered after Worker/process failure.
 
-`pr.prepare@1` uses `remote_reconciled`; `ci.observe@1` uses `read_only`. Adding either
-integration did not add a vendor branch to the Workflow interpreter.
+`pr.prepare@1` and `review.acknowledge@1` use `remote_reconciled`; `ci.observe@1` uses
+`read_only`. Adding these integrations did not add a vendor branch to the Workflow
+interpreter.
 
 Because wait-result mappings and recoverable loop exhaustion are now part of the
 compiled contract, the current compiler/IR markers are compiler `4` and IR `m2`; new
@@ -88,14 +90,20 @@ state is deduplicated by content hash.
 The compiled wait maps `approved` and `changes_requested` to generic predicate facts.
 The task-specific graph decides what follows. Current company graphs use a pre-checked,
 three-attempt loop containing `review.revise@1`, targeted verification, PR draft and
-policy regeneration, guarded branch update/PR reconciliation, Jenkins observation, and
-another `code_review@1` wait. Approval skips or exits the loop. Exhaustion opens
-`operator_guidance@1`; the operator's prompt is passed to the next revision Activity in
-the same Workflow Run and managed worktree.
+policy regeneration, guarded branch update/PR reconciliation, Jenkins observation,
+`review.acknowledge@1`, and another `code_review@1` wait. Approval skips or exits the
+loop. Exhaustion opens `operator_guidance@1`; the operator's prompt is passed to the
+next revision Activity in the same Workflow Run and managed worktree.
 
 The operator may explicitly mark a comment-free review done. Tasker never auto-merges.
-Replying to or resolving Bitbucket threads is deliberately still absent until those
-writes have their own stable operation IDs and reconciliation proof.
+The file-backed `review-feedback` policy requires every `review.revise@1` path to publish
+the revision, observe CI, acknowledge the imported threads, and return to review. Its
+directional path obligation is configuration, not Temporal code. The Bitbucket adapter
+posts a localized reply to each root thread with a hidden stable marker. Every reply has
+its own intent and receipt; a preflight/post-failure activity probe reconciles lost
+responses and partial batches. A 403 pauses only this step. The review observer ignores
+an acknowledged thread while that marker is the latest comment; any later reviewer
+reply makes the thread actionable again.
 
 ## Pilot gate
 
@@ -173,6 +181,8 @@ Automated tests prove:
   ignore bot-only roots, classify VPN/403, and deduplicate immutable review evidence;
 - review changes execute revise/verify/PR/CI cycles, bounded exhaustion opens operator
   guidance, and the supplied prompt resumes the same loop and worktree;
+- review replies reconcile lost responses and partial 403 batches per root thread, and
+  a later human follow-up makes the thread actionable again;
 - a remote task-branch revision advances only through an exact lease after proving the
   remote commit is an ancestor of the local commit.
 
@@ -182,6 +192,7 @@ of the selected task/repository.
 
 ## Remaining T4 sequence
 
-1. add reconciled Bitbucket thread reply/resolve effects;
-2. add Jira assignment/status/comment/attachment effects under project policy;
-3. enable the real flags for one allowed task and complete the T4 exit gate.
+1. add Jira assignment/status/comment/attachment effects under project policy;
+2. enable the real flags for one allowed task and complete the T4 exit gate;
+3. add automatic Bitbucket thread resolution only if a supported company endpoint and
+   desired review policy are verified during the pilot.

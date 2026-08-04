@@ -159,6 +159,10 @@ const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] 
         with: verificationInput(task, 'review_revision'),
       }),
       ...pullRequestPublication(task, 'review-'),
+      step('acknowledge-review-threads', {
+        uses: 'review.acknowledge@1',
+        with: taskInput(task, 'Acknowledge the pull-request threads addressed by this revision.'),
+      }),
       wait('wait-for-revised-code-review', { for: 'code_review@1' }),
     ]),
   }),

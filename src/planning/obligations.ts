@@ -238,34 +238,51 @@ export const validateWorkflowObligations = (
             : [],
         );
         for (const triggerPosition of triggerPositions) {
-          let before = triggerPosition + 1;
           let missing: (typeof obligation.ordered)[number] | undefined;
-          for (let index = obligation.ordered.length - 1; index >= 0; index -= 1) {
-            const required = obligation.ordered[index];
-            if (required === undefined) continue;
-            let match = -1;
-            for (let candidate = before - 1; candidate >= 0; candidate -= 1) {
-              const marker = path[candidate];
-              if (
-                marker !== undefined &&
-                marker.kind === required.kind &&
-                marker.reference === required.reference
-              ) {
-                match = candidate;
+          if (obligation.direction === 'after') {
+            let after = triggerPosition + 1;
+            for (const required of obligation.ordered) {
+              const match = path.findIndex(
+                (marker, candidate) =>
+                  candidate >= after &&
+                  marker.kind === required.kind &&
+                  marker.reference === required.reference,
+              );
+              if (match < 0) {
+                missing = required;
                 break;
               }
+              after = match + 1;
             }
-            if (match < 0) {
-              missing = required;
-              break;
+          } else {
+            let before = triggerPosition + 1;
+            for (let index = obligation.ordered.length - 1; index >= 0; index -= 1) {
+              const required = obligation.ordered[index];
+              if (required === undefined) continue;
+              let match = -1;
+              for (let candidate = before - 1; candidate >= 0; candidate -= 1) {
+                const marker = path[candidate];
+                if (
+                  marker !== undefined &&
+                  marker.kind === required.kind &&
+                  marker.reference === required.reference
+                ) {
+                  match = candidate;
+                  break;
+                }
+              }
+              if (match < 0) {
+                missing = required;
+                break;
+              }
+              before = match;
             }
-            before = match;
           }
           if (missing !== undefined) {
             issues.push(
               issue(
                 obligation.id,
-                `Policy ${policy.id}@${policy.version} requires ${missing.kind} ${missing.reference} before ${obligation.trigger.reference}`,
+                `Policy ${policy.id}@${policy.version} requires ${missing.kind} ${missing.reference} ${obligation.direction} ${obligation.trigger.reference}`,
                 ['root', 'executionPaths', pathIndex, triggerPosition],
               ),
             );

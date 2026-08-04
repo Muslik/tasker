@@ -286,8 +286,9 @@ payload schema. The Workflow consumes a message once and records the decision in
 history. Duplicate webhook/poll results are deduplicated by stable external identity.
 
 PR conversation is the primary review channel: Tasker imports unresolved Bitbucket
-threads, starts a revision Activity, posts or resolves only through the integration
-adapter, waits for CI again when needed, and returns to code review. The cockpit may
+threads, starts a revision Activity, and posts acknowledgements only through the
+integration adapter after CI, then returns to code review. Provider-specific resolution
+may be added behind the same boundary when its API and policy are verified. The cockpit may
 also submit operator guidance. For an infrastructure or agent block, that guidance
 resumes the same durable wait and is included in the next attempt; the completed
 prefix, worktree, artifacts, and conversation provenance remain intact.

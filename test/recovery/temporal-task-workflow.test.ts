@@ -511,6 +511,7 @@ describe('Temporal task workflow', () => {
     });
     expect(executions.filter(({ uses }) => uses === 'pr.prepare@1')).toHaveLength(5);
     expect(executions.filter(({ uses }) => uses === 'ci.observe@1')).toHaveLength(5);
+    expect(executions.filter(({ uses }) => uses === 'review.acknowledge@1')).toHaveLength(4);
 
     if (finalReview.status !== 'waiting') throw new Error('Expected final review wait');
     const approved = await service.resolveWait(taskReference, {

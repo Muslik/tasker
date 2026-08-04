@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "reference": "review.acknowledge@1",
+  "policy": "review-feedback",
+  "description": "Reply to pull-request review threads after their requested changes are published and verified.",
+  "retryBudget": 3,
+  "inputContract": "task_input",
+  "outputContract": "integration_output",
+  "execution": {
+    "kind": "integration",
+    "adapter": "bitbucket.review-reply@1"
+  },
+  "activityDelivery": "remote_reconciled",
+  "allowedEffects": ["code-review.reply"],
+  "requiredCapabilities": ["code-review.write"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["pull-request-review-acknowledgement"],
+  "requiredArtifactContracts": ["pull-request", "pull-request-review"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

@@ -50,8 +50,9 @@ flow into same-branch artifacts and a validated provider-neutral PR draft. The g
 Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and
 passes its local crash matrix. The file-backed Jenkins block observes the exact task
 commit, classifies pipeline/Allure evidence, and resumes at CI after Worker/VPN failure.
-Real Bitbucket mutation remains disabled by default. Jira lifecycle and
-review/revision are the remaining T4 work. See
+Real Bitbucket mutation remains disabled by default. Review comments now run through a
+reconciled revision/reply loop; Jira lifecycle and the allowed real pilot are the
+remaining T4 work. See
 [`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
 for the runtime boundary and recovery evidence.
 

@@ -117,7 +117,12 @@ export type BitbucketReviewSnapshot = z.infer<typeof BitbucketReviewSnapshotSche
 
 export type BitbucketReviewProblem = {
   readonly kind:
-    'access_blocked' | 'auth_failed' | 'invalid_response' | 'not_found' | 'unavailable';
+    | 'access_blocked'
+    | 'auth_failed'
+    | 'invalid_request'
+    | 'invalid_response'
+    | 'not_found'
+    | 'unavailable';
   readonly message: string;
   readonly retryable: boolean;
   readonly httpStatus?: number;
@@ -135,6 +140,40 @@ export interface BitbucketReviewPort {
     readonly pullRequestUrl: string | null;
   }): Promise<BitbucketReviewObservation>;
 }
+
+export type BitbucketReviewReplyResult =
+  | { readonly status: 'replied'; readonly commentId: number }
+  | { readonly status: 'failed'; readonly problem: BitbucketReviewProblem };
+
+export type BitbucketReviewAcknowledgementObservation =
+  | { readonly status: 'observed'; readonly acknowledged: boolean }
+  | { readonly status: 'failed'; readonly problem: BitbucketReviewProblem };
+
+export interface BitbucketReviewReplyPort {
+  reply(input: {
+    readonly projectKey: string;
+    readonly repositorySlug: string;
+    readonly pullRequestId: number;
+    readonly rootCommentId: number;
+    readonly text: string;
+  }): Promise<BitbucketReviewReplyResult>;
+  hasAcknowledgement(input: {
+    readonly projectKey: string;
+    readonly repositorySlug: string;
+    readonly pullRequestId: number;
+    readonly marker: string;
+  }): Promise<BitbucketReviewAcknowledgementObservation>;
+}
+
+const TASKER_REVIEW_MARKER_PREFIX = '<!-- tasker-review:';
+
+export const taskerReviewAcknowledgementMarker = (
+  reviewId: string,
+  rootCommentId: number,
+): string => `${TASKER_REVIEW_MARKER_PREFIX}${reviewId}:thread-${String(rootCommentId)} -->`;
+
+export const isTaskerReviewAcknowledgement = (text: string): boolean =>
+  text.includes(TASKER_REVIEW_MARKER_PREFIX);
 
 const BOT_MARKERS = ['_bot', 'bot_', 'jenkins', 'code_review_bot'] as const;
 
@@ -163,7 +202,24 @@ const flattenComments = (
   ...comment.comments.flatMap((child) => flattenComments(child, comment.id)),
 ];
 
+const latestComment = (
+  comments: readonly z.infer<typeof BitbucketReviewCommentSchema>[],
+): z.infer<typeof BitbucketReviewCommentSchema> | undefined =>
+  comments.reduce<z.infer<typeof BitbucketReviewCommentSchema> | undefined>(
+    (latest, comment) =>
+      latest === undefined || comment.createdAt > latest.createdAt ? comment : latest,
+    undefined,
+  );
+
 const problemForStatus = (status: number): BitbucketReviewProblem => {
+  if (status === 400) {
+    return {
+      kind: 'invalid_request',
+      message: 'Bitbucket rejected the review comment payload',
+      retryable: false,
+      httpStatus: status,
+    };
+  }
   if (status === 401) {
     return {
       kind: 'auth_failed',
@@ -196,7 +252,11 @@ const problemForStatus = (status: number): BitbucketReviewProblem => {
   };
 };
 
-export class BitbucketReviewClient implements BitbucketReviewPort {
+type ActivityLoadResult =
+  | { readonly status: 'loaded'; readonly activities: readonly z.infer<typeof RawActivitySchema>[] }
+  | { readonly status: 'failed'; readonly problem: BitbucketReviewProblem };
+
+export class BitbucketReviewClient implements BitbucketReviewPort, BitbucketReviewReplyPort {
   public constructor(
     private readonly configuration: BitbucketRepositoryConfiguration,
     private readonly fetchImplementation: typeof fetch = fetch,
@@ -208,39 +268,9 @@ export class BitbucketReviewClient implements BitbucketReviewPort {
     readonly pullRequestId: number;
     readonly pullRequestUrl: string | null;
   }): Promise<BitbucketReviewObservation> {
-    const activities: z.infer<typeof RawActivitySchema>[] = [];
-    let start: number | undefined;
-    do {
-      const query = new URLSearchParams({ limit: '200' });
-      if (start !== undefined) query.set('start', String(start));
-      const response = await this.request(
-        `/rest/api/1.0/projects/${encodeURIComponent(input.projectKey)}/repos/${encodeURIComponent(input.repositorySlug)}/pull-requests/${String(input.pullRequestId)}/activities?${query.toString()}`,
-      );
-      if (response.status === 'failed') return response;
-      const parsed = RawActivityPageSchema.safeParse(response.body);
-      if (!parsed.success) {
-        return {
-          status: 'failed',
-          problem: {
-            kind: 'invalid_response',
-            message: 'Bitbucket returned an invalid review activity page',
-            retryable: false,
-          },
-        };
-      }
-      activities.push(...parsed.data.values);
-      start = parsed.data.isLastPage ? undefined : parsed.data.nextPageStart;
-      if (!parsed.data.isLastPage && start === undefined) {
-        return {
-          status: 'failed',
-          problem: {
-            kind: 'invalid_response',
-            message: 'Bitbucket review pagination omitted nextPageStart',
-            retryable: false,
-          },
-        };
-      }
-    } while (start !== undefined);
+    const loaded = await this.loadActivities(input);
+    if (loaded.status === 'failed') return loaded;
+    const activities = loaded.activities;
 
     const threads = activities
       .flatMap((activity) => {
@@ -252,6 +282,8 @@ export class BitbucketReviewClient implements BitbucketReviewPort {
         ) {
           return [];
         }
+        const comments = flattenComments(activity.comment);
+        if (isTaskerReviewAcknowledgement(latestComment(comments)?.text ?? '')) return [];
         const anchor = activity.commentAnchor;
         return [
           BitbucketReviewThreadSchema.parse({
@@ -262,7 +294,7 @@ export class BitbucketReviewClient implements BitbucketReviewPort {
               lineType: anchor?.lineType ?? null,
               orphaned: anchor?.orphaned ?? false,
             },
-            comments: flattenComments(activity.comment),
+            comments,
           }),
         ];
       })
@@ -290,17 +322,105 @@ export class BitbucketReviewClient implements BitbucketReviewPort {
     };
   }
 
+  public async reply(input: {
+    readonly projectKey: string;
+    readonly repositorySlug: string;
+    readonly pullRequestId: number;
+    readonly rootCommentId: number;
+    readonly text: string;
+  }): Promise<BitbucketReviewReplyResult> {
+    const response = await this.request(`${this.pullRequestPath(input)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ text: input.text, parent: { id: input.rootCommentId } }),
+    });
+    if (response.status === 'failed') return response;
+    const parsed = z.object({ id: z.number().int().positive() }).loose().safeParse(response.body);
+    return parsed.success
+      ? { status: 'replied', commentId: parsed.data.id }
+      : {
+          status: 'failed',
+          problem: {
+            kind: 'invalid_response',
+            message: 'Bitbucket returned an invalid review reply',
+            retryable: true,
+          },
+        };
+  }
+
+  public async hasAcknowledgement(input: {
+    readonly projectKey: string;
+    readonly repositorySlug: string;
+    readonly pullRequestId: number;
+    readonly marker: string;
+  }): Promise<BitbucketReviewAcknowledgementObservation> {
+    const loaded = await this.loadActivities(input);
+    if (loaded.status === 'failed') return loaded;
+    return {
+      status: 'observed',
+      acknowledged: loaded.activities.some(
+        (activity) =>
+          activity.comment !== undefined &&
+          flattenComments(activity.comment).some((comment) => comment.text.includes(input.marker)),
+      ),
+    };
+  }
+
+  private async loadActivities(input: {
+    readonly projectKey: string;
+    readonly repositorySlug: string;
+    readonly pullRequestId: number;
+  }): Promise<ActivityLoadResult> {
+    const activities: z.infer<typeof RawActivitySchema>[] = [];
+    let start: number | undefined;
+    do {
+      const query = new URLSearchParams({ limit: '200' });
+      if (start !== undefined) query.set('start', String(start));
+      const response = await this.request(
+        `${this.pullRequestPath(input)}/activities?${query.toString()}`,
+      );
+      if (response.status === 'failed') return response;
+      const parsed = RawActivityPageSchema.safeParse(response.body);
+      if (!parsed.success) {
+        return {
+          status: 'failed',
+          problem: {
+            kind: 'invalid_response',
+            message: 'Bitbucket returned an invalid review activity page',
+            retryable: false,
+          },
+        };
+      }
+      activities.push(...parsed.data.values);
+      start = parsed.data.isLastPage ? undefined : parsed.data.nextPageStart;
+      if (!parsed.data.isLastPage && start === undefined) {
+        return {
+          status: 'failed',
+          problem: {
+            kind: 'invalid_response',
+            message: 'Bitbucket review pagination omitted nextPageStart',
+            retryable: false,
+          },
+        };
+      }
+    } while (start !== undefined);
+
+    return { status: 'loaded', activities };
+  }
+
   private async request(
     path: string,
+    init: Pick<RequestInit, 'body' | 'method'> = {},
   ): Promise<
     | { readonly status: 'ok'; readonly body: unknown }
     | { readonly status: 'failed'; readonly problem: BitbucketReviewProblem }
   > {
     try {
       const response = await this.fetchImplementation(`${this.configuration.baseUrl}${path}`, {
+        ...init,
         headers: {
           accept: 'application/json',
           authorization: `Bearer ${this.configuration.token}`,
+          ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
         },
         signal: AbortSignal.timeout(this.configuration.requestTimeoutMs),
       });
@@ -316,6 +436,14 @@ export class BitbucketReviewClient implements BitbucketReviewPort {
         },
       };
     }
+  }
+
+  private pullRequestPath(input: {
+    readonly projectKey: string;
+    readonly repositorySlug: string;
+    readonly pullRequestId: number;
+  }): string {
+    return `/rest/api/1.0/projects/${encodeURIComponent(input.projectKey)}/repos/${encodeURIComponent(input.repositorySlug)}/pull-requests/${String(input.pullRequestId)}`;
   }
 }
 

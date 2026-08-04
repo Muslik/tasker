@@ -124,13 +124,25 @@ describe('file-backed harness pack', () => {
         'pr.describe@1',
       ]),
     );
-    expect(pack.policies).toMatchObject([
-      {
-        id: 'ai-assistance',
-        version: '1',
-        obligations: [{ id: 'pr-requires-ai-assistance', kind: 'path_sequence' }],
-      },
-    ]);
+    expect(pack.policies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'ai-assistance',
+          version: '1',
+          obligations: [expect.objectContaining({ id: 'pr-requires-ai-assistance' })],
+        }),
+        expect.objectContaining({
+          id: 'review-feedback',
+          version: '1',
+          obligations: [
+            expect.objectContaining({
+              id: 'publish-and-acknowledge-review-revision',
+              direction: 'after',
+            }),
+          ],
+        }),
+      ]),
+    );
   });
 
   it('declares Activity redelivery at the step contract boundary', () => {
@@ -144,6 +156,7 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('translations.extract@1')).toEqual({ kind: 'single_attempt' });
     expect(deliveryFor('ci.observe@1')).toEqual({ kind: 'read_only' });
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
+    expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
       kind: 'workspace_reconciled',
     });
@@ -170,11 +183,25 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(root);
     const references = pack.steps.map(({ reference }) => reference);
 
-    expect(pack.policies).toEqual([]);
+    expect(pack.policies.map(({ id }) => id)).toEqual(['review-feedback']);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
     expect(references).toContain('pr.describe@1');
     expect(references).toContain('pr.prepare@1');
+    expect(references).toContain('review.acknowledge@1');
+  });
+
+  it('removes the Bitbucket acknowledgement block when review feedback policy is disabled', async () => {
+    const root = await createTemporaryPack();
+    const policyPath = join(root, 'policies/review-feedback.json');
+    const policy = JSON.parse(await readFile(policyPath, 'utf8')) as { enabled: boolean };
+    policy.enabled = false;
+    await writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
+
+    const pack = loadHarnessPack(root);
+
+    expect(pack.policies.map(({ id }) => id)).not.toContain('review-feedback');
+    expect(pack.steps.map(({ reference }) => reference)).not.toContain('review.acknowledge@1');
   });
 
   it('binds visual evidence guidance only to reproduction and visual verification', () => {

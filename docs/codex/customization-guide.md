@@ -156,6 +156,12 @@ Use prompts for judgment and implementation guidance. Use deterministic obligati
 for requirements that must always hold, such as CI before PR review or before/after
 reproduction for a bug.
 
+Policy `path_sequence` obligations accept `direction: "before"` and
+`direction: "after"`. Use `before` for prerequisites such as evidence required before
+PR publication. Use `after` for continuations such as revision -> PR update -> CI ->
+thread acknowledgement -> review. This validates a dynamically assembled graph without
+turning the sequence into a Temporal branch.
+
 ## 5. Project policy
 
 Project policy describes workflow peculiarities, not source architecture. Good facts:

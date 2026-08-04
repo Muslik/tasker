@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "review-feedback",
+  "version": "1",
+  "enabled": true,
+  "description": "Keep human pull-request feedback recoverable and visible in the pull request.",
+  "configuration": {
+    "provider": "bitbucket",
+    "acknowledgement": "reply"
+  },
+  "obligations": [
+    {
+      "id": "publish-and-acknowledge-review-revision",
+      "kind": "path_sequence",
+      "direction": "after",
+      "trigger": { "kind": "step", "reference": "review.revise@1" },
+      "ordered": [
+        { "kind": "step", "reference": "pr.prepare@1" },
+        { "kind": "step", "reference": "ci.observe@1" },
+        { "kind": "step", "reference": "review.acknowledge@1" },
+        { "kind": "wait", "reference": "code_review@1" }
+      ],
+      "reason": "A review revision must be published, checked by CI, acknowledged in the same PR threads, and returned to human review."
+    }
+  ]
+}

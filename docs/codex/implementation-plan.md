@@ -245,11 +245,11 @@ blocked. Neither restarts code work.
 3. Wait for CI and code review.
 4. Import unresolved PR threads/comments.
 5. Start a revision Activity with exact comment provenance.
-6. Push amendments, re-observe CI, reply/resolve through explicit policy.
+6. Push amendments, re-observe CI, and reply through explicit policy.
 7. If no comments appear, the operator may mark done; Tasker does not auto-merge.
 
-Steps 1-5, the push/re-observe part of step 6, and the operator completion path in step
-7 are implemented behind `TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true`. Local-git
+Steps 1-6 and the operator completion path in step 7 are implemented behind
+`TASKER_ENABLE_BITBUCKET_PR_EFFECTS=true`. Local-git
 and fake-port tests cover lost push response, lost PR-create response, 403 resume, and
 existing-PR reuse. The company `ai-assistance` requirement is now an ordinary
 file-backed graph policy: it persists the accepted plan before implementation, harvests
@@ -257,11 +257,14 @@ actual evidence, validates same-branch artifacts, and produces the provider-neut
 draft consumed by Bitbucket. Review sync reads the exact PR from the durable
 `pr.prepare@1` output, stores unresolved human threads as immutable evidence, and
 resolves `code_review@1` with a typed decision. `changes_requested` enters a bounded
-`review.revise@1` -> verify -> PR update -> Jenkins -> review loop. Three unsuccessful
-cycles open `operator_guidance@1`; guidance resumes the same loop and worktree rather
-than failing the run. The operator can explicitly finish a review with no comments.
-Thread reply/resolve writes and the real pilot remain open, so the real-mutation flag
-stays off by default.
+`review.revise@1` -> verify -> PR update -> Jenkins -> `review.acknowledge@1` -> review
+loop. The reply adapter journals and probes each thread independently, so response loss
+or a partial 403 resumes without duplicate comments. A later human follow-up reopens the
+thread. Three unsuccessful cycles open `operator_guidance@1`; guidance resumes the same
+loop and worktree rather than failing the run. The operator can explicitly finish a
+review with no comments. The real pilot remains open, so the real-mutation flag stays
+off by default. Automatic thread resolution is not assumed without a verified company
+Bitbucket API contract.
 
 ### 7.4 Jenkins and Allure
 
@@ -386,9 +389,9 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-The Temporal cutover and local review/revision lifecycle are complete. Add
-policy-controlled Jira lifecycle effects and reconciled Bitbucket thread reply/resolve
-writes, then enable the explicit remote-effect flags for one allowed pilot task. The
+The Temporal cutover and local review/revision/reply lifecycle are complete. Add
+policy-controlled Jira lifecycle effects, then enable the explicit remote-effect flags
+for one allowed pilot task. The
 pilot path remains Jira intake -> managed worktree -> agent implementation -> targeted
 verification -> validated PR draft -> safe push/PR -> Jenkins classification -> human
 review/revision.

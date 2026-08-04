@@ -105,6 +105,7 @@ const HarnessPathSequenceObligationSchema = z
   .object({
     id: PolicyIdSchema,
     kind: z.literal('path_sequence'),
+    direction: z.enum(['before', 'after']).default('before'),
     trigger: HarnessPolicyMarkerSchema,
     ordered: z.array(HarnessPolicyMarkerSchema).min(2),
     reason: z.string().min(1),
