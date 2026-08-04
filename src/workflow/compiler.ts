@@ -347,6 +347,7 @@ const normalizeNode = (
         kind: 'step',
         id: node.id,
         uses: node.uses,
+        activityDelivery: stepContract?.activityDelivery ?? { kind: 'single_attempt' },
         with: canonicalizeJson(node.with),
       };
     }

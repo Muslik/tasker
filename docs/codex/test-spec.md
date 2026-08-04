@@ -281,6 +281,12 @@ Playwright acceptance scenarios:
 - worktree/bootstrap paths and recovery rules pass;
 - no remote mutation capability is enabled.
 
+Evidence on 2026-08-04: `temporal-local-mutation-recovery.test.ts` stops the first
+Worker after a TypeScript source mutation and before Activity completion, starts a
+replacement Worker on the same Task Queue, verifies `recovery_delivery` against the
+same built-in-profile worktree, runs the task test and build, and reaches
+`code_review@1`. Mutation intent and exact Activity output receipts are both asserted.
+
 ### T4 gate
 
 - allowed Jira task reaches PR code review;

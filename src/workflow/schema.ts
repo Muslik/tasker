@@ -19,6 +19,13 @@ export interface StepNodeSource {
   readonly with: JsonValue;
 }
 
+export const StepActivityDeliverySchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('single_attempt') }).strict(),
+  z.object({ kind: z.literal('workspace_reconciled') }).strict(),
+]);
+
+export type StepActivityDelivery = z.infer<typeof StepActivityDeliverySchema>;
+
 export interface BranchNodeSource {
   readonly kind: 'branch';
   readonly id: string;
@@ -106,6 +113,7 @@ export interface CompiledStepNode {
   readonly kind: 'step';
   readonly id: string;
   readonly uses: string;
+  readonly activityDelivery: StepActivityDelivery;
   readonly with: JsonValue;
 }
 
@@ -321,6 +329,7 @@ const CompiledStepNodeSchema = z.object({
   kind: z.literal('step'),
   id: NodeIdSchema,
   uses: StepTypeReferenceSchema,
+  activityDelivery: StepActivityDeliverySchema,
   with: JsonValueSchema,
 });
 

@@ -36,6 +36,7 @@ import {
   assertWorkspaceHarnessProvidesSkills,
   CommandWorkspaceBootstrapAdapter,
   HarnessProfileWorkspaceBootstrapAdapter,
+  GitWorkspaceMutationInspector,
   ManagedWorkspaceManager,
   WorkspaceBootstrapCoordinator,
   WorkspaceBootstrapStore,
@@ -53,6 +54,7 @@ import {
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
+import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
 
@@ -113,6 +115,11 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     repositories: repositoryCatalog,
   });
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+  const mutationRecovery = new WorkspaceMutationRecoveryStore(
+    ledger.repository,
+    systemClock,
+    new GitWorkspaceMutationInspector(nodeCommandRunner),
+  );
   const workspaces = new ManagedWorkspaceManager(
     loadWorkspaceConfiguration(),
     new WorkspaceStore(ledger.repository, systemClock),
@@ -160,6 +167,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         snapshots: planningStore,
         currentSteps: createCurrentStepRegistry(harnessPack),
         traces: executionTraces,
+        mutationRecovery,
         agentRunner: new CodexCliTaskStepAgentRunner(nodeCommandRunner),
         commands: nodeCommandRunner,
       }),

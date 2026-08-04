@@ -4,4 +4,5 @@ export * from './contracts.js';
 export * from './harness-pack.js';
 export * from './harness-profile-bootstrap.js';
 export * from './manager.js';
+export * from './mutation-state.js';
 export * from './store.js';

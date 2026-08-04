@@ -103,6 +103,10 @@ export const ExecuteTaskStepInputSchema = z
     nodeId: z.string().min(1),
     stepAttempt: z.number().int().positive(),
     uses: z.string().min(1),
+    activityDelivery: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('single_attempt') }).strict(),
+      z.object({ kind: z.literal('workspace_reconciled') }).strict(),
+    ]),
     workspace: WorkspaceLocatorSchema,
     planningSnapshot: PlanningSnapshotReferenceSchema,
     operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
@@ -219,6 +223,7 @@ export type { PlanningSnapshotReference };
 export interface TaskWorkflowActivities {
   prepareTaskWorkspace(input: PrepareTaskWorkspaceInput): Promise<PrepareTaskWorkspaceResult>;
   executeStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
+  executeWorkspaceReconciledStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   evaluatePredicate(input: EvaluatePredicateInput): Promise<boolean>;
   planTaskImplementation(input: PlanTaskImplementationInput): Promise<TaskWorkflowPlanningState>;
   linkWorkflowContinuation(

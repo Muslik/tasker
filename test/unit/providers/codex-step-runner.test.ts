@@ -88,6 +88,7 @@ describe('Codex task-step runner', () => {
         operationId: 'workflow:step:attempt-1',
         prompt: 'Return the result.',
         skills: ['jira'],
+        recovery: { kind: 'single_attempt' },
         outputSchema: z.object({ done: z.literal(true) }).strict(),
         cwd: repositoryPath,
         timeoutMs: 10_000,

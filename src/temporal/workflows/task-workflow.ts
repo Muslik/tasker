@@ -40,6 +40,19 @@ const executionActivities = proxyActivities<Pick<TaskWorkflowActivities, 'execut
   },
 });
 
+const workspaceReconciledExecutionActivities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'executeWorkspaceReconciledStep'>
+>({
+  startToCloseTimeout: '35 minutes',
+  scheduleToCloseTimeout: '2 hours',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
+    maximumAttempts: 3,
+  },
+});
+
 const planningActivities = proxyActivities<Pick<TaskWorkflowActivities, 'planTaskImplementation'>>({
   startToCloseTimeout: '35 minutes',
   scheduleToCloseTimeout: '2 hours',
@@ -514,7 +527,11 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             );
           }
           attempts[node.id] = (attempts[node.id] ?? 0) + 1;
-          const result = await executionActivities.executeStep({
+          const execute =
+            node.activityDelivery.kind === 'workspace_reconciled'
+              ? workspaceReconciledExecutionActivities.executeWorkspaceReconciledStep
+              : executionActivities.executeStep;
+          const result = await execute({
             taskReference: input.taskReference,
             workflowId: execution.workflowId,
             workflowRunId: execution.runId,
@@ -522,6 +539,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             nodeId: node.id,
             stepAttempt: attempts[node.id] ?? 1,
             uses: node.uses,
+            activityDelivery: node.activityDelivery,
             workspace: readyContext.workspace,
             planningSnapshot: readyContext.planningSnapshot,
             operatorGuidance,

@@ -7,7 +7,7 @@ import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { findTaskFixture } from '../../src/planning/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
 import type { CommandRunner } from '../../src/providers/command-runner.js';
-import { ok } from '../../src/shared/outcome.js';
+import { err, ok } from '../../src/shared/outcome.js';
 import { systemClock } from '../../src/shared/clock.js';
 import {
   createCurrentStepRegistry,
@@ -45,6 +45,22 @@ const stubWorkspace = {
   path: '/tmp/worktree',
   branch: 'tasker/task-ref',
   preparedAt: '2026-08-03T00:00:00.000Z',
+};
+
+const mutationRecovery = {
+  prepare: () =>
+    Promise.resolve(
+      ok({
+        kind: 'initial_delivery' as const,
+        intentArtifactId: 'task-step-mutation-intent:test',
+        baseline: {
+          fingerprint: '1'.repeat(64),
+          trackedDiffSha256: '2'.repeat(64),
+          changedPaths: [],
+          changedPathsTruncated: false,
+        },
+      }),
+    ),
 };
 
 const makeSnapshot = (
@@ -171,6 +187,7 @@ describe('temporal block execution activity', () => {
         nodeId: 'verify-targeted',
         stepAttempt: 1,
         uses: 'verify.targeted@1',
+        activityDelivery: { kind: 'workspace_reconciled' },
         workspace: stubWorkspace,
         planningSnapshot: {
           artifactId: 'planning-snapshot:test',
@@ -188,6 +205,7 @@ describe('temporal block execution activity', () => {
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
+        mutationRecovery,
         agentRunner,
         commands: {
           run: vi.fn(),
@@ -207,6 +225,141 @@ describe('temporal block execution activity', () => {
     expect(prompts[0]).toContain('SNAPSHOT PROMPT');
     expect(prompts[0]).toContain('VPN is enabled; retry the same verification');
     expect(selectedSkills).toEqual([['jenkins', 'test-design']]);
+  });
+
+  it('returns the durable result without invoking the agent again after response loss', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        ok({
+          stdout: '',
+          stderr: '',
+          finalMessage: {
+            status: 'completed',
+            output: { summary: 'Implementation completed', artifacts: [] },
+          },
+        }),
+      ),
+    );
+    const input = {
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: stubWorkspace.workflowHash,
+      nodeId: 'implement-feature',
+      stepAttempt: 1,
+      uses: 'code.implement@1',
+      activityDelivery: { kind: 'workspace_reconciled' as const },
+      workspace: stubWorkspace,
+      planningSnapshot: {
+        artifactId: 'planning-snapshot:test',
+        checksum: 'd'.repeat(64),
+      },
+      operatorGuidance: null,
+      input: {
+        objective: 'Normalize passenger names',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+    const dependencies = {
+      snapshots: {
+        readRunSnapshot: () => ok(makeSnapshot('code.implement@1')),
+      },
+      currentSteps: createCurrentStepRegistry(pack),
+      traces,
+      mutationRecovery,
+      agentRunner: { provider: 'codex' as const, run },
+      commands: { run: vi.fn() },
+    };
+    const runtime = {
+      attempt: 1,
+      cancellationSignal: new AbortController().signal,
+      heartbeat: () => {},
+    };
+
+    const first = await executeRegisteredTaskStep(input, dependencies, runtime);
+    const replacement = await executeRegisteredTaskStep(input, dependencies, {
+      ...runtime,
+      attempt: 2,
+    });
+
+    expect(replacement).toEqual(first);
+    expect(first.artifactIds).toEqual([
+      'task-step-output:tasker:task-ref:implement-feature:attempt-1:artifact',
+      'task-step-mutation-intent:test',
+    ]);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeat a controlled blocked provider result after response loss', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        err({
+          kind: 'provider_failed',
+          exitCode: 1,
+          message: 'Provider stopped after reporting a controlled failure',
+          stdout: '',
+          stderr: 'controlled failure',
+        }),
+      ),
+    );
+    const input = {
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: stubWorkspace.workflowHash,
+      nodeId: 'implement-feature',
+      stepAttempt: 1,
+      uses: 'code.implement@1',
+      activityDelivery: { kind: 'workspace_reconciled' as const },
+      workspace: stubWorkspace,
+      planningSnapshot: {
+        artifactId: 'planning-snapshot:test',
+        checksum: 'd'.repeat(64),
+      },
+      operatorGuidance: null,
+      input: {
+        objective: 'Normalize passenger names',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+    const dependencies = {
+      snapshots: {
+        readRunSnapshot: () => ok(makeSnapshot('code.implement@1')),
+      },
+      currentSteps: createCurrentStepRegistry(pack),
+      traces,
+      mutationRecovery,
+      agentRunner: { provider: 'codex' as const, run },
+      commands: { run: vi.fn() },
+    };
+    const runtime = {
+      attempt: 1,
+      cancellationSignal: new AbortController().signal,
+      heartbeat: () => {},
+    };
+
+    const first = await executeRegisteredTaskStep(input, dependencies, runtime);
+    const replacement = await executeRegisteredTaskStep(input, dependencies, {
+      ...runtime,
+      attempt: 2,
+    });
+
+    expect(replacement).toEqual(first);
+    expect(first).toMatchObject({
+      status: 'blocked',
+      waitKind: 'code.implement.1.blocked@1',
+      artifactIds: [
+        'task-step-output:tasker:task-ref:implement-feature:attempt-1:artifact',
+        'task-step-mutation-intent:test',
+      ],
+    });
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('resolves a registered process command from the immutable snapshot project policy', async () => {
@@ -242,6 +395,7 @@ describe('temporal block execution activity', () => {
         nodeId: 'extract-translation-keys',
         stepAttempt: 1,
         uses: 'translations.extract@1',
+        activityDelivery: { kind: 'single_attempt' },
         workspace: componentWorkspace,
         planningSnapshot: {
           artifactId: 'planning-snapshot:test',
@@ -267,6 +421,7 @@ describe('temporal block execution activity', () => {
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
+        mutationRecovery,
         agentRunner: {
           provider: 'codex',
           run: vi.fn(),
@@ -323,6 +478,7 @@ describe('temporal block execution activity', () => {
         nodeId: 'publish-development-package',
         stepAttempt: 1,
         uses: 'component.dev_publish@1',
+        activityDelivery: { kind: 'single_attempt' },
         workspace: componentWorkspace,
         planningSnapshot: {
           artifactId: 'planning-snapshot:test',
@@ -348,6 +504,7 @@ describe('temporal block execution activity', () => {
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
+        mutationRecovery,
         agentRunner: {
           provider: 'codex',
           run: vi.fn(),

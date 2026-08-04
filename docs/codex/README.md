@@ -1,6 +1,7 @@
 # Tasker design package
 
-Status: **Temporal-only runtime cutover implemented**, 2026-08-03.
+Status: **Temporal-only runtime cutover and T3 managed execution implemented**,
+2026-08-04.
 
 ## Canonical documents
 
@@ -45,7 +46,9 @@ Compiled graphs, durable waits, validated Updates, implementation planning, mana
 workspace preparation, and registered agent/process step execution all run through
 Temporal. Planning questions, plan review/revision, provider retry, workspace retry,
 execution-time workflow change review, and child-workflow continuation have recovery
-coverage. Jira/Bitbucket/Jenkins mutation remains disabled.
+coverage. Local mutation now also survives Worker replacement after a dirty worktree is
+created but before its Activity response is acknowledged. Jira/Bitbucket/Jenkins
+mutation remains disabled.
 
 ## Historical implementation records
 

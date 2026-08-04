@@ -57,6 +57,7 @@ const contract = (
   id,
   version: '1',
   retryPolicy: `bounded:${String(options.retryBudget)}`,
+  activityDelivery: options.activityDelivery,
   inputSchema: options.inputSchema,
   outputSchema: options.outputSchema,
   allowedEffects: options.allowedEffects,
@@ -98,6 +99,7 @@ const agentStep = (
     waitKinds: [],
     artifactContracts: [...options.artifactContracts],
     workflowChanges: [...(options.workflowChanges ?? [])],
+    activityDelivery: { kind: 'workspace_reconciled' },
     ...(options.allowedEffects?.length ? { reconciliation: { strategy: 'receipt' as const } } : {}),
   }),
 });
@@ -130,6 +132,7 @@ const processStep = (
     waitKinds: [...(options.waitKinds ?? [])],
     artifactContracts: [...options.artifactContracts],
     workflowChanges: [...(options.workflowChanges ?? [])],
+    activityDelivery: { kind: 'single_attempt' },
     reconciliation: { strategy: 'probe' },
   }),
 });
@@ -161,6 +164,7 @@ const integrationStep = (
     waitKinds: [...(options.waitKinds ?? [])],
     artifactContracts: [...options.artifactContracts],
     workflowChanges: [],
+    activityDelivery: { kind: 'single_attempt' },
     reconciliation: { strategy: 'probe' },
   }),
 });
@@ -303,6 +307,7 @@ export const TWIKET_HARNESS_STEPS = [
       waitKinds: [],
       artifactContracts: [],
       workflowChanges: [],
+      activityDelivery: { kind: 'single_attempt' },
     }),
   },
 ] satisfies readonly HarnessStepDefinition[];

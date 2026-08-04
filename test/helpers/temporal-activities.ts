@@ -96,6 +96,7 @@ const linkWorkflowContinuation: TaskWorkflowActivities['linkWorkflowContinuation
 export const testTaskWorkflowActivities = {
   prepareTaskWorkspace,
   executeStep,
+  executeWorkspaceReconciledStep: executeStep,
   evaluatePredicate,
   planTaskImplementation,
   linkWorkflowContinuation,

@@ -45,6 +45,11 @@ import {
   type ExecuteTaskStepResult,
   type TaskWorkflowActivities,
 } from '../contracts.js';
+import {
+  TaskStepRecoveryContextSchema,
+  type TaskStepRecoveryContext,
+  type WorkspaceMutationRecoveryStore,
+} from './workspace-mutation-recovery.js';
 
 const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
   z
@@ -63,7 +68,7 @@ const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
 
 const TaskStepOutputArtifactSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     operationId: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
@@ -79,6 +84,7 @@ const TaskStepOutputArtifactSchema = z
     stdout: z.string(),
     stderr: z.string(),
     details: JsonValueSchema,
+    result: ExecuteTaskStepResultSchema.nullable(),
     recordedAt: z.iso.datetime(),
   })
   .strict();
@@ -117,6 +123,7 @@ export interface TaskStepAgentRequest {
   readonly operationId: string;
   readonly prompt: string;
   readonly skills: readonly string[];
+  readonly recovery: TaskStepRecoveryContext;
   readonly outputSchema: z.ZodType;
   readonly cwd: string;
   readonly timeoutMs: number;
@@ -330,6 +337,11 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
 
 type TemporalTaskStepTraceStoreError =
   | { readonly kind: 'ledger_conflict' }
+  | {
+      readonly kind: 'output_corrupt';
+      readonly artifactId: string;
+      readonly issues: readonly string[];
+    }
   | { readonly kind: 'transcript_corrupt'; readonly issues: readonly string[] }
   | { readonly kind: 'artifact_missing'; readonly artifactId: string };
 
@@ -388,6 +400,27 @@ export class TemporalTaskStepTraceStore {
 
   public transcriptIdFor(operationId: string): string {
     return `task-step-transcript:${operationId}`;
+  }
+
+  public readOutputResult(
+    operationId: string,
+  ): Outcome<
+    ExecuteTaskStepResult | null,
+    Extract<TemporalTaskStepTraceStoreError, { readonly kind: 'output_corrupt' }>
+  > {
+    const artifactId = `task-step-output:${operationId}:artifact`;
+    const artifact = this.ledger.readArtifact(artifactId);
+    if (artifact === null) return ok(null);
+    const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
+    return parsed.success
+      ? ok(parsed.data.result)
+      : err({
+          kind: 'output_corrupt',
+          artifactId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
   }
 
   public append(
@@ -475,13 +508,36 @@ export class TemporalTaskStepTraceStore {
     readonly stdout: string;
     readonly stderr: string;
     readonly details: unknown;
-  }): Outcome<{ readonly artifactId: string }, TemporalTaskStepTraceStoreError> {
+    readonly result?: ExecuteTaskStepResult;
+  }): Outcome<
+    { readonly artifactId: string; readonly result: ExecuteTaskStepResult | null },
+    TemporalTaskStepTraceStoreError
+  > {
     const aggregateId = `task-step-output:${input.operationId}`;
     const artifactId = `${aggregateId}:artifact`;
-    if (this.ledger.readArtifact(artifactId) !== null) return ok({ artifactId });
+    const existing = this.ledger.readArtifact(artifactId);
+    if (existing !== null) {
+      const parsed = TaskStepOutputArtifactSchema.safeParse(existing.payload);
+      return parsed.success
+        ? ok({ artifactId, result: parsed.data.result })
+        : err({
+            kind: 'output_corrupt',
+            artifactId,
+            issues: parsed.error.issues.map(
+              (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+            ),
+          });
+    }
     const recordedAt = this.clock.now();
+    const result =
+      input.result === undefined
+        ? null
+        : ExecuteTaskStepResultSchema.parse({
+            ...input.result,
+            artifactIds: [artifactId, ...new Set(input.result.artifactIds)],
+          });
     const payload = TaskStepOutputArtifactSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operationId: input.operationId,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
@@ -497,6 +553,7 @@ export class TemporalTaskStepTraceStore {
       stdout: input.stdout,
       stderr: input.stderr,
       details: asJson(input.details),
+      result,
       recordedAt,
     });
     const committed = this.ledger.transact({
@@ -532,7 +589,7 @@ export class TemporalTaskStepTraceStore {
       ],
       timestamp: recordedAt,
     });
-    return committed.ok ? ok({ artifactId }) : err({ kind: 'ledger_conflict' });
+    return committed.ok ? ok({ artifactId, result }) : err({ kind: 'ledger_conflict' });
   }
 
   private appendChunk(
@@ -625,6 +682,12 @@ const block = (
     transcriptId: null,
   });
 
+const withRecoveryArtifact = (
+  recovery: TaskStepRecoveryContext,
+  artifactIds: readonly string[],
+): readonly string[] =>
+  recovery.kind === 'single_attempt' ? artifactIds : [recovery.intentArtifactId, ...artifactIds];
+
 const commandLineToInvocation = (
   commandLine: string,
 ): Outcome<
@@ -654,6 +717,7 @@ const promptForAgentStep = (input: {
   readonly allowedEffects: readonly string[];
   readonly workflowChanges: readonly string[];
   readonly skills: readonly string[];
+  readonly recovery: TaskStepRecoveryContext;
   readonly operatorGuidance: string | null;
 }): string =>
   [
@@ -673,6 +737,7 @@ const promptForAgentStep = (input: {
         allowedEffects: input.allowedEffects,
         workflowChanges: input.workflowChanges,
         preferredSkills: input.skills,
+        activityRecovery: input.recovery,
         operatorGuidance: input.operatorGuidance,
       },
       null,
@@ -733,10 +798,50 @@ const persistBlockedArtifact = (
 const executionOperationId = (input: ExecuteTaskStepInput): string =>
   `${input.workflowId}:${input.nodeId}:attempt-${String(input.stepAttempt)}`;
 
+const persistAgentBlockedResult = (
+  traces: TemporalTaskStepTraceStore,
+  input: ExecuteTaskStepInput,
+  recovery: TaskStepRecoveryContext,
+  summary: string,
+  details: unknown,
+  stdout: string,
+  stderr: string,
+  provider: AgentProvider,
+): ExecuteTaskStepResult => {
+  const result = block(
+    summary,
+    blockingWaitKindFor(input.uses),
+    withRecoveryArtifact(recovery, []),
+  );
+  const persisted = traces.persistOutputArtifact({
+    operationId: executionOperationId(input),
+    workflowId: input.workflowId,
+    workflowRunId: input.workflowRunId,
+    nodeId: input.nodeId,
+    stepReference: input.uses,
+    stepAttempt: input.stepAttempt,
+    runner: 'agent',
+    command: provider,
+    args: [],
+    cwd: input.workspace.path,
+    exitCode: null,
+    status: 'blocked',
+    stdout,
+    stderr,
+    details,
+    result,
+  });
+  if (!persisted.ok || persisted.value.result === null) {
+    throw new Error(`Blocked execution receipt persistence failed for ${input.uses}`);
+  }
+  return persisted.value.result;
+};
+
 export interface TaskExecutionActivityDependencies {
   readonly snapshots: Pick<ImplementationPlanningStore, 'readRunSnapshot'>;
   readonly currentSteps: ReadonlyMap<string, LoadedHarnessStep>;
   readonly traces: TemporalTaskStepTraceStore;
+  readonly mutationRecovery: Pick<WorkspaceMutationRecoveryStore, 'prepare'>;
   readonly agentRunner: TaskStepAgentRunner;
   readonly commands: CommandRunner;
 }
@@ -747,6 +852,15 @@ export const executeRegisteredTaskStep = async (
   runtime: TaskStepActivityContext,
 ): Promise<ExecuteTaskStepResult> => {
   const input = ExecuteTaskStepInputSchema.parse(inputValue);
+  const priorResult = dependencies.traces.readOutputResult(executionOperationId(input));
+  if (!priorResult.ok) {
+    return block(
+      `Execution receipt for ${input.uses} is corrupt`,
+      blockingWaitKindFor(input.uses),
+      [priorResult.error.artifactId],
+    );
+  }
+  if (priorResult.value !== null) return priorResult.value;
   runtime.heartbeat({ phase: 'load_snapshot', nodeId: input.nodeId });
   const loaded = dependencies.snapshots.readRunSnapshot(input.planningSnapshot);
   if (!loaded.ok) {
@@ -767,6 +881,12 @@ export const executeRegisteredTaskStep = async (
   if (current === undefined || current.execution.kind !== snapshottedStep.execution.kind) {
     return block(
       `Current harness registration for ${input.uses} no longer matches the snapshotted execution boundary`,
+      blockingWaitKindFor(input.uses),
+    );
+  }
+  if (current.contract.activityDelivery.kind !== input.activityDelivery.kind) {
+    return block(
+      `Current harness registration for ${input.uses} no longer matches its compiled Activity delivery boundary`,
       blockingWaitKindFor(input.uses),
     );
   }
@@ -811,6 +931,29 @@ export const executeRegisteredTaskStep = async (
         artifactIds,
       );
     }
+    let recovery: TaskStepRecoveryContext = TaskStepRecoveryContextSchema.parse({
+      kind: 'single_attempt',
+    });
+    if (input.activityDelivery.kind === 'workspace_reconciled') {
+      const prepared = await dependencies.mutationRecovery.prepare({
+        operationId: executionOperationId(input),
+        workspaceId: input.workspace.workspaceId,
+        workspacePath: input.workspace.path,
+        stepReference: input.uses,
+      });
+      if (!prepared.ok) {
+        const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
+          kind: 'workspace_recovery_failed',
+          failure: prepared.error,
+        });
+        return block(
+          `Workspace recovery for ${input.uses} is blocked: ${prepared.error.kind}`,
+          blockingWaitKindFor(input.uses),
+          artifactIds,
+        );
+      }
+      recovery = prepared.value;
+    }
     const prompt = promptForAgentStep({
       snapshottedPrompt: snapshottedStep.execution.prompt.content,
       taskReference: input.taskReference,
@@ -824,12 +967,14 @@ export const executeRegisteredTaskStep = async (
       allowedEffects: current.contract.allowedEffects,
       workflowChanges: current.contract.workflowChanges,
       skills: snapshottedStep.execution.skills,
+      recovery,
       operatorGuidance: input.operatorGuidance,
     });
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),
       prompt,
       skills: snapshottedStep.execution.skills,
+      recovery,
       outputSchema: AgentStepOutcomeSchema,
       cwd: input.workspace.path,
       timeoutMs: 35 * 60_000,
@@ -837,19 +982,15 @@ export const executeRegisteredTaskStep = async (
       transcriptStore: dependencies.traces,
     });
     if (!provider.ok) {
-      const artifactIds = persistBlockedArtifact(
+      return persistAgentBlockedResult(
         dependencies.traces,
         input,
-        'agent',
+        recovery,
+        `Agent execution for ${input.uses} is blocked: ${provider.error.kind}`,
         provider.error,
         'stdout' in provider.error ? provider.error.stdout : '',
         'stderr' in provider.error ? provider.error.stderr : '',
         dependencies.agentRunner.provider,
-      );
-      return block(
-        `Agent execution for ${input.uses} is blocked: ${provider.error.kind}`,
-        blockingWaitKindFor(input.uses),
-        artifactIds,
       );
     }
     const decision = AgentStepOutcomeSchema.parse(provider.value.finalMessage);
@@ -859,10 +1000,11 @@ export const executeRegisteredTaskStep = async (
         current.contract.workflowChanges,
       );
       if (!declared.ok) {
-        const artifactIds = persistBlockedArtifact(
+        return persistAgentBlockedResult(
           dependencies.traces,
           input,
-          'agent',
+          recovery,
+          `Agent execution for ${input.uses} returned an invalid workflow change request`,
           {
             kind: declared.error.kind,
             ...(declared.error.kind === 'invalid_request'
@@ -873,12 +1015,15 @@ export const executeRegisteredTaskStep = async (
           provider.value.stderr,
           dependencies.agentRunner.provider,
         );
-        return block(
-          `Agent execution for ${input.uses} returned an invalid workflow change request`,
-          blockingWaitKindFor(input.uses),
-          artifactIds,
-        );
       }
+      const result = ExecuteTaskStepResultSchema.parse({
+        status: 'workflow_change_required',
+        summary: `Agent execution for ${input.uses} requested a workflow change`,
+        request: declared.value,
+        artifactIds: withRecoveryArtifact(recovery, []),
+        transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
+        predicateResults: {},
+      });
       const persisted = dependencies.traces.persistOutputArtifact({
         operationId: executionOperationId(input),
         workflowId: input.workflowId,
@@ -895,22 +1040,20 @@ export const executeRegisteredTaskStep = async (
         stdout: provider.value.stdout,
         stderr: provider.value.stderr,
         details: { request: declared.value },
+        result,
       });
-      return ExecuteTaskStepResultSchema.parse({
-        status: 'workflow_change_required',
-        summary: `Agent execution for ${input.uses} requested a workflow change`,
-        request: declared.value,
-        artifactIds: persisted.ok ? [persisted.value.artifactId] : [],
-        transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
-        predicateResults: {},
-      });
+      if (!persisted.ok || persisted.value.result === null) {
+        throw new Error(`Workflow change receipt persistence failed for ${input.uses}`);
+      }
+      return persisted.value.result;
     }
     const validatedOutput = current.contract.outputSchema.safeParse(decision.output);
     if (!validatedOutput.success) {
-      const artifactIds = persistBlockedArtifact(
+      return persistAgentBlockedResult(
         dependencies.traces,
         input,
-        'agent',
+        recovery,
+        `Agent execution for ${input.uses} returned output that does not match the registered contract`,
         {
           kind: 'invalid_step_output',
           issues: validatedOutput.error.issues.map(
@@ -921,12 +1064,21 @@ export const executeRegisteredTaskStep = async (
         provider.value.stderr,
         dependencies.agentRunner.provider,
       );
-      return block(
-        `Agent execution for ${input.uses} returned output that does not match the registered contract`,
-        blockingWaitKindFor(input.uses),
-        artifactIds,
-      );
     }
+    const outputRecord = validatedOutput.data as {
+      readonly summary?: string;
+      readonly artifacts?: unknown;
+    };
+    const result = ExecuteTaskStepResultSchema.parse({
+      status: 'completed',
+      summary:
+        typeof outputRecord.summary === 'string' && outputRecord.summary.trim().length > 0
+          ? outputRecord.summary
+          : `${input.uses} completed`,
+      predicateResults: { 'attempt.succeeded@1': true },
+      artifactIds: withRecoveryArtifact(recovery, []),
+      transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
+    });
     const persisted = dependencies.traces.persistOutputArtifact({
       operationId: executionOperationId(input),
       workflowId: input.workflowId,
@@ -943,21 +1095,12 @@ export const executeRegisteredTaskStep = async (
       stdout: provider.value.stdout,
       stderr: provider.value.stderr,
       details: { output: validatedOutput.data },
+      result,
     });
-    const outputRecord = validatedOutput.data as {
-      readonly summary?: string;
-      readonly artifacts?: unknown;
-    };
-    return ExecuteTaskStepResultSchema.parse({
-      status: 'completed',
-      summary:
-        typeof outputRecord.summary === 'string' && outputRecord.summary.trim().length > 0
-          ? outputRecord.summary
-          : `${input.uses} completed`,
-      predicateResults: { 'attempt.succeeded@1': true },
-      artifactIds: persisted.ok ? [persisted.value.artifactId] : [],
-      transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
-    });
+    if (!persisted.ok || persisted.value.result === null) {
+      throw new Error(`Completion receipt persistence failed for ${input.uses}`);
+    }
+    return persisted.value.result;
   }
 
   const inputRepository = readRepositoryFromInput(validatedInput.data);
@@ -1102,8 +1245,13 @@ const temporalRuntime = (): TaskStepActivityContext => {
 
 export const createTaskExecutionActivity = (
   dependencies: TaskExecutionActivityDependencies,
-): Pick<TaskWorkflowActivities, 'evaluatePredicate' | 'executeStep'> => ({
+): Pick<
+  TaskWorkflowActivities,
+  'evaluatePredicate' | 'executeStep' | 'executeWorkspaceReconciledStep'
+> => ({
   executeStep: async (input) => executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
+  executeWorkspaceReconciledStep: async (input) =>
+    executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
   evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? true),
 });
 

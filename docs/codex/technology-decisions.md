@@ -143,6 +143,20 @@ last persisted artifact, and phase. They are not a log transport.
 Temporal Activity retries are enabled only when the Activity boundary is safe. Error
 classification is typed:
 
+The registered step contract declares its Activity delivery class. The compiler copies
+that class into the immutable graph, and the generic Workflow interpreter only selects
+the matching Temporal Activity route:
+
+- `workspace_reconciled`: local agent work may be redelivered after Tasker persists a
+  baseline mutation intent. The replacement delivery receives the current Git state,
+  while an already committed exact output receipt bypasses the provider entirely.
+- `single_attempt`: no automatic Activity retry. Process and external-effect adapters
+  remain here until they implement effect-specific reconciliation.
+
+Logical workflow retry budgets remain separate from Activity redelivery. A new logical
+attempt may use operator guidance or another bounded-loop iteration; a Temporal
+redelivery has the same operation ID and must only recover the interrupted attempt.
+
 | Class | Default handling |
 |---|---|
 | transient network/5xx | bounded retry with backoff |

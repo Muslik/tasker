@@ -57,6 +57,7 @@ describe('file-backed harness pack', () => {
         resumeBoundary: 'attempt',
         idempotency: 'none',
         retryPolicy: 'bounded:1',
+        activityDelivery: { kind: 'single_attempt' },
         waitKinds: [],
         artifactContracts: ['custom-report'],
         workflowChanges: [],
@@ -108,6 +109,18 @@ describe('file-backed harness pack', () => {
     });
     expect(stepDefinition?.prompt?.content).toContain('test-operations plan');
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it('declares Activity redelivery at the step contract boundary', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const deliveryFor = (reference: string) =>
+      pack.steps.find((stepDefinition) => stepDefinition.reference === reference)?.contract
+        .activityDelivery;
+
+    expect(deliveryFor('code.implement@1')).toEqual({ kind: 'workspace_reconciled' });
+    expect(deliveryFor('verify.full@1')).toEqual({ kind: 'workspace_reconciled' });
+    expect(deliveryFor('translations.extract@1')).toEqual({ kind: 'single_attempt' });
+    expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'single_attempt' });
   });
 
   it('binds visual evidence guidance only to reproduction and visual verification', () => {

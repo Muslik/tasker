@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { AbiIdSchema, AbiVersionSchema, WaitReferenceSchema } from './schema.js';
+import {
+  AbiIdSchema,
+  AbiVersionSchema,
+  StepActivityDeliverySchema,
+  WaitReferenceSchema,
+} from './schema.js';
 import { WorkflowChangeKindSchema } from './execution-result.js';
 
 const RuntimeSchemaSchema = z.custom<z.ZodType>(
@@ -29,6 +34,7 @@ export const StepTypeContractSchema = z.object({
   resumeBoundary: ResumeBoundarySchema.default('none'),
   idempotency: IdempotencySchema.default('none'),
   retryPolicy: z.string().min(1).optional(),
+  activityDelivery: StepActivityDeliverySchema.default({ kind: 'single_attempt' }),
   waitKinds: z.array(WaitReferenceSchema).default([]),
   artifactContracts: z.array(ArtifactKindSchema).default([]),
   workflowChanges: z.array(WorkflowChangeKindSchema).default([]),

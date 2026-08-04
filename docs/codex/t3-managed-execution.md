@@ -1,8 +1,8 @@
 # T3 managed work execution
 
-Status: managed workspace, built-in multi-project harness bootstrap, optional external
-adapter protocol, Temporal preparation Activity, executable block boundary, and browser
-E2E parity implemented 2026-08-04; real local mutation response-loss smoke remains.
+Status: managed workspace, built-in multi-project harness bootstrap, Temporal
+preparation and executable block Activities, response-loss reconciliation, and browser
+E2E parity implemented 2026-08-04. The T3 gate is complete.
 
 ## Boundary
 
@@ -55,6 +55,28 @@ receipt.
 `ai-assistance` remains an optional company policy pack that contributes ordinary
 registered blocks. It is unrelated to workspace allocation and Temporal durability.
 
+## Activity delivery and mutation recovery
+
+Activity retry safety is part of each registered step contract and is copied into the
+accepted compiled graph. It is not inferred from a node name inside the Temporal
+interpreter:
+
+- `workspace_reconciled` is used by local agent blocks. Before the provider starts,
+  Tasker persists a mutation-intent artifact containing the worktree fingerprint,
+  tracked diff hash, and changed paths. A replacement Activity delivery inspects the
+  same worktree and receives both the baseline and current state in its execution
+  context.
+- `single_attempt` is used by process and integration blocks until their specific
+  effect adapters can prove read-before-write reconciliation. Temporal does not retry
+  these effects merely because a Worker response was lost.
+
+Agent completion, controlled block, and workflow-change results are persisted as exact
+Activity output receipts before returning to Temporal. If the receipt is committed but
+the response is lost, the replacement delivery returns the stored result without
+invoking the provider again. If only workspace changes exist, the provider resumes with
+an explicit `recovery_delivery` context and must inspect and continue the existing work
+instead of assuming a clean attempt.
+
 ## Delivered evidence
 
 - application-data path derivation for macOS/Linux/Windows through the existing
@@ -90,10 +112,17 @@ registered blocks. It is unrelated to workspace allocation and Temporal durabili
 - execution-time `blocked` and `workflow_change_required` outcomes reopen durable waits
   on the same node, so the run can resume after operator guidance instead of restarting
   the task.
+- a disposable TypeScript feature ran through the built-in `front-avia` profile. The
+  first Worker changed `src/passenger-name.ts` and stopped before acknowledging the
+  Activity; a replacement Worker observed the dirty worktree, applied no duplicate
+  mutation, ran the behavior test and TypeScript build, passed non-mutating PR/CI smoke
+  adapters, and reached `code_review@1` in the same Workflow Run;
+- the smoke asserts both mutation-intent and exact output-receipt artifacts, one
+  provider invocation per delivery, one durable worktree identity, and an unchanged
+  final diff.
 
-## Remaining T3 sequence
+## T3 exit
 
-1. Prove a disposable file change and build survive worker replacement after mutation
-   but before Activity completion without applying the change twice.
-2. Pilot the built-in profile and mutation recovery against a disposable managed
-   repository; Temporal-only browser E2E coverage already passes.
+T3 has no remaining implementation item. Jira, Bitbucket, Jenkins/Allure, push, and
+publication are deliberately still disabled; they enter in T4 one effect family at a
+time with their own intent, reconciliation, receipt, and unknown-outcome contracts.

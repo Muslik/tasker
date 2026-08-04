@@ -159,14 +159,14 @@ T2 exit gate:
 
 Build the first real repository-changing vertical slice without remote mutation.
 
-Implementation status on 2026-08-03: deterministic application-data worktrees,
+Implementation status on 2026-08-04: deterministic application-data worktrees,
 durable locator/bootstrap receipts, target-aware `inspect`/`apply` bootstrap protocol,
 the heartbeat-enabled Temporal preparation Activity, worktree-based immutable planning
 snapshot, recoverable `workspace.retry@1` wait, and registered agent/process block
 execution are complete. Temporal-backed browser parity and dependency isolation/replay
-pass. A real target-aware company bootstrap adapter and the first local mutation
-response-loss smoke remain product work within T3; they are not cutover blockers
-because no legacy remote-mutation path is being preserved.
+pass. The built-in company profile and first local mutation response-loss smoke also
+pass: a replacement Worker continues the same dirty worktree, runs verification, and
+reaches code review without repeating the mutation. T3 is complete.
 
 ### 6.1 Repository lifecycle
 
@@ -193,12 +193,13 @@ because no legacy remote-mutation path is being preserved.
 Use a disposable fixture repository to execute:
 
 ```text
-analyze -> plan -> implement -> targeted verify -> operator acceptance
+analyze -> plan -> implement -> full verify -> code review wait
 ```
 
 No Jira/Bitbucket/Jenkins mutation is allowed yet. Kill the worker after file mutation
 and before Activity completion; recovery must preserve the change and avoid duplicating
-it.
+it. This gate passed on 2026-08-04 with the built-in `front-avia` harness profile,
+behavior tests, and a TypeScript build.
 
 ## 7. T4 — Jira, Bitbucket, Jenkins/Allure, and review
 
