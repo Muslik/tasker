@@ -52,6 +52,7 @@ const requestFor = async (
   evidence: IntegrationStepExecutionRequest['evidence'] = {
     acceptedPlan: null,
     completedSteps: [],
+    reviewInputs: [],
   },
 ): Promise<IntegrationStepExecutionRequest> => {
   const workspacePath = await mkdtemp(join(tmpdir(), 'tasker-ai-assistance-'));
@@ -132,6 +133,7 @@ describe('AI-assistance workflow adapters', () => {
     const request = await requestFor(adapter.id, {
       acceptedPlan,
       completedSteps: [],
+      reviewInputs: [],
     });
 
     const result = await adapter.execute(request);
@@ -144,7 +146,11 @@ describe('AI-assistance workflow adapters', () => {
 
   it('accepts matching branch artifacts and pull-request section', async () => {
     const adapter = new AiAssistanceValidateAdapter();
-    const request = await requestFor(adapter.id, { acceptedPlan, completedSteps: [] });
+    const request = await requestFor(adapter.id, {
+      acceptedPlan,
+      completedSteps: [],
+      reviewInputs: [],
+    });
     const taskRoot = join(request.workspace.path, '.ai/workspace/AVIA-13236');
     const pullRequestRoot = join(request.workspace.path, '.tasker/pull-request');
     await mkdir(taskRoot, { recursive: true });

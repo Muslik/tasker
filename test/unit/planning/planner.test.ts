@@ -261,6 +261,7 @@ describe('M1 task workflow planning', () => {
     expect(result.value.proposal.waits.map((wait) => wait.waitKind)).toEqual([
       'code_review@1',
       'final_publish@1',
+      'code_review@1',
       'translation_complete@1',
     ]);
     expect(result.value.proposal.retryBudgets.some((budget) => budget.scope === 'loop')).toBe(true);

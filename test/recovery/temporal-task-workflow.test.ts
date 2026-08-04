@@ -184,7 +184,7 @@ describe('Temporal task workflow', () => {
     const completedAutomatic = await service.resolveWait(automaticTask, {
       nodeId: 'wait-for-code-review',
       waitKind: 'code_review@1',
-      resolution: { decision: 'done' },
+      resolution: { decision: 'approved', reviewId: 'review:automatic:approved' },
     });
     expect(completedAutomatic.ok).toBe(true);
     await expect
@@ -200,7 +200,7 @@ describe('Temporal task workflow', () => {
     const completedReviewed = await service.resolveWait(reviewedTask, {
       nodeId: 'wait-for-code-review',
       waitKind: 'code_review@1',
-      resolution: { decision: 'done' },
+      resolution: { decision: 'approved', reviewId: 'review:reviewed:approved' },
     });
     expect(completedReviewed.ok).toBe(true);
     await expect
@@ -232,7 +232,7 @@ describe('Temporal task workflow', () => {
     const completed = await service.resolveWait(taskReference, {
       nodeId: 'wait-for-code-review',
       waitKind: 'code_review@1',
-      resolution: { decision: 'done' },
+      resolution: { decision: 'approved', reviewId: 'review:retry:approved' },
     });
     expect(completed.ok).toBe(true);
   }, 30_000);
@@ -433,6 +433,97 @@ describe('Temporal task workflow', () => {
     );
   }, 30_000);
 
+  it('revises from review evidence and asks for guidance after the bounded budget', async () => {
+    const taskReference = `review-revision-${String(Date.now())}`;
+    const approvedTaskReference = `review-approved-${String(Date.now())}`;
+    const executions: { uses: string; operatorGuidance: string | null }[] = [];
+    const executeRecorded: TaskWorkflowActivities['executeStep'] = async (input) => {
+      executions.push({ uses: input.uses, operatorGuidance: input.operatorGuidance });
+      return testTaskWorkflowActivities.executeStep(input);
+    };
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      executeStep: executeRecorded,
+      executeReadOnlyStep: executeRecorded,
+      executeWorkspaceReconciledStep: executeRecorded,
+      executeRemoteReconciledStep: executeRecorded,
+    });
+
+    const approvalOnly = await service.start(
+      workflowInput('avia-13236-short-bug', approvedTaskReference, 'automatic'),
+    );
+    expect(approvalOnly.ok).toBe(true);
+    const initialApproval = await waitForWait(service, approvedTaskReference, 'code_review@1');
+    if (initialApproval.status !== 'waiting') throw new Error('Expected initial review wait');
+    const approvalResolution = await service.resolveWait(approvedTaskReference, {
+      nodeId: initialApproval.wait.nodeId,
+      waitKind: initialApproval.wait.waitKind,
+      resolution: { decision: 'approved', reviewId: 'review:approval-only' },
+    });
+    expect(approvalResolution.ok).toBe(true);
+    await expect
+      .poll(async () => (await requireState(service, approvedTaskReference)).status)
+      .toBe('completed');
+    expect(executions.some(({ uses }) => uses === 'review.revise@1')).toBe(false);
+    executions.length = 0;
+
+    const started = await service.start(
+      workflowInput('avia-13236-short-bug', taskReference, 'automatic'),
+    );
+    expect(started.ok).toBe(true);
+
+    const resolveReview = async (reviewId: string): Promise<void> => {
+      const review = await waitForWait(service, taskReference, 'code_review@1');
+      if (review.status !== 'waiting') throw new Error('Expected code review wait');
+      const resolved = await service.resolveWait(taskReference, {
+        nodeId: review.wait.nodeId,
+        waitKind: review.wait.waitKind,
+        resolution: { decision: 'changes_requested', reviewId },
+      });
+      expect(resolved.ok).toBe(true);
+    };
+
+    await resolveReview('review:initial');
+    await resolveReview('review:revision:1');
+    await resolveReview('review:revision:2');
+    await resolveReview('review:revision:3');
+
+    const exhausted = await waitForWait(service, taskReference, 'operator_guidance@1');
+    expect(executions.filter(({ uses }) => uses === 'review.revise@1')).toHaveLength(3);
+    if (exhausted.status !== 'waiting') throw new Error('Expected operator guidance wait');
+    const resumed = await service.resolveWait(taskReference, {
+      nodeId: exhausted.wait.nodeId,
+      waitKind: exhausted.wait.waitKind,
+      resolution: {
+        decision: 'resume',
+        guidance: 'The comments refer to the generated fallback; update that source first.',
+      },
+    });
+    expect(resumed.ok).toBe(true);
+
+    const finalReview = await waitForWait(service, taskReference, 'code_review@1');
+    expect(executions.filter(({ uses }) => uses === 'review.revise@1')).toHaveLength(4);
+    expect(executions).toContainEqual({
+      uses: 'review.revise@1',
+      operatorGuidance: 'The comments refer to the generated fallback; update that source first.',
+    });
+    expect(executions.filter(({ uses }) => uses === 'pr.prepare@1')).toHaveLength(5);
+    expect(executions.filter(({ uses }) => uses === 'ci.observe@1')).toHaveLength(5);
+
+    if (finalReview.status !== 'waiting') throw new Error('Expected final review wait');
+    const approved = await service.resolveWait(taskReference, {
+      nodeId: finalReview.wait.nodeId,
+      waitKind: finalReview.wait.waitKind,
+      resolution: { decision: 'approved', reviewId: 'review:final:approved' },
+    });
+    expect(approved.ok).toBe(true);
+    await expect
+      .poll(async () => (await requireState(service, taskReference)).status)
+      .toBe('completed');
+  }, 30_000);
+
   it('links an accepted workflow change as a recoverable Temporal child workflow', async () => {
     const parentTask = `continuation-parent-${String(Date.now())}`;
     const childTask = `continuation-child-${String(Date.now())}`;
@@ -507,7 +598,7 @@ describe('Temporal task workflow', () => {
     const completedChild = await service.resolveWait(childTask, {
       nodeId: childReview.wait.nodeId,
       waitKind: childReview.wait.waitKind,
-      resolution: { decision: 'done' },
+      resolution: { decision: 'approved', reviewId: 'review:child:approved' },
     });
     expect(completedChild.ok).toBe(true);
     await expect
@@ -536,7 +627,7 @@ describe('Temporal task workflow', () => {
     const completed = await service.resolveWait(taskReference, {
       nodeId: review.wait.nodeId,
       waitKind: review.wait.waitKind,
-      resolution: { decision: 'done' },
+      resolution: { decision: 'approved', reviewId: 'review:history:approved' },
     });
     expect(completed.ok).toBe(true);
     await expect

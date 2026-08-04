@@ -9,6 +9,7 @@ import type { LoadedHarnessPack, LoadedHarnessStep } from '../../harness/index.j
 import {
   emptyIntegrationStepAdapterRegistry,
   type IntegrationStepAdapterRegistry,
+  type PullRequestReviewEvidence,
   type TaskRunEvidence,
 } from '../../integrations/index.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
@@ -891,6 +892,11 @@ export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
   public constructor(
     private readonly planning: Pick<ImplementationPlanningStore, 'read'>,
     private readonly traces: TemporalTaskStepTraceStore,
+    private readonly reviews?: {
+      list(
+        workflowId: string,
+      ): Outcome<readonly PullRequestReviewEvidence[], { readonly kind: string }>;
+    },
   ) {}
 
   public read(
@@ -901,6 +907,8 @@ export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
     if (!planning.ok) return err({ kind: `planning_${planning.error.kind}` });
     const completedSteps = this.traces.readRunStepEvidence(workflowId);
     if (!completedSteps.ok) return err({ kind: completedSteps.error.kind });
+    const reviewInputs = this.reviews?.list(workflowId) ?? ok([]);
+    if (!reviewInputs.ok) return err({ kind: reviewInputs.error.kind });
     const record = planning.value;
     return ok({
       acceptedPlan:
@@ -913,6 +921,7 @@ export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
             })
           : null,
       completedSteps: completedSteps.value,
+      reviewInputs: reviewInputs.value,
     });
   }
 }
@@ -943,7 +952,7 @@ export const executeRegisteredTaskStep = async (
   const snapshot = loaded.value;
   const evidence =
     dependencies.evidence?.read(input.taskReference, input.workflowId) ??
-    ok({ acceptedPlan: null, completedSteps: [] });
+    ok({ acceptedPlan: null, completedSteps: [], reviewInputs: [] });
   if (!evidence.ok) {
     return block(
       `Execution evidence for ${input.uses} is unavailable: ${evidence.error.kind}`,
@@ -1452,7 +1461,7 @@ export const createTaskExecutionActivity = (
     executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
   executeRemoteReconciledStep: async (input) =>
     executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
-  evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? true),
+  evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
 });
 
 export const createCurrentStepRegistry = (

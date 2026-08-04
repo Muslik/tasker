@@ -4,6 +4,7 @@ import {
   AbiIdSchema,
   AbiVersionSchema,
   StepActivityDeliverySchema,
+  WaitResolutionMappingSchema,
   WaitReferenceSchema,
 } from './schema.js';
 import { WorkflowChangeKindSchema } from './execution-result.js';
@@ -54,6 +55,8 @@ export const WaitContractSchema = z.object({
   id: AbiIdSchema,
   version: AbiVersionSchema,
   resolutionSchema: RuntimeSchemaSchema.optional(),
+  resolutionMapping: WaitResolutionMappingSchema.optional(),
+  artifactContracts: z.array(ArtifactKindSchema).optional(),
   description: z.string().min(1).optional(),
 });
 

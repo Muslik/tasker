@@ -43,6 +43,8 @@ export const bounded_loop = (
   definition: {
     readonly maxAttempts: number;
     readonly until: string;
+    readonly checkBefore?: boolean;
+    readonly exhaustedWait?: string;
     readonly body: WorkflowNodeSource;
   },
 ): WorkflowNodeSource => ({
@@ -50,6 +52,8 @@ export const bounded_loop = (
   id,
   maxAttempts: definition.maxAttempts,
   until: definition.until,
+  checkBefore: definition.checkBefore ?? false,
+  ...(definition.exhaustedWait === undefined ? {} : { exhaustedWait: definition.exhaustedWait }),
   body: definition.body,
 });
 

@@ -164,6 +164,7 @@ const retryResolution = (resolution: TaskWaitResolution): boolean =>
 
 const operatorGuidanceFrom = (resolution: TaskWaitResolution): string | null =>
   isRecord(resolution) &&
+  resolution.decision === 'resume' &&
   typeof resolution.guidance === 'string' &&
   resolution.guidance.trim().length > 0
     ? resolution.guidance.trim()
@@ -251,6 +252,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
   );
   const attempts: MutableAttempts = {};
   const predicateFacts: PredicateFacts = {};
+  let queuedOperatorGuidance: string | null = null;
   let pendingResolution: ResolveTaskWaitCommand | null = null;
   let planningNode: PlanningStepNode | null = null;
   let planningCommandSequence = 0;
@@ -519,6 +521,30 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     });
   };
 
+  const applyWaitResolution = (
+    node: Extract<CompiledWorkflowNode, { readonly kind: 'wait' }>,
+    resolution: TaskWaitResolution,
+  ): void => {
+    const mapping = node.resolutionMapping;
+    if (mapping === undefined) return;
+    if (!isRecord(resolution)) {
+      throw ApplicationFailure.nonRetryable(`Wait ${node.id} received a non-object resolution`);
+    }
+    const outcome = resolution[mapping.discriminator];
+    if (typeof outcome !== 'string') {
+      throw ApplicationFailure.nonRetryable(
+        `Wait ${node.id} resolution has no ${mapping.discriminator} outcome`,
+      );
+    }
+    const facts = mapping.cases[outcome];
+    if (facts === undefined) {
+      throw ApplicationFailure.nonRetryable(
+        `Wait ${node.id} received unsupported outcome ${outcome}`,
+      );
+    }
+    Object.assign(predicateFacts, facts);
+  };
+
   const executeNode = async (node: CompiledWorkflowNode): Promise<Traversal> => {
     markRunning(node.id);
 
@@ -544,7 +570,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         if (state.executionContext.status !== 'ready') {
           throw ApplicationFailure.nonRetryable('Execution step has no prepared execution context');
         }
-        let operatorGuidance: string | null = null;
+        let operatorGuidance = queuedOperatorGuidance;
+        queuedOperatorGuidance = null;
         for (;;) {
           const readyContext = state.executionContext;
           if (readyContext.status !== 'ready') {
@@ -628,24 +655,44 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return traversal;
       }
       case 'bounded_loop': {
-        for (let attempt = 1; attempt <= node.maxAttempts; attempt += 1) {
-          attempts[node.id] = attempt;
-          const traversal = await executeNode(node.body);
-          if (traversal.kind === 'finalized') {
-            nodeStates[node.id] = 'succeeded';
-            return traversal;
-          }
-          if (await evaluate(node.until)) {
+        for (;;) {
+          if (node.checkBefore && (await evaluate(node.until))) {
             nodeStates[node.id] = 'succeeded';
             return { kind: 'continue' };
           }
+          for (let attempt = 1; attempt <= node.maxAttempts; attempt += 1) {
+            attempts[node.id] = attempt;
+            const traversal = await executeNode(node.body);
+            if (traversal.kind === 'finalized') {
+              nodeStates[node.id] = 'succeeded';
+              return traversal;
+            }
+            if (await evaluate(node.until)) {
+              nodeStates[node.id] = 'succeeded';
+              return { kind: 'continue' };
+            }
+          }
+          if (node.exhaustedWait === undefined) {
+            nodeStates[node.id] = 'failed';
+            throw new Error(
+              `Bounded loop ${node.id} exhausted ${String(node.maxAttempts)} attempts`,
+            );
+          }
+          const resolution = await openWait(node.id, node.exhaustedWait);
+          const guidance = operatorGuidanceFrom(resolution);
+          if (guidance === null) {
+            throw ApplicationFailure.nonRetryable(
+              `Exhausted loop ${node.id} requires operator guidance`,
+            );
+          }
+          queuedOperatorGuidance = guidance;
         }
-        nodeStates[node.id] = 'failed';
-        throw new Error(`Bounded loop ${node.id} exhausted ${String(node.maxAttempts)} attempts`);
       }
-      case 'wait':
-        await openWait(node.id, node.for);
+      case 'wait': {
+        const resolution = await openWait(node.id, node.for);
+        applyWaitResolution(node, resolution);
         return { kind: 'continue' };
+      }
       case 'gate': {
         if (node.resumeWhen === 'plan.approved@1' && input.settings.planApproval === 'automatic') {
           nodeStates[node.id] = 'skipped';

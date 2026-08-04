@@ -27,6 +27,13 @@ missing semantic work. Explain every material assembly choice in assemblyDecisio
 verification from observable task/repository facts and policy. A bug requires before and after
 reproduction evidence. A PR path requires CI observation and the code-review wait.
 
+For a PR path, keep human review as a durable wait. If review feedback should be fixed
+autonomously, assemble a bounded loop with `checkBefore: true`: start from the
+`code_review@1` wait, skip the body when `review.approved@1` is true, and otherwise run
+`review.revise@1`, task-selected verification, PR preparation, CI observation, and a
+new `code_review@1` wait. Give the loop `operator_guidance@1` as `exhaustedWait` so
+three unsuccessful review cycles pause for a human correction instead of losing work.
+
 Do not claim facts that require later execution. In particular, do not claim that a bug was
 reproduced or that an implementation works. If reproduction or implementation later discovers
 a new repository/dependency, the runtime will return workflow_change_required and Tasker will

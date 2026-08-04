@@ -98,16 +98,19 @@ const acceptedPlanRecord = (task: TaskContext): readonly WorkflowNodeSource[] =>
       ]
     : [];
 
-const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] => [
+const pullRequestPublication = (
+  task: TaskContext,
+  prefix: '' | 'review-',
+): readonly WorkflowNodeSource[] => [
   ...(aiAssistanceEnabled()
     ? [
-        step('finalize-ai-assistance', {
+        step(`${prefix}finalize-ai-assistance`, {
           uses: 'ai.assistance.finalize@1',
           with: taskInput(task, 'Harvest the actual result and verification evidence.'),
         }),
       ]
     : []),
-  step('describe-pr', {
+  step(`${prefix}describe-pr`, {
     uses: 'pr.describe@1',
     with: {
       ...taskInput(task, 'Compose the provider-neutral pull-request draft.'),
@@ -116,7 +119,7 @@ const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] 
   }),
   ...(aiAssistanceEnabled()
     ? [
-        step('validate-ai-assistance', {
+        step(`${prefix}validate-ai-assistance`, {
           uses: 'ai.assistance.validate@1',
           with: {
             ...taskInput(task, 'Validate the branch artifacts and pull-request AI section.'),
@@ -125,18 +128,40 @@ const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] 
         }),
       ]
     : []),
-  step('prepare-pr', {
+  step(`${prefix}prepare-pr`, {
     uses: 'pr.prepare@1',
     with: {
       ...taskInput(task, 'Prepare the implementation for code review.'),
       draftPath: '.tasker/pull-request/draft.json',
     },
   }),
-  step('observe-ci', {
+  step(`${prefix}observe-ci`, {
     uses: 'ci.observe@1',
     with: taskInput(task, 'Wait for CI and classify failures before code review completes.'),
   }),
+];
+
+const pullRequestReadiness = (task: TaskContext): readonly WorkflowNodeSource[] => [
+  ...pullRequestPublication(task, ''),
   wait('wait-for-code-review', { for: 'code_review@1' }),
+  bounded_loop('code-review-revision-loop', {
+    maxAttempts: 3,
+    until: 'review.approved@1',
+    checkBefore: true,
+    exhaustedWait: 'operator_guidance@1',
+    body: sequence('code-review-revision', [
+      step('revise-from-review', {
+        uses: 'review.revise@1',
+        with: taskInput(task, 'Apply every actionable unresolved pull-request review thread.'),
+      }),
+      step('verify-review-revision', {
+        uses: 'verify.targeted@1',
+        with: verificationInput(task, 'review_revision'),
+      }),
+      ...pullRequestPublication(task, 'review-'),
+      wait('wait-for-revised-code-review', { for: 'code_review@1' }),
+    ]),
+  }),
 ];
 
 const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
@@ -179,7 +204,7 @@ const shortBugfixRoot = (task: TaskContext): WorkflowNodeSource =>
       ),
     }),
     ...pullRequestReadiness(task),
-    finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
+    finalize('review-complete', { outcome: 'done' }),
   ]);
 
 const featureWithReviewRoot = (
@@ -218,7 +243,7 @@ const featureWithReviewRoot = (
     }),
     ...translationNodes(task, task.repository, resolveProjectWorkflowProfile(task.repository)),
     ...pullRequestReadiness(task),
-    finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
+    finalize('review-complete', { outcome: 'done' }),
   ]);
 
 const sharedComponentRoot = (
@@ -279,7 +304,7 @@ const sharedComponentRoot = (
       with: verificationInput(task, verificationProfile),
     }),
     ...pullRequestReadiness(task),
-    finalize('waiting-for-review', { outcome: 'waiting_for_review' }),
+    finalize('review-complete', { outcome: 'done' }),
   ]);
 };
 

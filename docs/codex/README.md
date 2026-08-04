@@ -1,7 +1,7 @@
 # Tasker design package
 
-Status: **Temporal-only runtime, T3 managed execution, and the T4 path through
-reconciled PR plus classified Jenkins observation implemented**, 2026-08-04.
+Status: **Temporal-only runtime with the local T4 PR -> CI -> review -> revision loop
+implemented**, 2026-08-04.
 
 ## Canonical documents
 
@@ -59,7 +59,11 @@ final validator fails closed before the reconciled Bitbucket boundary. The Bitbu
 adapter remains disabled by default behind an explicit real-mutation flag. A
 file-backed Jenkins block now observes the exact task commit, classifies CI/Allure
 evidence, and pauses recoverably on VPN, flaky, infrastructure, or unknown outcomes.
-Jira lifecycle and Bitbucket review/revision remain disabled.
+Bitbucket review intake imports unresolved human threads into immutable evidence. A
+typed review decision either completes the task or enters a bounded
+revise/verify/publish/CI loop; exhaustion asks the operator for guidance and continues
+without discarding the worktree. Jira lifecycle mutation, review-thread replies, and
+the real company pilot remain disabled.
 
 ## Historical implementation records
 
@@ -87,6 +91,7 @@ T3 managed execution is implemented in
 [`t3-managed-execution.md`](t3-managed-execution.md). T4 now includes the company
 policy-to-PR boundary described in
 [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) and the gated Bitbucket effect
-family in [`t4-external-effects.md`](t4-external-effects.md). Next are Bitbucket
-review/revision and Jira lifecycle effects before a real pilot. Future work must not
-reintroduce a second runtime.
+family in [`t4-external-effects.md`](t4-external-effects.md). The local Bitbucket
+review/revision lifecycle is also complete. Next are the remaining Jira/review write
+effects and one explicitly allowed real pilot. Future work must not reintroduce a
+second runtime.

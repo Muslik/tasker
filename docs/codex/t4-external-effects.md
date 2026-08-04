@@ -1,10 +1,9 @@
 # T4 external effects, Bitbucket PR preparation, and Jenkins observation
 
-Status: generic effect journal, `remote_reconciled` Temporal delivery, validated
-provider-neutral PR draft, and the first Bitbucket branch/PR adapter implemented behind
-an explicit pilot flag on 2026-08-04. The Jenkins/Allure read boundary and CI
-classification are also implemented. Jira lifecycle mutation, review
-ingestion/revision, and the real company pilot remain open.
+Status: generic effect journal, reconciled Bitbucket PR publication, Jenkins/Allure
+observation, and the local human-review/revision lifecycle implemented behind an
+explicit pilot flag on 2026-08-04. Jira lifecycle mutation, review-thread reply/resolve
+writes, and the real company pilot remain open.
 
 ## Boundary
 
@@ -25,9 +24,10 @@ Delivery classes now mean:
 `pr.prepare@1` uses `remote_reconciled`; `ci.observe@1` uses `read_only`. Adding either
 integration did not add a vendor branch to the Workflow interpreter.
 
-Because step artifact dependencies are now part of the compiled contract, the current
-compiler/IR markers are compiler `3` and IR `m1`; new runs cannot silently mistake an
-older graph for the current recovery and dataflow contract.
+Because wait-result mappings and recoverable loop exhaustion are now part of the
+compiled contract, the current compiler/IR markers are compiler `4` and IR `m2`; new
+runs cannot silently mistake an older graph for the current recovery and dataflow
+contract.
 
 ## Effect protocol
 
@@ -58,7 +58,9 @@ managed worktree. It then:
 3. stages only paths reported by Git and creates one local task commit when needed;
 4. verifies every `branchArtifacts` path declared by the draft exists in that commit;
 5. prepares a push intent and probes the exact remote branch ref;
-6. pushes only when the ref is absent and refuses to overwrite a different commit;
+6. creates a missing ref, or advances the task ref only when its remote commit is an
+   ancestor of the new local commit and the exact remote value still matches a
+   force-with-lease guard;
 7. probes again after timeout/failed response and accepts a matching remote commit;
 8. prepares a PR intent and finds an existing open PR by exact source/target refs;
 9. creates the PR only when absent, then reconciles after conflict or response loss;
@@ -72,6 +74,28 @@ state and continues at branch publication or PR creation.
 The access token exists only in Worker memory and Git/fetch request configuration. It is
 not placed in command arguments, Workflow input/results, effect identity, artifacts, or
 metadata.
+
+## Review and revision
+
+`code_review@1` is a durable Temporal wait, not a long-running polling Activity. An
+operator sync (and later a webhook using the same coordinator) reads the exact PR from
+the latest completed `pr.prepare@1` output. Pending review leaves the wait untouched.
+Approval or unresolved human comments produce a small typed wait result while the full
+thread tree, anchors, authors, and timestamps are stored in an immutable
+`pull-request-review` artifact outside Workflow history. Re-importing identical review
+state is deduplicated by content hash.
+
+The compiled wait maps `approved` and `changes_requested` to generic predicate facts.
+The task-specific graph decides what follows. Current company graphs use a pre-checked,
+three-attempt loop containing `review.revise@1`, targeted verification, PR draft and
+policy regeneration, guarded branch update/PR reconciliation, Jenkins observation, and
+another `code_review@1` wait. Approval skips or exits the loop. Exhaustion opens
+`operator_guidance@1`; the operator's prompt is passed to the next revision Activity in
+the same Workflow Run and managed worktree.
+
+The operator may explicitly mark a comment-free review done. Tasker never auto-merges.
+Replying to or resolving Bitbucket threads is deliberately still absent until those
+writes have their own stable operation IDs and reconciliation proof.
 
 ## Pilot gate
 
@@ -145,6 +169,12 @@ Automated tests prove:
   Jenkins adapters backed by deterministic fake remote ports;
 - the operator Activity surface contains only terminal CI evidence and links to the
   relevant build.
+- paginated Bitbucket activities preserve nested human threads and file/line anchors,
+  ignore bot-only roots, classify VPN/403, and deduplicate immutable review evidence;
+- review changes execute revise/verify/PR/CI cycles, bounded exhaustion opens operator
+  guidance, and the supplied prompt resumes the same loop and worktree;
+- a remote task-branch revision advances only through an exact lease after proving the
+  remote commit is an ancestor of the local commit.
 
 No request was sent to company Bitbucket or Jenkins in this milestone. The first real
 pilot still requires the policy block, explicit flag, and operator-visible confirmation
@@ -152,6 +182,6 @@ of the selected task/repository.
 
 ## Remaining T4 sequence
 
-1. ingest Bitbucket review threads with provenance and execute revision/push/CI loops;
+1. add reconciled Bitbucket thread reply/resolve effects;
 2. add Jira assignment/status/comment/attachment effects under project policy;
 3. enable the real flags for one allowed task and complete the T4 exit gate.

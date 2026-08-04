@@ -115,15 +115,28 @@ export const validateWorkflowObligations = (
       const later = path.slice(markerIndex + 1);
       const earlier = path.slice(0, markerIndex);
       const contract = M1_WORKFLOW_CONTRACTS.stepTypes.get(marker.reference);
+      const nextReviewIndex = later.findIndex(
+        (candidate) => candidate.kind === 'wait' && candidate.reference === 'code_review@1',
+      );
+      const beforeNextReview = nextReviewIndex < 0 ? later : later.slice(0, nextReviewIndex + 1);
 
       for (const requiredArtifact of contract?.requiredArtifactContracts ?? []) {
         const hasProducer = earlier.some((candidate) => {
-          if (candidate.kind !== 'step') return false;
-          return (
-            M1_WORKFLOW_CONTRACTS.stepTypes
-              .get(candidate.reference)
-              ?.artifactContracts.includes(requiredArtifact) === true
-          );
+          if (candidate.kind === 'step') {
+            return (
+              M1_WORKFLOW_CONTRACTS.stepTypes
+                .get(candidate.reference)
+                ?.artifactContracts.includes(requiredArtifact) === true
+            );
+          }
+          if (candidate.kind === 'wait') {
+            return (
+              M1_WORKFLOW_CONTRACTS.waits
+                .get(candidate.reference)
+                ?.artifactContracts?.includes(requiredArtifact) === true
+            );
+          }
+          return false;
         });
         if (!hasProducer) {
           issues.push(
@@ -138,7 +151,7 @@ export const validateWorkflowObligations = (
 
       if (
         contract?.allowedEffects.includes('workspace.write') === true &&
-        !later.some(
+        !beforeNextReview.some(
           (candidate) => candidate.kind === 'step' && candidate.reference.startsWith('verify.'),
         )
       ) {
@@ -153,7 +166,7 @@ export const validateWorkflowObligations = (
 
       if (
         contract?.allowedEffects.includes('workspace.write') === true &&
-        !later.some(
+        !beforeNextReview.some(
           (candidate) => candidate.kind === 'step' && candidate.reference === 'pr.prepare@1',
         )
       ) {
@@ -167,8 +180,12 @@ export const validateWorkflowObligations = (
       }
 
       if (marker.reference === 'pr.prepare@1') {
+        const nextReview = later.findIndex(
+          (candidate) => candidate.kind === 'wait' && candidate.reference === 'code_review@1',
+        );
+        const beforeReview = nextReview < 0 ? later : later.slice(0, nextReview + 1);
         if (
-          !later.some(
+          !beforeReview.some(
             (candidate) => candidate.kind === 'step' && candidate.reference === 'ci.observe@1',
           )
         ) {
@@ -180,11 +197,7 @@ export const validateWorkflowObligations = (
             ),
           );
         }
-        if (
-          !later.some(
-            (candidate) => candidate.kind === 'wait' && candidate.reference === 'code_review@1',
-          )
-        ) {
+        if (nextReview < 0) {
           issues.push(
             issue(
               'pr-requires-ci-and-review',
@@ -218,49 +231,45 @@ export const validateWorkflowObligations = (
   for (const policy of policies) {
     for (const obligation of policy.obligations) {
       paths.forEach((path, pathIndex) => {
-        const triggered = path.some(
-          (marker) =>
-            marker.kind === obligation.trigger.kind &&
-            marker.reference === obligation.trigger.reference,
+        const triggerPositions = path.flatMap((marker, markerIndex) =>
+          marker.kind === obligation.trigger.kind &&
+          marker.reference === obligation.trigger.reference
+            ? [markerIndex]
+            : [],
         );
-        if (!triggered) return;
-
-        const positions = obligation.ordered.map((required) =>
-          path.flatMap((marker, markerIndex) =>
-            marker.kind === required.kind && marker.reference === required.reference
-              ? [markerIndex]
-              : [],
-          ),
-        );
-        const invalidCardinality = positions.findIndex((matches) => matches.length !== 1);
-        if (invalidCardinality >= 0) {
-          const required = obligation.ordered[invalidCardinality];
-          if (required === undefined) return;
-          issues.push(
-            issue(
-              obligation.id,
-              `Policy ${policy.id}@${policy.version} requires exactly one ${required.kind} ${required.reference} on this execution path`,
-              ['root', 'executionPaths', pathIndex],
-            ),
-          );
-          return;
-        }
-
-        const orderedPositions = positions.map(([position]) => position ?? -1);
-        const outOfOrder = orderedPositions.findIndex(
-          (position, index) => index > 0 && position <= (orderedPositions[index - 1] ?? -1),
-        );
-        if (outOfOrder >= 0) {
-          const current = obligation.ordered[outOfOrder];
-          const previous = obligation.ordered[outOfOrder - 1];
-          if (current === undefined || previous === undefined) return;
-          issues.push(
-            issue(
-              obligation.id,
-              `Policy ${policy.id}@${policy.version} requires ${previous.reference} before ${current.reference}`,
-              ['root', 'executionPaths', pathIndex],
-            ),
-          );
+        for (const triggerPosition of triggerPositions) {
+          let before = triggerPosition + 1;
+          let missing: (typeof obligation.ordered)[number] | undefined;
+          for (let index = obligation.ordered.length - 1; index >= 0; index -= 1) {
+            const required = obligation.ordered[index];
+            if (required === undefined) continue;
+            let match = -1;
+            for (let candidate = before - 1; candidate >= 0; candidate -= 1) {
+              const marker = path[candidate];
+              if (
+                marker !== undefined &&
+                marker.kind === required.kind &&
+                marker.reference === required.reference
+              ) {
+                match = candidate;
+                break;
+              }
+            }
+            if (match < 0) {
+              missing = required;
+              break;
+            }
+            before = match;
+          }
+          if (missing !== undefined) {
+            issues.push(
+              issue(
+                obligation.id,
+                `Policy ${policy.id}@${policy.version} requires ${missing.kind} ${missing.reference} before ${obligation.trigger.reference}`,
+                ['root', 'executionPaths', pathIndex, triggerPosition],
+              ),
+            );
+          }
         }
       });
     }

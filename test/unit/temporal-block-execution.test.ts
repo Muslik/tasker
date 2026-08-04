@@ -539,7 +539,15 @@ describe('temporal block execution activity', () => {
       Promise.resolve({
         status: 'completed' as const,
         summary: 'Pull request 73 is ready for review',
-        output: { externalId: '73', status: 'open' },
+        output: {
+          externalId: '73',
+          status: 'open',
+          provider: 'bitbucket',
+          repository: 'twiket/front-avia',
+          sourceBranch: 'tasker/task-ref',
+          targetBranch: 'master',
+          url: 'https://bitbucket.example/projects/TWIKET/repos/front-avia/pull-requests/73',
+        },
         artifactIds: ['external-effect:prepare-pr:receipt'],
       }),
     );

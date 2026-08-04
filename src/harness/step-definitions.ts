@@ -61,6 +61,18 @@ export const integrationOutputSchema = z
   })
   .strict();
 
+export const pullRequestOutputSchema = z
+  .object({
+    externalId: z.string().min(1),
+    status: z.literal('open'),
+    provider: z.string().min(1),
+    repository: z.string().min(1),
+    sourceBranch: z.string().min(1),
+    targetBranch: z.string().min(1),
+    url: z.url().nullable(),
+  })
+  .strict();
+
 export const ciObservationOutputSchema = z
   .object({
     externalId: z.string().min(1),
@@ -119,6 +131,7 @@ const contractSchemas = {
   process_input: processInputSchema,
   process_output: processOutputSchema,
   pull_request_input: pullRequestInputSchema,
+  pull_request_output: pullRequestOutputSchema,
   reproduction_input: reproductionInputSchema,
   task_input: taskInputSchema,
   verification_input: verificationInputSchema,
@@ -270,6 +283,7 @@ const integrationStep = (
     readonly requiredArtifactContracts?: readonly string[];
     readonly activityDelivery?: StepTypeContract['activityDelivery'];
     readonly inputSchema?: z.ZodType;
+    readonly outputSchema?: z.ZodType;
   },
 ): HarnessStepDefinition => ({
   reference: `${id}@1`,
@@ -279,7 +293,7 @@ const integrationStep = (
   contract: contract(id, {
     retryBudget: options.retryBudget,
     inputSchema: options.inputSchema ?? taskInputSchema,
-    outputSchema: integrationOutputSchema,
+    outputSchema: options.outputSchema ?? integrationOutputSchema,
     allowedEffects: [...options.allowedEffects],
     requiredCapabilities: [...options.requiredCapabilities],
     resumeBoundary: 'step',
@@ -408,6 +422,7 @@ export const TWIKET_HARNESS_STEPS = [
     artifactContracts: ['pull-request'],
     requiredArtifactContracts: ['pull-request-draft'],
     inputSchema: pullRequestInputSchema,
+    outputSchema: pullRequestOutputSchema,
     activityDelivery: { kind: 'remote_reconciled' },
   }),
   {

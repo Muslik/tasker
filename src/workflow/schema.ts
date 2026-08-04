@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-export const WORKFLOW_IR_VERSION = 'm1';
-export const WORKFLOW_COMPILER_VERSION = 3;
+export const WORKFLOW_IR_VERSION = 'm2';
+export const WORKFLOW_COMPILER_VERSION = 4;
 
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
@@ -41,6 +41,8 @@ export interface BoundedLoopNodeSource {
   readonly id: string;
   readonly maxAttempts: number;
   readonly until: string;
+  readonly checkBefore: boolean;
+  readonly exhaustedWait?: string | undefined;
   readonly body: WorkflowNodeSource;
 }
 
@@ -132,13 +134,21 @@ export interface CompiledBoundedLoopNode {
   readonly id: string;
   readonly maxAttempts: number;
   readonly until: string;
+  readonly checkBefore: boolean;
+  readonly exhaustedWait?: string | undefined;
   readonly body: CompiledWorkflowNode;
+}
+
+export interface WaitResolutionMapping {
+  readonly discriminator: string;
+  readonly cases: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
 }
 
 export interface CompiledWaitNode {
   readonly kind: 'wait';
   readonly id: string;
   readonly for: string;
+  readonly resolutionMapping?: WaitResolutionMapping | undefined;
   readonly resumeAt?: string | undefined;
 }
 
@@ -242,6 +252,8 @@ export const BoundedLoopNodeSourceSchema = z
     id: NodeIdSchema,
     maxAttempts: z.number(),
     until: PredicateReferenceSchema,
+    checkBefore: z.boolean().default(false),
+    exhaustedWait: WaitReferenceSchema.optional(),
     body: z.lazy(() => WorkflowNodeSourceSchema),
   })
   .strict();
@@ -348,13 +360,31 @@ const CompiledBoundedLoopNodeSchema = z.object({
   id: NodeIdSchema,
   maxAttempts: z.number(),
   until: PredicateReferenceSchema,
+  checkBefore: z.boolean(),
+  exhaustedWait: WaitReferenceSchema.optional(),
   body: z.lazy(() => CompiledWorkflowNodeSchema),
 });
+
+export const WaitResolutionMappingSchema = z
+  .object({
+    discriminator: z.string().min(1),
+    cases: z.record(
+      z.string().min(1),
+      z
+        .record(PredicateReferenceSchema, z.boolean())
+        .refine(
+          (facts) => Object.keys(facts).length > 0,
+          'A wait resolution case must set at least one predicate fact',
+        ),
+    ),
+  })
+  .strict();
 
 const CompiledWaitNodeSchema = z.object({
   kind: z.literal('wait'),
   id: NodeIdSchema,
   for: WaitReferenceSchema,
+  resolutionMapping: WaitResolutionMappingSchema.optional(),
   resumeAt: z.string().min(1).optional(),
 });
 

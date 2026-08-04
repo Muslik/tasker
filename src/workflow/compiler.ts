@@ -365,6 +365,9 @@ const normalizeNode = (
 
     case 'bounded_loop':
       validatePredicateReference(context, node.until, [...path, 'until']);
+      if (node.exhaustedWait !== undefined) {
+        validateWaitReference(context, node.exhaustedWait, [...path, 'exhaustedWait']);
+      }
 
       if (!Number.isSafeInteger(node.maxAttempts) || node.maxAttempts <= 0) {
         addIssue(context, {
@@ -382,11 +385,27 @@ const normalizeNode = (
         id: node.id,
         maxAttempts: node.maxAttempts,
         until: node.until,
+        checkBefore: node.checkBefore,
+        ...(node.exhaustedWait === undefined ? {} : { exhaustedWait: node.exhaustedWait }),
         body: normalizeNode(context, node.body, [...path, 'body']),
       };
 
     case 'wait': {
-      validateWaitReference(context, node.for, [...path, 'for']);
+      const waitContract = validateWaitReference(context, node.for, [...path, 'for']);
+      for (const [caseName, facts] of Object.entries(
+        waitContract?.resolutionMapping?.cases ?? {},
+      )) {
+        for (const reference of Object.keys(facts)) {
+          validatePredicateReference(context, reference, [
+            ...path,
+            'for',
+            'resolutionMapping',
+            'cases',
+            caseName,
+            reference,
+          ]);
+        }
+      }
 
       if (node.resumeAt !== undefined) {
         context.resumeTargets.push({
@@ -400,6 +419,9 @@ const normalizeNode = (
         kind: 'wait',
         id: node.id,
         for: node.for,
+        ...(waitContract?.resolutionMapping === undefined
+          ? {}
+          : { resolutionMapping: waitContract.resolutionMapping }),
         ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
       };
     }

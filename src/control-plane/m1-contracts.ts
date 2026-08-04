@@ -194,6 +194,15 @@ export const ResumeRunCommandSchema = z
   })
   .strict();
 
+export const CodeReviewSyncResponseSchema = z
+  .object({
+    status: z.enum(['pending', 'approved', 'changes_requested']),
+    reviewId: z.string().min(1).nullable(),
+    pullRequestUrl: z.url().nullable(),
+    run: TaskWorkflowPublicStateSchema,
+  })
+  .strict();
+
 export const OperatorTaskStatusSchema = z.enum([
   'backlog',
   'planned',
@@ -304,6 +313,7 @@ export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
 export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;
 export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
+export type CodeReviewSyncResponse = z.infer<typeof CodeReviewSyncResponseSchema>;
 export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
 export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;
 export type OperatorActivityResponse = z.infer<typeof OperatorActivityResponseSchema>;

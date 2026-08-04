@@ -269,6 +269,14 @@ The generic external-effect journal is reusable, but reconciliation remains
 effect-specific. A Git ref, Jira comment, package version, and PR thread have different
 proof surfaces; do not hide them behind a generic “exactly once” claim.
 
+Human waits may expose a provider-neutral `resolutionMapping` that turns a small typed
+decision into predicate facts. Graphs can branch or loop on those facts without adding
+vendor logic to Temporal. A bounded loop that cannot safely fail may declare an
+`exhaustedWait`; after its attempt budget, Tasker asks the operator for guidance and
+passes that text to the first step of the next cycle. Add these semantics only to the
+workflow contract/catalog. Bitbucket parsing and reply APIs stay in the adapter, while
+the actual revision instructions stay in an editable file-backed step prompt.
+
 For Jenkins, project manifests configure only the replaceable provider mapping:
 
 ```json

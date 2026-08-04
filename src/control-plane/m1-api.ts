@@ -12,7 +12,12 @@ import {
   type WorkflowContinuationCoordinator,
   type WorkflowContinuationError,
 } from './workflow-continuation.js';
-import type { JiraIssueService, JiraIssueServiceError } from '../integrations/index.js';
+import type {
+  BitbucketReviewCoordinator,
+  BitbucketReviewSyncError,
+  JiraIssueService,
+  JiraIssueServiceError,
+} from '../integrations/index.js';
 import {
   RepositoryCatalogResponseSchema,
   RepositoryReferenceSchema,
@@ -20,6 +25,7 @@ import {
 import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
 import {
   ApiErrorResponseSchema,
+  CodeReviewSyncResponseSchema,
   DEFAULT_RUN_START_COMMAND,
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
@@ -64,6 +70,7 @@ export interface BuildM1ApiOptions {
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly workflowContinuation?: WorkflowContinuationCoordinator | undefined;
   readonly executionActivity?: ExecutionActivityReader | undefined;
+  readonly bitbucketReview?: Pick<BitbucketReviewCoordinator, 'sync'> | undefined;
   readonly temporalRunService: TaskTemporalRunService;
 }
 
@@ -134,6 +141,23 @@ const sendTemporalRunError = (reply: FastifyReply, error: TemporalRunError): Fas
         .send(apiError(error.kind, 'This run already exists with different immutable settings'));
     case 'runtime_unavailable':
       return reply.code(503).send(apiError(error.kind, error.message));
+  }
+};
+
+const sendBitbucketReviewError = (
+  reply: FastifyReply,
+  error: BitbucketReviewSyncError,
+): FastifyReply => {
+  switch (error.kind) {
+    case 'pull_request_evidence_missing':
+    case 'invalid_pull_request_evidence':
+      return reply.code(409).send(apiError(error.kind, 'Pull request evidence is unavailable'));
+    case 'review_failed':
+      return reply
+        .code(error.problem.retryable ? 503 : 422)
+        .send(apiError(error.problem.kind, error.problem.message));
+    case 'store_failed':
+      return reply.code(500).send(apiError('review_store_failed', error.error.kind));
   }
 };
 
@@ -808,6 +832,95 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : sendTemporalRunError(reply, started.error);
   });
 
+  api.post('/api/workflows/:fixtureId/code-review/sync', async (request, reply) => {
+    if (options.bitbucketReview === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('bitbucket_review_not_configured', 'Bitbucket review intake is disabled'));
+    }
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const current = await temporalRunService.read(params.data.fixtureId);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'code_review@1'
+    ) {
+      return reply
+        .code(409)
+        .send(apiError('run_not_at_code_review', 'The run is not waiting for code review'));
+    }
+    const synced = await options.bitbucketReview.sync({
+      taskReference: params.data.fixtureId,
+      workflowId: current.value.workflowId,
+      workflowRunId: current.value.runId,
+    });
+    if (!synced.ok) return sendBitbucketReviewError(reply, synced.error);
+    if (synced.value.status === 'pending') {
+      return reply.send(
+        CodeReviewSyncResponseSchema.parse({
+          status: 'pending',
+          reviewId: null,
+          pullRequestUrl: synced.value.pullRequestUrl,
+          run: current.value,
+        }),
+      );
+    }
+    const resumed = await temporalRunService.resolveWait(params.data.fixtureId, {
+      nodeId: current.value.wait.nodeId,
+      waitKind: current.value.wait.waitKind,
+      resolution: {
+        decision: synced.value.status,
+        reviewId: synced.value.reviewId,
+      },
+    });
+    if (!resumed.ok) return sendTemporalRunError(reply, resumed.error);
+    return reply.send(
+      CodeReviewSyncResponseSchema.parse({
+        status: synced.value.status,
+        reviewId: synced.value.reviewId,
+        pullRequestUrl: synced.value.evidence.snapshot.pullRequestUrl,
+        run: resumed.value,
+      }),
+    );
+  });
+
+  api.post('/api/workflows/:fixtureId/code-review/complete', async (request, reply) => {
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const current = await temporalRunService.read(params.data.fixtureId);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'code_review@1'
+    ) {
+      return reply
+        .code(409)
+        .send(apiError('run_not_at_code_review', 'The run is not waiting for code review'));
+    }
+    const reviewId = `operator:${current.value.runId}:${current.value.wait.nodeId}`;
+    const completed = await temporalRunService.resolveWait(params.data.fixtureId, {
+      nodeId: current.value.wait.nodeId,
+      waitKind: current.value.wait.waitKind,
+      resolution: { decision: 'approved', reviewId },
+    });
+    if (!completed.ok) return sendTemporalRunError(reply, completed.error);
+    return reply.send(
+      CodeReviewSyncResponseSchema.parse({
+        status: 'approved',
+        reviewId,
+        pullRequestUrl: null,
+        run: completed.value,
+      }),
+    );
+  });
+
   api.post('/api/workflows/:fixtureId/resume', async (request, reply) => {
     const params = FixtureParamsSchema.safeParse(request.params);
     if (!params.success) {
@@ -835,7 +948,8 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (
       current.value.wait.waitKind === 'human_clarification' ||
       current.value.wait.waitKind === 'plan.approved@1' ||
-      current.value.wait.waitKind === 'workflow_change.review@1'
+      current.value.wait.waitKind === 'workflow_change.review@1' ||
+      current.value.wait.waitKind === 'code_review@1'
     ) {
       return reply
         .code(409)

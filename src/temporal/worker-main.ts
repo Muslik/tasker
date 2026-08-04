@@ -17,6 +17,7 @@ import {
   AiAssistanceValidateAdapter,
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
+  PullRequestReviewEvidenceStore,
   createJiraIssueService,
   ExternalEffectStore,
   IntegrationStepAdapterRegistry,
@@ -154,6 +155,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     repositories: repositoryCatalog,
   });
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+  const reviewEvidence = new PullRequestReviewEvidenceStore(ledger.repository, systemClock);
   const mutationRecovery = new WorkspaceMutationRecoveryStore(
     ledger.repository,
     systemClock,
@@ -210,7 +212,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         agentRunner: new CodexCliTaskStepAgentRunner(nodeCommandRunner),
         commands: nodeCommandRunner,
         integrations: integrationAdapters,
-        evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces),
+        evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),
       }),
     });
     try {

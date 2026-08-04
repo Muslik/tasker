@@ -58,7 +58,7 @@ const executeStep = (input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult
   });
 
 const evaluatePredicate = (input: EvaluatePredicateInput): Promise<boolean> =>
-  Promise.resolve(input.facts[input.reference] ?? true);
+  Promise.resolve(input.facts[input.reference] ?? false);
 
 const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] = (input) =>
   Promise.resolve({

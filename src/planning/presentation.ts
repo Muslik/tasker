@@ -46,6 +46,8 @@ const LoopPresentationNodeSchema = z
     kind: z.literal('bounded_loop'),
     maxAttempts: z.number().int().positive(),
     until: z.string().min(1),
+    checkBefore: z.boolean(),
+    exhaustedWait: z.string().min(1).optional(),
   })
   .strict();
 
@@ -158,6 +160,8 @@ export const createWorkflowPresentation = (
           kind: 'bounded_loop',
           label: node.id,
           maxAttempts: node.maxAttempts,
+          checkBefore: node.checkBefore,
+          ...(node.exhaustedWait === undefined ? {} : { exhaustedWait: node.exhaustedWait }),
           status: 'planned',
           until: node.until,
         };

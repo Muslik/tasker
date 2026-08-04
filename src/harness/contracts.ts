@@ -21,6 +21,7 @@ export const HarnessContractNameSchema = z.enum([
   'process_input',
   'process_output',
   'pull_request_input',
+  'pull_request_output',
   'reproduction_input',
   'task_input',
   'verification_input',

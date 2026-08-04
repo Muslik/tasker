@@ -34,6 +34,7 @@ import type { PlanningStrategyRequest } from '../planning/implementation-plan.js
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import {
   answerPlanningClarification,
+  completeCodeReview,
   connectOperatorStream,
   generateWorkflow,
   graphDownloadUrl,
@@ -51,6 +52,7 @@ import {
   resumeWorkflow,
   retryWorkflowContinuation,
   startWorkflow,
+  syncCodeReview,
   syncJiraIssue,
 } from './api-client.js';
 import { Badge } from './components/ui/badge.js';
@@ -118,6 +120,8 @@ type TaskOperation =
   | 'starting'
   | 'approving_plan'
   | 'requesting_plan_changes'
+  | 'syncing_review'
+  | 'completing_review'
   | 'answering_questions'
   | 'resuming'
   | 'accepting_continuation'
@@ -653,6 +657,53 @@ const PlanReviewControls = ({
           )}
           {requestingChanges ? 'Sending…' : 'Request changes'}
         </Button>
+      </div>
+    </section>
+  );
+};
+
+const CodeReviewControls = ({
+  pendingOperation,
+  notice,
+  onSync,
+  onComplete,
+}: {
+  readonly pendingOperation: TaskOperation | null;
+  readonly notice: string | null;
+  readonly onSync: () => void;
+  readonly onComplete: () => void;
+}) => {
+  const syncing = pendingOperation === 'syncing_review';
+  const completing = pendingOperation === 'completing_review';
+  const busy = syncing || completing;
+  return (
+    <section className="border-b border-violet-500/20 bg-violet-500/4 px-5 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <strong className="text-sm">Code review</strong>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Import actionable PR threads, or finish when review needs no revision.
+          </p>
+          {notice === null ? null : <p className="mt-1 text-xs text-violet-300">{notice}</p>}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="sm" type="button" disabled={busy} onClick={onSync}>
+            {syncing ? (
+              <LoaderCircle data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <RefreshCw data-icon="inline-start" />
+            )}
+            {syncing ? 'Syncing…' : 'Sync review'}
+          </Button>
+          <Button size="sm" type="button" disabled={busy} onClick={onComplete}>
+            {completing ? (
+              <LoaderCircle data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <CheckCircle2 data-icon="inline-start" />
+            )}
+            {completing ? 'Finishing…' : 'Mark done'}
+          </Button>
+        </div>
       </div>
     </section>
   );
@@ -1925,6 +1976,9 @@ export const App = () => {
     status: 'not_applicable',
   });
   const [jiraSyncState, setJiraSyncState] = useState<JiraSyncState>({ status: 'idle' });
+  const [codeReviewNotices, setCodeReviewNotices] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
   const [pendingOperations, setPendingOperations] = useState<ReadonlyMap<string, TaskOperation>>(
     new Map(),
@@ -2330,6 +2384,48 @@ export const App = () => {
       });
   };
 
+  const handleCodeReview = (action: 'sync' | 'complete'): void => {
+    if (selectedTask === null || selectedTask.status !== 'code_review') return;
+    const taskReference = selectedTask.id;
+    const operation = action === 'sync' ? 'syncing_review' : 'completing_review';
+    setPendingOperations((current) => new Map(current).set(taskReference, operation));
+    const request =
+      action === 'sync' ? syncCodeReview(taskReference) : completeCodeReview(taskReference);
+    void request
+      .then(async (result) => {
+        setCodeReviewNotices((current) => {
+          const next = new Map(current);
+          next.set(
+            taskReference,
+            result.status === 'pending'
+              ? 'No actionable review comments yet.'
+              : result.status === 'changes_requested'
+                ? 'Review imported. Revision is starting.'
+                : 'Review completed.',
+          );
+          return next;
+        });
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) await refreshSelection(taskReference);
+      })
+      .catch((error: unknown) => {
+        setCodeReviewNotices((current) =>
+          new Map(current).set(
+            taskReference,
+            error instanceof Error ? error.message : 'Unexpected code review failure',
+          ),
+        );
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== operation) return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
   const handlePlanningClarification = (): void => {
     if (
       selectedTask === null ||
@@ -2595,6 +2691,18 @@ export const App = () => {
                     }}
                     onRequestChanges={() => {
                       handlePlanReview('request_changes');
+                    }}
+                  />
+                ) : null}
+                {selectedTask.status === 'code_review' ? (
+                  <CodeReviewControls
+                    pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
+                    notice={codeReviewNotices.get(selectedTask.id) ?? null}
+                    onSync={() => {
+                      handleCodeReview('sync');
+                    }}
+                    onComplete={() => {
+                      handleCodeReview('complete');
                     }}
                   />
                 ) : null}

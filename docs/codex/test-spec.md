@@ -220,6 +220,11 @@ For a representative run, inspect Event History and Search Attributes:
 - reply/resolve operations are idempotent or reconciled;
 - no automatic merge occurs.
 
+Implemented local evidence additionally proves that approval skips the revision body,
+changes run revise -> verify -> PR -> CI before returning to review, and three
+unsuccessful cycles open operator guidance instead of failing or rebuilding the task
+workspace. Reply/resolve remains an exit-gate test for its future mutation adapter.
+
 ### 6.5 Jenkins/Allure
 
 - build success signals code-review readiness;

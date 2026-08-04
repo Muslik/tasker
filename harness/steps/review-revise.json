@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "reference": "review.revise@1",
+  "description": "Apply actionable human pull-request feedback with exact imported provenance.",
+  "retryBudget": 3,
+  "inputContract": "task_input",
+  "outputContract": "agent_output",
+  "execution": {
+    "kind": "agent",
+    "prompt": "prompts/steps/review-revise.md",
+    "skills": ["bitbucket", "typescript-design", "test-design"]
+  },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["workspace.write"],
+  "requiredCapabilities": ["repository.read", "workspace.write"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["review-revision-diff"],
+  "requiredArtifactContracts": ["pull-request-review"],
+  "workflowChanges": [
+    "cross_repository_dependency",
+    "external_process_required",
+    "task_scope_changed",
+    "verification_scope_changed"
+  ],
+  "reconciliation": { "strategy": "receipt" }
+}

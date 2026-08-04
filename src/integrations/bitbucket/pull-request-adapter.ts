@@ -101,9 +101,17 @@ const pullRequestResult = (
     targetBranch,
   });
 
-const pullRequestOutput = (receipt: z.infer<typeof PullRequestReceiptResultSchema>): JsonValue => ({
+const pullRequestOutput = (
+  receipt: z.infer<typeof PullRequestReceiptResultSchema>,
+  repository: string,
+): JsonValue => ({
   externalId: String(receipt.pullRequestId),
   status: 'open',
+  provider: 'bitbucket',
+  repository,
+  sourceBranch: receipt.sourceBranch,
+  targetBranch: receipt.targetBranch,
+  url: receipt.url,
 });
 
 const problemResult = (
@@ -169,6 +177,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       targetRef,
       sourceBranch: request.workspace.branch,
       targetBranch: targetBranch.branch,
+      repositoryReference: request.workspace.repository.reference,
       artifactIds: pushed.artifactIds,
       draft: draft.value,
     });
@@ -552,23 +561,33 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       };
     }
     if (before.status === 'found' && before.commit !== localCommit) {
-      return {
-        status: 'blocked',
-        result: {
+      const ancestor = await this.runGit(request, 'verify_remote_branch_ancestor', [
+        'merge-base',
+        '--is-ancestor',
+        before.commit,
+        localCommit,
+      ]);
+      if (!commandSucceeded(ancestor)) {
+        return {
           status: 'blocked',
-          kind: 'remote_conflict',
-          summary: 'The remote task branch points to a different commit',
-          details: { sourceRef, localCommit, remoteCommit: before.commit },
-          artifactIds: artifacts,
-        },
-      };
+          result: {
+            status: 'blocked',
+            kind: 'remote_conflict',
+            summary: 'The remote task branch is not an ancestor of the local revision',
+            details: { sourceRef, localCommit, remoteCommit: before.commit },
+            artifactIds: artifacts,
+          },
+        };
+      }
     }
 
-    if (before.status === 'missing') {
+    if (before.status === 'missing' || before.commit !== localCommit) {
+      const lease =
+        before.status === 'found' ? [`--force-with-lease=${sourceRef}:${before.commit}`] : [];
       const push = await this.runGit(
         request,
         'push_branch',
-        ['push', 'origin', `HEAD:${sourceRef}`],
+        ['push', ...lease, 'origin', `HEAD:${sourceRef}`],
         { authenticated: true, timeoutMs: 10 * 60_000 },
       );
       if (!commandSucceeded(push)) {
@@ -642,6 +661,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       readonly targetRef: string;
       readonly sourceBranch: string;
       readonly targetBranch: string;
+      readonly repositoryReference: string;
       readonly artifactIds: readonly string[];
       readonly draft: PullRequestDraft;
     },
@@ -681,7 +701,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       return {
         status: 'completed',
         summary: `Pull request ${String(parsed.data.pullRequestId)} is ready for review`,
-        output: pullRequestOutput(parsed.data),
+        output: pullRequestOutput(parsed.data, input.repositoryReference),
         artifactIds: [...artifacts, this.effects.receiptArtifactId(request.operationId, effectId)],
       };
     }
@@ -760,7 +780,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
     return {
       status: 'completed',
       summary: `Pull request ${String(pullRequest.id)} is ready for review`,
-      output: pullRequestOutput(result),
+      output: pullRequestOutput(result, input.repositoryReference),
       artifactIds: [...artifacts, this.effects.receiptArtifactId(request.operationId, effectId)],
     };
   }

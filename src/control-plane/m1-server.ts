@@ -4,9 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 import { openSqliteLedger } from '../ledger/index.js';
 import {
+  BitbucketReviewClient,
+  BitbucketReviewCoordinator,
   createJiraIssueService,
   JiraServerClient,
   loadJiraConfiguration,
+  PullRequestReviewEvidenceStore,
 } from '../integrations/index.js';
 import {
   CodexCliImplementationPlanner,
@@ -34,6 +37,7 @@ import { createImplementationPlanningCoordinator } from './implementation-planni
 import { createM1WorkflowService } from './m1-service.js';
 import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
+import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 
 const parsePort = (input: string | undefined): number => {
   const port = input === undefined ? 4311 : Number(input);
@@ -102,6 +106,14 @@ export const startM1Server = async (): Promise<void> => {
     temporalConfiguration,
     new LedgerTemporalRunRegistry(ledger.repository),
   );
+  const bitbucketReview =
+    bitbucketConfiguration === null
+      ? undefined
+      : new BitbucketReviewCoordinator(
+          new TemporalTaskStepTraceStore(ledger.repository, systemClock),
+          new BitbucketReviewClient(bitbucketConfiguration),
+          new PullRequestReviewEvidenceStore(ledger.repository, systemClock),
+        );
   const cockpitDirectory = resolve('dist/cockpit');
   const api = buildM1Api({
     service,
@@ -111,6 +123,7 @@ export const startM1Server = async (): Promise<void> => {
     implementationPlanning,
     workflowContinuation,
     executionActivity: new LedgerExecutionActivityReader(ledger.repository),
+    ...(bitbucketReview === undefined ? {} : { bitbucketReview }),
     temporalRunService: temporalRuntime.service,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });

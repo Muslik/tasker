@@ -144,7 +144,7 @@ const requestFor = (
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
-  evidence: { acceptedPlan: null, completedSteps: [] },
+  evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [],
   project: null,
   runtime: {
@@ -295,5 +295,37 @@ describe('Bitbucket pull request effect adapter', () => {
 
     expect(result).toMatchObject({ status: 'completed', output: { externalId: '73' } });
     expect(pullRequests.createCalls).toBe(0);
+  });
+
+  it('fast-forwards the same guarded task branch for a review revision', async () => {
+    const workspace = createGitWorkspace();
+    const pullRequests = new StatefulPullRequestPort();
+    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+
+    const first = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+    const firstRemoteCommit = git(workspace.workspace, [
+      'rev-parse',
+      `refs/remotes/origin/${workspace.branch}`,
+    ]);
+    writeFileSync(join(workspace.workspace, 'feature.ts'), 'export const value = 3;\n', 'utf8');
+    const revised = await adapter.execute(
+      requestFor(workspace, 'workflow:review-prepare-pr:attempt-1'),
+    );
+    const localCommit = git(workspace.workspace, ['rev-parse', 'HEAD']);
+    const remoteCommit = git(workspace.workspace, [
+      'ls-remote',
+      '--heads',
+      'origin',
+      `refs/heads/${workspace.branch}`,
+    ]).split(/\s+/u)[0];
+
+    expect(first).toMatchObject({ status: 'completed', output: { externalId: '73' } });
+    expect(revised).toMatchObject({ status: 'completed', output: { externalId: '73' } });
+    expect(firstRemoteCommit).not.toBe(localCommit);
+    expect(remoteCommit).toBe(localCommit);
+    expect(
+      git(workspace.workspace, ['merge-base', '--is-ancestor', firstRemoteCommit, localCommit]),
+    ).toBe('');
+    expect(pullRequests.createCalls).toBe(1);
   });
 });

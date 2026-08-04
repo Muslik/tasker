@@ -1,5 +1,6 @@
 import {
   ApiErrorResponseSchema,
+  CodeReviewSyncResponseSchema,
   PlanReviewCommandSchema,
   RunStartCommandSchema,
   ResumeRunCommandSchema,
@@ -20,6 +21,7 @@ import type {
   FixtureSummary,
   WorkflowResponse,
   ExecutionRunView,
+  CodeReviewSyncResponse,
 } from '../control-plane/m1-contracts.js';
 import {
   ImplementationPlanningRecordSchema,
@@ -299,6 +301,29 @@ export const resumeWorkflow = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Resume response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const syncCodeReview = async (fixtureId: string): Promise<CodeReviewSyncResponse> => {
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/code-review/sync`,
+    { method: 'POST' },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = CodeReviewSyncResponseSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Code review sync does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const completeCodeReview = async (fixtureId: string): Promise<CodeReviewSyncResponse> => {
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(fixtureId)}/code-review/complete`,
+    { method: 'POST' },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = CodeReviewSyncResponseSchema.safeParse(result.body);
+  if (!parsed.success)
+    throw new Error('Code review completion does not match the cockpit contract');
   return parsed.data;
 };
 

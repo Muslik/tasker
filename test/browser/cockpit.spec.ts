@@ -337,6 +337,10 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review');
   await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review');
   await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Sync review' })).toBeVisible();
+  await page.getByRole('button', { name: 'Mark done' }).click();
+  await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Done');
+  await expect(page.getByTestId('selected-task')).toContainText('Workflow completed');
 });
 
 test('the project profile explains why inline copy adds no translation wait', async ({ page }) => {

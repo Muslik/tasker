@@ -6,13 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildM1Api,
+  CodeReviewSyncResponseSchema,
   createM1WorkflowService,
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/index.js';
-import type { JiraIssuePort } from '../../src/integrations/index.js';
+import type { BitbucketReviewCoordinator, JiraIssuePort } from '../../src/integrations/index.js';
 import { createJiraIssueService } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { err, ok } from '../../src/shared/outcome.js';
@@ -322,14 +323,16 @@ describe('Temporal HTTP boundary', () => {
 
     const completedBug = await api.inject({
       method: 'POST',
-      url: '/api/workflows/avia-13236-short-bug/resume',
-      payload: { guidance: 'VPN is enabled; retry the preserved step.' },
+      url: '/api/workflows/avia-13236-short-bug/code-review/complete',
     });
-    ExecutionRunViewSchema.parse(completedBug.json());
-    expect(completedBug.json()).toMatchObject({ status: 'completed' });
+    CodeReviewSyncResponseSchema.parse(completedBug.json());
+    expect(completedBug.json()).toMatchObject({
+      status: 'approved',
+      run: { status: 'completed' },
+    });
     expect(temporal.resolutions.at(-1)?.command.resolution).toEqual({
-      decision: 'resume',
-      guidance: 'VPN is enabled; retry the preserved step.',
+      decision: 'approved',
+      reviewId: 'operator:run:avia-13236-short-bug:wait-for-code-review',
     });
 
     const featureRun = await api.inject({
@@ -340,6 +343,115 @@ describe('Temporal HTTP boundary', () => {
     expect(featureRun.json()).toMatchObject({
       status: 'waiting',
       wait: { waitKind: 'code_review@1' },
+    });
+
+    await api.close();
+  });
+
+  it('imports typed Bitbucket review evidence before resuming the review wait', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-temporal-review-api-'));
+    const clock = makeAdjustableClock('2026-08-03T10:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const workflows = createM1WorkflowService(ledger.repository, clock);
+    workflows.generate('avia-13236-short-bug');
+    const temporal = new ContractTemporalRunService();
+    let observations = 0;
+    const syncReview: BitbucketReviewCoordinator['sync'] = (input) => {
+      observations += 1;
+      if (observations === 1) {
+        return Promise.resolve(
+          ok({
+            status: 'pending' as const,
+            pullRequestUrl:
+              'https://bitbucket.example/projects/AVIA/repos/front-avia/pull-requests/42',
+          }),
+        );
+      }
+      const snapshot = {
+        provider: 'bitbucket' as const,
+        projectKey: 'AVIA',
+        repositorySlug: 'front-avia',
+        pullRequestId: 42,
+        pullRequestUrl: 'https://bitbucket.example/projects/AVIA/repos/front-avia/pull-requests/42',
+        decision: 'changes_requested' as const,
+        approvals: [],
+        threads: [
+          {
+            rootCommentId: 101,
+            anchor: { path: 'src/fare.ts', line: 14, lineType: 'ADDED', orphaned: false },
+            comments: [
+              {
+                id: 101,
+                parentId: null,
+                author: { displayName: 'Reviewer', slug: 'reviewer' },
+                text: 'Keep the fallback visible while baggage data loads.',
+                createdAt: '2026-08-03T10:01:00.000Z',
+                resolved: false,
+              },
+            ],
+          },
+        ],
+      };
+      return Promise.resolve(
+        ok({
+          status: 'changes_requested' as const,
+          reviewId: 'bitbucket:AVIA/front-avia:42:review-1',
+          evidence: {
+            schemaVersion: 1 as const,
+            ...input,
+            reviewId: 'bitbucket:AVIA/front-avia:42:review-1',
+            importedAt: '2026-08-03T10:02:00.000Z',
+            snapshot,
+          },
+        }),
+      );
+    };
+    const api = buildM1Api({
+      service: workflows,
+      temporalRunService: temporal,
+      bitbucketReview: { sync: syncReview },
+    });
+
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/start',
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'auto' } },
+    });
+    const genericResume = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/resume',
+    });
+    expect(genericResume.statusCode).toBe(409);
+    expect(genericResume.json()).toMatchObject({ error: 'typed_resolution_required' });
+
+    const pending = CodeReviewSyncResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'POST',
+          url: '/api/workflows/avia-13236-short-bug/code-review/sync',
+        })
+      ).json(),
+    );
+    expect(pending).toMatchObject({ status: 'pending', run: { status: 'waiting' } });
+    expect(temporal.resolutions).toHaveLength(0);
+
+    const changed = CodeReviewSyncResponseSchema.parse(
+      (
+        await api.inject({
+          method: 'POST',
+          url: '/api/workflows/avia-13236-short-bug/code-review/sync',
+        })
+      ).json(),
+    );
+    expect(changed).toMatchObject({
+      status: 'changes_requested',
+      reviewId: 'bitbucket:AVIA/front-avia:42:review-1',
+      run: { status: 'completed' },
+    });
+    expect(temporal.resolutions.at(-1)?.command.resolution).toEqual({
+      decision: 'changes_requested',
+      reviewId: 'bitbucket:AVIA/front-avia:42:review-1',
     });
 
     await api.close();

@@ -23,6 +23,18 @@ const predicateContracts = [
     description: 'The most recent implementation and verification attempt succeeded.',
   },
   {
+    id: 'review.approved',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest imported or operator-provided code-review decision is approval.',
+  },
+  {
+    id: 'review.changes_requested',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest imported code-review decision contains actionable changes.',
+  },
+  {
     id: 'plan.approved',
     version: '1',
     inputSchema: z.object({ taskId: z.string().min(1) }).strict(),
@@ -41,7 +53,32 @@ const waitContracts = [
         reviewId: z.string().min(1),
       })
       .strict(),
+    resolutionMapping: {
+      discriminator: 'decision',
+      cases: {
+        approved: {
+          'review.approved@1': true,
+          'review.changes_requested@1': false,
+        },
+        changes_requested: {
+          'review.approved@1': false,
+          'review.changes_requested@1': true,
+        },
+      },
+    },
+    artifactContracts: ['pull-request-review'],
     description: 'Wait for a human review decision or actionable PR comments.',
+  },
+  {
+    id: 'operator_guidance',
+    version: '1',
+    resolutionSchema: z
+      .object({
+        decision: z.literal('resume'),
+        guidance: z.string().trim().min(1),
+      })
+      .strict(),
+    description: 'Pause an exhausted bounded loop for explicit operator correction.',
   },
   {
     id: 'translation_complete',

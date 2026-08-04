@@ -2,6 +2,7 @@ import type { TaskFixture } from '../planning/fixtures.js';
 import type { HarnessPolicyManifest, HarnessProjectManifest } from '../harness/index.js';
 import type { JsonValue } from '../workflow/schema.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
+import type { PullRequestReviewEvidence } from './bitbucket/review.js';
 
 export interface TaskRunStepEvidence {
   readonly operationId: string;
@@ -17,6 +18,7 @@ export interface TaskRunStepEvidence {
 export interface TaskRunEvidence {
   readonly acceptedPlan: JsonValue | null;
   readonly completedSteps: readonly TaskRunStepEvidence[];
+  readonly reviewInputs: readonly PullRequestReviewEvidence[];
 }
 
 export interface IntegrationStepRuntime {

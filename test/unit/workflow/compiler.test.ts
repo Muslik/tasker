@@ -35,6 +35,11 @@ const baseContracts = () => ({
       version: '1',
       inputSchema: z.object({}),
     },
+    {
+      id: 'review.approved',
+      version: '1',
+      inputSchema: z.object({}),
+    },
   ]),
   stepTypes: createStepTypeRegistry([
     {
@@ -94,7 +99,20 @@ const baseContracts = () => ({
       id: 'review_event',
       version: '1',
       resolutionSchema: z.object({
+        decision: z.literal('approved'),
         reviewId: z.string().min(1),
+      }),
+      resolutionMapping: {
+        discriminator: 'decision',
+        cases: { approved: { 'review.approved@1': true } },
+      },
+    },
+    {
+      id: 'operator_guidance',
+      version: '1',
+      resolutionSchema: z.object({
+        decision: z.literal('resume'),
+        guidance: z.string().min(1),
       }),
     },
   ]),
@@ -135,6 +153,8 @@ describe('workflow compiler', () => {
         bounded_loop('ci-repair', {
           maxAttempts: 3,
           until: predicate('ci.is_acceptable@1'),
+          checkBefore: true,
+          exhaustedWait: 'operator_guidance@1',
           body: sequence('repair-cycle', [
             step('run-ci', {
               uses: 'ci.run@1',
@@ -166,16 +186,17 @@ describe('workflow compiler', () => {
 
     expect(result.value.hash).toMatch(/^[a-f0-9]{64}$/u);
     expect(result.value.graph.metadata).toEqual({
-      compilerVersion: 3,
-      irVersion: 'm1',
+      compilerVersion: 4,
+      irVersion: 'm2',
       references: {
         predicates: [
           'change.needs_visual_verification@1',
           'ci.is_acceptable@1',
+          'review.approved@1',
           'review.guidance_cleared@1',
         ],
         stepTypes: ['agent.investigate@1', 'ci.run@1', 'verify.targeted@1'],
-        waits: ['review_event@1'],
+        waits: ['operator_guidance@1', 'review_event@1'],
       },
       workflowId: 'bugfix',
       workflowVersion: 1,
@@ -186,6 +207,9 @@ describe('workflow compiler', () => {
     );
     expect(Object.isFrozen(result.value.graph)).toBe(true);
     expect(Object.isFrozen(result.value.graph.root)).toBe(true);
+    expect(result.value.canonicalJson).toContain('"checkBefore":true');
+    expect(result.value.canonicalJson).toContain('"exhaustedWait":"operator_guidance@1"');
+    expect(result.value.canonicalJson).toContain('"resolutionMapping"');
     expect(result.value.validatorReport.issues).toEqual([]);
   });
 

@@ -113,9 +113,13 @@ export const createWorkflowAnalyzerContext = (
         })),
         waits: M1_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
           reference: toContractReference(contract),
+          artifactContracts: contract.artifactContracts ?? [],
           ...(contract.resolutionSchema === undefined
             ? {}
             : { resolutionSchema: inputContract(contract.resolutionSchema) }),
+          ...(contract.resolutionMapping === undefined
+            ? {}
+            : { resolutionMapping: contract.resolutionMapping }),
           ...(contract.description === undefined ? {} : { description: contract.description }),
         })),
       },
