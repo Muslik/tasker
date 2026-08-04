@@ -64,6 +64,7 @@ test('the operator console renders the queue and lets me inspect a task', async 
 
   await page.goto('/');
   await expect(page.getByTestId('task-list')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
   await expect(page.getByTestId('task-list').locator('li')).toHaveCount(tasks.tasks.length);
 
   const candidate = requireTask(

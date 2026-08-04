@@ -537,6 +537,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       connection: 'keep-alive',
       'x-accel-buffering': 'no',
     });
+    reply.raw.write(': connected\n\n');
 
     const flush = (): void => {
       const events = [
