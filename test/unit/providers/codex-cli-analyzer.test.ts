@@ -128,6 +128,10 @@ describe('Codex CLI workflow analyzer', () => {
     expect(executionRequest?.env?.CODEX_HOME).toMatch(/tasker-codex-analyzer-.+\/codex-home$/u);
     expect(executionRequest?.stdin).toContain('Do not claim facts that require later execution');
     expect(executionRequest?.stdin).toContain('MUST have exactly these top-level keys');
+    expect(executionRequest?.stdin).toContain(
+      '"root":{"kind":"sequence","id":"delivery","children"',
+    );
+    expect(executionRequest?.stdin).toContain('Do not omit node ids, sequence children, step with');
     expect(executionRequest?.stdin).toContain('Construct the complete graph from an empty root');
     expect(executionRequest?.stdin).toContain('NEVER return top-level keys such as schemaVersion');
     expect(executionRequest?.stdin).not.toContain('copying plannerContext.baseTemplate');

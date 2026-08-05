@@ -133,4 +133,48 @@ describe('Temporal workflow bootstrap', () => {
       ledger.close();
     }
   });
+
+  it('surfaces a safe provider reason after the retry budget is exhausted', async () => {
+    const fixture = findTaskFixture('avia-14002-inline-copy');
+    if (fixture === undefined) throw new Error('Missing bootstrap fixture');
+    const ledger = openSqliteLedger({ filename: ':memory:' });
+    try {
+      const workflows = createM1WorkflowService(ledger.repository, {
+        now: () => '2026-08-05T00:00:00.000Z',
+      });
+      delegate = {
+        generate: () =>
+          Promise.resolve(
+            err({
+              kind: 'provider_failure' as const,
+              provider: 'codex_cli' as const,
+              failure: {
+                kind: 'provider_failed' as const,
+                exitCode: 1,
+                message: 'subscription capacity is temporarily unavailable',
+                stderr: 'credential-bearing diagnostic must stay private',
+              },
+            }),
+          ),
+      };
+      const generator = new TemporalWorkflowGenerator(environment.client, configuration, workflows);
+
+      const failed = await generator.generate(fixture.fixtureId);
+
+      expect(failed).toMatchObject({
+        ok: false,
+        error: {
+          kind: 'generation_runtime_unavailable',
+        },
+      });
+      if (failed.ok) throw new Error('Expected bootstrap failure');
+      if (failed.error.kind !== 'generation_runtime_unavailable') {
+        throw new Error(`Expected runtime failure, received ${failed.error.kind}`);
+      }
+      expect(failed.error.message).toContain('subscription capacity is temporarily unavailable');
+      expect(failed.error.message).not.toContain('credential-bearing diagnostic');
+    } finally {
+      ledger.close();
+    }
+  });
 });

@@ -1,6 +1,8 @@
 import { ApplicationFailure, Context } from '@temporalio/activity';
 
 import type { WorkflowGenerator } from '../../control-plane/workflow-generator.js';
+import { providerFailureSummary } from '../../control-plane/workflow-generator.js';
+import type { M1ServiceError } from '../../control-plane/m1-service.js';
 import {
   TaskBootstrapWorkflowInputSchema,
   TaskDraftAssemblyResultSchema,
@@ -15,6 +17,27 @@ const NON_RETRYABLE_GENERATION_FAILURES = new Set([
   'planner_contract_failure',
   'non_json_artifact',
 ]);
+
+const failureMessage = (error: M1ServiceError): string => {
+  switch (error.kind) {
+    case 'provider_failure':
+      return providerFailureSummary(error.failure);
+    case 'generation_runtime_unavailable':
+      return error.message;
+    case 'generation_blocked':
+      return error.reason;
+    case 'fixture_not_found':
+      return `Fixture ${error.fixtureId} does not exist`;
+    case 'task_not_found':
+      return `Task ${error.taskReference} does not exist`;
+    case 'planner_contract_failure':
+      return `Planner stopped at ${error.stage}`;
+    case 'non_json_artifact':
+      return `Planner produced non-JSON ${error.artifact}`;
+    case 'store_failure':
+      return `Ledger failed with ${error.error.kind}`;
+  }
+};
 
 export const createWorkflowAssemblyActivity = (
   generator: WorkflowGenerator,
@@ -34,7 +57,7 @@ export const createWorkflowAssemblyActivity = (
       context.cancellationSignal.throwIfAborted();
       if (!generated.ok) {
         throw ApplicationFailure.create({
-          message: `Workflow draft assembly stopped: ${generated.error.kind}`,
+          message: `Workflow draft assembly stopped: ${generated.error.kind}: ${failureMessage(generated.error)}`,
           type: `workflow_generation.${generated.error.kind}`,
           nonRetryable: NON_RETRYABLE_GENERATION_FAILURES.has(generated.error.kind),
         });

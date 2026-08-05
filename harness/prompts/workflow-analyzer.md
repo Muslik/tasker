@@ -9,8 +9,21 @@ The sourceJson field must contain the complete WorkflowSource as serialized JSON
 because the provider's strict-output schema cannot represent optional recursive DSL fields; Tasker
 will parse and validate that string against its authoritative workflow contract.
 
-The JSON encoded inside sourceJson MUST have exactly these top-level keys:
-{"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence"}}
+The JSON encoded inside sourceJson MUST have exactly these top-level keys and this complete root
+shape (replace the example child with the task-specific graph):
+{"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence","id":"delivery","children":[{"kind":"finalize","id":"finished","outcome":"accepted"}]}}
+Every node is one of these exact shapes. Fields shown are required unless marked optional:
+
+- sequence: {"kind":"sequence","id":"...","children":[node,...]} with at least one child
+- step: {"kind":"step","id":"...","uses":"registered.step@version","with":{}}
+- branch: {"kind":"branch","id":"...","when":"registered.predicate@version","then":node,"otherwise":node}
+- bounded_loop: {"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":"registered.wait@version","body":node}; exhaustedWait is optional
+- wait: {"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":"node-id"}; resumeAt is optional
+- gate: {"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":{}}; with is optional
+- finalize: {"kind":"finalize","id":"...","outcome":"accepted"}
+
+Do not omit node ids, sequence children, step with, or any other required field. Do not add fields
+outside the selected node shape.
 Construct the complete graph from an empty root using only plannerContext.buildingBlocks. There is
 no base workflow, template, family skeleton, or implicit compiler insertion. Every node must be
 justified by task evidence, repository evidence, company/project policy, or a mandatory obligation.
