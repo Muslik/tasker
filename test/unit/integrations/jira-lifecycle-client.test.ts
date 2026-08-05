@@ -30,10 +30,20 @@ describe('Jira lifecycle client', () => {
     expect(requestBody).not.toContain('secret-token');
   });
 
-  it('classifies a transition 400 as a non-retryable invalid request', async () => {
+  it('preserves actionable Jira validation errors when a transition is rejected', async () => {
     const client = new JiraLifecycleClient(
       configuration,
-      vi.fn(() => Promise.resolve(new Response(null, { status: 400 }))),
+      vi.fn(() =>
+        Promise.resolve(
+          Response.json(
+            {
+              errorMessages: ['Transition prerequisites are not satisfied'],
+              errors: { customfield_12345: 'Development estimate is required' },
+            },
+            { status: 400 },
+          ),
+        ),
+      ),
     );
 
     const result = await client.transition('AVIA-12536', '11');
@@ -42,7 +52,9 @@ describe('Jira lifecycle client', () => {
       status: 'failed',
       problem: {
         kind: 'invalid_request',
-        message: 'Jira rejected the lifecycle mutation',
+        message:
+          'Jira rejected the lifecycle mutation: Transition prerequisites are not satisfied; Development estimate is required',
+        reasons: ['Transition prerequisites are not satisfied', 'Development estimate is required'],
         retryable: false,
         httpStatus: 400,
       },

@@ -738,10 +738,14 @@ const OperatorIntervention = ({
   readonly onResume: () => void;
 }) => (
   <section className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3">
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <strong className="text-sm">Operator intervention</strong>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{stage}</p>
+        <strong className="text-sm">Action required</strong>
+        <p className="mt-1 max-w-4xl text-sm leading-5 text-foreground/90">{stage}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Fix the prerequisite, or tell the agent how it should proceed. The same workflow step will
+          resume without repeating completed work.
+        </p>
       </div>
       <Button size="sm" type="button" disabled={pending} onClick={onResume}>
         {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}

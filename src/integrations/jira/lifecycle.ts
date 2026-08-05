@@ -96,6 +96,14 @@ const RawAttachmentsSchema = z
   })
   .loose();
 
+const RawJiraErrorResponseSchema = z
+  .object({
+    errorMessages: z.array(z.string()).optional(),
+    errors: z.record(z.string(), z.string()).optional(),
+    message: z.string().optional(),
+  })
+  .loose();
+
 export interface JiraLifecycleIssue {
   readonly issueKey: JiraIssueKey;
   readonly issueType: string;
@@ -110,18 +118,43 @@ export interface JiraLifecycleTransition {
   readonly toStatus: string;
 }
 
-export type JiraLifecycleProblem = {
-  readonly kind:
-    | 'access_blocked'
-    | 'auth_failed'
-    | 'invalid_request'
-    | 'invalid_response'
-    | 'not_found'
-    | 'unavailable';
-  readonly message: string;
-  readonly retryable: boolean;
-  readonly httpStatus?: number;
-};
+export type JiraLifecycleProblem =
+  | {
+      readonly kind: 'invalid_request';
+      readonly message: string;
+      readonly reasons: readonly string[];
+      readonly retryable: false;
+      readonly httpStatus: 400;
+    }
+  | {
+      readonly kind: 'auth_failed';
+      readonly message: string;
+      readonly retryable: false;
+      readonly httpStatus: 401;
+    }
+  | {
+      readonly kind: 'access_blocked';
+      readonly message: string;
+      readonly retryable: true;
+      readonly httpStatus: 403;
+    }
+  | {
+      readonly kind: 'not_found';
+      readonly message: string;
+      readonly retryable: false;
+      readonly httpStatus: 404;
+    }
+  | {
+      readonly kind: 'invalid_response';
+      readonly message: string;
+      readonly retryable: false;
+    }
+  | {
+      readonly kind: 'unavailable';
+      readonly message: string;
+      readonly retryable: boolean;
+      readonly httpStatus?: number;
+    };
 
 export type JiraLifecycleObservation =
   | { readonly status: 'observed'; readonly issue: JiraLifecycleIssue }
@@ -176,11 +209,44 @@ export interface JiraAttachmentPort {
 
 type FetchImplementation = typeof fetch;
 
-const problemForStatus = (status: number): JiraLifecycleProblem => {
+const normalizedJiraReason = (reason: string): string | null => {
+  const normalized = reason.replace(/\s+/gu, ' ').trim();
+  return normalized.length === 0 ? null : normalized.slice(0, 500);
+};
+
+const jiraReasonsFrom = async (response: Response): Promise<readonly string[]> => {
+  try {
+    const body = await response.text();
+    if (body.length === 0 || body.length > 64_000) return [];
+    const parsed = RawJiraErrorResponseSchema.safeParse(JSON.parse(body) as unknown);
+    if (!parsed.success) return [];
+
+    const candidates = [
+      ...(parsed.data.errorMessages ?? []),
+      ...Object.values(parsed.data.errors ?? {}),
+      ...(parsed.data.message === undefined ? [] : [parsed.data.message]),
+    ];
+    return [
+      ...new Set(
+        candidates.map(normalizedJiraReason).filter((reason): reason is string => reason !== null),
+      ),
+    ].slice(0, 8);
+  } catch {
+    return [];
+  }
+};
+
+const problemForResponse = async (response: Response): Promise<JiraLifecycleProblem> => {
+  const status = response.status;
   if (status === 400) {
+    const reasons = await jiraReasonsFrom(response);
     return {
       kind: 'invalid_request',
-      message: 'Jira rejected the lifecycle mutation',
+      message:
+        reasons.length === 0
+          ? 'Jira rejected the lifecycle mutation'
+          : `Jira rejected the lifecycle mutation: ${reasons.join('; ')}`,
+      reasons,
       retryable: false,
       httpStatus: status,
     };
@@ -393,7 +459,7 @@ export class JiraLifecycleClient implements JiraLifecyclePort, JiraAttachmentPor
       );
       return response.ok
         ? { status: 'accepted' }
-        : { status: 'failed', problem: problemForStatus(response.status) };
+        : { status: 'failed', problem: await problemForResponse(response) };
     } catch (error) {
       return {
         status: 'failed',
@@ -451,7 +517,7 @@ export class JiraLifecycleClient implements JiraLifecyclePort, JiraAttachmentPor
       });
       return response.ok
         ? { status: 'accepted', response }
-        : { status: 'failed', problem: problemForStatus(response.status) };
+        : { status: 'failed', problem: await problemForResponse(response) };
     } catch (error) {
       return {
         status: 'failed',

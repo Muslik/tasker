@@ -115,6 +115,7 @@ export const TaskWorkflowWaitSchema = z
   .object({
     nodeId: z.string().min(1),
     waitKind: z.string().min(1),
+    reason: z.string().min(1).optional(),
   })
   .strict();
 

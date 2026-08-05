@@ -122,6 +122,7 @@ class StatefulJiraLifecyclePort implements JiraLifecyclePort {
         problem: {
           kind: 'invalid_request',
           message: 'Jira rejected the lifecycle mutation',
+          reasons: [],
           retryable: false,
           httpStatus: 400,
         },

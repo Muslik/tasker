@@ -416,13 +416,17 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     };
   };
 
-  const openWait = async (nodeId: string, waitKind: string): Promise<TaskWaitResolution> => {
+  const openWait = async (
+    nodeId: string,
+    waitKind: string,
+    reason?: string,
+  ): Promise<TaskWaitResolution> => {
     nodeStates[nodeId] = 'waiting';
     state = {
       ...state,
       status: 'waiting',
       currentNodeId: nodeId,
-      wait: { nodeId, waitKind },
+      wait: { nodeId, waitKind, ...(reason === undefined ? {} : { reason }) },
       outcome: null,
     };
 
@@ -838,7 +842,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             operatorGuidance = review.guidance;
             state = { ...state, workflowChange: null };
           } else {
-            const resolution = await openWait(node.id, result.waitKind);
+            const resolution = await openWait(node.id, result.waitKind, result.summary);
             operatorGuidance = operatorGuidanceFrom(resolution);
           }
           markRunning(node.id);

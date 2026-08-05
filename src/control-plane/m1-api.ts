@@ -212,11 +212,13 @@ const applyTemporalRunToTask = (
         ...task,
         status: codeReview ? 'code_review' : planReview ? 'plan_review' : 'waiting',
         attention: 'operator',
-        currentStage: codeReview
-          ? 'Waiting for code review'
-          : planReview
-            ? 'Plan review required'
-            : `Waiting for ${run.wait.waitKind.replace('@1', '').replaceAll('_', ' ')}`,
+        currentStage:
+          run.wait.reason ??
+          (codeReview
+            ? 'Waiting for code review'
+            : planReview
+              ? 'Plan review required'
+              : `Waiting for ${run.wait.waitKind.replace('@1', '').replaceAll('_', ' ')}`),
       });
     }
     case 'completed':

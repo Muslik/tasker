@@ -24,6 +24,7 @@ import {
   type TaskWorkflowLifecycle,
   type TaskWorkflowPlanningState,
   type TaskWorkflowPublicState,
+  type TaskWorkflowWait,
 } from '../../src/temporal/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
@@ -35,7 +36,10 @@ class ContractTemporalRunService implements TaskTemporalRunService {
   private readonly runs = new Map<string, TaskWorkflowPublicState>();
   public readonly resolutions: { taskReference: string; command: ResolveTaskWaitCommand }[] = [];
 
-  public constructor(private readonly startsWithQuestion = false) {}
+  public constructor(
+    private readonly startsWithQuestion = false,
+    private readonly initialWait: TaskWorkflowWait | null = null,
+  ) {}
 
   private frozenLifecycle(
     input: Pick<
@@ -168,11 +172,13 @@ class ContractTemporalRunService implements TaskTemporalRunService {
     const existing = this.runs.get(input.taskReference);
     if (existing !== undefined) return Promise.resolve(ok(existing));
 
-    const wait = this.startsWithQuestion
-      ? { nodeId: 'analyze-task', waitKind: 'human_clarification' }
-      : input.settings.planApproval === 'required'
-        ? { nodeId: 'review-plan', waitKind: 'plan.approved@1' }
-        : { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' };
+    const wait =
+      this.initialWait ??
+      (this.startsWithQuestion
+        ? { nodeId: 'analyze-task', waitKind: 'human_clarification' }
+        : input.settings.planApproval === 'required'
+          ? { nodeId: 'review-plan', waitKind: 'plan.approved@1' }
+          : { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' });
     const baseState = {
       schemaVersion: 1,
       taskReference: input.taskReference,
@@ -193,7 +199,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
     const state: TaskWorkflowPublicState = {
       ...baseState,
       lifecycle:
-        wait.waitKind === 'code_review@1'
+        this.initialWait !== null || wait.waitKind === 'code_review@1'
           ? this.frozenLifecycle(baseState, 'automatic')
           : { phase: 'draft' },
     };
@@ -306,6 +312,38 @@ afterEach(() => {
 });
 
 describe('Temporal HTTP boundary', () => {
+  it('projects a blocked step reason as the operator action instead of hiding it behind the wait kind', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-temporal-wait-reason-api-'));
+    const clock = makeAdjustableClock('2026-08-03T10:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const workflows = createM1WorkflowService(ledger.repository, clock);
+    workflows.generate('avia-13236-short-bug');
+    const temporal = new ContractTemporalRunService(false, {
+      nodeId: 'policy-jira-lifecycle-jira-start-work',
+      waitKind: 'jira.start-work.1.blocked@1',
+      reason: 'Jira rejected the lifecycle mutation: Development estimate is required',
+    });
+    const api = buildM1Api({ service: workflows, temporalRunService: temporal });
+
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/start',
+      payload: { settings: { planApproval: 'automatic', planningStrategy: 'auto' } },
+    });
+    const tasks = OperatorTaskListResponseSchema.parse(
+      (await api.inject({ method: 'GET', url: '/api/operator/tasks' })).json(),
+    );
+
+    expect(tasks.tasks.find((task) => task.id === 'avia-13236-short-bug')).toMatchObject({
+      status: 'waiting',
+      attention: 'operator',
+      currentStage: 'Jira rejected the lifecycle mutation: Development estimate is required',
+    });
+
+    await api.close();
+  });
+
   it('projects and advances only the selected Temporal task', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-temporal-api-'));
     const clock = makeAdjustableClock('2026-08-03T10:00:00.000Z');

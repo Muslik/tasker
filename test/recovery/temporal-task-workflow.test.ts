@@ -327,7 +327,13 @@ describe('Temporal task workflow', () => {
     const started = await service.start(jiraWorkflowInput(taskReference));
 
     expect(started.ok).toBe(true);
-    await waitForWait(service, taskReference, 'jira.start-work.1.blocked@1');
+    const blocked = await waitForWait(service, taskReference, 'jira.start-work.1.blocked@1');
+    expect(blocked).toMatchObject({
+      status: 'waiting',
+      wait: {
+        reason: 'Jira rejected the lifecycle mutation with HTTP 400',
+      },
+    });
     expect(implementationCalls).toBe(0);
 
     const resumed = await service.resolveWait(taskReference, {

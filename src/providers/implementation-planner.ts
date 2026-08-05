@@ -19,6 +19,7 @@ import {
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { CommandRunner } from './command-runner.js';
 import {
+  codexOutputJsonSchema,
   parseCodexStream,
   prepareIsolatedCodexHome,
   providerFailureMessage,
@@ -189,7 +190,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
       if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
         schemaPath,
-        `${JSON.stringify(z.toJSONSchema(ImplementationPlannerProviderOutputSchema), null, 2)}\n`,
+        `${JSON.stringify(codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema), null, 2)}\n`,
         'utf8',
       );
       const execution = await this.runner.run({

@@ -51,6 +51,34 @@ export interface ParsedCodexStream {
 
 export const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
+const removeUnsupportedOutputSchemaKeywords = (value: unknown): void => {
+  if (Array.isArray(value)) {
+    value.forEach(removeUnsupportedOutputSchemaKeywords);
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+
+  const record = value as Record<string, unknown>;
+  // Codex structured outputs reject `propertyNames`. Zod emits it for records even
+  // when the key schema is an unconstrained string, so removing it preserves the
+  // runtime contract while keeping `additionalProperties` as the value schema.
+  delete record.propertyNames;
+  // Zod represents discriminated unions with `oneOf`, while the Codex structured
+  // output boundary accepts `anyOf`. Our variants have disjoint literal
+  // discriminators, so this keeps the same set of valid values.
+  if (Array.isArray(record.oneOf)) {
+    record.anyOf = record.oneOf;
+    delete record.oneOf;
+  }
+  Object.values(record).forEach(removeUnsupportedOutputSchemaKeywords);
+};
+
+export const codexOutputJsonSchema = (schema: z.ZodType): unknown => {
+  const output = z.toJSONSchema(schema);
+  removeUnsupportedOutputSchemaKeywords(output);
+  return output;
+};
+
 const sourceCodexHome = (): string => process.env.CODEX_HOME ?? join(homedir(), '.codex');
 
 const copyIfReadable = async (source: string, target: string): Promise<void> => {
@@ -92,6 +120,34 @@ export const prepareIsolatedCodexHome = async (
   ]);
 };
 
+const nestedProviderFailureMessage = (message: string): string => {
+  let current = message;
+  for (let depth = 0; depth < 3; depth += 1) {
+    try {
+      const parsed = JSON.parse(current) as unknown;
+      if (typeof parsed !== 'object' || parsed === null) return current;
+      if (
+        'error' in parsed &&
+        typeof parsed.error === 'object' &&
+        parsed.error !== null &&
+        'message' in parsed.error &&
+        typeof parsed.error.message === 'string'
+      ) {
+        current = parsed.error.message;
+        continue;
+      }
+      if ('message' in parsed && typeof parsed.message === 'string') {
+        current = parsed.message;
+        continue;
+      }
+      return current;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+};
+
 export const providerFailureMessage = (stdout: string): string => {
   for (const line of stdout.split(/\r?\n/u).reverse()) {
     try {
@@ -102,7 +158,7 @@ export const providerFailureMessage = (stdout: string): string => {
         'message' in event &&
         typeof event.message === 'string'
       ) {
-        return event.message;
+        return nestedProviderFailureMessage(event.message);
       }
       if (
         typeof event === 'object' &&
@@ -113,7 +169,7 @@ export const providerFailureMessage = (stdout: string): string => {
         'message' in event.error &&
         typeof event.error.message === 'string'
       ) {
-        return event.error.message;
+        return nestedProviderFailureMessage(event.error.message);
       }
     } catch {
       // A failed provider may mix non-JSON diagnostics into stdout; continue backwards.

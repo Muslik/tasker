@@ -178,10 +178,12 @@ describe('temporal block execution activity', () => {
             stderr: '',
             finalMessage: {
               status: 'completed',
-              output: {
+              outputJson: JSON.stringify({
                 summary: 'Verification completed',
                 artifacts: [],
-              },
+              }),
+              requestJson: null,
+              blockingReason: null,
             },
           }),
         );
@@ -247,7 +249,12 @@ describe('temporal block execution activity', () => {
           stderr: '',
           finalMessage: {
             status: 'completed',
-            output: { summary: 'Implementation completed', artifacts: [] },
+            outputJson: JSON.stringify({
+              summary: 'Implementation completed',
+              artifacts: [],
+            }),
+            requestJson: null,
+            blockingReason: null,
           },
         }),
       ),
@@ -301,6 +308,72 @@ describe('temporal block execution activity', () => {
       'task-step-mutation-intent:test',
     ]);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns an agent-reported infrastructure problem into an actionable durable wait', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const reason = 'pnpm start cannot find Node.js in the prepared execution environment';
+    const result = await executeRegisteredTaskStep(
+      {
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        workflowHash: stubWorkspace.workflowHash,
+        nodeId: 'reproduce-before',
+        stepAttempt: 1,
+        uses: 'bug.reproduce@1',
+        activityDelivery: { kind: 'workspace_reconciled' },
+        workspace: stubWorkspace,
+        planningSnapshot: {
+          artifactId: 'planning-snapshot:test',
+          checksum: 'd'.repeat(64),
+        },
+        operatorGuidance: null,
+        input: {
+          objective: 'Reproduce the reported bug before changing the code',
+          phase: 'before',
+          repository: fixture.repository,
+          taskId: fixture.taskId,
+        },
+      },
+      {
+        snapshots: {
+          readRunSnapshot: () => ok(makeSnapshot('bug.reproduce@1')),
+        },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        agentRunner: {
+          provider: 'codex',
+          run: () =>
+            Promise.resolve(
+              ok({
+                stdout: '',
+                stderr: '',
+                finalMessage: {
+                  status: 'blocked',
+                  outputJson: JSON.stringify({ command: 'pnpm start', exitCode: 127 }),
+                  requestJson: null,
+                  blockingReason: reason,
+                },
+              }),
+            ),
+        },
+        commands: { run: vi.fn() },
+      },
+      {
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      summary: `Agent execution for bug.reproduce@1 is blocked: ${reason}`,
+      waitKind: 'bug.reproduce.1.blocked@1',
+    });
   });
 
   it('does not repeat a controlled blocked provider result after response loss', async () => {
@@ -363,6 +436,8 @@ describe('temporal block execution activity', () => {
     expect(replacement).toEqual(first);
     expect(first).toMatchObject({
       status: 'blocked',
+      summary:
+        'Agent execution for code.implement@1 is blocked: Provider stopped after reporting a controlled failure',
       waitKind: 'code.implement.1.blocked@1',
       artifactIds: [
         'task-step-output:tasker:task-ref:implement-feature:attempt-1:artifact',

@@ -22,6 +22,7 @@ import type {
   ImplementationPlanningStoreError,
 } from '../../control-plane/implementation-planning.js';
 import {
+  codexOutputJsonSchema,
   prepareIsolatedCodexHome,
   parseCodexStream,
   providerFailureMessage,
@@ -71,7 +72,104 @@ const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
       request: WorkflowChangeRequestSchema,
     })
     .strict(),
+  z
+    .object({
+      status: z.literal('blocked'),
+      reason: z.string().trim().min(1).max(4_000),
+      details: JsonValueSchema,
+    })
+    .strict(),
 ]);
+
+const AgentStepProviderOutcomeSchema = z
+  .object({
+    status: z.enum(['completed', 'workflow_change_required', 'blocked']),
+    outputJson: z.string().min(1).nullable(),
+    requestJson: z.string().min(1).nullable(),
+    blockingReason: z.string().trim().min(1).max(4_000).nullable(),
+  })
+  .strict();
+
+const decodeAgentStepOutcome = (
+  envelope: unknown,
+): Outcome<
+  z.infer<typeof AgentStepOutcomeSchema>,
+  { readonly kind: 'invalid_agent_outcome'; readonly issues: readonly string[] }
+> => {
+  const parsedEnvelope = AgentStepProviderOutcomeSchema.safeParse(envelope);
+  if (!parsedEnvelope.success) {
+    return err({
+      kind: 'invalid_agent_outcome',
+      issues: parsedEnvelope.error.issues.map(
+        (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+      ),
+    });
+  }
+  const { status, outputJson, requestJson, blockingReason } = parsedEnvelope.data;
+  if (status === 'blocked') {
+    if (requestJson !== null || blockingReason === null) {
+      return err({
+        kind: 'invalid_agent_outcome',
+        issues: ['Blocked outcomes require blockingReason and null requestJson'],
+      });
+    }
+    let details: unknown = null;
+    if (outputJson !== null) {
+      try {
+        details = JSON.parse(outputJson) as unknown;
+      } catch {
+        return err({ kind: 'invalid_agent_outcome', issues: ['outputJson is not valid JSON'] });
+      }
+    }
+    const outcome = AgentStepOutcomeSchema.safeParse({
+      status,
+      reason: blockingReason,
+      details,
+    });
+    return outcome.success
+      ? ok(outcome.data)
+      : err({
+          kind: 'invalid_agent_outcome',
+          issues: outcome.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  const payload = status === 'completed' ? outputJson : requestJson;
+  const unusedPayload = status === 'completed' ? requestJson : outputJson;
+  if (payload === null || unusedPayload !== null || blockingReason !== null) {
+    return err({
+      kind: 'invalid_agent_outcome',
+      issues: [
+        status === 'completed'
+          ? 'Completed outcomes require outputJson, null requestJson, and null blockingReason'
+          : 'Workflow-change outcomes require requestJson, null outputJson, and null blockingReason',
+      ],
+    });
+  }
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(payload) as unknown;
+  } catch {
+    return err({
+      kind: 'invalid_agent_outcome',
+      issues: [`${status === 'completed' ? 'outputJson' : 'requestJson'} is not valid JSON`],
+    });
+  }
+  const outcome = AgentStepOutcomeSchema.safeParse(
+    status === 'completed' ? { status, output: decoded } : { status, request: decoded },
+  );
+  return outcome.success
+    ? ok(outcome.data)
+    : err({
+        kind: 'invalid_agent_outcome',
+        issues: outcome.error.issues.map(
+          (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+        ),
+      });
+};
 
 const TaskStepTranscriptChunkSchema = z
   .object({
@@ -198,7 +296,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
       if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
         schemaPath,
-        `${JSON.stringify(z.toJSONSchema(request.outputSchema), null, 2)}\n`,
+        `${JSON.stringify(codexOutputJsonSchema(request.outputSchema), null, 2)}\n`,
         'utf8',
       );
       const execution = await this.runCommand(request, {
@@ -747,6 +845,8 @@ const promptForAgentStep = (input: {
   readonly requiredCapabilities: readonly string[];
   readonly allowedEffects: readonly string[];
   readonly workflowChanges: readonly string[];
+  readonly stepOutputContract: unknown;
+  readonly workflowChangeRequestContract: unknown;
   readonly skills: readonly string[];
   readonly recovery: TaskStepRecoveryContext;
   readonly operatorGuidance: string | null;
@@ -768,6 +868,8 @@ const promptForAgentStep = (input: {
         requiredCapabilities: input.requiredCapabilities,
         allowedEffects: input.allowedEffects,
         workflowChanges: input.workflowChanges,
+        stepOutputContract: input.stepOutputContract,
+        workflowChangeRequestContract: input.workflowChangeRequestContract,
         preferredSkills: input.skills,
         activityRecovery: input.recovery,
         operatorGuidance: input.operatorGuidance,
@@ -778,6 +880,10 @@ const promptForAgentStep = (input: {
     ),
     '',
     'Operate only inside the prepared worktree. Return one JSON object matching the provided schema.',
+    'For a completed step, set status="completed", put the serialized step output JSON in outputJson, and set requestJson=null and blockingReason=null.',
+    'For a workflow change, set status="workflow_change_required", set outputJson=null, put the serialized typed workflow-change request JSON in requestJson, and set blockingReason=null.',
+    'For a recoverable infrastructure, access, or ambiguity failure that does not change task scope, set status="blocked", requestJson=null, blockingReason to the actionable reason, and outputJson to serialized evidence details or null.',
+    'Do not encode infrastructure failures as workflow changes.',
   ].join('\n');
 
 const snapshottedStepFrom = (
@@ -1166,6 +1272,8 @@ export const executeRegisteredTaskStep = async (
       requiredCapabilities: current.contract.requiredCapabilities,
       allowedEffects: current.contract.allowedEffects,
       workflowChanges: current.contract.workflowChanges,
+      stepOutputContract: z.toJSONSchema(current.contract.outputSchema),
+      workflowChangeRequestContract: z.toJSONSchema(WorkflowChangeRequestSchema),
       skills: snapshottedStep.execution.skills,
       recovery,
       operatorGuidance: input.operatorGuidance,
@@ -1176,25 +1284,55 @@ export const executeRegisteredTaskStep = async (
       prompt,
       skills: snapshottedStep.execution.skills,
       recovery,
-      outputSchema: AgentStepOutcomeSchema,
+      outputSchema: AgentStepProviderOutcomeSchema,
       cwd: input.workspace.path,
       timeoutMs: 35 * 60_000,
       runtime,
       transcriptStore: dependencies.traces,
     });
     if (!provider.ok) {
+      const reason =
+        'message' in provider.error
+          ? provider.error.message.replace(/\s+/gu, ' ').trim().slice(0, 1_000)
+          : provider.error.kind;
       return persistAgentBlockedResult(
         dependencies.traces,
         input,
         recovery,
-        `Agent execution for ${input.uses} is blocked: ${provider.error.kind}`,
+        `Agent execution for ${input.uses} is blocked: ${reason}`,
         provider.error,
         'stdout' in provider.error ? provider.error.stdout : '',
         'stderr' in provider.error ? provider.error.stderr : '',
         dependencies.agentRunner.provider,
       );
     }
-    const decision = AgentStepOutcomeSchema.parse(provider.value.finalMessage);
+    const decodedDecision = decodeAgentStepOutcome(provider.value.finalMessage);
+    if (!decodedDecision.ok) {
+      const issues = decodedDecision.error.issues.join('; ').replace(/\s+/gu, ' ').slice(0, 1_000);
+      return persistAgentBlockedResult(
+        dependencies.traces,
+        input,
+        recovery,
+        `Agent execution for ${input.uses} returned an invalid outcome: ${issues}`,
+        decodedDecision.error,
+        provider.value.stdout,
+        provider.value.stderr,
+        dependencies.agentRunner.provider,
+      );
+    }
+    const decision = decodedDecision.value;
+    if (decision.status === 'blocked') {
+      return persistAgentBlockedResult(
+        dependencies.traces,
+        input,
+        recovery,
+        `Agent execution for ${input.uses} is blocked: ${decision.reason}`,
+        { kind: 'agent_blocked', reason: decision.reason, details: decision.details },
+        provider.value.stdout,
+        provider.value.stderr,
+        dependencies.agentRunner.provider,
+      );
+    }
     if (decision.status === 'workflow_change_required') {
       const declared = parseDeclaredWorkflowChangeRequest(
         decision.request,

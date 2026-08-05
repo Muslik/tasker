@@ -16,6 +16,7 @@ import {
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { CommandRunner } from './command-runner.js';
 import {
+  codexOutputJsonSchema,
   parseCodexStream,
   prepareIsolatedCodexHome,
   providerFailureMessage,
@@ -129,7 +130,7 @@ export class CodexCliWorkflowAnalyzer {
       await mkdir(isolatedWorkspace, { recursive: true });
       await writeFile(
         schemaPath,
-        `${JSON.stringify(z.toJSONSchema(WorkflowAnalyzerProviderOutputSchema), null, 2)}\n`,
+        `${JSON.stringify(codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema), null, 2)}\n`,
         'utf8',
       );
       const execution = await this.runner.run({

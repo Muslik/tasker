@@ -47,6 +47,7 @@ describe('Codex task-step runner', () => {
       codexHome: string;
       jiraSkill: string;
       prFinalizeVisible: boolean;
+      outputSchema: string;
     }[] = [];
     const commands: CommandRunner = {
       run: (request) => {
@@ -64,16 +65,22 @@ describe('Codex task-step runner', () => {
         if (skillsRoot === undefined || codexHome === undefined) {
           throw new Error('Codex step environment was not prepared');
         }
+        const schemaIndex = request.args.indexOf('--output-schema');
+        const schemaPath = schemaIndex < 0 ? undefined : request.args[schemaIndex + 1];
+        if (schemaPath === undefined) throw new Error('Codex output schema was not provided');
         observations.push({
           skillsRoot,
           codexHome,
           jiraSkill: readFileSync(join(skillsRoot, 'jira/SKILL.md'), 'utf8'),
           prFinalizeVisible: existsSync(join(skillsRoot, 'pr-finalize/SKILL.md')),
+          outputSchema: readFileSync(schemaPath, 'utf8'),
         });
         return Promise.resolve({
           status: 'exited',
           exitCode: 0,
-          stdout: codexStream(JSON.stringify({ done: true })),
+          stdout: codexStream(
+            JSON.stringify({ status: 'done', done: true, labels: { result: 'verified' } }),
+          ),
           stderr: '',
           durationMs: 2,
         });
@@ -89,7 +96,16 @@ describe('Codex task-step runner', () => {
         prompt: 'Return the result.',
         skills: ['jira'],
         recovery: { kind: 'single_attempt' },
-        outputSchema: z.object({ done: z.literal(true) }).strict(),
+        outputSchema: z.discriminatedUnion('status', [
+          z
+            .object({
+              status: z.literal('done'),
+              done: z.literal(true),
+              labels: z.record(z.string(), z.string()),
+            })
+            .strict(),
+          z.object({ status: z.literal('blocked'), reason: z.string() }).strict(),
+        ]),
         cwd: repositoryPath,
         timeoutMs: 10_000,
         runtime: {
@@ -100,11 +116,18 @@ describe('Codex task-step runner', () => {
         transcriptStore: traces,
       });
 
-      expect(result).toMatchObject({ ok: true, value: { finalMessage: { done: true } } });
+      expect(result).toMatchObject({
+        ok: true,
+        value: { finalMessage: { done: true, labels: { result: 'verified' } } },
+      });
       expect(observations).toHaveLength(1);
       expect(observations[0]?.skillsRoot).toBe(join(observations[0]?.codexHome ?? '', 'skills'));
       expect(observations[0]?.jiraSkill).toContain('jira test skill');
       expect(observations[0]?.prFinalizeVisible).toBe(false);
+      expect(observations[0]?.outputSchema).not.toContain('propertyNames');
+      expect(observations[0]?.outputSchema).not.toContain('oneOf');
+      expect(observations[0]?.outputSchema).toContain('anyOf');
+      expect(observations[0]?.outputSchema).toContain('additionalProperties');
     } finally {
       ledger.close();
     }

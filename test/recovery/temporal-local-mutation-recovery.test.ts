@@ -77,7 +77,9 @@ const agentCompletion = (summary: string) =>
     stderr: '',
     finalMessage: {
       status: 'completed',
-      output: { summary, artifacts: [] },
+      outputJson: JSON.stringify({ summary, artifacts: [] }),
+      requestJson: null,
+      blockingReason: null,
     },
   });
 
