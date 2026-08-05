@@ -87,6 +87,68 @@ test('the operator console renders the queue and lets me inspect a task', async 
   );
 });
 
+test('the task rail can be hidden, restored, and keeps its preference', async ({ page }) => {
+  await page.goto('/');
+
+  await expect(page.getByRole('complementary', { name: 'Task queue' })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide tasks' }).click();
+  await expect(page.getByRole('complementary', { name: 'Task queue' })).toHaveCount(0);
+  await expect(page.getByTestId('operator-layout')).toHaveAttribute('data-tasks-collapsed', 'true');
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Show tasks' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Task queue' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Show tasks' }).click();
+  await expect(page.getByRole('complementary', { name: 'Task queue' })).toBeVisible();
+});
+
+test('the planning agent log presents attempts instead of raw provider JSONL', async ({ page }) => {
+  const errorMessage = "Invalid response schema. Missing 'evidenceRequestsJson'.";
+  const output = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+    JSON.stringify({
+      type: 'error',
+      message: JSON.stringify({ error: { message: errorMessage }, status: 400 }),
+    }),
+    JSON.stringify({ type: 'turn.failed', error: { message: errorMessage } }),
+  ].join('\n');
+  await page.route('**/api/workflows/*/planning-transcript', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        transcriptId: 'planning-transcript:browser-test',
+        operationId: 'browser-test',
+        chunks: [
+          {
+            schemaVersion: 1,
+            transcriptId: 'planning-transcript:browser-test',
+            operationId: 'browser-test',
+            sequence: 1,
+            providerAttempt: 1,
+            stream: 'stdout',
+            content: output,
+            byteLength: output.length,
+            recordedAt: '2026-08-05T12:00:00.000Z',
+          },
+        ],
+        totalBytes: output.length,
+        truncated: false,
+      }),
+    });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /Agent log/u }).click();
+
+  const log = page.getByTestId('planning-transcript');
+  await expect(log).toContainText('Attempt 1');
+  await expect(log).toContainText(errorMessage);
+  const rawLog = log.locator('details', { hasText: 'Raw JSONL' });
+  await expect(rawLog).not.toHaveAttribute('open', '');
+  await expect(rawLog.locator('pre')).toBeHidden();
+});
+
 test('I can import a Jira issue, inspect its evidence, and compile its workflow', async ({
   page,
 }) => {

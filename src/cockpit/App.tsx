@@ -11,11 +11,14 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Play,
   Radio,
   RefreshCw,
   Sparkles,
+  Terminal,
   Video,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -72,6 +75,7 @@ import {
   TooltipTrigger,
 } from './components/ui/tooltip.js';
 import { cn } from './lib/utils.js';
+import { planningAgentLogFrom, type PlanningAgentEvent } from './planning-agent-log.js';
 import { WorkflowTree } from './WorkflowTree.js';
 
 type WorkflowLoadState =
@@ -130,6 +134,7 @@ type TaskOperation =
   | 'retrying_continuation';
 
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
+const TASK_RAIL_STORAGE_KEY = 'tasker.operator.tasksCollapsed';
 
 const formatValue = (value: unknown): string =>
   value === undefined ? '—' : JSON.stringify(value, null, 2);
@@ -164,6 +169,15 @@ const readStoredSelection = (): string | null => {
 const writeStoredSelection = (taskId: string): void => {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(STORAGE_KEY, taskId);
+  }
+};
+
+const readStoredTaskRailCollapsed = (): boolean =>
+  typeof window !== 'undefined' && window.localStorage.getItem(TASK_RAIL_STORAGE_KEY) === 'true';
+
+const writeStoredTaskRailCollapsed = (collapsed: boolean): void => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(TASK_RAIL_STORAGE_KEY, String(collapsed));
   }
 };
 
@@ -1671,6 +1685,72 @@ const PlanningTranscriptSurface = ({
   if (transcript.status === 'failed') return <InlineError>{transcript.message}</InlineError>;
   if (transcript.transcript.chunks.length === 0 && !live) return null;
 
+  const log = planningAgentLogFrom(transcript.transcript);
+  const latestAttempt = log.attempts.at(-1)?.attempt ?? null;
+
+  const renderEvent = (event: PlanningAgentEvent, index: number): ReactNode => {
+    if (event.kind === 'command') {
+      return (
+        <li className="py-2" key={`${event.id}:${String(index)}`}>
+          <div className="flex min-w-0 items-center gap-2 text-xs">
+            <Terminal className="size-3.5 shrink-0 text-muted-foreground" />
+            <code className="min-w-0 flex-1 truncate text-foreground/90" title={event.command}>
+              {event.command}
+            </code>
+            <span
+              className={cn(
+                'shrink-0 text-[10px]',
+                event.status === 'failed' ? 'text-destructive' : 'text-muted-foreground',
+              )}
+            >
+              {event.status === 'running' ? 'running' : `exit ${String(event.exitCode ?? 0)}`}
+            </span>
+          </div>
+          {event.output.trim().length === 0 ? null : (
+            <details className="ml-5 mt-1 text-[11px] text-muted-foreground">
+              <summary className="cursor-pointer select-none hover:text-foreground">
+                Command output
+              </summary>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/25 p-2 font-mono leading-5">
+                {event.output}
+              </pre>
+            </details>
+          )}
+        </li>
+      );
+    }
+    if (event.kind === 'error') {
+      return (
+        <li className="flex gap-2 py-2 text-xs text-destructive" key={`error:${String(index)}`}>
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 break-words leading-5">{event.message}</span>
+        </li>
+      );
+    }
+    if (event.kind === 'warning') {
+      return (
+        <li className="py-2" key={`warning:${String(index)}`}>
+          <details className="text-xs text-amber-300/90">
+            <summary className="cursor-pointer select-none">Provider warning</summary>
+            <p className="mt-1 break-words pl-5 leading-5 text-muted-foreground">{event.message}</p>
+          </details>
+        </li>
+      );
+    }
+    return (
+      <li
+        className="flex min-w-0 items-baseline gap-2 py-2 text-xs"
+        key={`message:${String(index)}`}
+      >
+        <Sparkles className="size-3.5 shrink-0 text-primary" />
+        <strong className="font-medium">{event.title}</strong>
+        {event.detail === null ? null : (
+          <span className="truncate text-muted-foreground">{event.detail}</span>
+        )}
+      </li>
+    );
+  };
+
   return (
     <Collapsible defaultOpen={live}>
       <section className="border-t border-border" aria-label="Planning agent log">
@@ -1680,6 +1760,7 @@ const PlanningTranscriptSurface = ({
             <strong className="text-sm">Agent log</strong>
             {live ? <StateBadge>Live</StateBadge> : null}
             <span className="text-[11px] text-muted-foreground">
+              {log.attempts.length} {log.attempts.length === 1 ? 'attempt' : 'attempts'} ·{' '}
               {transcript.transcript.totalBytes.toLocaleString()} B
               {transcript.transcript.truncated ? ' · truncated' : ''}
             </span>
@@ -1687,23 +1768,72 @@ const PlanningTranscriptSurface = ({
           <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <ScrollArea className="max-h-72 border-t border-border/60 bg-black/20">
-            <pre
-              className="min-h-16 whitespace-pre-wrap break-words px-5 py-3 font-mono text-[11px] leading-5 text-muted-foreground"
-              data-testid="planning-transcript"
-            >
-              {transcript.transcript.chunks.length === 0
-                ? 'Waiting for provider output…'
-                : transcript.transcript.chunks.map((chunk) => (
-                    <span
-                      className={chunk.stream === 'stderr' ? 'text-amber-300/90' : undefined}
-                      key={`${String(chunk.providerAttempt)}:${String(chunk.sequence)}`}
+          <div
+            className="max-h-[min(55vh,36rem)] overflow-auto border-t border-border/60 bg-black/15"
+            data-testid="planning-transcript"
+          >
+            {log.attempts.length === 0 ? (
+              <p className="px-5 py-3 text-xs text-muted-foreground">
+                Waiting for provider output…
+              </p>
+            ) : (
+              <div>
+                {log.attempts.map((attempt) => {
+                  const tokens =
+                    attempt.usage === null
+                      ? null
+                      : attempt.usage.inputTokens + attempt.usage.outputTokens;
+                  return (
+                    <Collapsible
+                      defaultOpen={attempt.attempt === latestAttempt}
+                      key={attempt.attempt}
                     >
-                      {chunk.content}
-                    </span>
-                  ))}
-            </pre>
-          </ScrollArea>
+                      <div className="border-b border-border/60 px-5 last:border-b-0">
+                        <CollapsibleTrigger className="group flex w-full items-center gap-2 py-2.5 text-left">
+                          <span className="text-xs font-medium">Attempt {attempt.attempt}</span>
+                          <StateBadge
+                            className={cn(
+                              attempt.status === 'completed' &&
+                                'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+                              attempt.status === 'failed' &&
+                                'border-destructive/30 bg-destructive/10 text-destructive',
+                            )}
+                          >
+                            {attempt.status}
+                          </StateBadge>
+                          {tokens === null ? null : (
+                            <span className="text-[10px] tabular-nums text-muted-foreground">
+                              {tokens.toLocaleString()} tok
+                            </span>
+                          )}
+                          <ChevronDown className="ml-auto size-3.5 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          {attempt.events.length === 0 ? (
+                            <p className="pb-3 text-xs text-muted-foreground">
+                              No operator-relevant events
+                            </p>
+                          ) : (
+                            <ul className="divide-y divide-border/40 pb-1">
+                              {attempt.events.map(renderEvent)}
+                            </ul>
+                          )}
+                        </CollapsibleContent>
+                      </div>
+                    </Collapsible>
+                  );
+                })}
+                <details className="border-t border-border/60 px-5 py-3 text-[11px] text-muted-foreground">
+                  <summary className="cursor-pointer select-none hover:text-foreground">
+                    Raw JSONL
+                  </summary>
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/30 p-3 font-mono leading-5">
+                    {log.raw}
+                  </pre>
+                </details>
+              </div>
+            )}
+          </div>
         </CollapsibleContent>
       </section>
     </Collapsible>
@@ -1964,6 +2094,7 @@ export const App = () => {
   const [tasksStatus, setTasksStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [tasksMessage, setTasksMessage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>(() => readStoredSelection() ?? '');
+  const [tasksCollapsed, setTasksCollapsed] = useState(readStoredTaskRailCollapsed);
   const [workflowState, setWorkflowState] = useState<WorkflowLoadState>({ status: 'loading' });
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
   const [implementationPlanState, setImplementationPlanState] =
@@ -2640,6 +2771,22 @@ export const App = () => {
       <div className="flex h-dvh min-w-[1080px] flex-col bg-background text-foreground">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
           <div className="flex items-center gap-2.5">
+            <Button
+              aria-label={tasksCollapsed ? 'Show tasks' : 'Hide tasks'}
+              title={tasksCollapsed ? 'Show tasks' : 'Hide tasks'}
+              variant="ghost"
+              size="icon-sm"
+              type="button"
+              onClick={() => {
+                setTasksCollapsed((current) => {
+                  const next = !current;
+                  writeStoredTaskRailCollapsed(next);
+                  return next;
+                });
+              }}
+            >
+              {tasksCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            </Button>
             <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Circle className="size-3.5 fill-current" />
             </div>
@@ -2673,16 +2820,27 @@ export const App = () => {
           <InlineError>{tasksMessage ?? 'The task queue could not be loaded'}</InlineError>
         ) : null}
 
-        <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px]">
-          <TaskQueue
-            tasks={tasks}
-            repositories={repositories}
-            selectedId={selectedId}
-            onSelect={handleSelectTask}
-            onImportJira={handleJiraSync}
-            jiraSync={jiraSyncState}
-            liveStatus={streamStatus}
-          />
+        <div
+          className={cn(
+            'grid min-h-0 flex-1',
+            tasksCollapsed
+              ? 'grid-cols-[minmax(0,1fr)_340px]'
+              : 'grid-cols-[260px_minmax(0,1fr)_340px]',
+          )}
+          data-tasks-collapsed={String(tasksCollapsed)}
+          data-testid="operator-layout"
+        >
+          {tasksCollapsed ? null : (
+            <TaskQueue
+              tasks={tasks}
+              repositories={repositories}
+              selectedId={selectedId}
+              onSelect={handleSelectTask}
+              onImportJira={handleJiraSync}
+              jiraSync={jiraSyncState}
+              liveStatus={streamStatus}
+            />
+          )}
 
           <main className="flex min-h-0 flex-col border-r border-border">
             {selectedTask === null ? (
