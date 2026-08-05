@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -82,6 +84,7 @@ const request = (strategy: 'fast' | 'ralplan') => ({
   operationId: 'tasker:test:planning:1',
   repositoryPath: process.cwd(),
   strategy,
+  skills: [],
   promptTemplate: '{{strategyInstruction}}\n{{plannerContext}}\n{{repositoryEvidence}}',
   context: {
     taskSnapshot: { taskId: 'AVIA-13235', summary: 'Repair seat marker color' },
@@ -119,6 +122,39 @@ describe('Codex CLI implementation planner', () => {
     expect(runner.requests[1]?.stdin).toContain('Use one bounded planning pass');
     expect(runner.requests[1]?.stdin).not.toContain('Invoke $ralplan');
     expect(runner.schema).toContain('decisionJson');
+  });
+
+  it('projects the planning block skills into the read-only provider session', async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-planner-skills-'));
+    const skillPath = join(repositoryPath, '.tasker', 'harness', 'skills', 'jira');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(
+      join(skillPath, 'SKILL.md'),
+      '---\nname: jira\ndescription: Read Jira evidence.\n---\n',
+      'utf8',
+    );
+    const runner = new RecordingRunner(
+      JSON.stringify({ decisionJson: JSON.stringify(readyDecision) }),
+    );
+    const planner = new CodexCliImplementationPlanner(runner);
+
+    try {
+      const result = await planner.plan({
+        ...request('fast'),
+        repositoryPath,
+        skills: ['jira'],
+      });
+
+      expect(result.ok).toBe(true);
+      expect(runner.requests[1]).toMatchObject({ cwd: repositoryPath });
+      expect(runner.requests[1]?.args).toEqual(
+        expect.arrayContaining(['--sandbox', 'read-only', '--cd', repositoryPath]),
+      );
+      expect(runner.requests[1]?.stdin).toContain('Selected read-only skills: jira');
+      expect(runner.requests[1]?.env?.TASKER_SKILLS_ROOT).toMatch(/\/skills$/u);
+    } finally {
+      rmSync(repositoryPath, { recursive: true, force: true });
+    }
   });
 
   it('routes an explicit ralplan request through the consensus prompt with high reasoning', async () => {

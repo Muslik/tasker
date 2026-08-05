@@ -1,6 +1,6 @@
 # Customizing Tasker
 
-Status: canonical extension guide, Temporal revision, 2026-08-03
+Status: canonical extension guide, Temporal revision, 2026-08-05
 
 Tasker has no reusable workflow templates. Every initial workflow is assembled from an
 empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
@@ -37,12 +37,23 @@ task + linked context + bounded repository evidence
       + company/project policy + block catalog + obligations
                          |
                          v
-              analyzer proposes complete graph
+             append-only Evidence Bundle
+                         |
+                         v
+              analyzer proposes draft graph
                          |
                          v
        parse -> ABI/effect/capability/semantic validation
                          |
-                  accepted graph hash
+                         v
+       mandatory planner + selected read-only skills
+                         |
+          plan + questions + graph proposal
+                         |
+                         v
+        reassemble -> compile -> validate -> review
+                         |
+                 frozen graph hash
                          |
                          v
      generic Temporal Workflow interprets the graph
@@ -51,10 +62,13 @@ task + linked context + bounded repository evidence
        registered Activities execute individual blocks
 ```
 
-The analyzer chooses relevant blocks and order. The validator decides whether the
-proposal is safe and complete. The interpreter records progress. Activities perform
-I/O. Keeping these roles separate is what lets a new company or process replace one
-layer without rewriting the application.
+Context discovery gathers enough evidence for the analyzer to choose relevant blocks
+and order. The planner always checks that hypothesis and may propose a draft revision.
+The validator decides whether each proposal is safe and complete. The interpreter sees
+only the frozen graph and records execution progress. Activities perform I/O. Keeping
+these roles separate is what lets a new company or process replace one layer without
+rewriting the application. See
+[`planning-lifecycle.md`](planning-lifecycle.md) for the complete lifecycle.
 
 ## 3. Add a workflow block
 
@@ -113,6 +127,13 @@ rewrites a completed Activity result or accepted history.
 Logical skill names are provider-neutral. An adapter maps the same portable package to
 Codex, Claude, or another subscription CLI discovery surface. The graph must not
 contain provider-specific command syntax.
+
+The mandatory planner has its own pinned read-only skill selection. In the current
+bridge this selection is snapshotted from `task.analyze@1`; the target bootstrap
+lifecycle will snapshot it as first-class planner configuration. Removing a skill from
+an execution block must not accidentally remove the planner's ability to verify the
+draft. External planner reads must pass through the evidence boundary and append
+provenance rather than existing only in provider output.
 
 The built-in workspace pack stores one portable Agent Skills package per logical name.
 Bootstrap creates an effective pinned catalog under `.tasker/harness/skills`; it does

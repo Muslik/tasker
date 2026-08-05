@@ -463,6 +463,13 @@ const planningFailureView = (
   failure: ImplementationPlannerFailure,
 ): z.infer<typeof PlanningFailureViewSchema> => {
   switch (failure.kind) {
+    case 'invalid_skill_selection':
+      return { kind: failure.kind, message: failure.issues.join('; '), retryable: false };
+    case 'invalid_skill_package':
+    case 'skill_unavailable':
+      return { kind: failure.kind, message: failure.message, retryable: false };
+    case 'skill_materialization_failed':
+      return { kind: failure.kind, message: failure.message, retryable: true };
     case 'provider_unavailable':
       return { kind: failure.kind, message: failure.message, retryable: true };
     case 'provider_timed_out':
@@ -515,6 +522,21 @@ const countWorkflowNodes = (value: JsonValue): number => {
   );
 };
 
+const implementationPlannerSkillsFrom = (
+  steps: readonly {
+    readonly reference: string;
+    readonly execution:
+      | { readonly kind: 'agent'; readonly skills: readonly string[] }
+      | { readonly kind: 'process' | 'integration' };
+  }[],
+): readonly string[] => {
+  const planningStep = steps.find(({ reference }) => reference === 'task.analyze@1');
+  if (planningStep?.execution.kind !== 'agent') {
+    throw new Error('The mandatory implementation planner has no agent configuration');
+  }
+  return planningStep.execution.skills;
+};
+
 const snapshotPrompt = (prompt: LoadedPrompt) => ({
   relativePath: prompt.relativePath,
   content: prompt.content,
@@ -527,6 +549,7 @@ const snapshotHarness = (
   workflowGraph: JsonValue,
   task: WorkflowGenerationSubject['task'],
 ) => {
+  const implementationPlannerSkills = implementationPlannerSkillsFrom(pack.steps);
   const graph = CompiledWorkflowSchema.parse(workflowGraph);
   const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
   const referencedSteps = new Set(graph.metadata.references.stepTypes);
@@ -570,7 +593,10 @@ const snapshotHarness = (
   return {
     company: pack.company,
     project: snapshottedProject,
-    implementationPlannerPrompt: snapshotPrompt(pack.prompts.implementationPlanner),
+    implementationPlanner: {
+      prompt: snapshotPrompt(pack.prompts.implementationPlanner),
+      skills: implementationPlannerSkills,
+    },
     policies: pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task)),
     steps,
   };
@@ -654,7 +680,7 @@ export class ImplementationPlanningCoordinator {
     const graph = JsonValueSchema.safeParse(workflow.value.view.workflow.graph);
     if (!graph.success) return err({ kind: 'workflow_not_ready', taskReference });
     const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 2,
+      schemaVersion: 3,
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,
@@ -991,7 +1017,8 @@ export class ImplementationPlanningCoordinator {
             taskSnapshot: loaded.value.taskSnapshot,
           },
           workflowJson: loaded.value.workflow,
-          promptTemplate: loaded.value.harness.implementationPlannerPrompt.content,
+          promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
+          plannerSkills: loaded.value.harness.implementationPlanner.skills,
         });
       }
 
@@ -1017,6 +1044,7 @@ export class ImplementationPlanningCoordinator {
         subject: subject.value,
         workflowJson: JsonValueSchema.parse(workflow.value.view.workflow),
         promptTemplate: this.harnessPackSource().prompts.implementationPlanner.content,
+        plannerSkills: implementationPlannerSkillsFrom(this.harnessPackSource().steps),
       });
     })();
     if (!planningInput.ok) return planningInput;
@@ -1048,6 +1076,7 @@ export class ImplementationPlanningCoordinator {
       operationId: commandId,
       repositoryPath: planningInput.value.subject.repositoryPath,
       strategy: selection.strategy,
+      skills: planningInput.value.plannerSkills,
       context: {
         taskSnapshot: planningInput.value.subject.taskSnapshot,
         workflow: planningInput.value.workflowJson,

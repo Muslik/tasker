@@ -1,6 +1,6 @@
 # Tasker Temporal test specification
 
-Status: canonical acceptance and recovery specification, 2026-08-03
+Status: canonical acceptance and recovery specification, 2026-08-05
 
 ## 1. Test strategy
 
@@ -28,6 +28,11 @@ Every accepted implementation must prove:
 
 - a generated graph is rejected until its IR, ABI, capabilities, effects, bounds, and
   semantic obligations validate;
+- context discovery and every planner read append provenance-bearing evidence instead
+  of overwriting prior observations;
+- a draft graph cannot execute product effects before planning, recompilation,
+  deterministic validation, and configured plan review complete;
+- a planning workflow proposal cannot mutate the draft or bypass the compiler directly;
 - every initial graph is assembled for its task, not selected from a base template;
 - Temporal is the only authority for execution position, waits, timers, and retries;
 - Workflow code is deterministic and imports no I/O/provider/database/process modules;
@@ -104,6 +109,12 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 
 ### 4.2 Plan and questions
 
+- `context_discovery_survives_worker_restart_without_restarting_task_intake`
+- `planner_receives_pinned_read_only_skills_and_shared_evidence_bundle`
+- `planner_external_read_appends_provenance_before_decision_is_accepted`
+- `planning_workflow_delta_is_reassembled_recompiled_and_revalidated`
+- `rejected_planning_delta_preserves_previous_draft_and_evidence`
+- `execution_starts_only_with_frozen_workflow_hash`
 - `plan_review_false_proceeds_after_valid_plan`
 - `plan_review_true_waits_for_approval`
 - `plan_feedback_creates_new_plan_attempt`
@@ -123,6 +134,7 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 
 ### 4.4 Workflow change
 
+- `planning_change_revises_draft_without_starting_child_execution_workflow`
 - `workflow_change_required_stops_original_suffix`
 - `invalid_revision_is_rejected_and_visible`
 - `pilot_policy_waits_for_revision_review`

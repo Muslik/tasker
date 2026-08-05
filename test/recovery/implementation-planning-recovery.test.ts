@@ -251,6 +251,14 @@ describe('implementation planning recovery', () => {
       const changedContent = `${originalPack.prompts.implementationPlanner.content}\nchanged later`;
       const changedPack: LoadedHarnessPack = {
         ...originalPack,
+        steps: originalPack.steps.map((step) =>
+          step.reference === 'task.analyze@1' && step.execution.kind === 'agent'
+            ? {
+                ...step,
+                execution: { ...step.execution, skills: ['test-design'] },
+              }
+            : step,
+        ),
         prompts: {
           ...originalPack.prompts,
           implementationPlanner: {
@@ -261,6 +269,7 @@ describe('implementation planning recovery', () => {
         },
       };
       let observedPrompt: string | null = null;
+      let observedSkills: readonly string[] | null = null;
       const fallback = new DeterministicImplementationPlanner();
       const coordinator = createImplementationPlanningCoordinator({
         ledger: ledger.repository,
@@ -271,6 +280,7 @@ describe('implementation planning recovery', () => {
         planner: {
           plan: (request) => {
             observedPrompt = request.promptTemplate;
+            observedSkills = request.skills;
             return fallback.plan(request);
           },
         },
@@ -291,6 +301,7 @@ describe('implementation planning recovery', () => {
       });
       expect(observedPrompt).toBe(originalPack.prompts.implementationPlanner.content);
       expect(observedPrompt).not.toBe(changedContent);
+      expect(observedSkills).toEqual(['jira', 'confluence', 'loop']);
     } finally {
       ledger.close();
       rmSync(directory, { recursive: true, force: true });

@@ -122,7 +122,7 @@ const makeSnapshot = (
             },
           };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 2,
+    schemaVersion: 3,
     taskReference: 'task-ref',
     workflowHash: 'a'.repeat(64),
     task,
@@ -139,7 +139,10 @@ const makeSnapshot = (
         manifest: projectManifest,
         guidance,
       },
-      implementationPlannerPrompt: pack.prompts.implementationPlanner,
+      implementationPlanner: {
+        prompt: pack.prompts.implementationPlanner,
+        skills: ['jira', 'confluence', 'loop'],
+      },
       policies: pack.policies,
       steps: [step],
     },

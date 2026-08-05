@@ -54,7 +54,7 @@ const SnapshottedStepSchema = z
 
 export const RunPlanningSnapshotSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     taskReference: z.string().min(1),
     workflowHash: ContentHashSchema,
     task: TaskFixtureSchema,
@@ -77,7 +77,12 @@ export const RunPlanningSnapshotSchema = z
           })
           .strict()
           .nullable(),
-        implementationPlannerPrompt: SnapshottedPromptSchema,
+        implementationPlanner: z
+          .object({
+            prompt: SnapshottedPromptSchema,
+            skills: z.array(z.string().min(1)),
+          })
+          .strict(),
         policies: z.array(HarnessPolicyManifestSchema),
         steps: z.array(SnapshottedStepSchema),
       })

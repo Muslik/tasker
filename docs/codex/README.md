@@ -10,26 +10,28 @@ Read these for decisions and future implementation:
 1. [`architecture.md`](architecture.md) — product/runtime boundary, dynamic graph
    assembly, Activities, messages, graph evolution, operator UI, security, and
    invariants.
-2. [`temporal-migration.md`](temporal-migration.md) — preserve/replace/delete map,
+2. [`planning-lifecycle.md`](planning-lifecycle.md) — canonical bootstrap, draft,
+   planning, Evidence Bundle, workflow proposal, and execution-freeze boundary.
+3. [`temporal-migration.md`](temporal-migration.md) — preserve/replace/delete map,
    parity matrix, data transition, cutover, and rollback.
-3. [`implementation-plan.md`](implementation-plan.md) — T0–T7 delivery ladder and the
+4. [`implementation-plan.md`](implementation-plan.md) — T0–T7 delivery ladder and the
    delivered Temporal runtime and the remaining product milestones.
-4. [`t1-temporal-walking-skeleton.md`](t1-temporal-walking-skeleton.md) — implemented
+5. [`t1-temporal-walking-skeleton.md`](t1-temporal-walking-skeleton.md) — implemented
    runtime boundary, local commands, recovery evidence, and deliberate limits.
-5. [`t2-temporal-planning.md`](t2-temporal-planning.md) — real planning Activity,
+6. [`t2-temporal-planning.md`](t2-temporal-planning.md) — real planning Activity,
    immutable input snapshot, durable question/review loop, and remaining exit work.
-6. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
+7. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
    acceptance gates.
-7. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
+8. [`technology-decisions.md`](technology-decisions.md) — concrete TypeScript/Temporal
    contracts, messages, Activities, persistence, retry, and dependency decisions.
-8. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
+9. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
    prompts, policies, providers, trackers, repositories, and company packs without
    rewriting the runtime.
-9. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
+10. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
    correction.
-10. [`t4-external-effects.md`](t4-external-effects.md) — remote-effect protocol,
+11. [`t4-external-effects.md`](t4-external-effects.md) — remote-effect protocol,
     Bitbucket branch/PR reconciliation, pilot gate, and remaining T4 work.
-11. [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) — file-backed blocks,
+12. [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) — file-backed blocks,
     path obligations, durable evidence flow, same-branch artifacts, and PR draft boundary.
 
 These documents are the source of truth. Older `.omx` plans are audit history only.

@@ -3,6 +3,11 @@
 Status: core control loop, durable operator transcript, and real-provider recovery
 evidence completed 2026-08-03.
 
+Architecture note (2026-08-05): this file describes the currently implemented
+`task.analyze@1` bridge. The target lifecycle moves planning ahead of graph freeze,
+retains its read-only skills, and recompiles proposed draft changes; see
+[`planning-lifecycle.md`](planning-lifecycle.md).
+
 ## Operator-visible behavior
 
 A Temporal task now performs real implementation planning at its `task.analyze@1`

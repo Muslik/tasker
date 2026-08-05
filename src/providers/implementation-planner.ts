@@ -21,6 +21,11 @@ import {
   sha256,
 } from './codex-cli-support.js';
 import {
+  prepareAgentSkills,
+  type PrepareAgentSkillsFailure,
+  workspaceHarnessEnvironment,
+} from './agent-skills.js';
+import {
   ImplementationPlannerReceiptSchema,
   type ImplementationPlannerReceipt,
 } from './contracts.js';
@@ -170,6 +175,7 @@ export interface ImplementationPlannerRequest {
   readonly operationId: string | null;
   readonly repositoryPath: string;
   readonly strategy: PlanningStrategy;
+  readonly skills: readonly string[];
   readonly context: ImplementationPlannerContext;
   readonly promptTemplate: string;
 }
@@ -181,6 +187,7 @@ export interface ImplementationPlannerSuccess {
 }
 
 export type ImplementationPlannerFailure =
+  | PrepareAgentSkillsFailure
   | { readonly kind: 'provider_unavailable'; readonly message: string }
   | {
       readonly kind: 'provider_timed_out';
@@ -211,11 +218,14 @@ const plannerPrompt = (
       ? `Invoke $ralplan non-interactively and use its Planner -> Architect -> Critic consensus loop.
 This provider boundary is read-only: keep deliberation in memory, do not create .omx files, and
 return the final consensus decision through the required JSON schema.`
-      : `Use one bounded planning pass and only the immutable repository evidence supplied below.
-Do not call tools or shell commands. Do not start a consensus or implementation workflow.`;
+      : `Use one bounded planning pass. Start with the immutable evidence supplied below, then use
+read-only repository tools or the selected logical skills only when they can resolve a material
+planning uncertainty. Do not start a consensus or implementation workflow.`;
 
   return renderPromptTemplate(request.promptTemplate, {
-    strategyInstruction,
+    strategyInstruction: `${strategyInstruction}\nSelected read-only skills: ${
+      request.skills.length === 0 ? 'none' : request.skills.join(', ')
+    }.`,
     plannerContext: JSON.stringify(request.context, null, 2),
     repositoryEvidence:
       evidence === null
@@ -264,7 +274,6 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
     const directory = await mkdtemp(join(tmpdir(), 'tasker-implementation-planner-'));
     const schemaPath = join(directory, 'implementation-planner-output.schema.json');
     const isolatedCodexHome = join(directory, 'codex-home');
-    const isolatedWorkspace = join(directory, 'workspace');
     const model = this.options.model ?? 'gpt-5.4';
     const serviceTier = this.options.serviceTier ?? 'fast';
 
@@ -278,7 +287,13 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         includePlanningSurfaces: request.strategy === 'ralplan',
       });
       await mkdir(isolatedCodexHome, { recursive: true });
-      await mkdir(isolatedWorkspace, { recursive: true });
+      const preparedSkills = await prepareAgentSkills({
+        provider: 'codex',
+        repositoryPath: request.repositoryPath,
+        configurationRoot: isolatedCodexHome,
+        skills: [...request.skills],
+      });
+      if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
         schemaPath,
         `${JSON.stringify(z.toJSONSchema(ImplementationPlannerProviderOutputSchema), null, 2)}\n`,
@@ -300,15 +315,16 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
           '--sandbox',
           'read-only',
           '--cd',
-          request.strategy === 'fast' ? isolatedWorkspace : request.repositoryPath,
+          request.repositoryPath,
           '--output-schema',
           schemaPath,
           '--json',
           '-',
         ],
-        cwd: request.strategy === 'fast' ? isolatedWorkspace : request.repositoryPath,
+        cwd: request.repositoryPath,
         env: {
           CODEX_HOME: isolatedCodexHome,
+          ...workspaceHarnessEnvironment(request.repositoryPath, preparedSkills.value.skillsRoot),
         },
         stdin: prompt,
         timeoutMs:

@@ -91,7 +91,7 @@ precedence:
 
 Repositories are cloned into Tasker's application-data directory, never into
 `~/Projects/work`. Existing operator clones may be discovered for naming help but are
-not mutated. Before planning, Tasker creates a managed branch/worktree and runs the
+not mutated. Before implementation planning, Tasker creates a managed branch/worktree and runs the
 configured external harness bootstrap. Its locator and bootstrap receipt are product
 artifacts recorded by the preparation Activity and referenced by durable Workflow
 state. The API request contains portable task/graph/settings data; it does not perform
@@ -101,10 +101,17 @@ Repeated Jira synchronization updates the cached snapshot and `syncedAt`; it doe
 append activity-log noise. A VPN/403/network failure changes sync health only. It does
 not invalidate the cached task, delete a workflow, or restart completed work.
 
-## 5. Per-task workflow assembly
+## 5. Context, draft assembly, planning, and freeze
 
 Every task receives a newly assembled graph. There is no default bugfix, feature,
 translation, or PR template.
+
+The canonical lifecycle is `bootstrap workflow -> draft workflow -> frozen execution
+workflow`; see [`planning-lifecycle.md`](planning-lifecycle.md). The bootstrap is a
+durable infrastructure protocol, not a reusable business graph. Context discovery
+creates an append-only Evidence Bundle, the analyzer assembles a complete task-specific
+draft, and the mandatory planning agent may propose revisions before product effects
+begin.
 
 Assembly input is a bounded, provenance-bearing planner context:
 
@@ -139,8 +146,12 @@ an independent Jira evidence policy can select only `bug.reproduce@1` markers wh
 input contains `phase=before` and require `jira.attach-reproduction@1` after them.
 These obligations add no Jira branches to the compiler or Temporal Workflow.
 
-The accepted compiled graph, run policy, and hashes become immutable Temporal Workflow
-input. Large prompts, repository snapshots, transcripts, videos, and screenshots stay
+The first compiled draft is not yet executable or immutable. A planner
+`workflow_change_required` result is a proposal: Tasker applies it to the draft through
+the assembler, recompiles the complete graph, and runs deterministic validation again.
+After the plan fits and optional operator review succeeds, the accepted compiled graph,
+run policy, and hashes become the frozen execution input. Large prompts, repository
+snapshots, transcripts, videos, and screenshots stay
 in the Tasker artifact store; history contains stable IDs, hashes, metadata, and bounded
 summaries. Secrets never enter Workflow input or Event History.
 

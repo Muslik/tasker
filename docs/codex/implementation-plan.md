@@ -1,6 +1,6 @@
 # Temporal migration and Tasker delivery plan
 
-Status: canonical execution plan, 2026-08-03
+Status: canonical execution plan, 2026-08-05
 
 ## 1. Goal and sequencing rule
 
@@ -147,6 +147,30 @@ justify retaining a second durable runtime.
 8. A revision creates a new immutable planning attempt linked to feedback.
 9. Implement `workflow_change_required` as a typed planner outcome but keep revision
    approval mandatory in this milestone.
+
+### 5.1 Planning lifecycle correction
+
+The 2026-08-05 architecture review found that the first compiled graph was being
+treated as immutable too early and that Temporal special-cased `task.analyze@1` without
+using its declared read-only skills. The correction is defined in
+[`planning-lifecycle.md`](planning-lifecycle.md) and precedes additional execution-block
+work:
+
+1. run context discovery as a durable bootstrap lifecycle and persist an append-only,
+   provenance-bearing Evidence Bundle;
+2. assemble a complete task-specific draft from that bundle;
+3. always run implementation planning with the pinned read-only skills and the same
+   evidence;
+4. treat `workflow_change_required` as a draft proposal, then reassemble, recompile,
+   and validate the full graph;
+5. apply optional plan review, freeze the accepted graph, and only then admit product
+   execution;
+6. reserve Child Workflow continuation for discoveries made after execution freeze;
+7. remove name-based planning logic from the generic graph interpreter.
+
+The first delivered sub-slice projects the snapshotted `task.analyze@1` skills into the
+actual read-only planner provider session. Durable context discovery, mediated evidence
+reads, draft recompilation, and interpreter simplification remain the immediate target.
 
 T2 exit gate:
 

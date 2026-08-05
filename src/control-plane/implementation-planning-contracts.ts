@@ -11,6 +11,10 @@ import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 export const PlanningFailureViewSchema = z
   .object({
     kind: z.enum([
+      'invalid_skill_selection',
+      'invalid_skill_package',
+      'skill_unavailable',
+      'skill_materialization_failed',
       'provider_unavailable',
       'provider_timed_out',
       'provider_failed',

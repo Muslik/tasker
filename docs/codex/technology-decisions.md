@@ -216,17 +216,24 @@ prompts, source code, transcripts, videos, or arbitrary provider output. Search
 Attributes contain only operational lookup fields such as Tasker task ID, lifecycle
 state, attention state, repository key, and graph revision.
 
-## 9. Dynamic graph revisions
+## 9. Draft revisions and execution continuations
 
-An Activity may return `workflow_change_required`. A planning Activity produces a new
-compiled continuation artifact. The Workflow records its hash and decision.
+Before product execution, the workflow graph is a draft. A planning Activity may return
+`workflow_change_required`, but this is only a proposal. The assembler applies the
+proposal to workflow source, the compiler recompiles the complete graph, and all
+deterministic validators run again. Only the accepted post-planning graph is frozen.
+
+After freeze, an execution Activity may return `workflow_change_required`. A planning
+Activity then produces a new compiled continuation artifact. The Workflow records its
+hash and decision.
 
 An accepted continuation starts as a Child Workflow and the parent waits for its typed
 result. This preserves the accepted parent graph and its completed prefix without
 teaching the interpreter how to mutate graph input. Ordinary branches inside an
 accepted graph remain interpreter nodes and do not create Child Workflows.
 
-During the pilot, a run-policy flag requires operator approval for graph revisions.
+During the pilot, a run-policy flag requires operator approval for draft revisions and
+execution continuations.
 Later, validator-approved low-risk classes can auto-apply. Validation cannot be
 disabled.
 
