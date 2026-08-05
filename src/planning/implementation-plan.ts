@@ -114,5 +114,6 @@ export type PlanningQuestionAnswer = z.infer<typeof PlanningQuestionAnswerSchema
 export type PlanningClarificationAnswerCommand = z.infer<
   typeof PlanningClarificationAnswerCommandSchema
 >;
+export type WorkflowChangeRequest = z.infer<typeof WorkflowChangeRequestSchema>;
 export type ImplementationPlanningDecision = z.infer<typeof ImplementationPlanningDecisionSchema>;
 export type ImplementationPlannerContext = z.infer<typeof ImplementationPlannerContextSchema>;

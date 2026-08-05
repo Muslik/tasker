@@ -8,7 +8,7 @@ import {
   workflowInfo,
 } from '@temporalio/workflow';
 
-import type { CompiledWorkflowNode } from '../../workflow/index.js';
+import type { CompiledWorkflow, CompiledWorkflowNode } from '../../workflow/index.js';
 import type {
   PlanningActivityCommand,
   ResolveTaskWaitCommand,
@@ -92,6 +92,19 @@ const planningActivities = proxyActivities<Pick<TaskWorkflowActivities, 'planTas
   },
 });
 
+const draftRevisionActivities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'reviseTaskWorkflowDraft'>
+>({
+  startToCloseTimeout: '35 minutes',
+  scheduleToCloseTimeout: '2 hours',
+  heartbeatTimeout: '30 seconds',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '30 seconds',
+    maximumAttempts: 3,
+  },
+});
+
 const workspaceActivities = proxyActivities<Pick<TaskWorkflowActivities, 'prepareTaskWorkspace'>>({
   startToCloseTimeout: '5 minutes',
   scheduleToCloseTimeout: '30 minutes',
@@ -117,6 +130,13 @@ type Traversal =
   { readonly kind: 'continue' } | { readonly kind: 'finalized'; readonly outcome: string };
 
 type PlanningStepNode = Extract<CompiledWorkflowNode, { readonly kind: 'step' }>;
+type PlanningGateNode = Extract<CompiledWorkflowNode, { readonly kind: 'gate' }>;
+type PlanningLifecycle = {
+  readonly step: PlanningStepNode;
+  readonly gate: PlanningGateNode;
+};
+
+const MAX_AUTOMATIC_DRAFT_REVISIONS = 3;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -242,29 +262,67 @@ const setSubtreeStatus = (
   }
 };
 
+const findPlanningLifecycle = (graph: CompiledWorkflow): PlanningLifecycle => {
+  const steps: PlanningStepNode[] = [];
+  const gates: PlanningGateNode[] = [];
+  const visit = (node: CompiledWorkflowNode): void => {
+    switch (node.kind) {
+      case 'sequence':
+        for (const child of node.children) visit(child);
+        return;
+      case 'branch':
+        visit(node.then);
+        visit(node.otherwise);
+        return;
+      case 'bounded_loop':
+        visit(node.body);
+        return;
+      case 'step':
+        if (node.uses === 'task.analyze@1') steps.push(node);
+        return;
+      case 'gate':
+        if (node.resumeWhen === 'plan.approved@1') gates.push(node);
+        return;
+      case 'wait':
+      case 'finalize':
+        return;
+    }
+  };
+  visit(graph.root);
+  if (steps.length !== 1 || gates.length !== 1) {
+    throw ApplicationFailure.nonRetryable(
+      'Validated workflow must contain one implementation planning lifecycle',
+    );
+  }
+  return { step: steps[0] as PlanningStepNode, gate: gates[0] as PlanningGateNode };
+};
+
 export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWorkflowResult> {
   // The Client validates the serialized boundary before start. Importing Zod or the
   // compiler here would pull Node-only code into Temporal's deterministic sandbox.
   const input = rawInput;
+  let activeGraph = input.graph;
+  let activeWorkflowHash = input.workflowHash;
   const nodeIds: string[] = [];
-  collectNodeIds(input.graph.root, nodeIds);
+  collectNodeIds(activeGraph.root, nodeIds);
 
-  const nodeStates: MutableNodeStates = Object.fromEntries(
+  let nodeStates: MutableNodeStates = Object.fromEntries(
     nodeIds.map((nodeId) => [nodeId, 'planned' as const]),
   );
   const attempts: MutableAttempts = {};
   const predicateFacts: PredicateFacts = {};
   let queuedOperatorGuidance: string | null = null;
   let pendingResolution: ResolveTaskWaitCommand | null = null;
-  let planningNode: PlanningStepNode | null = null;
   let planningCommandSequence = 0;
+  let draftRevisionSequence = 0;
+  const completedLifecycleNodeIds = new Set<string>();
   const execution = workflowInfo();
   let state: TaskWorkflowPublicState = {
     schemaVersion: 1,
     taskReference: input.taskReference,
     workflowId: execution.workflowId,
     runId: execution.runId,
-    workflowHash: input.workflowHash,
+    workflowHash: activeWorkflowHash,
     settings: input.settings,
     executionContext: { status: 'preparing' },
     planning: null,
@@ -303,6 +361,9 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return retryResolution(command.resolution);
       }
       if (state.wait.waitKind === 'workspace.retry@1') {
+        return retryResolution(command.resolution);
+      }
+      if (state.wait.waitKind === 'draft_revision.guidance@1') {
         return retryResolution(command.resolution);
       }
       if (state.wait.waitKind === 'workflow_change.review@1') {
@@ -400,19 +461,45 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     return { kind: 'finalized', outcome: result.outcome };
   };
 
-  const executePlanning = async (
-    node: PlanningStepNode,
-    initialCommand: PlanningActivityCommand,
-  ): Promise<Traversal> => {
+  const installRevisedDraft = (
+    revised: Awaited<ReturnType<typeof draftRevisionActivities.reviseTaskWorkflowDraft>>,
+  ): void => {
     if (state.executionContext.status !== 'ready') {
-      throw ApplicationFailure.nonRetryable('Planning has no prepared execution context');
+      throw ApplicationFailure.nonRetryable('Draft revision has no prepared execution context');
     }
-    const planningSnapshot = state.executionContext.planningSnapshot;
+    activeGraph = revised.graph;
+    activeWorkflowHash = revised.workflowHash;
+    const revisedNodeIds: string[] = [];
+    collectNodeIds(activeGraph.root, revisedNodeIds);
+    nodeStates = Object.fromEntries(revisedNodeIds.map((nodeId) => [nodeId, 'planned' as const]));
+    state = {
+      ...state,
+      workflowHash: activeWorkflowHash,
+      executionContext: {
+        ...state.executionContext,
+        planningSnapshot: revised.planningSnapshot,
+      },
+      workflowChange: null,
+      status: 'running',
+      currentNodeId: null,
+      wait: null,
+      outcome: null,
+      nodeStates,
+    };
+  };
+
+  const executePlanning = async (initialCommand: PlanningActivityCommand): Promise<void> => {
     let command = initialCommand;
+    let automaticRevisionCount = 0;
 
     for (;;) {
+      const node = findPlanningLifecycle(activeGraph).step;
+      if (state.executionContext.status !== 'ready') {
+        throw ApplicationFailure.nonRetryable('Planning has no prepared execution context');
+      }
+      const readyContext = state.executionContext;
       planningCommandSequence += 1;
-      const commandId = `${execution.workflowId}:planning:${String(planningCommandSequence)}`;
+      const commandId = `${execution.workflowId}:${execution.runId}:planning:${String(planningCommandSequence)}`;
       let result: TaskWorkflowPlanningState;
       for (;;) {
         markRunning(node.id);
@@ -420,8 +507,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         try {
           result = await planningActivities.planTaskImplementation({
             taskReference: input.taskReference,
-            workflowHash: input.workflowHash,
-            planningSnapshot,
+            workflowHash: activeWorkflowHash,
+            planningSnapshot: readyContext.planningSnapshot,
             nodeId: node.id,
             commandId,
             requestedStrategy: input.settings.planningStrategy,
@@ -441,7 +528,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       if (result.status === 'ready') {
         state = { ...state, workflowChange: null };
         nodeStates[node.id] = 'succeeded';
-        return { kind: 'continue' };
+        return;
       }
       if (result.status === 'needs_clarification') {
         const resolution = await openWait(node.id, 'human_clarification');
@@ -462,21 +549,49 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
           request: result.request,
         },
       };
-      const resolution = await openWait(node.id, 'workflow_change.review@1');
-      const continuation = continuationAcceptanceFrom(resolution);
-      if (continuation !== null) {
-        return executeContinuation(node.id, continuation);
+
+      if (automaticRevisionCount >= MAX_AUTOMATIC_DRAFT_REVISIONS) {
+        const resolution = await openWait(node.id, 'draft_revision.guidance@1');
+        const guidance = operatorGuidanceFrom(resolution);
+        if (guidance === null) {
+          throw ApplicationFailure.nonRetryable('Draft revision requires operator guidance');
+        }
+        automaticRevisionCount = 0;
+        state = { ...state, workflowChange: null };
+        command = { kind: 'revision', sourceAttempt: result.attempt, guidance };
+        continue;
       }
-      const review = planReviewFrom(resolution);
-      if (review?.decision !== 'request_changes') {
-        throw ApplicationFailure.nonRetryable('Workflow change requires revision guidance');
+
+      draftRevisionSequence += 1;
+      try {
+        const revised = await draftRevisionActivities.reviseTaskWorkflowDraft({
+          taskReference: input.taskReference,
+          workflowId: execution.workflowId,
+          workflowRunId: execution.runId,
+          currentWorkflowHash: activeWorkflowHash,
+          operationId: `${execution.workflowId}:${execution.runId}:draft-revision:${String(draftRevisionSequence)}`,
+          request: result.request,
+          workspace: readyContext.workspace,
+        });
+        installRevisedDraft(revised);
+        automaticRevisionCount += 1;
+        command = {
+          kind: 'revision',
+          sourceAttempt: result.attempt,
+          guidance:
+            'The requested workflow change was recompiled and validated. Verify the revised draft and implementation plan.',
+        };
+      } catch (error) {
+        if (isCancellation(error)) throw error;
+        const resolution = await openWait(node.id, 'draft_revision.guidance@1');
+        const guidance = operatorGuidanceFrom(resolution);
+        if (guidance === null) {
+          throw ApplicationFailure.nonRetryable('Draft revision requires operator guidance');
+        }
+        automaticRevisionCount = 0;
+        state = { ...state, workflowChange: null };
+        command = { kind: 'revision', sourceAttempt: result.attempt, guidance };
       }
-      state = { ...state, workflowChange: null };
-      command = {
-        kind: 'revision',
-        sourceAttempt: result.attempt,
-        guidance: review.guidance,
-      };
     }
   };
 
@@ -490,7 +605,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
           taskReference: input.taskReference,
           workflowId: execution.workflowId,
           workflowRunId: execution.runId,
-          workflowHash: input.workflowHash,
+          workflowHash: activeWorkflowHash,
         });
         state = {
           ...state,
@@ -509,6 +624,42 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
           throw ApplicationFailure.nonRetryable('Workspace retry wait received invalid payload');
         }
       }
+    }
+  };
+
+  const completePlanningLifecycle = async (): Promise<void> => {
+    const initialLifecycle = findPlanningLifecycle(activeGraph);
+    await ensureExecutionContext(initialLifecycle.step.id);
+    await executePlanning({ kind: 'initial' });
+
+    for (;;) {
+      const lifecycle = findPlanningLifecycle(activeGraph);
+      nodeStates[lifecycle.step.id] = 'succeeded';
+      if (input.settings.planApproval === 'automatic') {
+        nodeStates[lifecycle.gate.id] = 'skipped';
+        completedLifecycleNodeIds.add(lifecycle.step.id);
+        completedLifecycleNodeIds.add(lifecycle.gate.id);
+        return;
+      }
+      const resolution = await openWait(lifecycle.gate.id, lifecycle.gate.resumeWhen);
+      const review = planReviewFrom(resolution);
+      if (review === null) {
+        throw ApplicationFailure.nonRetryable('Plan review payload is invalid');
+      }
+      if (review.decision === 'approve') {
+        nodeStates[lifecycle.gate.id] = 'succeeded';
+        completedLifecycleNodeIds.add(lifecycle.step.id);
+        completedLifecycleNodeIds.add(lifecycle.gate.id);
+        return;
+      }
+      if (state.planning?.status !== 'ready') {
+        throw ApplicationFailure.nonRetryable('Plan revision has no accepted source plan');
+      }
+      await executePlanning({
+        kind: 'revision',
+        sourceAttempt: state.planning.attempt,
+        guidance: review.guidance,
+      });
     }
   };
 
@@ -548,6 +699,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
   };
 
   const executeNode = async (node: CompiledWorkflowNode): Promise<Traversal> => {
+    if (completedLifecycleNodeIds.has(node.id)) return { kind: 'continue' };
     markRunning(node.id);
 
     switch (node.kind) {
@@ -563,11 +715,6 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return { kind: 'continue' };
       }
       case 'step': {
-        if (node.uses === 'task.analyze@1') {
-          planningNode = node;
-          await ensureExecutionContext(node.id);
-          return executePlanning(node, { kind: 'initial' });
-        }
         await ensureExecutionContext(node.id);
         if (state.executionContext.status !== 'ready') {
           throw ApplicationFailure.nonRetryable('Execution step has no prepared execution context');
@@ -598,7 +745,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             taskReference: input.taskReference,
             workflowId: execution.workflowId,
             workflowRunId: execution.runId,
-            workflowHash: input.workflowHash,
+            workflowHash: activeWorkflowHash,
             nodeId: node.id,
             stepAttempt: attempts[node.id] ?? 1,
             uses: node.uses,
@@ -696,32 +843,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return { kind: 'continue' };
       }
       case 'gate': {
-        if (node.resumeWhen === 'plan.approved@1' && input.settings.planApproval === 'automatic') {
-          nodeStates[node.id] = 'skipped';
-          return { kind: 'continue' };
-        }
-        if (node.resumeWhen !== 'plan.approved@1') {
-          await openWait(node.id, node.resumeWhen);
-          return { kind: 'continue' };
-        }
-        if (planningNode === null || state.planning === null) {
-          throw ApplicationFailure.nonRetryable('Plan review has no preceding planning result');
-        }
-        for (;;) {
-          const resolution = await openWait(node.id, node.resumeWhen);
-          const review = planReviewFrom(resolution);
-          if (review === null) {
-            throw ApplicationFailure.nonRetryable('Plan review payload is invalid');
-          }
-          if (review.decision === 'approve') return { kind: 'continue' };
-          const traversal = await executePlanning(planningNode, {
-            kind: 'revision',
-            sourceAttempt: state.planning.attempt,
-            guidance: review.guidance,
-          });
-          if (traversal.kind === 'finalized') return traversal;
-          markRunning(node.id);
-        }
+        await openWait(node.id, node.resumeWhen);
+        return { kind: 'continue' };
       }
       case 'finalize':
         nodeStates[node.id] = 'succeeded';
@@ -729,7 +852,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     }
   };
 
-  const traversal = await executeNode(input.graph.root);
+  await completePlanningLifecycle();
+  const traversal = await executeNode(activeGraph.root);
   if (traversal.kind !== 'finalized') {
     throw new Error('Validated workflow completed without a terminal outcome');
   }
@@ -745,7 +869,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
 
   return {
     taskReference: input.taskReference,
-    workflowHash: input.workflowHash,
+    workflowHash: activeWorkflowHash,
     outcome: terminalOutcome,
   };
 }

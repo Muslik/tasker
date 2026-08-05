@@ -538,6 +538,22 @@ export class M1WorkflowService {
     );
   }
 
+  public readPlanningOperation(
+    fixtureId: string,
+    operationId: string,
+  ): Outcome<WorkflowResponse | null, M1ServiceError> {
+    const stored = this.store.readPlanningOperation(fixtureId, operationId);
+    if (!stored.ok) return err({ kind: 'store_failure', error: stored.error });
+    return stored.value === null
+      ? ok(null)
+      : ok(
+          WorkflowResponseSchema.parse({
+            status: stored.value.workflow.status === 'valid' ? 'ready' : 'rejected',
+            view: stored.value,
+          }),
+        );
+  }
+
   public readProjection(
     projectionType: 'm1_analyzer' | 'm1_intake' | 'm1_task',
     projectionId: string,
@@ -624,6 +640,30 @@ export class M1WorkflowService {
     return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), receipt);
   }
 
+  public reviseFromAnalyzerOutputForTask(
+    fixture: TaskFixture,
+    output: WorkflowAnalyzerOutput,
+    receipt: WorkflowAnalyzerReceipt,
+    operationId: string,
+  ): Outcome<WorkflowResponse, M1ServiceError> {
+    const proposal = createWorkflowProposalFromAnalyzerOutput(
+      fixture,
+      receipt.analyzerVersion,
+      output,
+    );
+    if (!proposal.ok) {
+      return err({
+        kind: 'planner_contract_failure',
+        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+      });
+    }
+
+    return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), receipt, {
+      operationId,
+      replaceValid: true,
+    });
+  }
+
   public generateContinuationFromAnalyzerOutput(
     fixture: TaskFixture,
     output: WorkflowAnalyzerOutput,
@@ -654,7 +694,11 @@ export class M1WorkflowService {
     fixture: TaskFixture,
     planning: ReturnType<typeof planTaskWorkflow>,
     receipt?: WorkflowAnalyzerReceipt,
-    options: { readonly projectTask?: boolean } = {},
+    options: {
+      readonly operationId?: string;
+      readonly projectTask?: boolean;
+      readonly replaceValid?: boolean;
+    } = {},
   ): Outcome<WorkflowResponse, M1ServiceError> {
     const built = planning.ok
       ? buildAcceptedView(fixture, planning.value, this.clock.now())

@@ -93,6 +93,9 @@ const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] =
 const linkWorkflowContinuation: TaskWorkflowActivities['linkWorkflowContinuation'] = () =>
   Promise.resolve({ linked: true });
 
+const reviseTaskWorkflowDraft: TaskWorkflowActivities['reviseTaskWorkflowDraft'] = () =>
+  Promise.reject(new Error('Unexpected workflow draft revision'));
+
 export const testTaskWorkflowActivities = {
   prepareTaskWorkspace,
   executeStep,
@@ -101,5 +104,6 @@ export const testTaskWorkflowActivities = {
   executeRemoteReconciledStep: executeStep,
   evaluatePredicate,
   planTaskImplementation,
+  reviseTaskWorkflowDraft,
   linkWorkflowContinuation,
 } satisfies TaskWorkflowActivities;

@@ -174,9 +174,12 @@ consumed by both workflow analysis and implementation planning. The planning sna
 contains only its immutable reference. Initial discovery/assembly now runs through a
 dedicated Temporal bootstrap Workflow and heartbeat-enabled Activity; accepted drafts
 are reused, validation-rejected attempts can be regenerated, and exhausted transient
-failures can resume as a new run without discarding persisted evidence. Mediating
-external evidence reads, pre-freeze draft recompilation, and removal of planning logic
-from the execution interpreter remain the immediate target.
+failures can resume as a new run without discarding persisted evidence. Planning-time
+workflow changes now produce immutable, operation-idempotent draft attempts through the
+normal assembler/compiler/validator path; the planner rechecks every accepted revision,
+and generic execution starts only after planning and optional review. Planning logic
+has been removed from the node interpreter. Mediating external evidence reads and an
+explicit retrospective-facing freeze receipt remain.
 
 T2 exit gate:
 

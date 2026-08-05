@@ -115,7 +115,9 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `planner_receives_pinned_read_only_skills_and_shared_evidence_bundle`
 - `planner_external_read_appends_provenance_before_decision_is_accepted`
 - `planning_workflow_delta_is_reassembled_recompiled_and_revalidated`
+- `redelivered_planning_delta_returns_exact_persisted_revision`
 - `rejected_planning_delta_preserves_previous_draft_and_evidence`
+- `draft_revision_infrastructure_failure_waits_without_losing_workspace`
 - `execution_starts_only_with_frozen_workflow_hash`
 - `plan_review_false_proceeds_after_valid_plan`
 - `plan_review_true_waits_for_approval`

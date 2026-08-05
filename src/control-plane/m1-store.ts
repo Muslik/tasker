@@ -56,10 +56,19 @@ export interface M1GenerationSubjectSaveResult {
   readonly subject: WorkflowGenerationSubject;
 }
 
+export interface M1WorkflowSaveOptions {
+  readonly operationId?: string;
+  readonly projectTask?: boolean;
+  readonly replaceValid?: boolean;
+}
+
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 
 const workflowAggregateId = (taskReference: string): string =>
   taskReference.startsWith('jira:') ? `workflow:${taskReference}` : `intake:${taskReference}`;
+
+const isRecord = (value: JsonValue): value is Readonly<Record<string, JsonValue>> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 export class M1WorkflowStore {
   public constructor(
@@ -198,20 +207,70 @@ export class M1WorkflowStore {
     return ok(parsed.data);
   }
 
+  public readPlanningOperation(
+    fixtureId: string,
+    operationId: string,
+  ): Outcome<WorkflowView | null, M1StoreError> {
+    const event = this.ledger
+      .listEvents(workflowAggregateId(fixtureId))
+      .find(
+        (candidate) =>
+          (candidate.eventType === 'WorkflowPlanned' ||
+            candidate.eventType === 'WorkflowRejected') &&
+          isRecord(candidate.payload) &&
+          candidate.payload.operationId === operationId,
+      );
+    if (event === undefined || !isRecord(event.payload)) return ok(null);
+    const attempt = event.payload.attempt;
+    if (typeof attempt !== 'number' || !Number.isInteger(attempt) || attempt < 1) {
+      return err({
+        kind: 'projection_corrupt',
+        fixtureId,
+        issues: [`Planning operation ${operationId} has no valid attempt number`],
+      });
+    }
+    const suffix = attempt === 1 ? '' : `:attempt-${String(attempt)}`;
+    const snapshot = this.ledger.readSnapshot(`snapshot:${fixtureId}${suffix}`);
+    if (snapshot === null) {
+      return err({
+        kind: 'projection_corrupt',
+        fixtureId,
+        issues: [`Planning operation ${operationId} has no snapshot`],
+      });
+    }
+    const parsed = WorkflowViewSchema.safeParse(snapshot.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({
+          kind: 'projection_corrupt',
+          fixtureId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
   public save(
     viewInput: WorkflowView,
     artifacts: M1WorkflowArtifacts,
     analyzerReceipt?: WorkflowAnalyzerReceipt,
-    options: { readonly projectTask?: boolean } = {},
+    options: M1WorkflowSaveOptions = {},
   ): Outcome<M1StoreResult, M1StoreError> {
     const candidateView = WorkflowViewSchema.parse(viewInput);
+    if (options.operationId !== undefined) {
+      const completed = this.readPlanningOperation(candidateView.fixture.id, options.operationId);
+      if (!completed.ok) return completed;
+      if (completed.value !== null) {
+        return ok({ disposition: 'already_exists', view: completed.value });
+      }
+    }
     const existing = this.read(candidateView.fixture.id);
 
     if (!existing.ok) {
       return existing;
     }
 
-    if (existing.value?.workflow.status === 'valid') {
+    if (existing.value?.workflow.status === 'valid' && options.replaceValid !== true) {
       return ok({ disposition: 'already_exists', view: existing.value });
     }
 
@@ -319,6 +378,7 @@ export class M1WorkflowStore {
         fixtureId,
         attempt,
         graphHash: view.workflow.graphHash,
+        operationId: options.operationId ?? null,
         status: view.workflow.status,
       },
       actor:
@@ -382,6 +442,14 @@ export class M1WorkflowStore {
 
     if (!result.ok) {
       if (result.error.kind === 'version_conflict') {
+        if (options.operationId !== undefined) {
+          const completed = this.readPlanningOperation(fixtureId, options.operationId);
+          if (!completed.ok) return completed;
+          if (completed.value !== null) {
+            return ok({ disposition: 'already_exists', view: completed.value });
+          }
+          return err({ kind: 'ledger_conflict', conflict: result.error });
+        }
         const concurrent = this.read(fixtureId);
         if (concurrent.ok && concurrent.value !== null) {
           return ok({ disposition: 'already_exists', view: concurrent.value });

@@ -14,6 +14,7 @@ import {
   WorkflowGenerationSubjectSource,
 } from '../control-plane/workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
+import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
   AiAssistanceInitializeAdapter,
@@ -81,6 +82,7 @@ import {
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { createWorkflowAssemblyActivity } from './activities/workflow-assembly-activity.js';
+import { createWorkflowDraftRevisionActivity } from './activities/workflow-draft-revision-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
@@ -187,11 +189,22 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     nodeCommandRunner,
     planningTranscripts,
   );
+  const workflowAnalyzer = deterministicProvider
+    ? undefined
+    : new CodexCliWorkflowAnalyzer(temporalCommandRunner);
+  const contextDiscovery = new ContextDiscoveryService(evidenceBundles, systemClock);
   const workflowGenerator = new CodexWorkflowGenerator(
     workflowService,
     subjects,
-    deterministicProvider ? undefined : new CodexCliWorkflowAnalyzer(temporalCommandRunner),
-    new ContextDiscoveryService(evidenceBundles, systemClock),
+    workflowAnalyzer,
+    contextDiscovery,
+  );
+  const workflowDraftRevisions = new WorkflowDraftRevisionCoordinator(
+    workflowService,
+    subjects,
+    workflowAnalyzer,
+    contextDiscovery,
+    repositoryCatalog,
   );
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
@@ -252,6 +265,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ...createWorkflowAssemblyActivity(workflowGenerator),
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
       ...createPlanningActivity(planning),
+      ...createWorkflowDraftRevisionActivity(workflowDraftRevisions, planning),
       linkWorkflowContinuation: (input) => {
         const linked = workflowContinuation.linkExecution(input.parentTaskReference, {
           taskReference: input.childTaskReference,

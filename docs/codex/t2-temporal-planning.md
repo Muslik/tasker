@@ -3,9 +3,10 @@
 Status: core control loop, durable operator transcript, and real-provider recovery
 evidence completed 2026-08-03.
 
-Architecture note (2026-08-05): this file describes the currently implemented
-`task.analyze@1` bridge. The target lifecycle moves planning ahead of graph freeze,
-retains its read-only skills, and recompiles proposed draft changes; see
+Architecture update (2026-08-05): planning now runs as a first-class pre-freeze
+Temporal lifecycle rather than a `task.analyze@1` branch inside the generic graph
+interpreter. It retains the snapshotted read-only skills and shared Evidence Bundle;
+proposed workflow changes are fully recompiled and validated before execution. See
 [`planning-lifecycle.md`](planning-lifecycle.md).
 
 ## Operator-visible behavior
@@ -17,7 +18,8 @@ boundary. Planning can:
 - ask one or more blocking questions in reviewed or automatic-plan mode;
 - pause for plan approval when the run setting requires it;
 - accept revision guidance and create another immutable attempt;
-- report `workflow_change_required` and pause for operator-guided revision;
+- report `workflow_change_required`, recompile a validated draft, and request operator
+  guidance only when the bounded automatic cycle cannot progress;
 - exhaust provider retries and wait for an explicit retry without restarting the task.
 
 Questions, approvals, revision feedback, and retry commands are validated Temporal

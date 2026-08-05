@@ -16,6 +16,7 @@ import {
 import {
   PlanningQuestionAnswerSchema,
   PlanningStrategyRequestSchema,
+  WorkflowChangeRequestSchema as PlanningWorkflowChangeRequestSchema,
 } from '../planning/implementation-plan.js';
 import {
   PlanningSnapshotReferenceSchema,
@@ -233,6 +234,28 @@ export const PrepareTaskWorkspaceResultSchema = z
   .strict()
   .readonly();
 
+export const ReviseTaskWorkflowDraftInputSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
+    currentWorkflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    operationId: z.string().min(1),
+    request: PlanningWorkflowChangeRequestSchema,
+    workspace: WorkspaceLocatorSchema,
+  })
+  .strict()
+  .readonly();
+
+export const ReviseTaskWorkflowDraftResultSchema = z
+  .object({
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    graph: CompiledWorkflowSchema,
+    planningSnapshot: PlanningSnapshotReferenceSchema,
+  })
+  .strict()
+  .readonly();
+
 export type TaskWorkflowInput = z.infer<typeof TaskWorkflowInputSchema>;
 export type TaskBootstrapWorkflowInput = z.infer<typeof TaskBootstrapWorkflowInputSchema>;
 export type TaskDraftAssemblyResult = z.infer<typeof TaskDraftAssemblyResultSchema>;
@@ -249,6 +272,8 @@ export type PlanningActivityCommand = z.infer<typeof PlanningActivityCommandSche
 export type PlanTaskImplementationInput = z.infer<typeof PlanTaskImplementationInputSchema>;
 export type PrepareTaskWorkspaceInput = z.infer<typeof PrepareTaskWorkspaceInputSchema>;
 export type PrepareTaskWorkspaceResult = z.infer<typeof PrepareTaskWorkspaceResultSchema>;
+export type ReviseTaskWorkflowDraftInput = z.infer<typeof ReviseTaskWorkflowDraftInputSchema>;
+export type ReviseTaskWorkflowDraftResult = z.infer<typeof ReviseTaskWorkflowDraftResultSchema>;
 export type { PlanningSnapshotReference };
 
 export interface TaskWorkflowActivities {
@@ -259,6 +284,9 @@ export interface TaskWorkflowActivities {
   executeRemoteReconciledStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   evaluatePredicate(input: EvaluatePredicateInput): Promise<boolean>;
   planTaskImplementation(input: PlanTaskImplementationInput): Promise<TaskWorkflowPlanningState>;
+  reviseTaskWorkflowDraft(
+    input: ReviseTaskWorkflowDraftInput,
+  ): Promise<ReviseTaskWorkflowDraftResult>;
   linkWorkflowContinuation(
     input: LinkWorkflowContinuationInput,
   ): Promise<LinkWorkflowContinuationResult>;

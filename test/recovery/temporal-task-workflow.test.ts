@@ -624,6 +624,11 @@ describe('Temporal task workflow', () => {
       'revision',
     ]);
     expect(new Set(commands.map((command) => command.commandId))).toHaveLength(3);
+    expect(
+      commands.every((command) =>
+        command.commandId.startsWith(`tasker:${taskReference}:${firstReview.runId}:planning:`),
+      ),
+    ).toBe(true);
     expect(new Set(commands.map((command) => command.snapshotChecksum))).toEqual(
       new Set(['0'.repeat(64)]),
     );
@@ -721,21 +726,21 @@ describe('Temporal task workflow', () => {
       .toBe('completed');
   }, 30_000);
 
-  it('links an accepted workflow change as a recoverable Temporal child workflow', async () => {
-    const parentTask = `continuation-parent-${String(Date.now())}`;
-    const childTask = `continuation-child-${String(Date.now())}`;
-    const childInput = workflowInput('avia-13236-short-bug', childTask, 'automatic');
-    const links: { parentTaskReference: string; childTaskReference: string; childRunId: string }[] =
-      [];
+  it('recompiles a planning-time workflow change before execution freezes', async () => {
+    const taskReference = `draft-revision-${String(Date.now())}`;
+    const revisedInput = workflowInput('avia-13236-short-bug', taskReference, 'automatic');
+    const planningCommands: string[] = [];
+    const revisionRequests: Parameters<TaskWorkflowActivities['reviseTaskWorkflowDraft']>[0][] = [];
     const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] = async (
       input,
     ) => {
+      planningCommands.push(input.command.kind);
       const stub = await testTaskWorkflowActivities.planTaskImplementation(input);
-      return input.taskReference === parentTask && input.command.kind === 'initial'
+      return input.command.kind === 'initial'
         ? {
             ...stub,
             status: 'workflow_change_required',
-            artifactId: `workflow-change:${parentTask}`,
+            artifactId: `workflow-change:${taskReference}`,
             request: {
               reason: 'The defect belongs to a shared component repository.',
               discoveredRepositories: ['twiket/ui-kit'],
@@ -743,10 +748,134 @@ describe('Temporal task workflow', () => {
               evidence: ['reproduction:before'],
             },
           }
-        : stub;
+        : { ...stub, attempt: 2, artifactId: `plan:${taskReference}:revised` };
     };
-    const activities: Partial<TaskWorkflowActivities> = {
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
       planTaskImplementation,
+      reviseTaskWorkflowDraft: (input) => {
+        revisionRequests.push(input);
+        return Promise.resolve({
+          workflowHash: revisedInput.workflowHash,
+          graph: revisedInput.graph,
+          planningSnapshot: {
+            artifactId: `planning-snapshot:${taskReference}:${revisedInput.workflowHash}`,
+            checksum: '1'.repeat(64),
+          },
+        });
+      },
+    });
+    const initial = workflowInput('avia-12536-feature-review', taskReference, 'automatic');
+    expect(initial.workflowHash).not.toBe(revisedInput.workflowHash);
+    const started = await service.start(initial);
+    expect(started.ok).toBe(true);
+
+    const review = await waitForWait(service, taskReference, 'code_review@1');
+    expect(review.workflowHash).toBe(revisedInput.workflowHash);
+    expect(review.workflowChange).toBeNull();
+    expect(review.executionContext).toMatchObject({
+      status: 'ready',
+      planningSnapshot: { checksum: '1'.repeat(64) },
+    });
+    expect(planningCommands).toEqual(['initial', 'revision']);
+    expect(revisionRequests).toHaveLength(1);
+    expect(revisionRequests[0]?.currentWorkflowHash).toBe(initial.workflowHash);
+    expect(revisionRequests[0]?.operationId).toBe(
+      `tasker:${taskReference}:${review.runId}:draft-revision:1`,
+    );
+    expect(revisionRequests[0]?.request.discoveredRepositories).toEqual(['twiket/ui-kit']);
+    expect(runRegistry.read(taskReference)?.workflowHash).toBe(revisedInput.workflowHash);
+  }, 30_000);
+
+  it('waits for guidance when draft recompilation cannot recover automatically', async () => {
+    const taskReference = `draft-revision-guidance-${String(Date.now())}`;
+    const planningCommands: string[] = [];
+    let revisionDeliveries = 0;
+    const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] = async (
+      input,
+    ) => {
+      planningCommands.push(input.command.kind);
+      const stub = await testTaskWorkflowActivities.planTaskImplementation(input);
+      return input.command.kind === 'initial'
+        ? {
+            ...stub,
+            status: 'workflow_change_required',
+            artifactId: `workflow-change:${taskReference}`,
+            request: {
+              reason: 'A second repository appears necessary but cannot be resolved.',
+              discoveredRepositories: ['twiket/unavailable-component'],
+              requiredCapabilities: ['repository.read'],
+              evidence: ['planner:repository-reference'],
+            },
+          }
+        : { ...stub, attempt: 2, artifactId: `plan:${taskReference}:guided` };
+    };
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      planTaskImplementation,
+      reviseTaskWorkflowDraft: () => {
+        revisionDeliveries += 1;
+        throw new Error('Bitbucket is unavailable while resolving the repository');
+      },
+    });
+    const started = await service.start(
+      workflowInput('avia-12536-feature-review', taskReference, 'automatic'),
+    );
+    expect(started.ok).toBe(true);
+
+    const blocked = await waitForWait(service, taskReference, 'draft_revision.guidance@1');
+    if (blocked.status !== 'waiting') throw new Error('Expected draft revision guidance wait');
+    expect(revisionDeliveries).toBe(3);
+    expect(blocked.workflowChange).toMatchObject({
+      request: { discoveredRepositories: ['twiket/unavailable-component'] },
+    });
+    const resumed = await service.resolveWait(taskReference, {
+      nodeId: blocked.wait.nodeId,
+      waitKind: blocked.wait.waitKind,
+      resolution: {
+        decision: 'resume',
+        guidance: 'The repository reference was a false lead; keep this task in the primary repo.',
+      },
+    });
+    expect(resumed.ok).toBe(true);
+    await waitForWait(service, taskReference, 'code_review@1');
+    expect(planningCommands).toEqual(['initial', 'revision']);
+  }, 30_000);
+
+  it('links a post-freeze workflow change as a recoverable Temporal child workflow', async () => {
+    const parentTask = `continuation-parent-${String(Date.now())}`;
+    const childTask = `continuation-child-${String(Date.now())}`;
+    const childInput = workflowInput('avia-13236-short-bug', childTask, 'automatic');
+    const links: { parentTaskReference: string; childTaskReference: string; childRunId: string }[] =
+      [];
+    const activities: Partial<TaskWorkflowActivities> = {
+      executeWorkspaceReconciledStep: (input) =>
+        input.taskReference === parentTask && input.uses === 'code.implement@1'
+          ? Promise.resolve({
+              status: 'workflow_change_required',
+              summary: 'Implementation discovered a shared component dependency.',
+              artifactIds: [`workflow-change:${parentTask}`],
+              transcriptId: null,
+              predicateResults: {},
+              request: {
+                schemaVersion: 1,
+                discoveredAtNodeId: input.nodeId,
+                summary: 'The defect belongs to a shared component repository.',
+                evidenceArtifactIds: [`workflow-change:${parentTask}`],
+                changes: [
+                  {
+                    kind: 'cross_repository_dependency',
+                    repository: 'twiket/ui-kit',
+                    requestedOutcome: 'Repair and publish the shared component.',
+                  },
+                ],
+              },
+            })
+          : testTaskWorkflowActivities.executeWorkspaceReconciledStep(input),
       linkWorkflowContinuation: (input) => {
         links.push(input);
         return Promise.resolve({ linked: true });
@@ -764,7 +893,7 @@ describe('Temporal task workflow', () => {
     const review = await waitForWait(service, parentTask, 'workflow_change.review@1');
     expect(review.workflowChange).toMatchObject({
       artifactId: `workflow-change:${parentTask}`,
-      request: { discoveredRepositories: ['twiket/ui-kit'] },
+      request: { changes: [{ repository: 'twiket/ui-kit' }] },
     });
     const accepted = await service.resolveWait(parentTask, {
       nodeId: review.currentNodeId ?? 'analyze-task',

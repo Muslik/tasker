@@ -52,10 +52,13 @@ action reaches that collector and the initial graph assembler through a retryabl
 heartbeat-enabled Temporal bootstrap Activity; a failed bootstrap can be retried after
 infrastructure recovery without deleting its persisted evidence. Workflow analysis and
 implementation planning consume the same immutable bundle revision, while Temporal
-planning snapshots carry only its reference. Planning still runs through the temporary
-`task.analyze@1` interpreter special case, so draft recompilation and the explicit freeze
-boundary remain the next architecture slice. External Jira/Confluence/Loop reads are
-not yet mediated back into the bundle. The company `ai-assistance` policy now contributes
+planning snapshots carry only its reference. Planning now runs before generic graph
+traversal. A planning-time workflow change creates a complete, deterministically
+validated and operation-idempotent draft revision; the planner checks it again, and
+product execution begins only after the plan fits and optional review completes.
+Post-freeze discoveries still use validated Child Workflow continuation. External
+Jira/Confluence/Loop reads are not yet mediated back into the bundle. The company
+`ai-assistance` policy now contributes
 ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
 flow into same-branch artifacts and a validated provider-neutral PR draft. The gated
 Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and

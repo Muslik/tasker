@@ -348,6 +348,8 @@ describe('Temporal local mutation recovery', () => {
               ? Promise.resolve(completedStep(input))
               : execution.executeRemoteReconciledStep(input),
           evaluatePredicate: execution.evaluatePredicate,
+          reviseTaskWorkflowDraft: () =>
+            Promise.reject(new Error('Unexpected workflow draft revision')),
           linkWorkflowContinuation: () => Promise.resolve({ linked: true }),
         };
       };

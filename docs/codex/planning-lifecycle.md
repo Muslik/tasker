@@ -124,7 +124,7 @@ Initial planning revisions and execution-time continuations are deliberately dif
 - planning revises a draft before product effects begin;
 - continuation preserves an already accepted graph and completed execution prefix.
 
-## Current implementation gap
+## Current implementation
 
 As of 2026-08-05, Tasker persists a typed, append-only Evidence Bundle with provenance,
 deduplicated immutable revisions, and restart-safe references. A dedicated Temporal
@@ -140,18 +140,35 @@ performs its own hidden repository evidence collection. Planning snapshots carry
 the immutable bundle reference. The planner also receives the block's snapshotted
 read-only skills.
 
-Tasker still special-cases `task.analyze@1` inside the execution graph interpreter and
-passes the compiled draft into that run before implementation planning has accepted the
-final shape. The following target work remains:
+Planning is now a first-class Temporal lifecycle before generic graph traversal. The
+lifecycle locates the validator-required planning step and review gate, prepares the
+workspace, runs the mandatory planner, and admits no product-effect block until the
+plan fits and optional review completes. The generic node interpreter no longer calls
+the planner or gives `task.analyze@1` name-based execution behavior.
 
-1. mediate Jira/Confluence/Loop skill reads through provenance-producing Tasker
-   adapters and move large evidence bodies into separately referenced artifacts;
-2. treat planning workflow changes as draft proposals followed by full recompilation,
-   rather than ordinary execution continuation;
-3. freeze and start the execution graph only after plan-fit validation and optional
-   review;
-4. remove the interpreter's name-based `task.analyze@1` special case once planning is a
-   first-class lifecycle phase.
+A planning `workflow_change_required` result invokes a heartbeat-enabled draft
+revision Activity. That Activity resolves newly discovered repositories, appends
+context evidence, asks the workflow analyzer for a complete replacement source,
+recompiles and validates it through the ordinary M1 compiler, and records a new
+immutable attempt. The accepted hash, graph, and planning-snapshot reference replace
+the in-Workflow draft. The planner then checks the revised draft again. Three
+automatic draft-revision cycles are allowed before a slot-free
+`draft_revision.guidance@1` operator wait.
 
-No new execution block should depend on the old special case as a permanent extension
-surface.
+Draft revision has a stable operation ID persisted in the same ledger transaction as
+the compiled attempt. If an Activity completion is lost, redelivery returns that exact
+attempt without rerunning context discovery or the provider. Validation failure or
+repository/VPN failure leaves the Temporal run and prepared workspace intact and opens
+operator guidance after Activity retries are exhausted.
+
+After planning and optional review, the lifecycle marks its graph nodes complete and
+hands the accepted graph/hash to the generic interpreter. That handoff is the freeze:
+the execution traversal has no code path that replaces the active graph. A later
+execution-block `workflow_change_required` still opens continuation review and may
+start a Child Workflow, preserving the original prefix.
+
+The remaining evidence-boundary work is to mediate Jira/Confluence/Loop skill reads
+through provenance-producing Tasker adapters and move large external bodies into
+separately referenced artifacts. A compact explicit freeze receipt is also desirable
+for retrospective/export surfaces; Temporal history and the run projection already
+retain the accepted hash used for execution.

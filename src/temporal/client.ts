@@ -160,7 +160,7 @@ export class TemporalTaskRunService implements TaskTemporalRunService {
           message: `Temporal run ${taskReference} has no valid Tasker memo`,
         });
       }
-      return ok(
+      return this.register(
         await this.readHandle(handle, memo.data, description.runId, description.status.name),
       );
     } catch (error) {
