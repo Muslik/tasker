@@ -221,6 +221,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
           ...workspaceHarnessEnvironment(request.repositoryPath, preparedSkills.value.skillsRoot),
           TASKER_HARNESS_ENV_FILE: '/dev/null',
         },
+        mounts: [{ source: directory, target: directory, readOnly: false }],
         unsetEnv: request.mediatedCredentialEnvironment,
         stdin: prompt,
         timeoutMs:

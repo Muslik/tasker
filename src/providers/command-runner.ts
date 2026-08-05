@@ -7,10 +7,17 @@ export interface CommandRequest {
   readonly cwd: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly unsetEnv?: readonly string[];
+  readonly mounts?: readonly CommandMount[];
   readonly stdin: string;
   readonly timeoutMs: number;
   readonly cancellationSignal?: AbortSignal;
   readonly onOutput?: ((stream: 'stdout' | 'stderr', chunk: string) => void) | undefined;
+}
+
+export interface CommandMount {
+  readonly source: string;
+  readonly target: string;
+  readonly readOnly: boolean;
 }
 
 export type CommandResult =
@@ -37,12 +44,28 @@ export interface CommandRunner {
   run(request: CommandRequest): Promise<CommandResult>;
 }
 
+export interface HostControlPlaneCommandRunner extends CommandRunner {
+  readonly executionEnvironment: 'host_control_plane';
+}
+
+export interface WorkspaceCommandRunner extends CommandRunner {
+  readonly executionEnvironment: 'docker_workspace';
+}
+
 const elapsedMilliseconds = (startedAt: bigint): number =>
   Number(process.hrtime.bigint() - startedAt) / 1_000_000;
 
-export const nodeCommandRunner: CommandRunner = {
-  run: (request) =>
-    new Promise((resolve) => {
+export const nodeCommandRunner: HostControlPlaneCommandRunner = {
+  executionEnvironment: 'host_control_plane',
+  run: (request) => {
+    if ((request.mounts?.length ?? 0) > 0) {
+      return Promise.resolve({
+        status: 'spawn_failed',
+        message: 'Host control-plane commands cannot consume container mounts',
+        durationMs: 0,
+      });
+    }
+    return new Promise((resolve) => {
       const startedAt = process.hrtime.bigint();
       const unsetEnvironment = new Set(request.unsetEnv ?? []);
       const environment = Object.fromEntries(
@@ -132,5 +155,6 @@ export const nodeCommandRunner: CommandRunner = {
         // The exit/close event owns the durable process result, including early EPIPE.
       });
       child.stdin.end(request.stdin);
-    }),
+    });
+  },
 };

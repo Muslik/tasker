@@ -156,6 +156,7 @@ export class CodexCliWorkflowAnalyzer {
         ],
         cwd: isolatedWorkspace,
         env: { CODEX_HOME: isolatedCodexHome },
+        mounts: [{ source: directory, target: directory, readOnly: false }],
         stdin: prompt,
         timeoutMs: this.options.timeoutMs ?? 10 * 60_000,
       });

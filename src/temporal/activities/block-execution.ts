@@ -33,6 +33,7 @@ import {
   workspaceHarnessEnvironment,
 } from '../../providers/agent-skills.js';
 import type {
+  CommandMount,
   CommandRequest,
   CommandResult,
   CommandRunner,
@@ -299,6 +300,21 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
         `${JSON.stringify(codexOutputJsonSchema(request.outputSchema), null, 2)}\n`,
         'utf8',
       );
+      const harnessEnvironment = workspaceHarnessEnvironment(
+        request.cwd,
+        preparedSkills.value.skillsRoot,
+      );
+      const harnessEnvironmentFile = harnessEnvironment.TASKER_HARNESS_ENV_FILE;
+      const extraMounts: readonly CommandMount[] =
+        harnessEnvironmentFile !== undefined && harnessEnvironmentFile !== '/dev/null'
+          ? [
+              {
+                source: harnessEnvironmentFile,
+                target: harnessEnvironmentFile,
+                readOnly: true,
+              },
+            ]
+          : [];
       const execution = await this.runCommand(request, {
         command,
         args: [
@@ -323,8 +339,12 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
         cwd: request.cwd,
         env: {
           CODEX_HOME: isolatedCodexHome,
-          ...workspaceHarnessEnvironment(request.cwd, preparedSkills.value.skillsRoot),
+          ...harnessEnvironment,
         },
+        mounts: [
+          { source: directory, target: directory, readOnly: false },
+          ...extraMounts,
+        ],
         stdin: request.prompt,
         timeoutMs: request.timeoutMs,
       });
