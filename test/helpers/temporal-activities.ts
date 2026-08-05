@@ -6,8 +6,62 @@ import type {
   PrepareTaskWorkspaceResult,
   TaskWorkflowActivities,
 } from '../../src/temporal/contracts.js';
+import { ok } from '../../src/shared/outcome.js';
+import type {
+  DockerWorkspaceRuntimeReceipt,
+  ResolvedWorkspaceRuntimePolicy,
+  WorkspaceLocator,
+} from '../../src/workspaces/index.js';
 
 const TEST_PROMPT_HASH = '0'.repeat(64);
+
+export const testDockerRuntimeReceipt = (
+  workspace: WorkspaceLocator,
+): DockerWorkspaceRuntimeReceipt => ({
+  schemaVersion: 1,
+  workspaceId: workspace.workspaceId,
+  workspacePath: workspace.path,
+  repositorySourcePath: workspace.repository.sourcePath,
+  policyHash: TEST_PROMPT_HASH,
+  policy: {
+    engine: 'docker',
+    image: { kind: 'prebuilt', reference: 'tasker/workspace:test' },
+    workspaceMountPath: '/workspace',
+    environment: {},
+    bootstrap: [],
+    cacheVolumes: [],
+    services: [],
+  },
+  image: 'tasker/workspace:test',
+  imageId: 'sha256:test',
+  networkName: `tasker-network-${workspace.workspaceId}`,
+  volumes: [],
+  services: [],
+  environment: {},
+  initializedVolumes: [],
+  completedBootstrap: [],
+  status: 'ready',
+  preparedAt: '2026-08-03T00:00:00.000Z',
+  updatedAt: '2026-08-03T00:00:00.000Z',
+});
+
+export const testDockerRuntimes = {
+  prepare: (workspace: WorkspaceLocator) =>
+    Promise.resolve(ok(testDockerRuntimeReceipt(workspace))),
+};
+
+export const testDockerRuntimePolicies = {
+  resolve: (): ResolvedWorkspaceRuntimePolicy => ({
+    engine: 'docker',
+    image: { kind: 'prebuilt', reference: 'tasker/workspace:test' },
+    workspaceMountPath: '/workspace',
+    environment: {},
+    bootstrap: [],
+    cacheVolumes: [],
+    services: [],
+    policyHash: TEST_PROMPT_HASH,
+  }),
+};
 
 const prepareTaskWorkspace = (
   input: PrepareTaskWorkspaceInput,
@@ -40,6 +94,23 @@ const prepareTaskWorkspace = (
       files: [],
       completedAt: '2026-08-03T00:00:00.000Z',
     },
+    runtime: testDockerRuntimeReceipt({
+      schemaVersion: 1,
+      workspaceId: '0'.repeat(24),
+      taskReference: input.taskReference,
+      workflowId: input.workflowId,
+      workflowRunId: input.workflowRunId,
+      workflowHash: input.workflowHash,
+      repository: {
+        reference: 'fixture/repository',
+        sourcePath: '/tasker/repositories/fixture',
+        baseCommit: '0'.repeat(40),
+      },
+      runnerId: 'temporal-test',
+      path: '/tasker/worktrees/fixture',
+      branch: `tasker/${input.taskReference}`,
+      preparedAt: '2026-08-03T00:00:00.000Z',
+    }),
     planningSnapshot: {
       artifactId: `planning-snapshot:${input.taskReference}:${input.workflowHash}`,
       checksum: TEST_PROMPT_HASH,

@@ -37,6 +37,7 @@ quality of coding workflows.
 | custom parent/child join scheduling | replace with Child Workflows where appropriate |
 | execution state in SQLite projections | reduce to cache/index with explicit staleness |
 | external effect intent/receipt/reconciliation | preserve; Temporal does not solve it |
+| provider/project host processes | replace with Docker-only workspace command runner |
 
 ## Runtime authority rule
 
@@ -60,10 +61,12 @@ src/
   repositories/             keep/adapt: catalog/checkout/worktree/bootstrap
   control-plane/            simplify: API and projection, no scheduler ownership
   ledger/                   shrink/rename: product/artifact/effect store only
-  runner/                   deleted: no Tasker-owned execution runtime remains
+  workspaces/               keep: worktrees plus Docker runtime policy/receipts/control
 ```
 
-Module names may change during implementation, but the ownership rule may not: no
+Temporal remains the durable runtime; Docker is an Activity execution environment, not
+a scheduler, cursor, or second history. Module names may change during implementation,
+but the ownership rule may not: no
 Temporal-shaped leases/cursors are recreated under a different folder.
 
 ## Expected deletion surface

@@ -11,9 +11,17 @@ export interface WorkspaceConfiguration {
 }
 
 export interface WorkspaceBootstrapConfiguration {
-  readonly command: string | null;
   readonly harnessPackPath: string;
   readonly snapshotStorePath: string;
+}
+
+export interface DockerWorkspaceConfiguration {
+  readonly executable: string;
+  readonly defaultImage: string;
+  readonly imageContextPath: string;
+  readonly imageDockerfilePath: string;
+  readonly runtimeStorePath: string;
+  readonly workspaceStorePath: string;
 }
 
 const defaultWorkspaceHarnessPackPath = (): string =>
@@ -44,7 +52,6 @@ export const loadWorkspaceConfiguration = (
 export const loadWorkspaceBootstrapConfiguration = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): WorkspaceBootstrapConfiguration => ({
-  command: environment.TASKER_WORKSPACE_BOOTSTRAP_COMMAND?.trim() || null,
   harnessPackPath: resolve(
     environment.TASKER_WORKSPACE_HARNESS_PATH?.trim() || defaultWorkspaceHarnessPackPath(),
   ),
@@ -53,3 +60,23 @@ export const loadWorkspaceBootstrapConfiguration = (
       resolve(dirname(defaultRepositoryStorePath(environment)), 'harness-snapshots'),
   ),
 });
+
+export const loadDockerWorkspaceConfiguration = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): DockerWorkspaceConfiguration => {
+  const workspaceStorePath = defaultWorkspaceStorePath(environment);
+  const runnerRoot = fileURLToPath(new URL('../../docker/runner/', import.meta.url));
+  return {
+    executable: environment.TASKER_DOCKER_EXECUTABLE?.trim() || 'docker',
+    defaultImage: environment.TASKER_DOCKER_WORKSPACE_IMAGE?.trim() || 'tasker/workspace:local',
+    imageContextPath: resolve(environment.TASKER_DOCKER_IMAGE_CONTEXT?.trim() || runnerRoot),
+    imageDockerfilePath: resolve(
+      environment.TASKER_DOCKER_IMAGE_DOCKERFILE?.trim() || resolve(runnerRoot, 'Dockerfile'),
+    ),
+    runtimeStorePath: resolve(
+      environment.TASKER_DOCKER_RUNTIME_STORE?.trim() ||
+        resolve(dirname(defaultRepositoryStorePath(environment)), 'docker-runtimes'),
+    ),
+    workspaceStorePath,
+  };
+};

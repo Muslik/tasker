@@ -66,8 +66,11 @@ import { systemClock } from '../shared/clock.js';
 import {
   loadWorkspaceConfiguration,
   loadWorkspaceBootstrapConfiguration,
+  loadDockerWorkspaceConfiguration,
   assertWorkspaceHarnessProvidesSkills,
-  CommandWorkspaceBootstrapAdapter,
+  DockerWorkspaceCommandRunner,
+  DockerWorkspaceRuntimeManager,
+  DockerWorkspaceRuntimeStore,
   HarnessProfileWorkspaceBootstrapAdapter,
   GitWorkspaceMutationInspector,
   ManagedWorkspaceManager,
@@ -75,6 +78,7 @@ import {
   WorkspaceBootstrapStore,
   WorkspaceStore,
   loadWorkspaceHarnessPack,
+  resolveWorkspaceRuntimePolicy,
 } from '../workspaces/index.js';
 import {
   createPlanningActivity,
@@ -110,6 +114,20 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const workflowService = createM1WorkflowService(ledger.repository, systemClock);
   const harnessPack = loadHarnessPack();
+  const dockerConfiguration = loadDockerWorkspaceConfiguration();
+  const dockerRuntimeStore = new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath);
+  const dockerCommands = new DockerWorkspaceCommandRunner(
+    dockerConfiguration,
+    nodeCommandRunner,
+    dockerRuntimeStore,
+  );
+  const dockerRuntimes = new DockerWorkspaceRuntimeManager(
+    dockerConfiguration,
+    nodeCommandRunner,
+    dockerCommands,
+    dockerRuntimeStore,
+    systemClock,
+  );
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
   const bitbucketPullRequestEffectsEnabled =
     process.env.TASKER_ENABLE_BITBUCKET_PR_EFFECTS === 'true';
@@ -198,7 +216,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   ]);
   const workflowFreezes = new WorkflowFreezeStore(ledger.repository, systemClock);
   const temporalCommandRunner = createTemporalActivityCommandRunner(
-    nodeCommandRunner,
+    dockerCommands,
     planningTranscripts,
   );
   const workflowAnalyzer = deterministicProvider
@@ -242,7 +260,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const mutationRecovery = new WorkspaceMutationRecoveryStore(
     ledger.repository,
     systemClock,
-    new GitWorkspaceMutationInspector(nodeCommandRunner),
+    new GitWorkspaceMutationInspector(dockerCommands),
   );
   const workspaces = new ManagedWorkspaceManager(
     loadWorkspaceConfiguration(),
@@ -250,25 +268,20 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     nodeCommandRunner,
   );
   const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
-  if (bootstrapConfiguration.command === null) {
-    assertWorkspaceHarnessProvidesSkills(
-      loadWorkspaceHarnessPack(bootstrapConfiguration.harnessPackPath),
-      harnessPack.steps.flatMap((step) =>
-        step.execution.kind === 'agent' ? [...step.execution.skills] : [],
-      ),
-    );
-  }
-  const bootstrapAdapter =
-    bootstrapConfiguration.command === null
-      ? new HarnessProfileWorkspaceBootstrapAdapter(
-          {
-            sourcePackPath: bootstrapConfiguration.harnessPackPath,
-            snapshotStorePath: bootstrapConfiguration.snapshotStorePath,
-          },
-          nodeCommandRunner,
-          systemClock,
-        )
-      : new CommandWorkspaceBootstrapAdapter(bootstrapConfiguration, nodeCommandRunner);
+  assertWorkspaceHarnessProvidesSkills(
+    loadWorkspaceHarnessPack(bootstrapConfiguration.harnessPackPath),
+    harnessPack.steps.flatMap((step) =>
+      step.execution.kind === 'agent' ? [...step.execution.skills] : [],
+    ),
+  );
+  const bootstrapAdapter = new HarnessProfileWorkspaceBootstrapAdapter(
+    {
+      sourcePackPath: bootstrapConfiguration.harnessPackPath,
+      snapshotStorePath: bootstrapConfiguration.snapshotStorePath,
+    },
+    nodeCommandRunner,
+    systemClock,
+  );
   const bootstrap = new WorkspaceBootstrapCoordinator(
     new WorkspaceBootstrapStore(ledger.repository),
     bootstrapAdapter,
@@ -276,7 +289,21 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {
       ...createWorkflowAssemblyActivity(workflowGenerator),
-      ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
+      ...createWorkspaceActivity(
+        subjects,
+        workspaces,
+        bootstrap,
+        dockerRuntimes,
+        {
+          resolve: (repositoryReference) =>
+            resolveWorkspaceRuntimePolicy(
+              harnessPack.company,
+              harnessPack.projects.find((project) => project.repository === repositoryReference) ??
+                null,
+            ),
+        },
+        planning,
+      ),
       ...createPlanningActivity(planning),
       ...createWorkflowDraftRevisionActivity(workflowDraftRevisions, planning),
       ...createWorkflowFreezeActivity(workflowFreezes),
@@ -295,8 +322,8 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         currentSteps: createCurrentStepRegistry(harnessPack),
         traces: executionTraces,
         mutationRecovery,
-        agentRunner: new CodexCliTaskStepAgentRunner(nodeCommandRunner),
-        commands: nodeCommandRunner,
+        agentRunner: new CodexCliTaskStepAgentRunner(dockerCommands),
+        commands: dockerCommands,
         integrations: integrationAdapters,
         evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),
       }),

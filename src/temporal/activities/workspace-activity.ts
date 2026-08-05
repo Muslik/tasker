@@ -7,6 +7,8 @@ import type {
   WorkspaceLocator,
   WorkspacePreparationError,
   WorkspaceBootstrapper,
+  DockerWorkspaceRuntimePreparer,
+  ResolvedWorkspaceRuntimePolicy,
 } from '../../workspaces/index.js';
 import {
   PrepareTaskWorkspaceInputSchema,
@@ -30,13 +32,26 @@ export interface TemporalManagedWorkspacePreparer {
   ): Promise<Outcome<WorkspaceLocator, WorkspacePreparationError>>;
 }
 
-const failure = (phase: string, kind: string): Error =>
-  new Error(`Task workspace ${phase} failed: ${kind}`);
+export interface TemporalWorkspaceRuntimePolicySource {
+  resolve(repositoryReference: string): ResolvedWorkspaceRuntimePolicy;
+}
+
+const failure = (
+  phase: string,
+  detail: { readonly kind: string; readonly message?: string },
+): Error =>
+  new Error(
+    `Task workspace ${phase} failed: ${detail.kind}${
+      detail.message === undefined ? '' : `: ${detail.message}`
+    }`,
+  );
 
 export const createWorkspaceActivity = (
   subjects: TemporalWorkspaceSubjectSource,
   workspaces: TemporalManagedWorkspacePreparer,
   bootstrap: WorkspaceBootstrapper,
+  runtimes: DockerWorkspaceRuntimePreparer,
+  runtimePolicies: TemporalWorkspaceRuntimePolicySource,
   snapshots: PlanningSnapshotSource,
 ): Pick<TaskWorkflowActivities, 'prepareTaskWorkspace'> => ({
   prepareTaskWorkspace: async (inputValue: PrepareTaskWorkspaceInput) => {
@@ -45,7 +60,7 @@ export const createWorkspaceActivity = (
     context.heartbeat({ phase: 'resolve_repository' });
 
     const subject = subjects.resolve(input.taskReference);
-    if (!subject.ok) throw failure('repository resolution', subject.error.kind);
+    if (!subject.ok) throw failure('repository resolution', subject.error);
 
     context.heartbeat({ phase: 'prepare_worktree' });
     const prepared = await workspaces.prepare({
@@ -56,12 +71,38 @@ export const createWorkspaceActivity = (
       repositoryReference: subject.value.task.repository,
       repositoryPath: subject.value.repositoryPath,
     });
-    if (!prepared.ok) throw failure('preparation', prepared.error.kind);
+    if (!prepared.ok) throw failure('preparation', prepared.error);
 
     context.cancellationSignal.throwIfAborted();
     context.heartbeat({ phase: 'bootstrap_harness' });
     const bootstrapped = await bootstrap.prepare(prepared.value);
-    if (!bootstrapped.ok) throw failure('bootstrap', bootstrapped.error.kind);
+    if (!bootstrapped.ok) throw failure('bootstrap', bootstrapped.error);
+
+    context.cancellationSignal.throwIfAborted();
+    context.heartbeat({ phase: 'prepare_docker_runtime' });
+    const heartbeat = setInterval(() => {
+      context.heartbeat({ phase: 'prepare_docker_runtime' });
+    }, 10_000);
+    const runtime = await (async () => {
+      try {
+        return await runtimes.prepare(
+          prepared.value,
+          runtimePolicies.resolve(prepared.value.repository.reference),
+          {
+            cancellationSignal: context.cancellationSignal,
+            onProgress: (progress) => {
+              context.heartbeat({
+                phase: `prepare_docker_runtime:${progress.phase}`,
+                ...(progress.detail === undefined ? {} : { detail: progress.detail }),
+              });
+            },
+          },
+        );
+      } finally {
+        clearInterval(heartbeat);
+      }
+    })();
+    if (!runtime.ok) throw failure('Docker runtime', runtime.error);
 
     context.cancellationSignal.throwIfAborted();
     context.heartbeat({ phase: 'snapshot_planning_input' });
@@ -71,12 +112,13 @@ export const createWorkspaceActivity = (
       path: prepared.value.path,
     });
     if (!planningSnapshot.ok) {
-      throw failure('planning snapshot', planningSnapshot.error.kind);
+      throw failure('planning snapshot', planningSnapshot.error);
     }
 
     return PrepareTaskWorkspaceResultSchema.parse({
       workspace: prepared.value,
       bootstrap: bootstrapped.value,
+      runtime: runtime.value,
       planningSnapshot: planningSnapshot.value,
     });
   },

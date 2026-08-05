@@ -9,6 +9,10 @@
     "pullCommand": "pnpm translations:pull"
   },
   "ci": { "kind": "jenkins", "job": "ui-kit" },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "services": []
+  },
   "processCommands": {
     "translations.extract@1": "pnpm translations:extract",
     "translations.pull@1": "pnpm translations:pull"

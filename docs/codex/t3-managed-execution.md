@@ -1,8 +1,8 @@
 # T3 managed work execution
 
-Status: managed workspace, built-in multi-project harness bootstrap, Temporal
+Status: managed workspace, built-in multi-project harness bootstrap, Docker-only
 preparation and executable block Activities, response-loss reconciliation, and browser
-E2E parity implemented 2026-08-04. The T3 gate is complete.
+E2E parity implemented 2026-08-05. The T3 gate is complete.
 
 ## Boundary
 
@@ -47,10 +47,16 @@ worktree-local `skip-worktree` bits keep this configuration out of the task diff
 or response is lost after a partial apply, the next Activity attempt completes the same
 snapshot. Editing the source pack affects future workspaces only.
 
-An optional `TASKER_WORKSPACE_BOOTSTRAP_COMMAND` retains the target-aware external
-adapter protocol for another company or packaging system. It receives `inspect` or
-`apply` plus the exact workspace locator and must return `absent` or a versioned ready
-receipt.
+Project bootstrap is declared in company/project `workspaceRuntime` policy and runs
+only inside Docker. The removed external host bootstrap backend is not a compatibility
+surface. Another company replaces the portable workspace pack and runtime policy,
+without adding a host hook.
+
+Runtime preparation heartbeats while the image, toolchain, dependencies, and service
+readiness are being reconciled. Volume ownership and every bootstrap command are
+receipted independently, so retry neither recursively rewrites a populated cache nor
+forgets an interrupted pre-bootstrap volume. Docker/image/bootstrap/service failures
+become the recoverable workspace wait with their exact cause.
 
 `ai-assistance` remains an optional company policy pack that contributes ordinary
 registered blocks. It is unrelated to workspace allocation and Temporal durability.

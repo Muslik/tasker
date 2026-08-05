@@ -16,7 +16,8 @@ invariants live in [`architecture.md`](architecture.md); sequencing lives in
 | Boundary validation | Zod | Existing schemas, runtime validation, JSON Schema export |
 | Product store | SQLite/WAL with `better-sqlite3` initially | Local-first metadata/artifacts/indexes; not execution authority |
 | HTTP/control plane | Fastify | Existing typed local API and SSE-compatible surface |
-| Process execution | Node `child_process.spawn` behind `CommandRunner` | Existing cancellable streaming boundary; no extra runtime dependency |
+| Workspace execution | Docker-only `WorkspaceCommandRunner`; ephemeral command containers plus task-scoped network/volumes/services | Reproducible toolchains, cancellation, isolation, and no dependency on laptop PATH |
+| Toolchain setup | `mise` inside the workspace image | Repository-pinned Node/other versions without one image per project |
 | UI | React, Vite, shadcn-style primitives | Minimal operator console, no graph-editor requirement |
 | Tests | Vitest, fast-check where useful, Playwright | Unit/property/integration/operator acceptance |
 | Logs | Pino with redaction | Operational diagnostics separate from task activity |
@@ -34,10 +35,12 @@ The development topology is:
 ```text
 Temporal Service <- Tasker Temporal Client <- Tasker API
         |
-        +-> Task Queue <- Tasker Worker(s) <- Activities/adapters/worktrees
+        +-> Task Queue <- Tasker Worker(s) <- Activities/adapters/Docker workspaces
 ```
 
-Use the Temporal CLI development server for tests and local development. It is not the
+Use the Temporal CLI development server for tests and local development. Docker is the
+only provider/project command environment; no host runner is selectable. The Temporal
+development server is not the
 durability target for unattended operation. A VPS pilot must use a supported persistent
 self-hosted deployment or Temporal Cloud and must test backup/recovery and worker
 deployment compatibility.

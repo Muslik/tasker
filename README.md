@@ -18,8 +18,9 @@ registered building blocks plus company/project policy. A dedicated Temporal boo
 Workflow now owns context discovery and initial draft assembly; it stores evidence and
 the compiled draft outside Temporal history and returns only the bounded result/hash.
 After planning and validation, the frozen graph is immutable input to a generic Temporal
-graph interpreter. Agent calls, shell commands, filesystem work, and remote APIs run
-only in Temporal Activities; review, clarification, translation, publication, CI, and
+graph interpreter. Agent calls, project shell commands, builds, tests, and Playwright
+run only in Docker-backed Temporal Activities; typed remote APIs remain Activity
+adapters; review, clarification, translation, publication, CI, and
 infrastructure pauses use durable Temporal messages and conditions.
 
 Read the canonical design in [`docs/codex`](docs/codex/README.md), the migration and
@@ -27,6 +28,8 @@ deletion plan in
 [`docs/codex/temporal-migration.md`](docs/codex/temporal-migration.md), and the extension
 contract in
 [`docs/codex/customization-guide.md`](docs/codex/customization-guide.md).
+Docker-only execution and project bootstrap are documented in
+[`docs/codex/docker-execution.md`](docs/codex/docker-execution.md).
 
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
 Company blocks and policies are file-backed under [`harness/steps`](harness/steps) and

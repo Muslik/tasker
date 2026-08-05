@@ -6,6 +6,11 @@ import { openSqliteLedger } from '../ledger/index.js';
 import { createWorkflowAnalyzerContext, findTaskFixture } from '../planning/index.js';
 import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
 import { systemClock } from '../shared/clock.js';
+import {
+  DockerWorkspaceCommandRunner,
+  DockerWorkspaceRuntimeStore,
+  loadDockerWorkspaceConfiguration,
+} from '../workspaces/index.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import type { WorkflowResponse } from './m1-contracts.js';
 import { renderWorkflowTree } from './m1-cli.js';
@@ -88,7 +93,14 @@ export const runAnalyzerCli = async (
     }
 
     write(`Analyzing ${fixture.taskId} in ${repositoryPath} with Codex read-only mode…`);
-    const analyzer = new CodexCliWorkflowAnalyzer(nodeCommandRunner);
+    const dockerConfiguration = loadDockerWorkspaceConfiguration();
+    const analyzer = new CodexCliWorkflowAnalyzer(
+      new DockerWorkspaceCommandRunner(
+        dockerConfiguration,
+        nodeCommandRunner,
+        new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
+      ),
+    );
     const analyzerContext = createWorkflowAnalyzerContext(fixture);
     const evidence = await new ContextDiscoveryService(
       new EvidenceBundleStore(ledger.repository, systemClock),

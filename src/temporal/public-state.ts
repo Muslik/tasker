@@ -10,6 +10,7 @@ import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../planning/evidence-bundle.js';
 import { WorkflowChangeRequestSchema as ExecutionWorkflowChangeRequestSchema } from '../workflow/execution-result.js';
+import { DockerWorkspaceRuntimeReceiptSchema } from '../workspaces/docker-runtime-contracts.js';
 import {
   WorkspaceBootstrapReceiptSchema,
   WorkspaceLocatorSchema,
@@ -57,6 +58,7 @@ export const TaskWorkflowExecutionContextSchema = z.discriminatedUnion('status',
       status: z.literal('ready'),
       workspace: WorkspaceLocatorSchema,
       bootstrap: WorkspaceBootstrapReceiptSchema,
+      runtime: DockerWorkspaceRuntimeReceiptSchema,
       planningSnapshot: PlanningSnapshotReferenceSchema,
     })
     .strict(),

@@ -23,6 +23,7 @@ fallback scheduler remains.
 | T1 — Temporal walking skeleton | start two fixture tasks and see independent live workflows | generic interpreter, worker, Query, Activity, wait/update |
 | T2 — planning parity | choose plan review; answer question; request revision | real planning Activity and durable message loop |
 | T3 — managed work execution | run one safe repository task through worktree/build | agent/process Activities, heartbeats, recovery |
+| T3.1 — Docker execution cutover | inspect image/bootstrap/service state and retry infrastructure without lost work | all provider/project commands Docker-only; host backend removed |
 | T4 — integrations and PR lifecycle | Jira -> code -> PR -> CI -> review/revise | reconciled external effects and webhook/poll signals |
 | T5 — late workflow change | discover another repo/translation/publish step and continue | validated graph revision/Child Workflow |
 | T6 — cutover and deletion | Temporal is the only runtime shown | custom scheduler/lease/cursor/wait code removed |
@@ -212,7 +213,7 @@ reaches code review without repeating the mutation. T3 is complete.
    `repo:<name>` description marker.
 2. Clone/fetch into the OS-standard Tasker application-data path if absent.
 3. Create a per-run branch and managed worktree before repository analysis/planning.
-4. Invoke the external harness bootstrap/profile adapter and persist its receipt.
+4. Materialize the built-in portable harness profile and persist its receipt.
 5. Reuse the same worktree on retry, question, worker restart, and plan revision.
 6. Never mutate `~/Projects/work` or duplicate its `work` overlays.
 
@@ -238,6 +239,32 @@ No Jira/Bitbucket/Jenkins mutation is allowed yet. Kill the worker after file mu
 and before Activity completion; recovery must preserve the change and avoid duplicating
 it. This gate passed on 2026-08-04 with the built-in `front-avia` harness profile,
 behavior tests, and a TypeScript build.
+
+### 6.4 T3.1 — Docker-only execution cutover
+
+Implementation status on 2026-08-05: code cutover complete. There is no selectable
+host command backend for workflow analysis, implementation planning, agent/process
+blocks, mutation inspection, Playwright, project bootstrap, tests, or dev services.
+The host runner is private control-plane infrastructure for managed Git operations,
+Docker CLI operations, and typed external-system adapters.
+
+Delivered behavior:
+
+1. a versioned workspace image provides Codex, Claude Code, Playwright browsers, `mise`,
+   and stable system dependencies;
+2. company/project manifests resolve a task-specific runtime policy before planning;
+3. exact worktree/source mounts, task network, named caches, and project services are
+   reconciled by deterministic Tasker identities;
+4. volume initialization and bootstrap commands have durable per-item receipts;
+5. long preparation heartbeats and command cancellation preserve Temporal liveness;
+6. infrastructure failures open `workspace.retry@1`, expose their classified cause,
+   and resume the same worktree after the prerequisite is fixed;
+7. the analyzer can inspect runtime/service facts, while runtime setup remains kernel
+   infrastructure rather than hard-coded graph nodes.
+
+The unit/contract/recovery suite verifies the cutover and interrupted-preparation
+reconciliation. A full `front-avia` bootstrap is an environment smoke gate: it requires
+sufficient Docker Desktop storage and is not permission to fall back to the host.
 
 ## 7. T4 — Jira, Bitbucket, Jenkins/Allure, and review
 

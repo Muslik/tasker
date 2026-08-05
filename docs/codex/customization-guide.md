@@ -261,34 +261,37 @@ skills and repository profiles imported from the personal harness, but excludes 
 symlink machinery and secrets. `manifest.json` maps repository aliases to profiles, so
 adding another repository does not require an application-code branch.
 
-The repository Activity:
+The repository preparation Activity:
 
 1. allocates a managed task worktree under Tasker's application-data path;
 2. pins the current workspace-pack content hash in application data;
 3. materializes the resolved profile into that exact worktree;
 4. persists profile/version/receipt and resulting instruction/skill hashes;
-5. reconciles the receipt on Activity retry;
-6. keeps the same worktree across questions, waits, worker restarts, and plan revisions.
+5. resolves and pins `workspaceRuntime` from company plus project manifests;
+6. prepares Docker image, caches, bootstrap commands, and declared services;
+7. reconciles both receipts on Activity retry;
+8. keeps the same worktree and runtime state across questions, waits, worker restarts,
+   and plan revisions.
 
-The built-in adapter is the default. `TASKER_WORKSPACE_HARNESS_PATH` can select another
-pack and `TASKER_HARNESS_SNAPSHOT_STORE` can relocate immutable snapshots. A company can
-replace the adapter entirely with a target-aware command: Tasker invokes
-`<command> inspect` or `<command> apply` in the managed worktree and sends a versioned
-JSON request on stdin containing `operationId` and the complete workspace locator. It
-must return JSON with either `{ "status": "absent" }` or
-`{ "status": "ready", "receipt": ... }`. `apply` must return `ready`; `inspect`
-must discover an already-applied result so a lost process response does not duplicate
-bootstrap effects. Configure that optional executable with
-`TASKER_WORKSPACE_BOOTSTRAP_COMMAND`.
-
-Replacing the bootstrap tool changes one Activity adapter. It does not change the graph
-interpreter or workflow history model.
+`TASKER_WORKSPACE_HARNESS_PATH` can select another portable pack and
+`TASKER_HARNESS_SNAPSHOT_STORE` can relocate immutable snapshots. There is no external
+host bootstrap command: project executable setup belongs to the Docker runtime policy,
+so it cannot accidentally mutate `~/Projects/work` or inherit laptop PATH state.
 
 There is no normal-path worktree script to remember to run. The Temporal repository
 Activity owns setup and reconciliation. The old `harness-wt-hook` was intentionally not
 imported because it scans and mutates `~/Projects/work`, while Tasker operates only on
-its managed application-data clone. A standalone adapter command remains optional for a
-future company-specific setup implementation.
+its managed application-data clone. Add future company setup as data under
+`workspaceRuntime.bootstrap` or as a versioned image change, not as a host-side hook.
+
+### 7.1 Docker runtime policy
+
+`harness/company.json` declares the default prebuilt image, environment and cache
+volumes. `harness/projects/*/project.json` may extend bootstrap commands and services.
+The resolved policy is pinned on first preparation, so editing it affects future runs
+without changing or destabilizing an active run. See
+[`docker-execution.md`](docker-execution.md) for the manifest behavior and recovery
+model.
 
 ## 8. Add or replace an integration
 

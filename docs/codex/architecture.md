@@ -68,7 +68,7 @@ flowchart LR
   TW --> WF["Generic graph-interpreter Workflow"]
   WF --> ACT["Typed Activities"]
   ACT --> AG["Codex / Claude / Antigravity adapters"]
-  ACT --> WT["Managed worktrees and processes"]
+  ACT --> WT["Managed worktrees + Docker task runtimes"]
   ACT --> EXT["Jira / Bitbucket / Jenkins / Confluence"]
   ACT --> DB
   TS --> API
@@ -91,8 +91,9 @@ precedence:
 
 Repositories are cloned into Tasker's application-data directory, never into
 `~/Projects/work`. Existing operator clones may be discovered for naming help but are
-not mutated. Before implementation planning, Tasker creates a managed branch/worktree and runs the
-configured external harness bootstrap. Its locator and bootstrap receipt are product
+not mutated. Before implementation planning, Tasker creates a managed branch/worktree,
+materializes the pinned harness profile, and prepares its Docker runtime. Its locator,
+harness receipt, and Docker receipt are product
 artifacts recorded by the preparation Activity and referenced by durable Workflow
 state. The API request contains portable task/graph/settings data; it does not perform
 runner-local filesystem work before Temporal starts.
@@ -234,6 +235,12 @@ declared boundary and persist useful evidence before returning. Long CLI calls
 heartbeat with a stable attempt/artifact reference. Cancellation requests terminate
 the managed subprocess where possible and record whether termination was confirmed.
 
+All workflow analyzers, implementation planners, agent blocks, process blocks,
+Playwright runs, builds, tests, and project services execute in Docker. The host/VPS
+retains only the control plane: Temporal/API/UI/product storage, managed Git worktree
+ownership, Docker daemon control, and typed external-system adapters. There is no host
+execution fallback. See [`docker-execution.md`](docker-execution.md).
+
 Temporal delivery does not make a Jira comment, git push, package publish, or PR update
 exactly once. External mutations use a Tasker idempotency key and this protocol:
 
@@ -368,7 +375,8 @@ The first supported topology is single-user:
 
 - Temporal development/self-hosted service on the laptop for local evaluation;
 - Tasker API/cockpit and one or more workers;
-- application data and managed repositories under an OS-standard Tasker data path.
+- application data and managed repositories under an OS-standard Tasker data path;
+- Docker with the Tasker workspace image and task-scoped runtime resources.
 
 A VPS deployment moves the Temporal Service/control plane and eligible workers without
 changing Workflow semantics. Filesystem Activities must run on a worker that owns or
@@ -409,6 +417,8 @@ fail-closed; an analyzer cannot grant itself a Jira/Bitbucket/publish capability
 12. Company-specific names and vendor payloads do not enter the Workflow domain.
 13. Large/sensitive artifacts stay outside Temporal history.
 14. Retrospective recommendations never modify the harness automatically.
+15. Provider and project commands execute only in Docker; missing Docker is a durable
+    infrastructure block, never permission to fall back to host execution.
 
 ## 16. Decision record
 

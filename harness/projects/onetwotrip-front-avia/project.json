@@ -5,6 +5,20 @@
   "repositoryKind": "frontend",
   "translations": { "kind": "inline_json" },
   "ci": { "kind": "jenkins", "job": "front-avia" },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile", "pnpm run dicts"],
+    "services": [
+      {
+        "id": "front-avia-app",
+        "command": "pnpm start",
+        "aliases": ["local.onetwotrip.com", "test-partner.onetwotrip.com"],
+        "environment": {
+          "HOST": "0.0.0.0"
+        },
+        "readyCheck": "curl -k -I --fail --max-time 5 https://local.onetwotrip.com:3004 >/dev/null"
+      }
+    ]
+  },
   "processCommands": {},
   "workflowGuidance": "projects/onetwotrip-front-avia/workflow.md"
 }

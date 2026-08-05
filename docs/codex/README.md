@@ -27,11 +27,13 @@ Read these for decisions and future implementation:
 9. [`customization-guide.md`](customization-guide.md) — how to add or change blocks,
    prompts, policies, providers, trackers, repositories, and company packs without
    rewriting the runtime.
-10. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
+10. [`docker-execution.md`](docker-execution.md) — Docker-only command boundary,
+    task-scoped services/caches, `mise` bootstrap, recovery, and customization.
+11. [`research-index.md`](research-index.md) — evidence trail and the 2026-08-03 decision
    correction.
-11. [`t4-external-effects.md`](t4-external-effects.md) — remote-effect protocol,
+12. [`t4-external-effects.md`](t4-external-effects.md) — remote-effect protocol,
     Bitbucket branch/PR reconciliation, pilot gate, and remaining T4 work.
-12. [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) — file-backed blocks,
+13. [`t4-ai-assistance-policy.md`](t4-ai-assistance-policy.md) — file-backed blocks,
     path obligations, durable evidence flow, same-branch artifacts, and PR draft boundary.
 
 These documents are the source of truth. Older `.omx` plans are audit history only.

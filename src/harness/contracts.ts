@@ -183,6 +183,42 @@ const CiPolicySchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+const WorkspaceRuntimeImageSchema = z
+  .object({
+    kind: z.literal('prebuilt'),
+    reference: z.string().trim().min(1),
+  })
+  .strict();
+
+const WorkspaceRuntimeCacheVolumeSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    mountPath: z.string().trim().min(1),
+  })
+  .strict();
+
+const WorkspaceRuntimeServiceSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    command: z.string().trim().min(1),
+    aliases: z.array(z.string().trim().min(1)).default([]),
+    readyCheck: z.string().trim().min(1).optional(),
+    environment: z.record(z.string(), z.string()).default({}),
+  })
+  .strict();
+
+export const WorkspaceRuntimeSchema = z
+  .object({
+    engine: z.literal('docker'),
+    image: WorkspaceRuntimeImageSchema,
+    workspaceMountPath: z.string().trim().min(1).default('/workspace'),
+    environment: z.record(z.string(), z.string()).default({}),
+    bootstrap: z.array(z.string().trim().min(1)).default([]),
+    cacheVolumes: z.array(WorkspaceRuntimeCacheVolumeSchema).default([]),
+    services: z.array(WorkspaceRuntimeServiceSchema).default([]),
+  })
+  .strict();
+
 export const HarnessProjectManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -192,6 +228,7 @@ export const HarnessProjectManifestSchema = z
     translations: TranslationPolicySchema,
     ci: CiPolicySchema.default({ kind: 'none' }),
     processCommands: ProcessCommandsSchema,
+    workspaceRuntime: WorkspaceRuntimeSchema.partial().optional(),
     workflowGuidance: RelativePathSchema.optional(),
   })
   .strict();
@@ -217,6 +254,7 @@ export const HarnessCompanyManifestSchema = z
     version: z.string().min(1),
     availableCapabilities: z.array(z.string().min(1)).min(1),
     processCommands: ProcessCommandsSchema,
+    workspaceRuntime: WorkspaceRuntimeSchema,
     systemPrompts: z
       .object({
         implementationPlanner: RelativePathSchema,
@@ -230,6 +268,7 @@ export const HarnessCompanyManifestSchema = z
 export type HarnessProjectManifest = z.infer<typeof HarnessProjectManifestSchema>;
 export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema>;
 export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
+export type WorkspaceRuntime = z.infer<typeof WorkspaceRuntimeSchema>;
 export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
 export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 

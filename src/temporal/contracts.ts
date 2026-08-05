@@ -22,6 +22,7 @@ import {
   PlanningSnapshotReferenceSchema,
   type PlanningSnapshotReference,
 } from '../planning/run-planning-snapshot.js';
+import { DockerWorkspaceRuntimeReceiptSchema } from '../workspaces/docker-runtime-contracts.js';
 import {
   WorkspaceBootstrapReceiptSchema,
   WorkspaceLocatorSchema,
@@ -230,6 +231,7 @@ export const PrepareTaskWorkspaceResultSchema = z
   .object({
     workspace: WorkspaceLocatorSchema,
     bootstrap: WorkspaceBootstrapReceiptSchema,
+    runtime: DockerWorkspaceRuntimeReceiptSchema,
     planningSnapshot: PlanningSnapshotReferenceSchema,
   })
   .strict()

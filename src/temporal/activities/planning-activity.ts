@@ -6,7 +6,7 @@ import type {
   PlanningSnapshotReference,
   PlanningStrategyRequest,
 } from '../../planning/index.js';
-import type { CommandRequest, CommandRunner } from '../../providers/command-runner.js';
+import type { CommandRequest, WorkspaceCommandRunner } from '../../providers/command-runner.js';
 import type { Outcome } from '../../shared/outcome.js';
 import {
   PlanTaskImplementationInputSchema,
@@ -132,9 +132,10 @@ export const createPlanningActivity = (
 });
 
 export const createTemporalActivityCommandRunner = (
-  delegate: CommandRunner,
+  delegate: WorkspaceCommandRunner,
   transcripts?: PlanningTranscriptSink,
-): CommandRunner => ({
+): WorkspaceCommandRunner => ({
+  executionEnvironment: 'docker_workspace',
   run: async (request: CommandRequest) => {
     const context = Context.current();
     let stdoutBytes = 0;

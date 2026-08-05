@@ -36,7 +36,7 @@ import type {
   CommandMount,
   CommandRequest,
   CommandResult,
-  CommandRunner,
+  WorkspaceCommandRunner,
 } from '../../providers/command-runner.js';
 import type { RunPlanningSnapshot } from '../../planning/run-planning-snapshot.js';
 import type { Clock } from '../../shared/clock.js';
@@ -254,7 +254,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
   public readonly provider = 'codex' as const;
 
   public constructor(
-    private readonly runner: CommandRunner,
+    private readonly runner: WorkspaceCommandRunner,
     private readonly options: {
       readonly command?: string;
       readonly model?: string;
@@ -341,10 +341,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
           CODEX_HOME: isolatedCodexHome,
           ...harnessEnvironment,
         },
-        mounts: [
-          { source: directory, target: directory, readOnly: false },
-          ...extraMounts,
-        ],
+        mounts: [{ source: directory, target: directory, readOnly: false }, ...extraMounts],
         stdin: request.prompt,
         timeoutMs: request.timeoutMs,
       });
@@ -1002,7 +999,7 @@ export interface TaskExecutionActivityDependencies {
   readonly traces: TemporalTaskStepTraceStore;
   readonly mutationRecovery: Pick<WorkspaceMutationRecoveryStore, 'prepare'>;
   readonly agentRunner: TaskStepAgentRunner;
-  readonly commands: CommandRunner;
+  readonly commands: WorkspaceCommandRunner;
   readonly integrations?: IntegrationStepAdapterRegistry;
   readonly evidence?: TaskRunEvidenceSource;
 }

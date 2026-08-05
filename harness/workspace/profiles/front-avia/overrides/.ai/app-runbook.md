@@ -6,15 +6,18 @@ visual verification). Don't reverse-engineer the setup — it's written here.
 
 ## Start the dev server
 
-- Deps are already installed at worktree prep (`pnpm install --frozen-lockfile` + `pnpm run dicts`).
-- Dev server: `pnpm start` (re-runs dicts, then rspack dev server). Background it.
+- Tasker prepares deps inside the pinned Docker runtime (`pnpm install --frozen-lockfile`
+  + `pnpm run dicts`); never rely on host `node`, `pnpm`, or `node_modules`.
+- The declared Docker service runs `pnpm start` from this exact managed worktree
+  (re-runs dicts, then rspack dev server). Agent steps reuse that task-scoped service.
 - Base URL: **`https://local.onetwotrip.com:3004`** (host/port set in `.bundlerrc.mjs`;
   override via env `HOST`/`PORT`). `local.onetwotrip.com` must resolve to 127.0.0.1
-  (present in /etc/hosts on the host machine; a container needs the same mapping).
+  (Tasker's Docker network provides the alias; host `/etc/hosts` is irrelevant).
 - HTTPS with a local self-signed cert → in Playwright use `ignoreHTTPSErrors: true`
   (their own spec config does). Alternative: `pnpm run start:unsecure` → plain http.
-- Ready signal: poll the base URL until it responds (first rspack build takes minutes —
-  poll, don't sleep blind). Reuse a server that's already listening on :3004.
+- Ready signal: Tasker's runtime policy polls the base URL until it responds (first
+  rspack build takes minutes). Do not reuse a host server or a service from another
+  task/worktree merely because port 3004 is listening.
 
 ## API / stands
 

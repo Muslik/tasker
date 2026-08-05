@@ -14,7 +14,7 @@ import {
   type WorkflowAnalyzerOutput,
 } from '../planning/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import type { CommandRunner } from './command-runner.js';
+import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
   codexOutputJsonSchema,
   parseCodexStream,
@@ -89,7 +89,7 @@ const analyzerPrompt = (request: CodexWorkflowAnalyzerRequest): string =>
 
 export class CodexCliWorkflowAnalyzer {
   public constructor(
-    private readonly runner: CommandRunner,
+    private readonly runner: WorkspaceCommandRunner,
     private readonly options: {
       readonly command?: string;
       readonly model?: string;

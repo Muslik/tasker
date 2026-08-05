@@ -9,6 +9,7 @@ import {
   resolveProjectWorkflowProfile,
 } from './project-policies.js';
 import { WORKFLOW_OBLIGATIONS } from './obligations.js';
+import { resolveWorkspaceRuntimePolicy } from '../workspaces/runtime-policy.js';
 
 export interface WorkflowAnalyzerContext {
   readonly taskSnapshot: JsonValue;
@@ -66,6 +67,7 @@ export const createWorkflowAnalyzerContext = (
   const harnessProject = pack.projects.find(
     (candidate) => candidate.repository === targetRepository,
   );
+  const workspaceRuntime = resolveWorkspaceRuntimePolicy(pack.company, harnessProject ?? null);
 
   return {
     taskSnapshot,
@@ -82,6 +84,7 @@ export const createWorkflowAnalyzerContext = (
         rootPath: pack.rootPath,
       },
       policies: {
+        workspaceRuntime,
         project: resolveProjectWorkflowProfile(targetRepository),
         projectGuidance:
           harnessProject?.guidance === null || harnessProject?.guidance === undefined

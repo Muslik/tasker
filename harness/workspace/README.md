@@ -66,8 +66,8 @@ a worktree or content snapshot.
 There is deliberately no standalone `wt` hook in the normal path. Temporal creates the
 managed worktree and invokes the bootstrap Activity before repository analysis or
 planning. A worker crash, VPN outage, or lost Activity response retries `inspect` and
-continues from the same pinned selection. `TASKER_WORKSPACE_BOOTSTRAP_COMMAND` exists
-only as an adapter escape hatch for another company; it is not required for this pack.
+continues from the same pinned selection. Project executable bootstrap is a separate,
+Docker-only `workspaceRuntime` policy; there is no host command escape hatch.
 
 ## Skills are not workflow steps
 

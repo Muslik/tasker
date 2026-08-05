@@ -304,9 +304,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(page.getByTestId('implementation-plan')).toContainText(/attempt \d+/u);
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   const activity = await loadActivity(page, fixtureId);
-  expect(
-    activity.entries.some((entry) => entry.title === 'Implementation plan ready'),
-  ).toBe(true);
+  expect(activity.entries.some((entry) => entry.title === 'Implementation plan ready')).toBe(true);
 });
 
 test('a planning-time workflow change revises the draft before freeze', async ({ page }) => {

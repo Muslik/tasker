@@ -7,7 +7,7 @@ import {
   CodexCliImplementationPlanner,
   type CommandRequest,
   type CommandResult,
-  type CommandRunner,
+  type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 
@@ -51,7 +51,8 @@ const codexJsonl = (finalMessage: string): string =>
     }),
   ].join('\n');
 
-class RecordingRunner implements CommandRunner {
+class RecordingRunner implements WorkspaceCommandRunner {
+  public readonly executionEnvironment = 'docker_workspace' as const;
   public readonly requests: CommandRequest[] = [];
   public schema: string | null = null;
   public materializedJiraSkill: string | null = null;

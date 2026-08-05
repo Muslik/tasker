@@ -54,7 +54,11 @@ import {
   type WorkspaceConfiguration,
 } from '../../src/workspaces/index.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';
-import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
+import {
+  testDockerRuntimePolicies,
+  testDockerRuntimes,
+  testTaskWorkflowActivities,
+} from '../helpers/temporal-activities.js';
 
 const workflowsPath = fileURLToPath(
   new URL('../../src/temporal/workflows/task-workflow.ts', import.meta.url),
@@ -211,6 +215,11 @@ describe('Temporal local mutation recovery', () => {
         ),
       );
       const traces = new TemporalTaskStepTraceStore(ledger.repository, clock);
+      const testWorkspaceCommands = {
+        executionEnvironment: 'docker_workspace' as const,
+        run: (request: Parameters<typeof nodeCommandRunner.run>[0]) =>
+          nodeCommandRunner.run(request),
+      };
       const mutationRecovery = new WorkspaceMutationRecoveryStore(
         ledger.repository,
         clock,
@@ -323,7 +332,7 @@ describe('Temporal local mutation recovery', () => {
           traces,
           mutationRecovery,
           agentRunner,
-          commands: nodeCommandRunner,
+          commands: testWorkspaceCommands,
           integrations,
         });
         const executeStep = (input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult> =>
@@ -338,7 +347,14 @@ describe('Temporal local mutation recovery', () => {
             : execution.executeWorkspaceReconciledStep(input);
 
         return {
-          ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
+          ...createWorkspaceActivity(
+            subjects,
+            workspaces,
+            bootstrap,
+            testDockerRuntimes,
+            testDockerRuntimePolicies,
+            planning,
+          ),
           ...createPlanningActivity(planning),
           executeStep,
           executeReadOnlyStep: (input) =>

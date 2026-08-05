@@ -46,6 +46,11 @@ import { TemporalWorkflowGenerator } from './temporal-workflow-generator.js';
 import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
+import {
+  DockerWorkspaceCommandRunner,
+  DockerWorkspaceRuntimeStore,
+  loadDockerWorkspaceConfiguration,
+} from '../workspaces/index.js';
 
 const parsePort = (input: string | undefined): number => {
   const port = input === undefined ? 4311 : Number(input);
@@ -82,9 +87,15 @@ export const startM1Server = async (): Promise<void> => {
     repositoryCatalog,
   });
   const deterministicProviders = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
+  const dockerConfiguration = loadDockerWorkspaceConfiguration();
+  const dockerCommands = new DockerWorkspaceCommandRunner(
+    dockerConfiguration,
+    nodeCommandRunner,
+    new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
+  );
   const continuationAnalyzer = deterministicProviders
     ? undefined
-    : new CodexCliWorkflowAnalyzer(nodeCommandRunner);
+    : new CodexCliWorkflowAnalyzer(dockerCommands);
   const subjects = new WorkflowGenerationSubjectSource(
     resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
     jiraIssueService,
@@ -105,7 +116,7 @@ export const startM1Server = async (): Promise<void> => {
     evidenceReaders,
     planner: deterministicProviders
       ? new DeterministicImplementationPlanner()
-      : new CodexCliImplementationPlanner(nodeCommandRunner),
+      : new CodexCliImplementationPlanner(dockerCommands),
   });
   const workflowContinuation = createWorkflowContinuationCoordinator({
     ledger: ledger.repository,

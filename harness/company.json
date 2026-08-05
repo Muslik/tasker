@@ -15,6 +15,30 @@
   "processCommands": {
     "component.dev-publish@1": "pnpm component:publish-dev"
   },
+  "workspaceRuntime": {
+    "engine": "docker",
+    "image": {
+      "kind": "prebuilt",
+      "reference": "tasker/workspace:local"
+    },
+    "workspaceMountPath": "/workspace",
+    "environment": {
+      "HOME": "/tasker/home",
+      "MISE_DATA_DIR": "/tasker/cache/mise/data",
+      "MISE_CACHE_DIR": "/tasker/cache/mise/cache",
+      "PNPM_HOME": "/tasker/cache/pnpm-home",
+      "PATH": "/tasker/cache/pnpm-home:/tasker/cache/mise/data/shims:/usr/local/bin:/usr/bin:/bin",
+      "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"
+    },
+    "bootstrap": [],
+    "cacheVolumes": [
+      { "id": "home", "mountPath": "/tasker/home" },
+      { "id": "node-modules", "mountPath": "/workspace/node_modules" },
+      { "id": "pnpm-store", "mountPath": "/tasker/cache/pnpm-store" },
+      { "id": "mise-cache", "mountPath": "/tasker/cache/mise" }
+    ],
+    "services": []
+  },
   "systemPrompts": {
     "implementationPlanner": "prompts/implementation-planner.md",
     "workflowAnalyzer": "prompts/workflow-analyzer.md"

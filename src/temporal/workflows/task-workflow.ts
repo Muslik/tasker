@@ -635,6 +635,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
             status: 'ready',
             workspace: prepared.workspace,
             bootstrap: prepared.bootstrap,
+            runtime: prepared.runtime,
             planningSnapshot: prepared.planningSnapshot,
           },
         };

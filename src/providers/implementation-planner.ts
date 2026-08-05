@@ -17,7 +17,7 @@ import {
   type PlanningEvidenceRequest,
 } from '../planning/planning-evidence.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import type { CommandRunner } from './command-runner.js';
+import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
   codexOutputJsonSchema,
   parseCodexStream,
@@ -134,7 +134,7 @@ run planning again with the updated bundle.
 
 export class CodexCliImplementationPlanner implements ImplementationPlanner {
   public constructor(
-    private readonly runner: CommandRunner,
+    private readonly runner: WorkspaceCommandRunner,
     private readonly options: {
       readonly command?: string;
       readonly model?: string;

@@ -7,7 +7,7 @@ import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js'
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { findTaskFixture } from '../../src/planning/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
-import type { CommandRunner } from '../../src/providers/command-runner.js';
+import type { CommandRunner, WorkspaceCommandRunner } from '../../src/providers/command-runner.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { systemClock } from '../../src/shared/clock.js';
 import {
@@ -18,6 +18,11 @@ import {
 } from '../../src/temporal/activities/block-execution.js';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+const workspaceCommands = (run: CommandRunner['run'] = vi.fn()): WorkspaceCommandRunner => ({
+  executionEnvironment: 'docker_workspace',
+  run,
+});
 
 const pack = loadHarnessPack();
 const fixture = findTaskFixture('avia-13236-short-bug');
@@ -219,9 +224,7 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         agentRunner,
-        commands: {
-          run: vi.fn(),
-        },
+        commands: workspaceCommands(),
       },
       {
         attempt: 1,
@@ -288,7 +291,7 @@ describe('temporal block execution activity', () => {
       traces,
       mutationRecovery,
       agentRunner: { provider: 'codex' as const, run },
-      commands: { run: vi.fn() },
+      commands: workspaceCommands(),
     };
     const runtime = {
       attempt: 1,
@@ -360,7 +363,7 @@ describe('temporal block execution activity', () => {
               }),
             ),
         },
-        commands: { run: vi.fn() },
+        commands: workspaceCommands(),
       },
       {
         attempt: 1,
@@ -419,7 +422,7 @@ describe('temporal block execution activity', () => {
       traces,
       mutationRecovery,
       agentRunner: { provider: 'codex' as const, run },
-      commands: { run: vi.fn() },
+      commands: workspaceCommands(),
     };
     const runtime = {
       attempt: 1,
@@ -511,7 +514,7 @@ describe('temporal block execution activity', () => {
           provider: 'codex',
           run: vi.fn(),
         },
-        commands: { run: commands },
+        commands: workspaceCommands(commands),
       },
       {
         attempt: 1,
@@ -594,9 +597,7 @@ describe('temporal block execution activity', () => {
           provider: 'codex',
           run: vi.fn(),
         },
-        commands: {
-          run: commands,
-        },
+        commands: workspaceCommands(commands),
       },
       {
         attempt: 1,
@@ -662,7 +663,7 @@ describe('temporal block execution activity', () => {
       traces,
       mutationRecovery,
       agentRunner: { provider: 'codex' as const, run: vi.fn() },
-      commands: { run: vi.fn() },
+      commands: workspaceCommands(),
       integrations: new IntegrationStepAdapterRegistry([
         { id: 'bitbucket.pull-request@1', execute },
       ]),

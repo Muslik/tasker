@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { openSqliteLedger } from '../../../src/ledger/index.js';
-import type { CommandRunner } from '../../../src/providers/index.js';
+import type { WorkspaceCommandRunner } from '../../../src/providers/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import {
   CodexCliTaskStepAgentRunner,
@@ -49,7 +49,8 @@ describe('Codex task-step runner', () => {
       prFinalizeVisible: boolean;
       outputSchema: string;
     }[] = [];
-    const commands: CommandRunner = {
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
       run: (request) => {
         if (request.args[0] === '--version') {
           return Promise.resolve({

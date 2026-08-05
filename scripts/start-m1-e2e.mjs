@@ -303,6 +303,7 @@ const workflowActivities = {
       throw new Error(`missing subject for ${input.taskReference}`);
     }
     const workspaceId = workspaceIdFor(input.taskReference);
+    const workspacePath = resolve('.tasker/e2e-workspaces', input.taskReference);
     const workspace = {
       schemaVersion: 1,
       workspaceId,
@@ -316,7 +317,7 @@ const workflowActivities = {
         baseCommit: '0'.repeat(40),
       },
       runnerId: 'temporal-e2e',
-      path: resolve('.tasker/e2e-workspaces', input.taskReference),
+      path: workspacePath,
       branch: `tasker/${input.taskReference}`,
       preparedAt: '2026-08-03T00:00:00.000Z',
     };
@@ -343,6 +344,33 @@ const workflowActivities = {
         profile: 'fixture',
         files: [],
         completedAt: '2026-08-03T00:00:00.000Z',
+      },
+      runtime: {
+        schemaVersion: 1,
+        workspaceId,
+        workspacePath,
+        repositorySourcePath: subject.value.repositoryPath,
+        policyHash: '1'.repeat(64),
+        policy: {
+          engine: 'docker',
+          image: { kind: 'prebuilt', reference: 'tasker/workspace:e2e' },
+          workspaceMountPath: '/workspace',
+          environment: {},
+          bootstrap: [],
+          cacheVolumes: [],
+          services: [],
+        },
+        image: 'tasker/workspace:e2e',
+        imageId: 'sha256:temporal-e2e',
+        networkName: `tasker-network-${workspaceId}`,
+        volumes: [],
+        services: [],
+        environment: {},
+        initializedVolumes: [],
+        completedBootstrap: [],
+        status: 'ready',
+        preparedAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T00:00:00.000Z',
       },
       planningSnapshot: planningSnapshot.value,
     };

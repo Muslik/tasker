@@ -479,12 +479,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     ) => {
       const run = await temporalRunService.read(params.data.fixtureId);
       if (!run.ok || run.value === null) return entries;
-      const nextSequence =
-        entries.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
-      return [
-        ...entries,
-        ...activityEntriesFromTemporalRun(run.value, nextSequence),
-      ].sort((left, right) => left.sequence - right.sequence);
+      const nextSequence = entries.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
+      return [...entries, ...activityEntriesFromTemporalRun(run.value, nextSequence)].sort(
+        (left, right) => left.sequence - right.sequence,
+      );
     };
 
     if (params.data.fixtureId.startsWith('jira:') && options.jiraIssueService !== undefined) {
@@ -522,11 +520,11 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
     ]);
     return reply.send(
-          OperatorActivityResponseSchema.parse({
-            ...result.value,
-            entries,
-          }),
-        );
+      OperatorActivityResponseSchema.parse({
+        ...result.value,
+        entries,
+      }),
+    );
   });
 
   api.get('/api/jira/issues/:issueKey', (request, reply) => {

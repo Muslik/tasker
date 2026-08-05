@@ -30,7 +30,11 @@ import {
   createWorkspaceActivity,
   TemporalTaskRunService,
 } from '../../src/temporal/index.js';
-import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
+import {
+  testDockerRuntimePolicies,
+  testDockerRuntimes,
+  testTaskWorkflowActivities,
+} from '../helpers/temporal-activities.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 import {
   ManagedWorkspaceManager,
@@ -130,7 +134,14 @@ describe('Temporal managed workspace', () => {
         workflowsPath,
         activities: {
           ...testTaskWorkflowActivities,
-          ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
+          ...createWorkspaceActivity(
+            subjects,
+            workspaces,
+            bootstrap,
+            testDockerRuntimes,
+            testDockerRuntimePolicies,
+            planning,
+          ),
           ...createPlanningActivity(planning),
         },
         maxCachedWorkflows: 0,

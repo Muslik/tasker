@@ -6,7 +6,7 @@ import {
   CodexCliWorkflowAnalyzer,
   type CommandRequest,
   type CommandResult,
-  type CommandRunner,
+  type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 
@@ -56,7 +56,8 @@ const providerMessage = (output: ReturnType<typeof validAnalyzerOutput>): string
     verificationPlan: output.verificationPlan,
   });
 
-class RecordingRunner implements CommandRunner {
+class RecordingRunner implements WorkspaceCommandRunner {
+  public readonly executionEnvironment = 'docker_workspace' as const;
   public readonly requests: CommandRequest[] = [];
   public schema: string | null = null;
 
