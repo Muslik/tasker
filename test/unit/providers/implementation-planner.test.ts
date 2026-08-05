@@ -112,7 +112,7 @@ const request = (strategy: 'fast' | 'ralplan') => ({
 describe('Codex CLI implementation planner', () => {
   it('uses a bounded low-reasoning subscription pass for fast planning', async () => {
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(readyDecision) }),
+      JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
     );
     const planner = new CodexCliImplementationPlanner(runner);
 
@@ -137,6 +137,9 @@ describe('Codex CLI implementation planner', () => {
     expect(runner.requests[1]?.stdin).toContain('Use one bounded planning pass');
     expect(runner.requests[1]?.stdin).not.toContain('Invoke $ralplan');
     expect(runner.schema).toContain('decisionJson');
+    expect(JSON.parse(runner.schema ?? '{}')).toMatchObject({
+      required: ['decisionJson', 'evidenceRequestsJson'],
+    });
   });
 
   it('projects the planning block skills into the read-only provider session', async () => {
@@ -157,7 +160,7 @@ describe('Codex CLI implementation planner', () => {
       'utf8',
     );
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(readyDecision) }),
+      JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
     );
     const planner = new CodexCliImplementationPlanner(runner);
 
@@ -214,7 +217,7 @@ describe('Codex CLI implementation planner', () => {
 
   it('routes an explicit ralplan request through the consensus prompt with high reasoning', async () => {
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(readyDecision) }),
+      JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
     );
     const planner = new CodexCliImplementationPlanner(runner);
 
@@ -230,7 +233,10 @@ describe('Codex CLI implementation planner', () => {
 
   it('rejects a decision outside the typed planner contract', async () => {
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify({ status: 'ready', plan: {} }) }),
+      JSON.stringify({
+        decisionJson: JSON.stringify({ status: 'ready', plan: {} }),
+        evidenceRequestsJson: '[]',
+      }),
     );
     const planner = new CodexCliImplementationPlanner(runner);
 
@@ -250,7 +256,9 @@ describe('Codex CLI implementation planner', () => {
         },
       ],
     } as const;
-    const runner = new RecordingRunner(JSON.stringify({ decisionJson: JSON.stringify(decision) }));
+    const runner = new RecordingRunner(
+      JSON.stringify({ decisionJson: JSON.stringify(decision), evidenceRequestsJson: '[]' }),
+    );
     const planner = new CodexCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('fast'));

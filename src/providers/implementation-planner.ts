@@ -37,7 +37,7 @@ import {
 const ImplementationPlannerProviderOutputSchema = z
   .object({
     decisionJson: z.string().min(1).nullable(),
-    evidenceRequestsJson: z.string().min(2).optional(),
+    evidenceRequestsJson: z.string().min(2),
   })
   .strict();
 
@@ -267,9 +267,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
 
       let evidenceRequestsInput: unknown = [];
       try {
-        evidenceRequestsInput = JSON.parse(
-          providerOutput.data.evidenceRequestsJson ?? '[]',
-        ) as unknown;
+        evidenceRequestsInput = JSON.parse(providerOutput.data.evidenceRequestsJson) as unknown;
       } catch {
         return invalidOutput(['evidenceRequestsJson: expected serialized request array JSON']);
       }
