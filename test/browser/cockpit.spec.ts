@@ -303,9 +303,10 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(planGuidance).toHaveValue('', { timeout: 20_000 });
   await expect(page.getByTestId('implementation-plan')).toContainText(/attempt \d+/u);
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Implementation plan ready',
-  );
+  const activity = await loadActivity(page, fixtureId);
+  expect(
+    activity.entries.some((entry) => entry.title === 'Implementation plan ready'),
+  ).toBe(true);
 });
 
 test('a planning-time workflow change revises the draft before freeze', async ({ page }) => {
@@ -344,12 +345,9 @@ test('a planning-time workflow change revises the draft before freeze', async ({
     phase: 'frozen',
     receipt: { workflowHash: parentAfter.view.workflow.graphHash },
   });
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Workflow change required',
-  );
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Implementation plan ready',
-  );
+  const activity = await loadActivity(page, fixtureId);
+  expect(activity.entries.some((entry) => entry.title === 'Workflow change required')).toBe(true);
+  expect(activity.entries.some((entry) => entry.title === 'Implementation plan ready')).toBe(true);
 });
 
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
