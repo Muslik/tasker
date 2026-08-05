@@ -168,9 +168,12 @@ work:
 6. reserve Child Workflow continuation for discoveries made after execution freeze;
 7. remove name-based planning logic from the generic graph interpreter.
 
-The first delivered sub-slice projects the snapshotted `task.analyze@1` skills into the
-actual read-only planner provider session. Durable context discovery, mediated evidence
-reads, draft recompilation, and interpreter simplification remain the immediate target.
+Delivered sub-slices now project the snapshotted `task.analyze@1` skills into the actual
+read-only planner provider session and persist one provenance-bearing Evidence Bundle
+consumed by both workflow analysis and implementation planning. The planning snapshot
+contains only its immutable reference. Moving this discovery/assembly boundary into
+Temporal, mediating external evidence reads, draft recompilation, and interpreter
+simplification remain the immediate target.
 
 T2 exit gate:
 

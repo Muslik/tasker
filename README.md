@@ -44,7 +44,11 @@ start validated Child Workflows without rewriting the accepted parent graph.
 
 The current vertical slice covers dynamic graph generation, managed workspace setup,
 implementation planning/revision, durable waits, recovery/replay, parallel task runs,
-and the three-pane operator console. The company `ai-assistance` policy now contributes
+and the three-pane operator console. Initial task, harness, and bounded repository
+context is persisted as an append-only Evidence Bundle with provenance; workflow
+analysis and implementation planning consume the same immutable revision, while
+Temporal planning snapshots carry only its reference. External Jira/Confluence/Loop
+reads are not yet mediated back into that bundle. The company `ai-assistance` policy now contributes
 ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
 flow into same-branch artifacts and a validated provider-neutral PR draft. The gated
 Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and

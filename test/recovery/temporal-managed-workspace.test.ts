@@ -31,6 +31,7 @@ import {
   TemporalTaskRunService,
 } from '../../src/temporal/index.js';
 import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
+import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 import {
   ManagedWorkspaceManager,
   WorkspaceBootstrapCoordinator,
@@ -81,6 +82,7 @@ describe('Temporal managed workspace', () => {
       const workflowService = createM1WorkflowService(ledger.repository, clock);
       const generated = workflowService.generate(taskReference);
       if (!generated.ok) throw new Error('Workspace fixture did not generate');
+      recordTestEvidenceBundle(ledger.repository, clock, taskReference);
       const subjects = new WorkflowGenerationSubjectSource(repositoryPath);
       const planning = createImplementationPlanningCoordinator({
         ledger: ledger.repository,

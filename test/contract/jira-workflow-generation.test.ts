@@ -6,7 +6,9 @@ import { z } from 'zod';
 
 import {
   CodexWorkflowGenerator,
+  ContextDiscoveryService,
   createM1WorkflowService,
+  EvidenceBundleStore,
   WorkflowGenerationSubjectSource,
   type WorkflowAnalyzer,
 } from '../../src/control-plane/index.js';
@@ -139,6 +141,7 @@ describe('Jira workflow generation', () => {
       service,
       new WorkflowGenerationSubjectSource(directory, jiraService),
       analyzer,
+      new ContextDiscoveryService(new EvidenceBundleStore(ledger.repository, clock), clock),
     );
 
     const rejected = await generator.generate('jira:AVIA-13235');
@@ -177,6 +180,13 @@ describe('Jira workflow generation', () => {
     );
     expect(evidence.issue.comments.map((comment) => comment.id)).toContain('1094745');
     expect(evidence.repository.reference).toBe('onetwotrip/front-avia');
+    const persistedEvidence = new EvidenceBundleStore(ledger.repository, clock).readLatest(
+      'jira:AVIA-13235',
+    );
+    if (!persistedEvidence.ok || persistedEvidence.value === null) {
+      throw new Error('Expected persisted analyzer evidence');
+    }
+    expect(request.evidenceBundle).toEqual(persistedEvidence.value.bundle);
     const planner = z
       .object({
         buildingBlocks: z.object({

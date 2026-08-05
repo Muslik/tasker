@@ -6,6 +6,7 @@ import { openSqliteLedger } from '../ledger/index.js';
 import { createWorkflowAnalyzerContext, findTaskFixture } from '../planning/index.js';
 import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
 import { systemClock } from '../shared/clock.js';
+import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import type { WorkflowResponse } from './m1-contracts.js';
 import { renderWorkflowTree } from './m1-cli.js';
 import { createM1WorkflowService } from './m1-service.js';
@@ -88,9 +89,25 @@ export const runAnalyzerCli = async (
 
     write(`Analyzing ${fixture.taskId} in ${repositoryPath} with Codex read-only mode…`);
     const analyzer = new CodexCliWorkflowAnalyzer(nodeCommandRunner);
-    const analyzed = await analyzer.analyze({
-      ...createWorkflowAnalyzerContext(fixture),
+    const analyzerContext = createWorkflowAnalyzerContext(fixture);
+    const evidence = await new ContextDiscoveryService(
+      new EvidenceBundleStore(ledger.repository, systemClock),
+      systemClock,
+    ).discover({
+      taskReference: fixtureId,
+      taskSnapshot: analyzerContext.taskSnapshot,
+      plannerContext: analyzerContext.plannerContext,
+      repositoryReference: fixture.repository,
       repositoryPath,
+    });
+    if (!evidence.ok) {
+      write(`error: ${evidence.error.kind}`);
+      return 1;
+    }
+    const analyzed = await analyzer.analyze({
+      ...analyzerContext,
+      repositoryPath,
+      evidenceBundle: evidence.value.bundle,
     });
     if (!analyzed.ok) {
       write(`error: ${analyzed.error.kind}`);

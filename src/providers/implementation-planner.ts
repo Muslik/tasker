@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,141 +35,6 @@ const ImplementationPlannerProviderOutputSchema = z
     decisionJson: z.string().min(1),
   })
   .strict();
-
-interface PlanningEvidence {
-  readonly files: readonly string[];
-  readonly documents: readonly { readonly path: string; readonly content: string }[];
-}
-
-const ignoredDirectories = new Set([
-  '.git',
-  '.tasker',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'target',
-]);
-const readableExtensions = new Set([
-  '.cjs',
-  '.css',
-  '.html',
-  '.js',
-  '.json',
-  '.jsx',
-  '.md',
-  '.mjs',
-  '.scss',
-  '.ts',
-  '.tsx',
-  '.yaml',
-  '.yml',
-]);
-const planningStopWords = new Set([
-  'about',
-  'after',
-  'before',
-  'change',
-  'description',
-  'implementation',
-  'requested',
-  'should',
-  'task',
-  'workflow',
-]);
-
-const extensionOf = (path: string): string => {
-  const basename = path.split('/').at(-1) ?? '';
-  const dot = basename.lastIndexOf('.');
-  return dot < 0 ? '' : basename.slice(dot).toLowerCase();
-};
-
-const collectPlanningEvidence = async (
-  repositoryPath: string,
-  taskSnapshot: unknown,
-): Promise<PlanningEvidence> => {
-  const files: string[] = [];
-  const visit = async (directory: string, prefix: string, depth: number): Promise<void> => {
-    if (depth > 8 || files.length >= 1_200) return;
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (files.length >= 1_200) return;
-      const relativePath = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) {
-        if (!ignoredDirectories.has(entry.name)) {
-          await visit(join(directory, entry.name), relativePath, depth + 1);
-        }
-      } else if (entry.isFile()) {
-        files.push(relativePath);
-      }
-    }
-  };
-  await visit(repositoryPath, '', 0);
-
-  const snapshotText = JSON.stringify(taskSnapshot).toLowerCase();
-  const keywords = [
-    ...new Set(
-      snapshotText
-        .split(/[^\p{L}\p{N}_-]+/gu)
-        .filter((token) => token.length >= 4 && !planningStopWords.has(token)),
-    ),
-  ].slice(0, 80);
-  const pathHints = [
-    ...snapshotText.matchAll(
-      /(?:^|[\s`'"(])(?<path>(?:apps|docs|lib|packages|src|test|tests)\/[\p{L}\p{N}_./-]+)/gu,
-    ),
-  ]
-    .map((match) => match.groups?.path?.replace(/[.,:;)]+$/u, ''))
-    .filter((path): path is string => path !== undefined);
-
-  const ranked = files
-    .filter((path) => readableExtensions.has(extensionOf(path)))
-    .map((path) => {
-      const normalized = path.toLowerCase();
-      const basename = normalized.split('/').at(-1) ?? normalized;
-      const policyScore =
-        basename === 'agents.md' ||
-        basename === 'readme.md' ||
-        basename === 'workflow.md' ||
-        basename === 'tasker-workflow.md' ||
-        basename === 'package.json'
-          ? 40
-          : 0;
-      const hintScore = pathHints.some(
-        (hint) => normalized.startsWith(hint) || hint.startsWith(normalized),
-      )
-        ? 100
-        : 0;
-      const keywordScore = keywords.reduce(
-        (score, keyword) => score + (normalized.includes(keyword) ? 3 : 0),
-        0,
-      );
-      return { path, score: policyScore + hintScore + keywordScore };
-    })
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
-    .slice(0, 28);
-
-  const documents: { path: string; content: string }[] = [];
-  let remainingBytes = 48_000;
-  for (const entry of ranked) {
-    if (remainingBytes <= 0) break;
-    try {
-      const content = await readFile(join(repositoryPath, entry.path), 'utf8');
-      const bounded = content.slice(0, Math.min(remainingBytes, 6_000));
-      documents.push({ path: entry.path, content: bounded });
-      remainingBytes -= Buffer.byteLength(bounded, 'utf8');
-    } catch {
-      // A concurrently removed or non-text candidate is absent from this immutable evidence bundle.
-    }
-  }
-  return { files: files.slice(0, 600), documents };
-};
 
 export interface ImplementationPlannerRequest {
   readonly operationId: string | null;
@@ -209,10 +74,7 @@ export interface ImplementationPlanner {
   ): Promise<Outcome<ImplementationPlannerSuccess, ImplementationPlannerFailure>>;
 }
 
-const plannerPrompt = (
-  request: ImplementationPlannerRequest,
-  evidence: PlanningEvidence | null,
-): string => {
+const plannerPrompt = (request: ImplementationPlannerRequest): string => {
   const strategyInstruction =
     request.strategy === 'ralplan'
       ? `Invoke $ralplan non-interactively and use its Planner -> Architect -> Critic consensus loop.
@@ -226,11 +88,16 @@ planning uncertainty. Do not start a consensus or implementation workflow.`;
     strategyInstruction: `${strategyInstruction}\nSelected read-only skills: ${
       request.skills.length === 0 ? 'none' : request.skills.join(', ')
     }.`,
-    plannerContext: JSON.stringify(request.context, null, 2),
-    repositoryEvidence:
-      evidence === null
-        ? 'Available through read-only repository tools.'
-        : JSON.stringify(evidence, null, 2),
+    plannerContext: JSON.stringify(
+      {
+        workflow: request.context.workflow,
+        repositoryReference: request.context.repositoryReference,
+        operatorGuidance: request.context.operatorGuidance,
+      },
+      null,
+      2,
+    ),
+    repositoryEvidence: JSON.stringify(request.context.evidenceBundle, null, 2),
   });
 };
 
@@ -278,11 +145,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
     const serviceTier = this.options.serviceTier ?? 'fast';
 
     try {
-      const evidence =
-        request.strategy === 'fast'
-          ? await collectPlanningEvidence(request.repositoryPath, request.context.taskSnapshot)
-          : null;
-      const prompt = plannerPrompt(request, evidence);
+      const prompt = plannerPrompt(request);
       await prepareIsolatedCodexHome(isolatedCodexHome, {
         includePlanningSurfaces: request.strategy === 'ralplan',
       });

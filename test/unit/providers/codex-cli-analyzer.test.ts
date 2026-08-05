@@ -8,6 +8,7 @@ import {
   type CommandResult,
   type CommandRunner,
 } from '../../../src/providers/index.js';
+import { makeEvidenceBundle } from '../../helpers/evidence.js';
 
 const fixture = () => {
   const value = findTaskFixture('avia-13236-short-bug');
@@ -96,6 +97,7 @@ describe('Codex CLI workflow analyzer', () => {
       repositoryPath: '/tmp/repository',
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },
+      evidenceBundle: makeEvidenceBundle('avia-13236-short-bug'),
     });
 
     expect(result).toMatchObject({
@@ -161,6 +163,7 @@ describe('Codex CLI workflow analyzer', () => {
       repositoryPath: '/tmp/repository',
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },
+      evidenceBundle: makeEvidenceBundle('avia-13236-short-bug'),
     });
 
     expect(result).toMatchObject({ ok: false, error: { kind: 'invalid_analyzer_output' } });

@@ -9,6 +9,7 @@ import {
   type CommandResult,
   type CommandRunner,
 } from '../../../src/providers/index.js';
+import { makeEvidenceBundle } from '../../helpers/evidence.js';
 
 const readyDecision = {
   status: 'ready',
@@ -89,6 +90,7 @@ const request = (strategy: 'fast' | 'ralplan') => ({
   context: {
     taskSnapshot: { taskId: 'AVIA-13235', summary: 'Repair seat marker color' },
     workflow: { kind: 'sequence', id: 'delivery' },
+    evidenceBundle: makeEvidenceBundle(),
     repositoryReference: 'onetwotrip/front-avia',
     operatorGuidance: null,
   },

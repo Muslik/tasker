@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { JsonValueSchema } from '../workflow/schema.js';
+import { EvidenceBundleSchema } from './evidence-bundle.js';
 
 export const PlanningStrategyRequestSchema = z.enum(['auto', 'fast', 'ralplan']);
 export const PlanningStrategySchema = z.enum(['fast', 'ralplan']);
@@ -99,6 +100,7 @@ export const ImplementationPlannerContextSchema = z
   .object({
     taskSnapshot: JsonValueSchema,
     workflow: JsonValueSchema,
+    evidenceBundle: EvidenceBundleSchema,
     repositoryReference: z.string().min(1),
     operatorGuidance: z.string().min(1).max(10_000).nullable(),
   })

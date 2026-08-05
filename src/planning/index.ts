@@ -1,5 +1,6 @@
 export * from './contracts.js';
 export * from './analyzer-context.js';
+export * from './evidence-bundle.js';
 export * from './fixture-assembly.js';
 export * from './fixtures.js';
 export * from './implementation-plan.js';
@@ -8,4 +9,5 @@ export * from './planner.js';
 export * from './presentation.js';
 export * from './project-policies.js';
 export * from './proposal.js';
+export * from './repository-evidence.js';
 export * from './run-planning-snapshot.js';

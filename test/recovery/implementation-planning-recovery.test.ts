@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createImplementationPlanningCoordinator,
   createM1WorkflowService,
+  EvidenceBundleStore,
   WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import { loadHarnessPack, type LoadedHarnessPack } from '../../src/harness/index.js';
@@ -19,6 +20,7 @@ import {
 } from '../../src/providers/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
+import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 
 describe('implementation planning recovery', () => {
   it('restores a ready plan and artifact after restart without calling the provider again', async () => {
@@ -30,6 +32,7 @@ describe('implementation planning recovery', () => {
     const subjects = new WorkflowGenerationSubjectSource(directory);
     const generated = firstService.generate('avia-13236-short-bug');
     if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+    recordTestEvidenceBundle(firstLedger.repository, clock, 'avia-13236-short-bug');
     const firstCoordinator = createImplementationPlanningCoordinator({
       ledger: firstLedger.repository,
       clock,
@@ -82,6 +85,7 @@ describe('implementation planning recovery', () => {
       const subjects = new WorkflowGenerationSubjectSource(directory);
       const generated = service.generate('avia-13236-short-bug');
       if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
       const graphHash = generated.value.view.workflow.graphHash;
       let calls = 0;
       const fallback = new DeterministicImplementationPlanner();
@@ -136,6 +140,7 @@ describe('implementation planning recovery', () => {
       const service = createM1WorkflowService(ledger.repository, clock);
       const generated = service.generate('avia-13236-short-bug');
       if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
       const fallback = new DeterministicImplementationPlanner();
       let providerCalls = 0;
       const planner: ImplementationPlanner = {
@@ -181,6 +186,7 @@ describe('implementation planning recovery', () => {
       const service = createM1WorkflowService(ledger.repository, clock);
       const generated = service.generate('avia-13236-short-bug');
       if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
       let providerCalls = 0;
       const coordinator = createImplementationPlanningCoordinator({
         ledger: ledger.repository,
@@ -227,6 +233,7 @@ describe('implementation planning recovery', () => {
       const service = createM1WorkflowService(ledger.repository, clock);
       const generated = service.generate('avia-13236-short-bug');
       if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
       const workflowHash = generated.value.view.workflow.graphHash;
       if (workflowHash === null) throw new Error('Expected a compiled workflow hash');
       const subjects = new WorkflowGenerationSubjectSource(directory);
@@ -270,6 +277,7 @@ describe('implementation planning recovery', () => {
       };
       let observedPrompt: string | null = null;
       let observedSkills: readonly string[] | null = null;
+      let observedEvidenceBundle: unknown = null;
       const fallback = new DeterministicImplementationPlanner();
       const coordinator = createImplementationPlanningCoordinator({
         ledger: ledger.repository,
@@ -281,6 +289,7 @@ describe('implementation planning recovery', () => {
           plan: (request) => {
             observedPrompt = request.promptTemplate;
             observedSkills = request.skills;
+            observedEvidenceBundle = request.context.evidenceBundle;
             return fallback.plan(request);
           },
         },
@@ -302,6 +311,16 @@ describe('implementation planning recovery', () => {
       expect(observedPrompt).toBe(originalPack.prompts.implementationPlanner.content);
       expect(observedPrompt).not.toBe(changedContent);
       expect(observedSkills).toEqual(['jira', 'confluence', 'loop']);
+      const evidence = new EvidenceBundleStore(ledger.repository, clock).readLatest(
+        'avia-13236-short-bug',
+      );
+      if (!evidence.ok || evidence.value === null) throw new Error('Expected planning evidence');
+      expect(observedEvidenceBundle).toEqual(evidence.value.bundle);
+      const snapshotArtifact = ledger.repository.readArtifact(snapshot.value.artifactId);
+      if (snapshotArtifact === null) throw new Error('Expected planning snapshot artifact');
+      expect(RunPlanningSnapshotSchema.parse(snapshotArtifact.payload).evidenceBundle).toEqual(
+        evidence.value.reference,
+      );
     } finally {
       ledger.close();
       rmSync(directory, { recursive: true, force: true });
@@ -316,6 +335,7 @@ describe('implementation planning recovery', () => {
       const service = createM1WorkflowService(ledger.repository, clock);
       const generated = service.generate('avia-13236-short-bug');
       if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
       const workflowHash = generated.value.view.workflow.graphHash;
       if (workflowHash === null) throw new Error('Expected a compiled workflow hash');
       const subjects = new WorkflowGenerationSubjectSource(directory);
@@ -364,6 +384,7 @@ describe('implementation planning recovery', () => {
     const subjects = new WorkflowGenerationSubjectSource(directory);
     const generated = firstService.generate('avia-13236-short-bug');
     if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+    recordTestEvidenceBundle(firstLedger.repository, clock, 'avia-13236-short-bug');
     const fallback = new DeterministicImplementationPlanner();
     const questioningPlanner: ImplementationPlanner = {
       plan: async (request) => {

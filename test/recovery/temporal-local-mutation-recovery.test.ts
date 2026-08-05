@@ -53,6 +53,7 @@ import {
   WorkspaceStore,
   type WorkspaceConfiguration,
 } from '../../src/workspaces/index.js';
+import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 
 const workflowsPath = fileURLToPath(
   new URL('../../src/temporal/workflows/task-workflow.ts', import.meta.url),
@@ -168,6 +169,7 @@ describe('Temporal local mutation recovery', () => {
       if (!savedSubject.ok) throw new Error('Disposable task subject was not saved');
       const generated = workflowService.generateTask(task);
       if (!generated.ok) throw new Error('Disposable task workflow was not generated');
+      recordTestEvidenceBundle(ledger.repository, clock, task.fixtureId);
 
       const harnessPack = loadHarnessPack();
       const subjects = new WorkflowGenerationSubjectSource(

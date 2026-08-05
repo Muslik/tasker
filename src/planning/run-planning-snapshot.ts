@@ -8,6 +8,7 @@ import {
 import { TaskFixtureSchema } from './fixtures.js';
 import type { Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../workflow/schema.js';
+import { EvidenceBundleReferenceSchema } from './evidence-bundle.js';
 
 const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -54,12 +55,13 @@ const SnapshottedStepSchema = z
 
 export const RunPlanningSnapshotSchema = z
   .object({
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
     taskReference: z.string().min(1),
     workflowHash: ContentHashSchema,
     task: TaskFixtureSchema,
     taskSnapshot: JsonValueSchema,
     workflow: JsonValueSchema,
+    evidenceBundle: EvidenceBundleReferenceSchema,
     repository: z
       .object({
         workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),

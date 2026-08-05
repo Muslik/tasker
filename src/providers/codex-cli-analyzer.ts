@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import {
   VerificationPlanSchema,
   WorkflowAssemblyDecisionSchema,
   WorkflowAnalyzerOutputSchema,
+  type EvidenceBundle,
   type WorkflowAnalyzerContext,
   type WorkflowAnalyzerOutput,
 } from '../planning/index.js';
@@ -32,6 +33,7 @@ const WorkflowAnalyzerProviderOutputSchema = z
 
 export interface CodexWorkflowAnalyzerRequest extends WorkflowAnalyzerContext {
   readonly repositoryPath: string;
+  readonly evidenceBundle: EvidenceBundle;
 }
 
 export interface CodexWorkflowAnalyzerSuccess {
@@ -65,82 +67,23 @@ export type CodexWorkflowAnalyzerFailure =
       readonly issues: readonly string[];
     };
 
-interface RepositoryEvidence {
-  readonly files: readonly string[];
-  readonly workflowDocuments: readonly {
-    readonly path: string;
-    readonly content: string;
-  }[];
-}
-
-const ignoredDirectories = new Set(['.git', 'build', 'coverage', 'dist', 'node_modules', 'target']);
-
-const collectRepositoryEvidence = async (repositoryPath: string): Promise<RepositoryEvidence> => {
-  const files: string[] = [];
-
-  const visit = async (directory: string, prefix: string, depth: number): Promise<void> => {
-    if (depth > 4 || files.length >= 750) return;
-
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (files.length >= 750) return;
-      const relativePath = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) {
-        if (!ignoredDirectories.has(entry.name)) {
-          await visit(join(directory, entry.name), relativePath, depth + 1);
-        }
-      } else if (entry.isFile()) {
-        files.push(relativePath);
-      }
-    }
-  };
-
-  await visit(repositoryPath, '', 0);
-
-  const workflowDocumentPaths = files.filter((path) => {
-    const basename = path.split('/').at(-1)?.toLowerCase() ?? '';
-    return (
-      path === 'AGENTS.md' ||
-      path === 'README.md' ||
-      path === 'WORKFLOW.md' ||
-      basename === 'package.json' ||
-      basename === 'pnpm-workspace.yaml' ||
-      basename === 'tasker-workflow.md' ||
-      basename === 'workflow.md'
-    );
-  });
-  const workflowDocuments: { path: string; content: string }[] = [];
-  let remainingBytes = 48_000;
-
-  for (const path of workflowDocumentPaths) {
-    if (remainingBytes <= 0) break;
-    try {
-      const content = await readFile(join(repositoryPath, path), 'utf8');
-      const bounded = content.slice(0, Math.min(remainingBytes, 16_000));
-      workflowDocuments.push({ path, content: bounded });
-      remainingBytes -= Buffer.byteLength(bounded, 'utf8');
-    } catch {
-      // A concurrently removed or non-text policy file is simply absent from the evidence bundle.
-    }
-  }
-
-  return { files, workflowDocuments };
-};
-
-const analyzerPrompt = (
-  request: CodexWorkflowAnalyzerRequest,
-  repositoryEvidence: RepositoryEvidence,
-): string =>
+const analyzerPrompt = (request: CodexWorkflowAnalyzerRequest): string =>
   renderPromptTemplate(getHarnessPack().prompts.workflowAnalyzer.content, {
     taskSnapshot: JSON.stringify(request.taskSnapshot, null, 2),
     plannerContext: JSON.stringify(request.plannerContext, null, 2),
-    repositoryEvidence: JSON.stringify(repositoryEvidence, null, 2),
+    repositoryEvidence: JSON.stringify(
+      {
+        taskReference: request.evidenceBundle.taskReference,
+        revision: request.evidenceBundle.revision,
+        inputFingerprint: request.evidenceBundle.inputFingerprint,
+        entries: request.evidenceBundle.entries.filter(
+          ({ evidenceType }) =>
+            evidenceType === 'repository_inventory' || evidenceType === 'repository_document',
+        ),
+      },
+      null,
+      2,
+    ),
   });
 
 export class CodexCliWorkflowAnalyzer {
@@ -173,8 +116,7 @@ export class CodexCliWorkflowAnalyzer {
       return err({ kind: 'provider_unavailable', message: 'Codex CLI version probe failed' });
     }
 
-    const repositoryEvidence = await collectRepositoryEvidence(request.repositoryPath);
-    const prompt = analyzerPrompt(request, repositoryEvidence);
+    const prompt = analyzerPrompt(request);
     const directory = await mkdtemp(join(tmpdir(), 'tasker-codex-analyzer-'));
     const schemaPath = join(directory, 'workflow-analyzer-output.schema.json');
     const isolatedCodexHome = join(directory, 'codex-home');

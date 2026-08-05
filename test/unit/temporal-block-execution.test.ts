@@ -122,12 +122,17 @@ const makeSnapshot = (
             },
           };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 4,
     taskReference: 'task-ref',
     workflowHash: 'a'.repeat(64),
     task,
     taskSnapshot: task,
     workflow: {},
+    evidenceBundle: {
+      artifactId: 'evidence-bundle:fixture:r1',
+      checksum: '4'.repeat(64),
+      revision: 1,
+    },
     repository: {
       workspaceId,
       reference: repositoryReference,

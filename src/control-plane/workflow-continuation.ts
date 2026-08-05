@@ -21,9 +21,11 @@ import type { ImplementationPlanningRecord } from './implementation-planning-con
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import type {
   WorkflowAnalyzer,
+  WorkflowContextDiscovery,
   WorkflowGenerationSubject,
   WorkflowGenerationSubjectSource,
 } from './workflow-generator.js';
+import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import {
   WorkflowContinuationIssueSchema,
   WorkflowContinuationRecordSchema,
@@ -319,8 +321,9 @@ export class WorkflowContinuationCoordinator {
     private readonly clock: Clock,
     private readonly workflows: M1WorkflowService,
     private readonly subjects: WorkflowGenerationSubjectSource,
-    private readonly analyzer?: WorkflowAnalyzer,
-    private readonly repositories?: RepositoryCatalog,
+    private readonly analyzer: WorkflowAnalyzer | undefined,
+    private readonly repositories: RepositoryCatalog | undefined,
+    private readonly contextDiscovery: WorkflowContextDiscovery,
   ) {}
 
   public read(
@@ -437,10 +440,7 @@ export class WorkflowContinuationCoordinator {
         }),
       );
     }
-    const generated =
-      this.analyzer === undefined
-        ? this.workflows.generateContinuationTask(fixture)
-        : await this.analyzeContinuation(fixture, repository.path, taskSnapshot);
+    const generated = await this.generateContinuation(fixture, repository.path, taskSnapshot);
     if (!generated.ok) {
       return this.persistRecord(
         WorkflowContinuationRecordSchema.parse({
@@ -789,15 +789,31 @@ export class WorkflowContinuationCoordinator {
     }
   }
 
-  private async analyzeContinuation(
+  private async generateContinuation(
     fixture: TaskFixture,
     repositoryPath: string,
     taskSnapshot: JsonValue,
   ): Promise<Outcome<WorkflowResponse, M1ServiceError>> {
-    if (this.analyzer === undefined) throw new Error('Continuation analyzer is unavailable');
-    const analyzed = await this.analyzer.analyze({
-      ...createWorkflowAnalyzerContext(fixture, taskSnapshot),
+    const analyzerContext = createWorkflowAnalyzerContext(fixture, taskSnapshot);
+    const evidence = await this.contextDiscovery.discover({
+      taskReference: fixture.fixtureId,
+      taskSnapshot,
+      plannerContext: analyzerContext.plannerContext,
+      repositoryReference: fixture.repository,
       repositoryPath,
+    });
+    if (!evidence.ok) {
+      return err({
+        kind: 'generation_blocked',
+        taskReference: fixture.fixtureId,
+        reason: `Continuation context discovery failed: ${evidence.error.kind}`,
+      });
+    }
+    if (this.analyzer === undefined) return this.workflows.generateContinuationTask(fixture);
+    const analyzed = await this.analyzer.analyze({
+      ...analyzerContext,
+      repositoryPath,
+      evidenceBundle: evidence.value.bundle,
     });
     return analyzed.ok
       ? this.workflows.generateContinuationFromAnalyzerOutput(
@@ -868,6 +884,7 @@ export const createWorkflowContinuationCoordinator = (input: {
   readonly subjects: WorkflowGenerationSubjectSource;
   readonly analyzer?: WorkflowAnalyzer;
   readonly repositories?: RepositoryCatalog;
+  readonly contextDiscovery?: WorkflowContextDiscovery;
 }): WorkflowContinuationCoordinator =>
   new WorkflowContinuationCoordinator(
     new WorkflowContinuationStore(input.ledger, input.clock),
@@ -876,4 +893,6 @@ export const createWorkflowContinuationCoordinator = (input: {
     input.subjects,
     input.analyzer,
     input.repositories,
+    input.contextDiscovery ??
+      new ContextDiscoveryService(new EvidenceBundleStore(input.ledger, input.clock), input.clock),
   );

@@ -3,6 +3,7 @@ import {
   createWorkflowAnalyzerContext,
   findTaskFixture,
   TaskFixtureSchema,
+  type EvidenceBundle,
 } from '../planning/index.js';
 import type {
   CodexWorkflowAnalyzerFailure,
@@ -10,13 +11,14 @@ import type {
   CodexWorkflowAnalyzerSuccess,
 } from '../providers/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../workflow/index.js';
+import { JsonValueSchema, type JsonValue } from '../workflow/index.js';
 import {
   WorkflowGenerationSubjectSchema,
   type WorkflowGenerationSubject,
   type WorkflowResponse,
 } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
+import type { EvidenceBundleStoreError } from './evidence-bundle.js';
 
 export type { WorkflowGenerationSubject } from './m1-contracts.js';
 
@@ -30,6 +32,16 @@ export interface WorkflowAnalyzer {
   analyze(
     request: CodexWorkflowAnalyzerRequest,
   ): Promise<Outcome<CodexWorkflowAnalyzerSuccess, CodexWorkflowAnalyzerFailure>>;
+}
+
+export interface WorkflowContextDiscovery {
+  discover(input: {
+    readonly taskReference: string;
+    readonly taskSnapshot: JsonValue;
+    readonly plannerContext: JsonValue;
+    readonly repositoryReference: string;
+    readonly repositoryPath: string;
+  }): Promise<Outcome<{ readonly bundle: EvidenceBundle }, EvidenceBundleStoreError>>;
 }
 
 const qualifiedRepositoryReference = (aliases: readonly string[]): string | null =>
@@ -142,7 +154,8 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
   public constructor(
     private readonly service: M1WorkflowService,
     private readonly subjects: WorkflowGenerationSubjectSource,
-    private readonly analyzer?: WorkflowAnalyzer,
+    private readonly analyzer: WorkflowAnalyzer | undefined,
+    private readonly contextDiscovery: WorkflowContextDiscovery,
   ) {}
 
   public generate(taskReference: string): Promise<WorkflowGenerationResult> {
@@ -163,11 +176,31 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
 
     const subject = this.subjects.resolve(taskReference);
     if (!subject.ok) return subject;
+
+    const analyzerContext = createWorkflowAnalyzerContext(
+      subject.value.task,
+      subject.value.taskSnapshot,
+    );
+    const evidence = await this.contextDiscovery.discover({
+      taskReference,
+      taskSnapshot: subject.value.taskSnapshot,
+      plannerContext: analyzerContext.plannerContext,
+      repositoryReference: subject.value.task.repository,
+      repositoryPath: subject.value.repositoryPath,
+    });
+    if (!evidence.ok) {
+      return err({
+        kind: 'generation_blocked',
+        taskReference,
+        reason: `Context discovery failed: ${evidence.error.kind}`,
+      });
+    }
     if (this.analyzer === undefined) return this.service.generateTask(subject.value.task);
 
     const analyzed = await this.analyzer.analyze({
-      ...createWorkflowAnalyzerContext(subject.value.task, subject.value.taskSnapshot),
+      ...analyzerContext,
       repositoryPath: subject.value.repositoryPath,
+      evidenceBundle: evidence.value.bundle,
     });
     if (!analyzed.ok) {
       return err({

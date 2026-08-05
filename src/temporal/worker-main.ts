@@ -6,6 +6,7 @@ import {
   createImplementationPlanningCoordinator,
   ImplementationPlanningStore,
 } from '../control-plane/implementation-planning.js';
+import { EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
 import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
@@ -176,11 +177,13 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const deterministicProvider = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
+  const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
     workflows: workflowService,
     subjects,
+    evidenceBundles,
     harnessPack,
     planner: deterministicProvider
       ? new DeterministicImplementationPlanner()

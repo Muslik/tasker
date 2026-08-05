@@ -32,6 +32,7 @@ import {
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
 import { buildM1Api } from './m1-api.js';
+import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { createM1WorkflowService } from './m1-service.js';
@@ -84,12 +85,19 @@ export const startM1Server = async (): Promise<void> => {
     jiraIssueService,
     service,
   );
-  const workflowGenerator = new CodexWorkflowGenerator(service, subjects, workflowAnalyzer);
+  const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
+  const workflowGenerator = new CodexWorkflowGenerator(
+    service,
+    subjects,
+    workflowAnalyzer,
+    new ContextDiscoveryService(evidenceBundles, systemClock),
+  );
   const implementationPlanning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
     workflows: service,
     subjects,
+    evidenceBundles,
     planner: deterministicProviders
       ? new DeterministicImplementationPlanner()
       : new CodexCliImplementationPlanner(nodeCommandRunner),

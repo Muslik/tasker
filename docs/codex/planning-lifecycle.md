@@ -65,9 +65,10 @@ The Evidence Bundle is append-only. Each addition records:
 - the lifecycle phase and agent/tool invocation that introduced it.
 
 A new read creates a new evidence entry or bundle revision; it does not overwrite an
-older observation. Full Jira bodies, Confluence pages, Loop threads, repository files,
-and attachments remain in the artifact store. Temporal history contains only bounded
-references and hashes.
+older observation. Bounded JSON/text evidence may live inside the immutable bundle
+artifact; large Jira bodies, Confluence pages, Loop threads, repository files, and
+attachments use separate artifacts referenced by entries. Temporal history contains
+only the bundle reference and hashes.
 
 The workflow assembler and planner consume the same bundle. The planner reads supplied
 evidence first and may invoke only the read-only logical skills selected by its pinned
@@ -125,13 +126,18 @@ Initial planning revisions and execution-time continuations are deliberately dif
 
 ## Current implementation gap
 
-As of 2026-08-05, Tasker still compiles the graph before Temporal execution begins and
-special-cases `task.analyze@1` inside the graph interpreter. The planning coordinator is
-durable and now receives the block's snapshotted read-only skills, but the following
-target work remains:
+As of 2026-08-05, Tasker persists a typed, append-only Evidence Bundle with provenance,
+deduplicated immutable revisions, and restart-safe references. Workflow analysis and
+implementation planning consume that same bundle; neither provider performs its own
+hidden repository evidence collection. Planning snapshots carry only the immutable
+bundle reference. The planner also receives the block's snapshotted read-only skills.
+
+Tasker still compiles the graph before Temporal execution begins and special-cases
+`task.analyze@1` inside the graph interpreter. The following target work remains:
 
 1. move context discovery and draft assembly into the durable bootstrap lifecycle;
-2. persist the append-only Evidence Bundle and mediate external read skills;
+2. mediate Jira/Confluence/Loop skill reads through provenance-producing Tasker
+   adapters and move large evidence bodies into separately referenced artifacts;
 3. treat planning workflow changes as draft proposals followed by full recompilation,
    rather than ordinary execution continuation;
 4. freeze and start the execution graph only after plan-fit validation and optional

@@ -50,6 +50,7 @@ import type {
   WorkflowGenerationSubject,
   WorkflowGenerationSubjectSource,
 } from './workflow-generator.js';
+import { EvidenceBundleStore, type EvidenceBundleStoreError } from './evidence-bundle.js';
 
 export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_task';
 export {
@@ -508,6 +509,8 @@ export type ImplementationPlanningError =
       readonly issues: readonly string[];
     }
   | { readonly kind: 'transcript'; readonly error: PlanningTranscriptStoreError }
+  | { readonly kind: 'evidence_bundle'; readonly error: EvidenceBundleStoreError }
+  | { readonly kind: 'evidence_bundle_missing'; readonly taskReference: string }
   | { readonly kind: 'store'; readonly error: ImplementationPlanningStoreError };
 
 const countWorkflowNodes = (value: JsonValue): number => {
@@ -643,6 +646,7 @@ export class ImplementationPlanningCoordinator {
     private readonly store: ImplementationPlanningStore,
     private readonly workflows: M1WorkflowService,
     private readonly subjects: WorkflowGenerationSubjectSource,
+    private readonly evidenceBundles: EvidenceBundleStore,
     private readonly planner: ImplementationPlanner,
     private readonly harnessPackSource: () => LoadedHarnessPack,
     private readonly transcripts: PlanningTranscriptStore,
@@ -679,13 +683,18 @@ export class ImplementationPlanningCoordinator {
     }
     const graph = JsonValueSchema.safeParse(workflow.value.view.workflow.graph);
     if (!graph.success) return err({ kind: 'workflow_not_ready', taskReference });
+    const evidenceBundle = this.evidenceBundles.readLatest(taskReference);
+    if (!evidenceBundle.ok) return err({ kind: 'evidence_bundle', error: evidenceBundle.error });
+    if (evidenceBundle.value === null)
+      return err({ kind: 'evidence_bundle_missing', taskReference });
     const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 3,
+      schemaVersion: 4,
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,
       taskSnapshot: subject.value.taskSnapshot,
       workflow: JsonValueSchema.parse(workflow.value.view.workflow),
+      evidenceBundle: evidenceBundle.value.reference,
       repository: {
         workspaceId: workspace.workspaceId,
         reference: subject.value.task.repository,
@@ -1009,6 +1018,10 @@ export class ImplementationPlanningCoordinator {
             actualHash: loaded.value.workflowHash,
           });
         }
+        const evidenceBundle = this.evidenceBundles.read(loaded.value.evidenceBundle);
+        if (!evidenceBundle.ok) {
+          return err({ kind: 'evidence_bundle' as const, error: evidenceBundle.error });
+        }
         return ok({
           subject: {
             schemaVersion: 1 as const,
@@ -1017,6 +1030,7 @@ export class ImplementationPlanningCoordinator {
             taskSnapshot: loaded.value.taskSnapshot,
           },
           workflowJson: loaded.value.workflow,
+          evidenceBundle: evidenceBundle.value.bundle,
           promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
           plannerSkills: loaded.value.harness.implementationPlanner.skills,
         });
@@ -1040,9 +1054,17 @@ export class ImplementationPlanningCoordinator {
           actualHash: workflow.value.view.workflow.graphHash,
         });
       }
+      const evidenceBundle = this.evidenceBundles.readLatest(taskReference);
+      if (!evidenceBundle.ok) {
+        return err({ kind: 'evidence_bundle' as const, error: evidenceBundle.error });
+      }
+      if (evidenceBundle.value === null) {
+        return err({ kind: 'evidence_bundle_missing' as const, taskReference });
+      }
       return ok({
         subject: subject.value,
         workflowJson: JsonValueSchema.parse(workflow.value.view.workflow),
+        evidenceBundle: evidenceBundle.value.bundle,
         promptTemplate: this.harnessPackSource().prompts.implementationPlanner.content,
         plannerSkills: implementationPlannerSkillsFrom(this.harnessPackSource().steps),
       });
@@ -1080,6 +1102,7 @@ export class ImplementationPlanningCoordinator {
       context: {
         taskSnapshot: planningInput.value.subject.taskSnapshot,
         workflow: planningInput.value.workflowJson,
+        evidenceBundle: planningInput.value.evidenceBundle,
         repositoryReference: planningInput.value.subject.task.repository,
         operatorGuidance,
       },
@@ -1098,6 +1121,7 @@ export const createImplementationPlanningCoordinator = (input: {
   readonly workflows: M1WorkflowService;
   readonly subjects: WorkflowGenerationSubjectSource;
   readonly planner: ImplementationPlanner;
+  readonly evidenceBundles?: EvidenceBundleStore;
   readonly harnessPack?: LoadedHarnessPack;
   readonly harnessPackSource?: () => LoadedHarnessPack;
 }): ImplementationPlanningCoordinator => {
@@ -1109,6 +1133,7 @@ export const createImplementationPlanningCoordinator = (input: {
     new ImplementationPlanningStore(input.ledger, input.clock),
     input.workflows,
     input.subjects,
+    input.evidenceBundles ?? new EvidenceBundleStore(input.ledger, input.clock),
     input.planner,
     harnessPackSource,
     new PlanningTranscriptStore(input.ledger, input.clock),
