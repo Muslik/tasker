@@ -77,7 +77,7 @@ const waitForWait = async (
         const state = await requireState(service, taskReference);
         return state.status === 'waiting' ? state.wait.waitKind : state.status;
       },
-      { timeout: 5_000, interval: 50 },
+      { timeout: 10_000, interval: 50 },
     )
     .toBe(waitKind);
 

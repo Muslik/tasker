@@ -312,6 +312,8 @@ const generationFailureMessage = (error: M1ServiceError): string => {
       return `Continuation store failed: ${error.error.kind}`;
     case 'provider_failure':
       return `Continuation analyzer failed: ${error.failure.kind}`;
+    case 'generation_runtime_unavailable':
+      return error.message;
   }
 };
 

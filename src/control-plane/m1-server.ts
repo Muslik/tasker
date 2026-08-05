@@ -32,11 +32,12 @@ import {
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
 import { buildM1Api } from './m1-api.js';
-import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
+import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { createM1WorkflowService } from './m1-service.js';
-import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
+import { TemporalWorkflowGenerator } from './temporal-workflow-generator.js';
+import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 
@@ -77,7 +78,7 @@ export const startM1Server = async (): Promise<void> => {
     { repositoryCatalog },
   );
   const deterministicProviders = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
-  const workflowAnalyzer = deterministicProviders
+  const continuationAnalyzer = deterministicProviders
     ? undefined
     : new CodexCliWorkflowAnalyzer(nodeCommandRunner);
   const subjects = new WorkflowGenerationSubjectSource(
@@ -86,12 +87,6 @@ export const startM1Server = async (): Promise<void> => {
     service,
   );
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
-  const workflowGenerator = new CodexWorkflowGenerator(
-    service,
-    subjects,
-    workflowAnalyzer,
-    new ContextDiscoveryService(evidenceBundles, systemClock),
-  );
   const implementationPlanning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
@@ -107,12 +102,17 @@ export const startM1Server = async (): Promise<void> => {
     clock: systemClock,
     workflows: service,
     subjects,
-    ...(workflowAnalyzer === undefined ? {} : { analyzer: workflowAnalyzer }),
+    ...(continuationAnalyzer === undefined ? {} : { analyzer: continuationAnalyzer }),
     repositories: repositoryCatalog,
   });
   const temporalRuntime = await connectTemporalTaskRunService(
     temporalConfiguration,
     new LedgerTemporalRunRegistry(ledger.repository),
+  );
+  const workflowGenerator = new TemporalWorkflowGenerator(
+    temporalRuntime.client,
+    temporalConfiguration,
+    service,
   );
   const bitbucketReview =
     bitbucketConfiguration === null

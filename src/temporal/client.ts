@@ -227,14 +227,16 @@ export class TemporalTaskRunService implements TaskTemporalRunService {
 export const connectTemporalTaskRunService = async (
   configuration: TemporalClientConfiguration = DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
   registry?: TemporalRunRegistry,
-): Promise<{ readonly connection: Connection; readonly service: TemporalTaskRunService }> => {
+): Promise<{
+  readonly client: Client;
+  readonly connection: Connection;
+  readonly service: TemporalTaskRunService;
+}> => {
   const connection = await Connection.connect({ address: configuration.address });
+  const client = new Client({ connection, namespace: configuration.namespace });
   return {
+    client,
     connection,
-    service: new TemporalTaskRunService(
-      new Client({ connection, namespace: configuration.namespace }),
-      configuration,
-      registry,
-    ),
+    service: new TemporalTaskRunService(client, configuration, registry),
   };
 };

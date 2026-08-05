@@ -107,6 +107,8 @@ const sendServiceError = (reply: FastifyReply, error: M1ServiceError): FastifyRe
       return reply
         .code(502)
         .send(apiError('provider_failure', providerFailureSummary(error.failure)));
+    case 'generation_runtime_unavailable':
+      return reply.code(503).send(apiError(error.kind, error.message));
   }
 };
 

@@ -40,6 +40,33 @@ export const TaskWorkflowInputSchema = z
   .strict()
   .readonly();
 
+export const TaskBootstrapWorkflowInputSchema = z
+  .object({
+    schemaVersion: z.literal(TASK_WORKFLOW_SCHEMA_VERSION),
+    taskReference: z.string().min(1),
+  })
+  .strict()
+  .readonly();
+
+export const TaskDraftAssemblyResultSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('ready'),
+      taskReference: z.string().min(1),
+      workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    })
+    .strict()
+    .readonly(),
+  z
+    .object({
+      status: z.literal('rejected'),
+      taskReference: z.string().min(1),
+      workflowHash: z.null(),
+    })
+    .strict()
+    .readonly(),
+]);
+
 export const TaskWorkflowMemoSchema = z
   .object({
     schemaVersion: z.literal(TASK_WORKFLOW_SCHEMA_VERSION),
@@ -207,6 +234,8 @@ export const PrepareTaskWorkspaceResultSchema = z
   .readonly();
 
 export type TaskWorkflowInput = z.infer<typeof TaskWorkflowInputSchema>;
+export type TaskBootstrapWorkflowInput = z.infer<typeof TaskBootstrapWorkflowInputSchema>;
+export type TaskDraftAssemblyResult = z.infer<typeof TaskDraftAssemblyResultSchema>;
 export type TaskWorkflowMemo = z.infer<typeof TaskWorkflowMemoSchema>;
 export type ResolveTaskWaitCommand = z.infer<typeof ResolveTaskWaitCommandSchema>;
 export type ResolveTaskWaitReceipt = z.infer<typeof ResolveTaskWaitReceiptSchema>;
@@ -233,6 +262,10 @@ export interface TaskWorkflowActivities {
   linkWorkflowContinuation(
     input: LinkWorkflowContinuationInput,
   ): Promise<LinkWorkflowContinuationResult>;
+}
+
+export interface TaskBootstrapActivities {
+  assembleTaskWorkflowDraft(input: TaskBootstrapWorkflowInput): Promise<TaskDraftAssemblyResult>;
 }
 
 export interface TaskWorkflowResult {

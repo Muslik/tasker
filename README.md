@@ -14,11 +14,13 @@ Temporal is the execution kernel. Tasker owns the product-specific layers around
 - operator UI, artifacts, transcripts, shadow API cost, elapsed time, and retrospective.
 
 There are no base workflow templates. The analyzer starts from an empty graph and uses
-registered building blocks plus company/project policy. The accepted graph is immutable
-input to a generic Temporal graph interpreter. Agent calls, shell commands, filesystem
-work, and remote APIs run only in Temporal Activities; review, clarification,
-translation, publication, CI, and infrastructure pauses use durable Temporal messages
-and conditions.
+registered building blocks plus company/project policy. A dedicated Temporal bootstrap
+Workflow now owns context discovery and initial draft assembly; it stores evidence and
+the compiled draft outside Temporal history and returns only the bounded result/hash.
+After planning and validation, the frozen graph is immutable input to a generic Temporal
+graph interpreter. Agent calls, shell commands, filesystem work, and remote APIs run
+only in Temporal Activities; review, clarification, translation, publication, CI, and
+infrastructure pauses use durable Temporal messages and conditions.
 
 Read the canonical design in [`docs/codex`](docs/codex/README.md), the migration and
 deletion plan in
@@ -45,10 +47,15 @@ start validated Child Workflows without rewriting the accepted parent graph.
 The current vertical slice covers dynamic graph generation, managed workspace setup,
 implementation planning/revision, durable waits, recovery/replay, parallel task runs,
 and the three-pane operator console. Initial task, harness, and bounded repository
-context is persisted as an append-only Evidence Bundle with provenance; workflow
-analysis and implementation planning consume the same immutable revision, while
-Temporal planning snapshots carry only its reference. External Jira/Confluence/Loop
-reads are not yet mediated back into that bundle. The company `ai-assistance` policy now contributes
+context is persisted as an append-only Evidence Bundle with provenance. The Generate
+action reaches that collector and the initial graph assembler through a retryable,
+heartbeat-enabled Temporal bootstrap Activity; a failed bootstrap can be retried after
+infrastructure recovery without deleting its persisted evidence. Workflow analysis and
+implementation planning consume the same immutable bundle revision, while Temporal
+planning snapshots carry only its reference. Planning still runs through the temporary
+`task.analyze@1` interpreter special case, so draft recompilation and the explicit freeze
+boundary remain the next architecture slice. External Jira/Confluence/Loop reads are
+not yet mediated back into the bundle. The company `ai-assistance` policy now contributes
 ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
 flow into same-branch artifacts and a validated provider-neutral PR draft. The gated
 Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and

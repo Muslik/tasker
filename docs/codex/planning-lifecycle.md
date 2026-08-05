@@ -127,22 +127,30 @@ Initial planning revisions and execution-time continuations are deliberately dif
 ## Current implementation gap
 
 As of 2026-08-05, Tasker persists a typed, append-only Evidence Bundle with provenance,
-deduplicated immutable revisions, and restart-safe references. Workflow analysis and
-implementation planning consume that same bundle; neither provider performs its own
-hidden repository evidence collection. Planning snapshots carry only the immutable
-bundle reference. The planner also receives the block's snapshotted read-only skills.
+deduplicated immutable revisions, and restart-safe references. A dedicated Temporal
+bootstrap Workflow now invokes context discovery and initial draft assembly through one
+heartbeat-enabled Activity. The HTTP Generate action waits for that durable result;
+repeated requests reuse an accepted draft, rejected drafts receive a new bootstrap
+identity, and an exhausted transient failure can start a replacement run after the
+infrastructure is restored. Temporal history receives only the bounded status and graph
+hash; evidence and graph bodies remain Tasker artifacts.
 
-Tasker still compiles the graph before Temporal execution begins and special-cases
-`task.analyze@1` inside the graph interpreter. The following target work remains:
+Workflow analysis and implementation planning consume the same bundle; neither provider
+performs its own hidden repository evidence collection. Planning snapshots carry only
+the immutable bundle reference. The planner also receives the block's snapshotted
+read-only skills.
 
-1. move context discovery and draft assembly into the durable bootstrap lifecycle;
-2. mediate Jira/Confluence/Loop skill reads through provenance-producing Tasker
+Tasker still special-cases `task.analyze@1` inside the execution graph interpreter and
+passes the compiled draft into that run before implementation planning has accepted the
+final shape. The following target work remains:
+
+1. mediate Jira/Confluence/Loop skill reads through provenance-producing Tasker
    adapters and move large evidence bodies into separately referenced artifacts;
-3. treat planning workflow changes as draft proposals followed by full recompilation,
+2. treat planning workflow changes as draft proposals followed by full recompilation,
    rather than ordinary execution continuation;
-4. freeze and start the execution graph only after plan-fit validation and optional
+3. freeze and start the execution graph only after plan-fit validation and optional
    review;
-5. remove the interpreter's name-based `task.analyze@1` special case once planning is a
+4. remove the interpreter's name-based `task.analyze@1` special case once planning is a
    first-class lifecycle phase.
 
 No new execution block should depend on the old special case as a permanent extension

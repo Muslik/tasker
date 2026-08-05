@@ -30,6 +30,8 @@ Every accepted implementation must prove:
   semantic obligations validate;
 - context discovery and every planner read append provenance-bearing evidence instead
   of overwriting prior observations;
+- initial context discovery and draft assembly run through Temporal, reuse a persisted
+  accepted draft, and can resume after a transient bootstrap run exhausts its retries;
 - a draft graph cannot execute product effects before planning, recompilation,
   deterministic validation, and configured plan review complete;
 - a planning workflow proposal cannot mutate the draft or bypass the compiler directly;

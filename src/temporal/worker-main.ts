@@ -6,10 +6,13 @@ import {
   createImplementationPlanningCoordinator,
   ImplementationPlanningStore,
 } from '../control-plane/implementation-planning.js';
-import { EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
+import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
-import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
+import {
+  CodexWorkflowGenerator,
+  WorkflowGenerationSubjectSource,
+} from '../control-plane/workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
@@ -39,6 +42,7 @@ import {
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
 import {
+  CodexCliWorkflowAnalyzer,
   CodexCliImplementationPlanner,
   DeterministicImplementationPlanner,
   nodeCommandRunner,
@@ -76,6 +80,7 @@ import {
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
+import { createWorkflowAssemblyActivity } from './activities/workflow-assembly-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
@@ -178,6 +183,16 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
+  const temporalCommandRunner = createTemporalActivityCommandRunner(
+    nodeCommandRunner,
+    planningTranscripts,
+  );
+  const workflowGenerator = new CodexWorkflowGenerator(
+    workflowService,
+    subjects,
+    deterministicProvider ? undefined : new CodexCliWorkflowAnalyzer(temporalCommandRunner),
+    new ContextDiscoveryService(evidenceBundles, systemClock),
+  );
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
@@ -187,9 +202,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     harnessPack,
     planner: deterministicProvider
       ? new DeterministicImplementationPlanner()
-      : new CodexCliImplementationPlanner(
-          createTemporalActivityCommandRunner(nodeCommandRunner, planningTranscripts),
-        ),
+      : new CodexCliImplementationPlanner(temporalCommandRunner),
   });
   const workflowContinuation = createWorkflowContinuationCoordinator({
     ledger: ledger.repository,
@@ -236,6 +249,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {
+      ...createWorkflowAssemblyActivity(workflowGenerator),
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
       ...createPlanningActivity(planning),
       linkWorkflowContinuation: (input) => {

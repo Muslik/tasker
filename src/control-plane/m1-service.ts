@@ -66,6 +66,10 @@ export type M1ServiceError =
       readonly kind: 'provider_failure';
       readonly provider: 'codex_cli';
       readonly failure: CodexWorkflowAnalyzerFailure;
+    }
+  | {
+      readonly kind: 'generation_runtime_unavailable';
+      readonly message: string;
     };
 
 interface BuiltView {

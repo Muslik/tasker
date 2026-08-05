@@ -5,14 +5,16 @@ import {
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
   type TemporalClientConfiguration,
 } from './client.js';
-import type { TaskWorkflowActivities } from './contracts.js';
+import type { TaskBootstrapActivities, TaskWorkflowActivities } from './contracts.js';
+
+type TaskerTemporalActivities = TaskWorkflowActivities & TaskBootstrapActivities;
 
 export interface TaskerTemporalWorkerOptions {
   readonly connection: NativeConnection;
   readonly namespace: string;
   readonly taskQueue: string;
   readonly workflowsPath: string;
-  readonly activities: TaskWorkflowActivities;
+  readonly activities: TaskerTemporalActivities;
 }
 
 export const createTaskerTemporalWorker = async (
@@ -31,7 +33,7 @@ export const createTaskerTemporalWorker = async (
 
 export const connectTaskerTemporalWorker = async (
   configuration: TemporalClientConfiguration,
-  activities: TaskWorkflowActivities,
+  activities: TaskerTemporalActivities,
 ): Promise<{ readonly connection: NativeConnection; readonly worker: Worker }> => {
   const connection = await NativeConnection.connect({ address: configuration.address });
   return {

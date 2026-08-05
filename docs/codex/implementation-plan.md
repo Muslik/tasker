@@ -171,9 +171,12 @@ work:
 Delivered sub-slices now project the snapshotted `task.analyze@1` skills into the actual
 read-only planner provider session and persist one provenance-bearing Evidence Bundle
 consumed by both workflow analysis and implementation planning. The planning snapshot
-contains only its immutable reference. Moving this discovery/assembly boundary into
-Temporal, mediating external evidence reads, draft recompilation, and interpreter
-simplification remain the immediate target.
+contains only its immutable reference. Initial discovery/assembly now runs through a
+dedicated Temporal bootstrap Workflow and heartbeat-enabled Activity; accepted drafts
+are reused, validation-rejected attempts can be regenerated, and exhausted transient
+failures can resume as a new run without discarding persisted evidence. Mediating
+external evidence reads, pre-freeze draft recompilation, and removal of planning logic
+from the execution interpreter remain the immediate target.
 
 T2 exit gate:
 

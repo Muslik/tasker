@@ -4,6 +4,7 @@ export * from './client.js';
 export * from './run-registry.js';
 export * from './worker.js';
 export * from './activities/planning-activity.js';
+export * from './activities/workflow-assembly-activity.js';
 export * from './activities/workspace-activity.js';
 export * from './activities/workspace-mutation-recovery.js';
 export * from './workflows/messages.js';

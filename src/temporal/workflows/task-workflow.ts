@@ -23,6 +23,8 @@ import type {
 } from '../contracts.js';
 import { resolveTaskWaitUpdate, taskWorkflowStateQuery } from './messages.js';
 
+export { taskBootstrapWorkflow } from './task-bootstrap-workflow.js';
+
 const predicateActivities = proxyActivities<Pick<TaskWorkflowActivities, 'evaluatePredicate'>>({
   startToCloseTimeout: '1 minute',
   retry: {
