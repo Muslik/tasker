@@ -238,6 +238,53 @@ const applyTemporalRunToTask = (
   }
 };
 
+const activityEntriesFromTemporalRun = (
+  run: TaskWorkflowPublicState | null,
+  startingSequence: number,
+) => {
+  if (run === null) return [];
+
+  const occurredAt =
+    run.executionContext.status === 'ready'
+      ? run.executionContext.workspace.preparedAt
+      : new Date().toISOString();
+
+  const descriptors = [
+    {
+      include: true,
+      title: 'Run started',
+      detail: 'Temporal execution started for the compiled workflow graph.',
+    },
+    {
+      include:
+        run.settings.planApproval === 'automatic' &&
+        run.planning !== null &&
+        run.planning.status === 'ready',
+      title: 'Plan review not required',
+      detail: 'Immutable run settings skipped the human plan-approval gate.',
+    },
+    {
+      include: run.status === 'waiting' && run.wait.waitKind === 'code_review@1',
+      title: 'Waiting for code review',
+      detail: 'The workflow reached the code-review boundary and is paused for human review.',
+    },
+    {
+      include: run.status === 'waiting' && run.wait.waitKind === 'workflow_change.review@1',
+      title: 'Workflow change review required',
+      detail: 'Execution requested a workflow change that needs operator review.',
+    },
+  ].filter((entry) => entry.include);
+
+  return descriptors.map((entry, index) => ({
+    sequence: startingSequence + index,
+    occurredAt,
+    source: 'tool' as const,
+    level: 'info' as const,
+    title: entry.title,
+    detail: entry.detail,
+  }));
+};
+
 const decorateTreeWithTemporalState = (
   node: WorkflowTreeNode,
   run: TaskWorkflowPublicState,
@@ -421,17 +468,37 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     });
   });
 
-  api.get('/api/operator/tasks/:fixtureId/activity', (request, reply) => {
+  api.get('/api/operator/tasks/:fixtureId/activity', async (request, reply) => {
     const params = FixtureParamsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
+
+    const withTemporalEntries = async (
+      entries: ReadonlyArray<z.infer<typeof OperatorActivityResponseSchema>['entries'][number]>,
+    ) => {
+      const run = await temporalRunService.read(params.data.fixtureId);
+      if (!run.ok || run.value === null) return entries;
+      const nextSequence =
+        entries.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1;
+      return [
+        ...entries,
+        ...activityEntriesFromTemporalRun(run.value, nextSequence),
+      ].sort((left, right) => left.sequence - right.sequence);
+    };
 
     if (params.data.fixtureId.startsWith('jira:') && options.jiraIssueService !== undefined) {
       const jiraResult = options.jiraIssueService.readActivity(params.data.fixtureId);
       if (!jiraResult.ok) return sendJiraServiceError(reply, jiraResult.error);
       const workflowResult = options.service.readActivity(params.data.fixtureId);
       if (!workflowResult.ok) return sendServiceError(reply, workflowResult.error);
+      const entries = await withTemporalEntries([
+        ...jiraResult.value.entries,
+        ...workflowResult.value.entries,
+        ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
+        ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
+        ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
+      ]);
       return reply.send(
         OperatorActivityResponseSchema.parse({
           fixtureId: params.data.fixtureId,
@@ -439,31 +506,27 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             workflowResult.value.providerSession.status === 'completed'
               ? workflowResult.value.providerSession
               : jiraResult.value.providerSession,
-          entries: [
-            ...jiraResult.value.entries,
-            ...workflowResult.value.entries,
-            ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
-            ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
-            ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
-          ].sort((left, right) => left.sequence - right.sequence),
+          entries,
         }),
       );
     }
 
     const result = options.service.readActivity(params.data.fixtureId);
-    return result.ok
-      ? reply.send(
+    if (!result.ok) {
+      return sendServiceError(reply, result.error);
+    }
+    const entries = await withTemporalEntries([
+      ...result.value.entries,
+      ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
+      ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
+      ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
+    ]);
+    return reply.send(
           OperatorActivityResponseSchema.parse({
             ...result.value,
-            entries: [
-              ...result.value.entries,
-              ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
-              ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
-              ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
-            ].sort((left, right) => left.sequence - right.sequence),
+            entries,
           }),
-        )
-      : sendServiceError(reply, result.error);
+        );
   });
 
   api.get('/api/jira/issues/:issueKey', (request, reply) => {

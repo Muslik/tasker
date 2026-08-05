@@ -2496,6 +2496,12 @@ export const App = () => {
         if (selectedIdRef.current === taskReference) {
           await refreshSelection(taskReference);
         }
+        window.setTimeout(() => {
+          void refreshTasks();
+          if (selectedIdRef.current === taskReference) {
+            void refreshSelection(taskReference);
+          }
+        }, 750);
       })
       .catch((error: unknown) => {
         if (selectedIdRef.current === taskReference) {
