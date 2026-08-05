@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { access, cp, mkdir, readFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { z } from 'zod';
@@ -18,6 +18,7 @@ const PrepareAgentSkillsRequestSchema = z
     repositoryPath: z.string().min(1),
     configurationRoot: z.string().min(1),
     skills: z.array(SkillNameSchema),
+    skillOverrides: z.record(SkillNameSchema, z.string().min(1)).optional(),
   })
   .strict();
 
@@ -123,6 +124,10 @@ export const prepareAgentSkills = async (
         message: `Pinned workspace harness does not provide skill ${skill}`,
       });
     }
+    if (request.skillOverrides?.[skill] !== undefined) {
+      skills.push(skill);
+      return ok(null);
+    }
     const dependencies = await readSkillDependencies(sourceRoot, skill);
     if (!dependencies.ok) return dependencies;
     for (const dependency of dependencies.value) {
@@ -141,11 +146,18 @@ export const prepareAgentSkills = async (
   try {
     await mkdir(prepared.skillsRoot, { recursive: true });
     for (const skill of skills) {
-      await cp(join(sourceRoot, skill), join(prepared.skillsRoot, skill), {
-        recursive: true,
-        errorOnExist: true,
-        force: false,
-      });
+      const override = request.skillOverrides?.[skill];
+      if (override === undefined) {
+        await cp(join(sourceRoot, skill), join(prepared.skillsRoot, skill), {
+          recursive: true,
+          errorOnExist: true,
+          force: false,
+        });
+      } else {
+        const target = join(prepared.skillsRoot, skill);
+        await mkdir(target, { recursive: true });
+        await writeFile(join(target, 'SKILL.md'), override, 'utf8');
+      }
     }
   } catch (error) {
     return err({

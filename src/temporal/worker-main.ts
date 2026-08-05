@@ -16,6 +16,7 @@ import {
 import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
 import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
+import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
   AiAssistanceInitializeAdapter,
@@ -25,6 +26,7 @@ import {
   BitbucketPullRequestClient,
   BitbucketReviewClient,
   BitbucketReviewReplyAdapter,
+  ConfluencePlanningEvidenceReader,
   PullRequestReviewEvidenceStore,
   createJiraIssueService,
   ExternalEffectStore,
@@ -33,12 +35,16 @@ import {
   JenkinsBuildClient,
   JenkinsBuildObserverAdapter,
   JiraLifecycleClient,
+  JiraPlanningEvidenceReader,
   JiraReviewReadyAdapter,
   JiraReproductionEvidenceAdapter,
   JiraServerClient,
   JiraStartWorkAdapter,
+  LoopPlanningEvidenceReader,
+  loadConfluencePlanningEvidenceConfiguration,
   loadJenkinsBuildConfiguration,
   loadJiraConfiguration,
+  loadLoopPlanningEvidenceConfiguration,
   loadExternalEffectTaskAuthorization,
   TaskScopedIntegrationAdapter,
 } from '../integrations/index.js';
@@ -172,12 +178,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ? new UnconfiguredBitbucketRepositorySource()
       : new BitbucketRepositoryClient(bitbucketConfiguration),
   );
-  const jiraIssueService = createJiraIssueService(
-    ledger.repository,
-    systemClock,
-    new JiraServerClient(jiraConfiguration),
-    { repositoryCatalog },
-  );
+  const jiraClient = new JiraServerClient(jiraConfiguration);
+  const jiraIssueService = createJiraIssueService(ledger.repository, systemClock, jiraClient, {
+    repositoryCatalog,
+  });
   const subjects = new WorkflowGenerationSubjectSource(
     resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
     jiraIssueService,
@@ -187,6 +191,11 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
+  const evidenceReaders = new PlanningEvidenceReaderRegistry([
+    new JiraPlanningEvidenceReader(jiraClient, systemClock),
+    new ConfluencePlanningEvidenceReader(loadConfluencePlanningEvidenceConfiguration()),
+    new LoopPlanningEvidenceReader(loadLoopPlanningEvidenceConfiguration()),
+  ]);
   const workflowFreezes = new WorkflowFreezeStore(ledger.repository, systemClock);
   const temporalCommandRunner = createTemporalActivityCommandRunner(
     nodeCommandRunner,
@@ -215,6 +224,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     workflows: workflowService,
     subjects,
     evidenceBundles,
+    evidenceReaders,
     harnessPack,
     planner: deterministicProvider
       ? new DeterministicImplementationPlanner()

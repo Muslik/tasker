@@ -59,6 +59,11 @@ class ContractTemporalRunService implements TaskTemporalRunService {
         planningAttempt: input.planning?.attempt ?? 1,
         planningArtifactId: input.planning?.artifactId ?? `plan:${input.taskReference}:1`,
         planningSnapshot: input.executionContext.planningSnapshot,
+        evidenceBundle: input.planning?.evidenceBundle ?? {
+          artifactId: `evidence-bundle:${input.taskReference}:r1:contract`,
+          checksum: '0'.repeat(64),
+          revision: 1,
+        },
         approval: { kind: approval },
         frozenAt: '2026-08-03T00:00:00.000Z',
       },
@@ -117,6 +122,11 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       transcriptId: `planning-transcript:tasker:${input.taskReference}:planning:${String(attempt)}`,
       attempt,
       artifactId: `plan:${input.taskReference}:${String(attempt)}`,
+      evidenceBundle: {
+        artifactId: `evidence-bundle:${input.taskReference}:r1:contract`,
+        checksum: '0'.repeat(64),
+        revision: 1,
+      },
       requestedStrategy: input.settings.planningStrategy,
       selectedStrategy,
       receipt: {

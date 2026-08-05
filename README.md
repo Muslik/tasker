@@ -59,8 +59,10 @@ product execution begins only after the plan fits and optional review completes.
 That boundary is recorded as an immutable freeze receipt binding the exact graph, plan,
 evidence snapshot, approval mode, and Temporal run; a persistence failure pauses the
 same run without discarding its managed worktree.
-Post-freeze discoveries still use validated Child Workflow continuation. External
-Jira/Confluence/Loop reads are not yet mediated back into the bundle. The company
+Post-freeze discoveries still use validated Child Workflow continuation. Planning-time
+Jira/Confluence/Loop reads now use Tasker-owned mediated adapters: each request and
+provider receipt is persisted before I/O, results append provenance, 403/VPN recovery
+resumes the pending read, and large bodies remain content-addressed artifacts. The company
 `ai-assistance` policy now contributes
 ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
 flow into same-branch artifacts and a validated provider-neutral PR draft. The gated

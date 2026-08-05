@@ -74,6 +74,14 @@ owns normalized product artifacts and projections:
 - exact clarification-answer artifacts;
 - provider receipts with duration, token usage, prompt hash, and hypothetical API cost.
 
+Planner-selected Jira, Confluence, and Loop reads cross a Tasker-owned mediation
+boundary. The provider emits a typed evidence request instead of calling the system;
+Tasker persists that request and its receipt, runs the adapter, appends provenance, and
+invokes planning with the new bundle revision. Pending reads survive Activity retry, so
+a 403/VPN interruption does not spend the preceding planner round again. Large response
+bodies are content-addressed outside the bundle and verified before planner
+materialization.
+
 Company processes are not special-cased in this control loop. For example, a temporary
 `ai-assistance` policy is represented by registered workflow blocks selected by the
 analyzer. Removing that policy changes future assembled graphs without changing the
@@ -89,6 +97,11 @@ Temporal interpreter.
 - graph-hash mismatch stops before provider invocation;
 - typed HTTP commands reject generic or malformed wait resolutions;
 - independent tasks do not share planning/review state.
+- a failed mediated read resumes from its persisted request without rerunning the
+  preceding planner call;
+- planning-added evidence survives a later provider failure and new planning attempt;
+- large external evidence is referenced from the bundle and materialized with checksum
+  verification;
 - bounded stdout/stderr chunks survive ledger restart and preserve retry order;
 - transcript overflow is marked and capped instead of growing without limit;
 - persistence failure stops the provider attempt;

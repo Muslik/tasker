@@ -6,6 +6,7 @@ export interface CommandRequest {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly unsetEnv?: readonly string[];
   readonly stdin: string;
   readonly timeoutMs: number;
   readonly cancellationSignal?: AbortSignal;
@@ -43,9 +44,15 @@ export const nodeCommandRunner: CommandRunner = {
   run: (request) =>
     new Promise((resolve) => {
       const startedAt = process.hrtime.bigint();
+      const unsetEnvironment = new Set(request.unsetEnv ?? []);
+      const environment = Object.fromEntries(
+        Object.entries({ ...process.env, ...request.env }).filter(
+          ([name]) => !unsetEnvironment.has(name),
+        ),
+      );
       const child = spawn(request.command, [...request.args], {
         cwd: request.cwd,
-        env: { ...process.env, ...request.env },
+        env: environment,
         shell: false,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

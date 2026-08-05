@@ -547,6 +547,7 @@ describe('Temporal task workflow', () => {
         transcriptId: stub.transcriptId,
         attempt: stub.attempt,
         artifactId: stub.artifactId,
+        evidenceBundle: stub.evidenceBundle,
         requestedStrategy: stub.requestedStrategy,
         selectedStrategy: stub.selectedStrategy,
         receipt: stub.receipt,

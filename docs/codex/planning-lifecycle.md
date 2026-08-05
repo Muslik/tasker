@@ -35,7 +35,12 @@ flowchart LR
   A --> D["Draft workflow"]
   D --> P["Mandatory planning agent"]
   E --> P
-  P --> Q{"Blocking question?"}
+  P --> M{"More external evidence?"}
+  M -->|yes| B["Persist request + provider receipt"]
+  B --> C2["Tasker mediated read"]
+  C2 --> E2["Append Evidence Bundle revision"]
+  E2 --> P
+  M -->|no| Q{"Blocking question?"}
   Q -->|yes| H["Durable human clarification"]
   H --> P
   Q -->|no| R["Plan + proposed workflow delta + additional evidence"]
@@ -75,6 +80,19 @@ evidence first and may invoke only the read-only logical skills selected by its 
 harness snapshot. A mediated skill invocation returns both its result and provenance so
 Tasker can append it before accepting the planner decision. Provider transcripts are
 observability evidence, but a transcript alone is not the canonical Evidence Bundle.
+
+External planning skills are capability names, not provider-side API clients. For Jira,
+Confluence, and Loop, Tasker replaces the workspace skill with a generated request-only
+skill, removes the corresponding credential variables from the provider subprocess,
+and performs the actual read in a typed adapter. The request, purpose, provider receipt,
+token usage, and operation ID are persisted before the read. A worker/VPN failure thus
+resumes the pending read without rerunning that planner round. At most three mediated
+evidence rounds are accepted per planning attempt.
+
+Bodies larger than 64 KiB are content-addressed `evidence_body` artifacts. The persisted
+bundle entry contains their checksum reference; Tasker verifies and materializes the
+body only when constructing planner input. This keeps Temporal history and the bundle
+artifact bounded without hiding evidence in a provider transcript.
 
 ## Planning output
 
@@ -135,10 +153,10 @@ identity, and an exhausted transient failure can start a replacement run after t
 infrastructure is restored. Temporal history receives only the bounded status and graph
 hash; evidence and graph bodies remain Tasker artifacts.
 
-Workflow analysis and implementation planning consume the same bundle; neither provider
-performs its own hidden repository evidence collection. Planning snapshots carry only
-the immutable bundle reference. The planner also receives the block's snapshotted
-read-only skills.
+Workflow analysis and implementation planning consume the same bundle. Planning
+snapshots carry only the immutable initial bundle reference. The planner also receives
+the block's snapshotted read-only skills and may inspect the read-only worktree; external
+system reads must use the mediated request protocol and append a newer bundle revision.
 
 Planning is now a first-class Temporal lifecycle before generic graph traversal. The
 lifecycle locates the validator-required planning step and review gate, prepares the
@@ -175,6 +193,7 @@ The execution traversal has no code path that replaces the frozen active graph. 
 later execution-block `workflow_change_required` still opens continuation review and
 may start a Child Workflow, preserving the original prefix.
 
-The remaining evidence-boundary work is to mediate Jira/Confluence/Loop skill reads
-through provenance-producing Tasker adapters and move large external bodies into
-separately referenced artifacts.
+The evidence boundary now mediates Jira, Confluence, and Loop reads through
+provenance-producing Tasker adapters, persists pending requests before I/O, attributes
+each planner round's usage, and externalizes large bodies. The next product gate is an
+allowlisted real pilot through planning, frozen execution, PR/CI, and human review.

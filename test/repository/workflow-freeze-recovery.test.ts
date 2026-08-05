@@ -15,6 +15,11 @@ const freezeInput = {
     artifactId: 'planning-snapshot:jira:AVIA-13235',
     checksum: 'b'.repeat(64),
   },
+  evidenceBundle: {
+    artifactId: 'evidence-bundle:jira:AVIA-13235:r2:test',
+    checksum: 'd'.repeat(64),
+    revision: 2,
+  },
   approval: { kind: 'operator_approved' as const },
 } as const;
 

@@ -12,6 +12,10 @@ import {
   type ImplementationPlanningDecision,
   type PlanningStrategy,
 } from '../planning/implementation-plan.js';
+import {
+  PlanningEvidenceRequestSchema,
+  type PlanningEvidenceRequest,
+} from '../planning/planning-evidence.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { CommandRunner } from './command-runner.js';
 import {
@@ -32,7 +36,8 @@ import {
 
 const ImplementationPlannerProviderOutputSchema = z
   .object({
-    decisionJson: z.string().min(1),
+    decisionJson: z.string().min(1).nullable(),
+    evidenceRequestsJson: z.string().min(2).optional(),
   })
   .strict();
 
@@ -41,15 +46,22 @@ export interface ImplementationPlannerRequest {
   readonly repositoryPath: string;
   readonly strategy: PlanningStrategy;
   readonly skills: readonly string[];
+  readonly mediatedSkills: readonly string[];
+  readonly mediatedCredentialEnvironment: readonly string[];
   readonly context: ImplementationPlannerContext;
   readonly promptTemplate: string;
 }
 
 export interface ImplementationPlannerSuccess {
-  readonly decision: ImplementationPlanningDecision;
+  readonly decision: ImplementationPlanningDecision | null;
+  readonly evidenceRequests?: readonly PlanningEvidenceRequest[];
   readonly receipt: ImplementationPlannerReceipt;
   readonly stderr: string;
 }
+
+export type ImplementationPlannerDecisionSuccess = ImplementationPlannerSuccess & {
+  readonly decision: ImplementationPlanningDecision;
+};
 
 export type ImplementationPlannerFailure =
   | PrepareAgentSkillsFailure
@@ -87,6 +99,8 @@ planning uncertainty. Do not start a consensus or implementation workflow.`;
   return renderPromptTemplate(request.promptTemplate, {
     strategyInstruction: `${strategyInstruction}\nSelected read-only skills: ${
       request.skills.length === 0 ? 'none' : request.skills.join(', ')
+    }.\nExternally mediated skills: ${
+      request.mediatedSkills.length === 0 ? 'none' : request.mediatedSkills.join(', ')
     }.`,
     plannerContext: JSON.stringify(
       {
@@ -103,6 +117,19 @@ planning uncertainty. Do not start a consensus or implementation workflow.`;
 
 const invalidOutput = (issues: readonly string[]): Outcome<never, ImplementationPlannerFailure> =>
   err({ kind: 'invalid_planner_output', issues });
+
+const mediatedSkill = (skill: string): string => `---
+name: ${skill}
+description: Request read-only ${skill} evidence through Tasker's provenance boundary.
+---
+
+# Mediated ${skill} evidence
+
+Do not call ${skill} APIs, scripts, CLIs, or credentials directly. If the supplied Evidence Bundle
+does not contain material information that only ${skill} can answer, return an evidence request
+using the provider output contract. Tasker will perform the read, append immutable provenance, and
+run planning again with the updated bundle.
+`;
 
 export class CodexCliImplementationPlanner implements ImplementationPlanner {
   public constructor(
@@ -155,6 +182,9 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         repositoryPath: request.repositoryPath,
         configurationRoot: isolatedCodexHome,
         skills: [...request.skills],
+        skillOverrides: Object.fromEntries(
+          request.mediatedSkills.map((skill) => [skill, mediatedSkill(skill)]),
+        ),
       });
       if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
@@ -188,7 +218,9 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         env: {
           CODEX_HOME: isolatedCodexHome,
           ...workspaceHarnessEnvironment(request.repositoryPath, preparedSkills.value.skillsRoot),
+          TASKER_HARNESS_ENV_FILE: '/dev/null',
         },
+        unsetEnv: request.mediatedCredentialEnvironment,
         stdin: prompt,
         timeoutMs:
           request.strategy === 'ralplan'
@@ -233,6 +265,69 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         );
       }
 
+      let evidenceRequestsInput: unknown = [];
+      try {
+        evidenceRequestsInput = JSON.parse(
+          providerOutput.data.evidenceRequestsJson ?? '[]',
+        ) as unknown;
+      } catch {
+        return invalidOutput(['evidenceRequestsJson: expected serialized request array JSON']);
+      }
+      const evidenceRequests = z
+        .array(PlanningEvidenceRequestSchema)
+        .min(1)
+        .max(10)
+        .safeParse(evidenceRequestsInput);
+      const hasEvidenceRequests =
+        Array.isArray(evidenceRequestsInput) && evidenceRequestsInput.length > 0;
+      if (hasEvidenceRequests && !evidenceRequests.success) {
+        return invalidOutput(
+          evidenceRequests.error.issues.map(
+            (issue) => `evidenceRequestsJson.${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        );
+      }
+      if (!hasEvidenceRequests && !Array.isArray(evidenceRequestsInput)) {
+        return invalidOutput(['evidenceRequestsJson: expected an array']);
+      }
+
+      const receipt = ImplementationPlannerReceiptSchema.parse({
+        status: 'completed',
+        provider: 'codex_cli',
+        plannerVersion: 'implementation-planner@1',
+        cliVersion: version.stdout.trim(),
+        model,
+        serviceTier,
+        strategy: request.strategy,
+        sessionId: stream.value.sessionId,
+        promptHash: sha256(prompt),
+        durationMs: execution.durationMs,
+        usage: {
+          inputTokens: stream.value.usage.input_tokens,
+          cachedInputTokens: stream.value.usage.cached_input_tokens,
+          outputTokens: stream.value.usage.output_tokens,
+          reasoningOutputTokens: stream.value.usage.reasoning_output_tokens ?? 0,
+        },
+        hypotheticalApiCostUsd: null,
+      });
+      if (hasEvidenceRequests) {
+        if (providerOutput.data.decisionJson !== null) {
+          return invalidOutput(['decisionJson must be null while evidence requests are pending']);
+        }
+        if (!evidenceRequests.success) {
+          throw new Error('Validated evidence request state is inconsistent');
+        }
+        return ok({
+          decision: null,
+          evidenceRequests: evidenceRequests.data,
+          stderr: execution.stderr,
+          receipt,
+        });
+      }
+      if (providerOutput.data.decisionJson === null) {
+        return invalidOutput(['decisionJson is required when no evidence request is pending']);
+      }
+
       let decisionInput: unknown;
       try {
         decisionInput = JSON.parse(providerOutput.data.decisionJson) as unknown;
@@ -248,29 +343,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         );
       }
 
-      return ok({
-        decision: decision.data,
-        stderr: execution.stderr,
-        receipt: ImplementationPlannerReceiptSchema.parse({
-          status: 'completed',
-          provider: 'codex_cli',
-          plannerVersion: 'implementation-planner@1',
-          cliVersion: version.stdout.trim(),
-          model,
-          serviceTier,
-          strategy: request.strategy,
-          sessionId: stream.value.sessionId,
-          promptHash: sha256(prompt),
-          durationMs: execution.durationMs,
-          usage: {
-            inputTokens: stream.value.usage.input_tokens,
-            cachedInputTokens: stream.value.usage.cached_input_tokens,
-            outputTokens: stream.value.usage.output_tokens,
-            reasoningOutputTokens: stream.value.usage.reasoning_output_tokens ?? 0,
-          },
-          hypotheticalApiCostUsd: null,
-        }),
-      });
+      return ok({ decision: decision.data, stderr: execution.stderr, receipt });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

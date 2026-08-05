@@ -6,9 +6,14 @@ import { openSqliteLedger } from '../ledger/index.js';
 import {
   BitbucketReviewClient,
   BitbucketReviewCoordinator,
+  ConfluencePlanningEvidenceReader,
   createJiraIssueService,
+  JiraPlanningEvidenceReader,
   JiraServerClient,
+  loadConfluencePlanningEvidenceConfiguration,
   loadJiraConfiguration,
+  loadLoopPlanningEvidenceConfiguration,
+  LoopPlanningEvidenceReader,
   PullRequestReviewEvidenceStore,
 } from '../integrations/index.js';
 import {
@@ -35,6 +40,7 @@ import { buildM1Api } from './m1-api.js';
 import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
+import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { TemporalWorkflowGenerator } from './temporal-workflow-generator.js';
 import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
@@ -71,12 +77,10 @@ export const startM1Server = async (): Promise<void> => {
       ? new UnconfiguredBitbucketRepositorySource()
       : new BitbucketRepositoryClient(bitbucketConfiguration),
   );
-  const jiraIssueService = createJiraIssueService(
-    ledger.repository,
-    systemClock,
-    new JiraServerClient(loadJiraConfiguration()),
-    { repositoryCatalog },
-  );
+  const jiraClient = new JiraServerClient(loadJiraConfiguration());
+  const jiraIssueService = createJiraIssueService(ledger.repository, systemClock, jiraClient, {
+    repositoryCatalog,
+  });
   const deterministicProviders = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
   const continuationAnalyzer = deterministicProviders
     ? undefined
@@ -87,12 +91,18 @@ export const startM1Server = async (): Promise<void> => {
     service,
   );
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
+  const evidenceReaders = new PlanningEvidenceReaderRegistry([
+    new JiraPlanningEvidenceReader(jiraClient, systemClock),
+    new ConfluencePlanningEvidenceReader(loadConfluencePlanningEvidenceConfiguration()),
+    new LoopPlanningEvidenceReader(loadLoopPlanningEvidenceConfiguration()),
+  ]);
   const implementationPlanning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
     workflows: service,
     subjects,
     evidenceBundles,
+    evidenceReaders,
     planner: deterministicProviders
       ? new DeterministicImplementationPlanner()
       : new CodexCliImplementationPlanner(nodeCommandRunner),

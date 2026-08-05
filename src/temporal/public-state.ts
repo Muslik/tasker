@@ -8,6 +8,7 @@ import {
 } from '../planning/implementation-plan.js';
 import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapshot.js';
+import { EvidenceBundleReferenceSchema } from '../planning/evidence-bundle.js';
 import { WorkflowChangeRequestSchema as ExecutionWorkflowChangeRequestSchema } from '../workflow/execution-result.js';
 import {
   WorkspaceBootstrapReceiptSchema,
@@ -31,6 +32,7 @@ const TaskWorkflowPlanningBaseSchema = z.object({
   transcriptId: z.string().min(1),
   attempt: z.number().int().positive(),
   artifactId: z.string().min(1),
+  evidenceBundle: EvidenceBundleReferenceSchema,
   requestedStrategy: PlanningStrategyRequestSchema,
   selectedStrategy: PlanningStrategySchema,
   receipt: ImplementationPlannerReceiptSchema,

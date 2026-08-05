@@ -64,6 +64,7 @@ const planningResult = (record: ImplementationPlanningRecord, commandId: string)
     transcriptId: record.transcriptId,
     attempt: record.attempt,
     artifactId: record.artifactId,
+    evidenceBundle: record.evidenceBundle,
     requestedStrategy: record.requestedStrategy,
     selectedStrategy: record.selectedStrategy,
     receipt: record.receipt,

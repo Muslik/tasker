@@ -22,15 +22,17 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = String(apiPort);
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const [control, jira, ledgerModule, providers, repositories, shared, temporal] = await Promise.all([
-  import('../dist/control-plane/index.js'),
-  import('../dist/integrations/index.js'),
-  import('../dist/ledger/index.js'),
-  import('../dist/providers/index.js'),
-  import('../dist/repositories/index.js'),
-  import('../dist/shared/index.js'),
-  import('../dist/temporal/index.js'),
-]);
+const [control, jira, ledgerModule, planning, providers, repositories, shared, temporal] =
+  await Promise.all([
+    import('../dist/control-plane/index.js'),
+    import('../dist/integrations/index.js'),
+    import('../dist/ledger/index.js'),
+    import('../dist/planning/index.js'),
+    import('../dist/providers/index.js'),
+    import('../dist/repositories/index.js'),
+    import('../dist/shared/index.js'),
+    import('../dist/temporal/index.js'),
+  ]);
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
 const service = control.createM1WorkflowService(ledger.repository, shared.systemClock);
@@ -127,8 +129,68 @@ const subjects = new control.WorkflowGenerationSubjectSource(
   jiraIssueService,
   service,
 );
-const workflowGenerator = new control.CodexWorkflowGenerator(service, subjects);
+const evidenceBundles = new control.EvidenceBundleStore(ledger.repository, shared.systemClock);
+const contextDiscovery = new control.ContextDiscoveryService(evidenceBundles, shared.systemClock);
+const workflowGenerator = new control.CodexWorkflowGenerator(
+  service,
+  subjects,
+  undefined,
+  contextDiscovery,
+);
 const deterministicPlanner = new providers.DeterministicImplementationPlanner();
+const e2eAnalyzer = {
+  analyze: async (request) => {
+    const snapshot = request.taskSnapshot;
+    const parentSnapshot =
+      snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
+        ? (snapshot.parentTaskSnapshot ?? snapshot)
+        : snapshot;
+    const proposal = planning.analyzeTaskFixture(parentSnapshot);
+    if (!proposal.ok) {
+      return shared.err({
+        kind: 'invalid_analyzer_output',
+        issues: ['E2E analyzer could not reconstruct the fixture proposal.'],
+      });
+    }
+    const source = JSON.parse(
+      JSON.stringify(proposal.value.source, (_key, value) =>
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        value.kind === 'step' &&
+        value.uses === 'code.implement@1'
+          ? { ...value, with: { ...value.with, repository: 'twiket/ui-kit' } }
+          : value,
+      ),
+    );
+    return shared.ok({
+      output: planning.WorkflowAnalyzerOutputSchema.parse({
+        assemblyDecisions: proposal.value.assemblyDecisions,
+        source,
+        verificationPlan: proposal.value.verificationPlan,
+      }),
+      receipt: providers.WorkflowAnalyzerReceiptSchema.parse({
+        status: 'completed',
+        provider: 'codex_cli',
+        analyzerVersion: 'codex-cli@1',
+        cliVersion: 'temporal-e2e@1',
+        model: 'deterministic',
+        serviceTier: 'fast',
+        sessionId: 'temporal-e2e-workflow-revision',
+        promptHash: '0'.repeat(64),
+        durationMs: 0,
+        usage: {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          reasoningOutputTokens: 0,
+        },
+        hypotheticalApiCostUsd: null,
+      }),
+      stderr: '',
+    });
+  },
+};
 const e2ePlanner = {
   plan: async (request) => {
     const result = await deterministicPlanner.plan(request);
@@ -142,6 +204,7 @@ const e2ePlanner = {
       return result;
     }
     if (snapshot.fixtureId === 'avia-13236-short-bug') {
+      if (JSON.stringify(request.context.workflow).includes('twiket/ui-kit')) return result;
       return {
         ...result,
         value: {
@@ -184,7 +247,16 @@ const implementationPlanning = control.createImplementationPlanningCoordinator({
   workflows: service,
   subjects,
   planner: e2ePlanner,
+  evidenceBundles,
 });
+const workflowDraftRevisions = new control.WorkflowDraftRevisionCoordinator(
+  service,
+  subjects,
+  e2eAnalyzer,
+  contextDiscovery,
+  repositoryCatalog,
+);
+const workflowFreezes = new control.WorkflowFreezeStore(ledger.repository, shared.systemClock);
 const workflowContinuation = control.createWorkflowContinuationCoordinator({
   ledger: ledger.repository,
   clock: shared.systemClock,
@@ -223,6 +295,8 @@ const completeStep = async (input) => ({
 
 const workflowActivities = {
   ...planningActivity,
+  ...temporal.createWorkflowDraftRevisionActivity(workflowDraftRevisions, implementationPlanning),
+  ...temporal.createWorkflowFreezeActivity(workflowFreezes),
   prepareTaskWorkspace: async (input) => {
     const subject = subjects.resolve(input.taskReference);
     if (!subject.ok) {

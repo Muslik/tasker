@@ -695,6 +695,7 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
           planningAttempt: acceptedPlanning.attempt,
           planningArtifactId: acceptedPlanning.artifactId,
           planningSnapshot: readyContext.planningSnapshot,
+          evidenceBundle: acceptedPlanning.evidenceBundle,
           approval,
         });
         state = { ...state, lifecycle: { phase: 'frozen', receipt } };

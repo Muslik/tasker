@@ -182,7 +182,9 @@ has been removed from the node interpreter. An immutable, operation-idempotent f
 receipt now binds the accepted graph, plan, evidence snapshot, approval mode, and
 Temporal run before product execution begins. Failed receipt persistence opens a
 durable retry wait without losing the prepared workspace. Mediating external evidence
-reads remains.
+reads is also complete: Jira/Confluence/Loop requests are persisted with per-round
+provider receipts before Tasker adapters perform I/O, append a new Evidence Bundle
+revision, and resume planning. Large bodies are separately content-addressed.
 
 T2 exit gate:
 
@@ -451,10 +453,6 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-Complete the Evidence Bundle boundary: planner-initiated Jira, Confluence, and Loop
-reads must run through provenance-producing Tasker adapters and append immutable
-evidence before their result can influence an accepted plan or graph revision. Large
-external bodies must be stored as separately referenced artifacts rather than copied
-into Temporal history or provider-only transcripts. Then run one allowlisted pilot via
+Run one allowlisted pilot via
 Jira intake -> managed worktree -> agent implementation -> targeted verification ->
 validated PR draft -> safe push/PR -> Jenkins classification -> human review/revision.

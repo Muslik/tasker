@@ -13,6 +13,17 @@ export const EvidenceBundleReferenceSchema = z
   .strict()
   .readonly();
 
+export const EvidenceBodyReferenceSchema = z
+  .object({
+    kind: z.literal('artifact'),
+    artifactId: z.string().min(1),
+    checksum: EvidenceContentHashSchema,
+    byteLength: z.number().int().positive(),
+    mediaType: z.string().min(1),
+  })
+  .strict()
+  .readonly();
+
 export const EvidenceSourceSchema = z
   .object({
     kind: z.enum(['task_system', 'repository', 'harness', 'operator', 'external_system']),
@@ -71,6 +82,7 @@ export const EvidenceBundleSchema = z
   .readonly();
 
 export type EvidenceBundleReference = z.infer<typeof EvidenceBundleReferenceSchema>;
+export type EvidenceBodyReference = z.infer<typeof EvidenceBodyReferenceSchema>;
 export type EvidenceSource = z.infer<typeof EvidenceSourceSchema>;
 export type EvidenceEntry = z.infer<typeof EvidenceEntrySchema>;
 export type EvidenceBundle = z.infer<typeof EvidenceBundleSchema>;

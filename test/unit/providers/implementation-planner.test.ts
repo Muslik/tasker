@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -54,6 +54,8 @@ const codexJsonl = (finalMessage: string): string =>
 class RecordingRunner implements CommandRunner {
   public readonly requests: CommandRequest[] = [];
   public schema: string | null = null;
+  public materializedJiraSkill: string | null = null;
+  public materializedJiraHelper = false;
 
   public constructor(private readonly finalMessage: string) {}
 
@@ -71,6 +73,15 @@ class RecordingRunner implements CommandRunner {
     const schemaIndex = request.args.indexOf('--output-schema');
     const schemaPath = schemaIndex < 0 ? undefined : request.args[schemaIndex + 1];
     this.schema = schemaPath === undefined ? null : readFileSync(schemaPath, 'utf8');
+    const skillsRoot = request.env?.TASKER_SKILLS_ROOT;
+    if (skillsRoot !== undefined) {
+      try {
+        this.materializedJiraSkill = readFileSync(join(skillsRoot, 'jira', 'SKILL.md'), 'utf8');
+      } catch {
+        this.materializedJiraSkill = null;
+      }
+      this.materializedJiraHelper = existsSync(join(skillsRoot, 'jira-helper'));
+    }
     return Promise.resolve({
       status: 'exited',
       exitCode: 0,
@@ -86,6 +97,8 @@ const request = (strategy: 'fast' | 'ralplan') => ({
   repositoryPath: process.cwd(),
   strategy,
   skills: [],
+  mediatedSkills: [],
+  mediatedCredentialEnvironment: [],
   promptTemplate: '{{strategyInstruction}}\n{{plannerContext}}\n{{repositoryEvidence}}',
   context: {
     taskSnapshot: { taskId: 'AVIA-13235', summary: 'Repair seat marker color' },
@@ -135,6 +148,14 @@ describe('Codex CLI implementation planner', () => {
       '---\nname: jira\ndescription: Read Jira evidence.\n---\n',
       'utf8',
     );
+    writeFileSync(join(skillPath, 'dependencies.json'), '["jira-helper"]\n', 'utf8');
+    const helperPath = join(repositoryPath, '.tasker', 'harness', 'skills', 'jira-helper');
+    mkdirSync(helperPath, { recursive: true });
+    writeFileSync(
+      join(helperPath, 'SKILL.md'),
+      '---\nname: jira-helper\ndescription: Direct Jira helper.\n---\n',
+      'utf8',
+    );
     const runner = new RecordingRunner(
       JSON.stringify({ decisionJson: JSON.stringify(readyDecision) }),
     );
@@ -145,6 +166,8 @@ describe('Codex CLI implementation planner', () => {
         ...request('fast'),
         repositoryPath,
         skills: ['jira'],
+        mediatedSkills: ['jira'],
+        mediatedCredentialEnvironment: ['JIRA_TOKEN'],
       });
 
       expect(result.ok).toBe(true);
@@ -154,9 +177,39 @@ describe('Codex CLI implementation planner', () => {
       );
       expect(runner.requests[1]?.stdin).toContain('Selected read-only skills: jira');
       expect(runner.requests[1]?.env?.TASKER_SKILLS_ROOT).toMatch(/\/skills$/u);
+      expect(runner.requests[1]?.env?.TASKER_HARNESS_ENV_FILE).toBe('/dev/null');
+      expect(runner.requests[1]?.unsetEnv).toEqual(['JIRA_TOKEN']);
+      expect(runner.materializedJiraSkill).toContain('Request read-only jira evidence');
+      expect(runner.materializedJiraSkill).not.toContain('Read Jira evidence.');
+      expect(runner.materializedJiraHelper).toBe(false);
     } finally {
       rmSync(repositoryPath, { recursive: true, force: true });
     }
+  });
+
+  it('returns a typed mediated evidence request without a provisional decision', async () => {
+    const evidenceRequests = [
+      {
+        requestId: 'linked-issue',
+        skill: 'jira',
+        locator: 'AVIA-12045',
+        purpose: 'Confirm the related bug acceptance criteria.',
+      },
+    ];
+    const runner = new RecordingRunner(
+      JSON.stringify({
+        decisionJson: null,
+        evidenceRequestsJson: JSON.stringify(evidenceRequests),
+      }),
+    );
+    const planner = new CodexCliImplementationPlanner(runner);
+
+    const result = await planner.plan(request('fast'));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { decision: null, evidenceRequests },
+    });
   });
 
   it('routes an explicit ralplan request through the consensus prompt with high reasoning', async () => {

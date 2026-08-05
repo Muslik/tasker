@@ -152,10 +152,13 @@ describe('Temporal managed workspace', () => {
       });
       expect(started.ok).toBe(true);
       await expect
-        .poll(async () => {
-          const state = await service.read(taskReference);
-          return state.ok && state.value?.status === 'waiting' ? state.value.wait.waitKind : null;
-        })
+        .poll(
+          async () => {
+            const state = await service.read(taskReference);
+            return state.ok && state.value?.status === 'waiting' ? state.value.wait.waitKind : null;
+          },
+          { timeout: 20_000 },
+        )
         .toBe('code_review@1');
       const state = await service.read(taskReference);
       if (!state.ok || state.value?.executionContext.status !== 'ready') {

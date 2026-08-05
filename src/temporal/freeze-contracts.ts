@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapshot.js';
+import { EvidenceBundleReferenceSchema } from '../planning/evidence-bundle.js';
 
 export const WorkflowFreezeApprovalSchema = z.discriminatedUnion('kind', [
   z
@@ -22,6 +23,7 @@ const FreezeTaskWorkflowInputObjectSchema = z
     planningAttempt: z.number().int().positive(),
     planningArtifactId: z.string().min(1),
     planningSnapshot: PlanningSnapshotReferenceSchema,
+    evidenceBundle: EvidenceBundleReferenceSchema,
     approval: WorkflowFreezeApprovalSchema,
   })
   .strict();

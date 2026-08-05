@@ -50,6 +50,9 @@ const matchesInput = (receipt: WorkflowFreezeReceipt, input: FreezeTaskWorkflowI
   receipt.planningArtifactId === input.planningArtifactId &&
   receipt.planningSnapshot.artifactId === input.planningSnapshot.artifactId &&
   receipt.planningSnapshot.checksum === input.planningSnapshot.checksum &&
+  receipt.evidenceBundle.artifactId === input.evidenceBundle.artifactId &&
+  receipt.evidenceBundle.checksum === input.evidenceBundle.checksum &&
+  receipt.evidenceBundle.revision === input.evidenceBundle.revision &&
   receipt.approval.kind === input.approval.kind;
 
 export class WorkflowFreezeStore {
@@ -116,6 +119,7 @@ export class WorkflowFreezeStore {
             workflowRunId: receipt.workflowRunId,
             workflowHash: receipt.workflowHash,
             planningArtifactId: receipt.planningArtifactId,
+            evidenceBundleArtifactId: receipt.evidenceBundle.artifactId,
             approval: receipt.approval.kind,
           }),
           createdAt: frozenAt,

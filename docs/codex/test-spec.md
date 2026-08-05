@@ -122,6 +122,9 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `redelivered_freeze_returns_exact_immutable_receipt`
 - `conflicting_freeze_for_same_run_is_rejected`
 - `freeze_store_failure_waits_without_losing_run_or_workspace`
+- `planning_evidence_request_survives_reader_failure_without_replanning`
+- `planning_evidence_survives_a_later_provider_attempt_failure`
+- `large_planning_evidence_is_externalized_and_checksum_materialized`
 - `plan_review_false_proceeds_after_valid_plan`
 - `plan_review_true_waits_for_approval`
 - `plan_feedback_creates_new_plan_attempt`

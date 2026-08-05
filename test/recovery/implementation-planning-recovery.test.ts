@@ -8,6 +8,7 @@ import {
   createImplementationPlanningCoordinator,
   createM1WorkflowService,
   EvidenceBundleStore,
+  PlanningEvidenceReaderRegistry,
   WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import { loadHarnessPack, type LoadedHarnessPack } from '../../src/harness/index.js';
@@ -172,6 +173,224 @@ describe('implementation planning recovery', () => {
         value: { status: 'ready', attempt: 1, commandId },
       });
       expect(providerCalls).toBe(1);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('resumes a persisted evidence request after reader failure without rerunning that planner round', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-evidence-recovery-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
+      const fallback = new DeterministicImplementationPlanner();
+      let plannerCalls = 0;
+      const planner: ImplementationPlanner = {
+        plan: async (request) => {
+          plannerCalls += 1;
+          const base = await fallback.plan(request);
+          if (!base.ok) return base;
+          if (plannerCalls === 1) {
+            return ok({
+              ...base.value,
+              decision: null,
+              evidenceRequests: [
+                {
+                  requestId: 'linked-issue',
+                  skill: 'jira',
+                  locator: 'AVIA-12045',
+                  purpose: 'Confirm the linked issue acceptance criteria.',
+                },
+              ],
+            });
+          }
+          expect(request.context.evidenceBundle.revision).toBe(2);
+          const externalEvidence = request.context.evidenceBundle.entries.find(
+            ({ evidenceType }) => evidenceType === 'external_document',
+          );
+          expect(externalEvidence?.provenance.source).toEqual({
+            kind: 'external_system',
+            locator: 'jira:AVIA-12045',
+          });
+          expect(externalEvidence?.provenance.introducedBy.phase).toBe('planning');
+          expect(externalEvidence?.content).toEqual({
+            key: 'AVIA-12045',
+            acceptance: 'keep the current fallback',
+          });
+          return base;
+        },
+      };
+      let readerCalls = 0;
+      const evidenceReaders = new PlanningEvidenceReaderRegistry([
+        {
+          skill: 'jira',
+          credentialEnvironment: ['JIRA_TOKEN'],
+          read: (request) => {
+            readerCalls += 1;
+            if (readerCalls === 1) {
+              return Promise.resolve(
+                err({
+                  kind: 'reader_unavailable' as const,
+                  skill: 'jira',
+                  message: 'Jira returned HTTP 403; VPN or access may be required',
+                  retryable: true,
+                }),
+              );
+            }
+            return Promise.resolve(
+              ok({
+                skill: 'jira',
+                locator: request.locator,
+                title: 'AVIA-12045: Linked bug',
+                observedVersion: '2026-08-02T11:00:00.000Z',
+                mediaType: 'application/json',
+                content: { key: 'AVIA-12045', acceptance: 'keep the current fallback' },
+              }),
+            );
+          },
+        },
+      ]);
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects: new WorkflowGenerationSubjectSource(directory),
+        planner,
+        evidenceReaders,
+      });
+      const commandId = 'tasker:avia-13236-short-bug:planning:1';
+
+      const interrupted = await coordinator.prepare(
+        'avia-13236-short-bug',
+        'fast',
+        null,
+        commandId,
+      );
+      const pending = coordinator.read('avia-13236-short-bug');
+      const resumed = await coordinator.prepare('avia-13236-short-bug', 'fast', null, commandId);
+
+      expect(interrupted).toMatchObject({
+        ok: false,
+        error: { kind: 'evidence_read', error: { retryable: true } },
+      });
+      expect(pending).toMatchObject({
+        ok: true,
+        value: {
+          status: 'planning',
+          pendingEvidence: { round: 1, requests: [{ requestId: 'linked-issue' }] },
+        },
+      });
+      expect(resumed).toMatchObject({
+        ok: true,
+        value: {
+          status: 'ready',
+          evidenceBundle: { revision: 2 },
+          evidenceRounds: [{ round: 1, receipt: { usage: { inputTokens: 0 } } }],
+        },
+      });
+      expect(plannerCalls).toBe(2);
+      expect(readerCalls).toBe(2);
+      expect(
+        ledger.repository
+          .listEvents('implementation-plan:avia-13236-short-bug')
+          .map(({ eventType }) => eventType),
+      ).toEqual([
+        'ImplementationPlanningStarted',
+        'PlanningEvidenceRequested',
+        'PlanningEvidenceAppended',
+        'ImplementationPlanReady',
+      ]);
+      expect(coordinator.readActivity('avia-13236-short-bug')).toHaveLength(4);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves planning-added evidence when a later provider call starts a new attempt', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-evidence-attempt-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
+      const fallback = new DeterministicImplementationPlanner();
+      let plannerCalls = 0;
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects: new WorkflowGenerationSubjectSource(directory),
+        planner: {
+          plan: async (request) => {
+            plannerCalls += 1;
+            const base = await fallback.plan(request);
+            if (!base.ok) return base;
+            if (plannerCalls === 1) {
+              return ok({
+                ...base.value,
+                decision: null,
+                evidenceRequests: [
+                  {
+                    requestId: 'linked-issue',
+                    skill: 'jira',
+                    locator: 'AVIA-12045',
+                    purpose: 'Confirm linked scope.',
+                  },
+                ],
+              });
+            }
+            if (plannerCalls === 2) {
+              return err({
+                kind: 'provider_failed' as const,
+                exitCode: 1,
+                message: 'subscription provider disconnected',
+                stderr: '',
+              });
+            }
+            expect(request.context.evidenceBundle.revision).toBe(2);
+            return base;
+          },
+        },
+        evidenceReaders: new PlanningEvidenceReaderRegistry([
+          {
+            skill: 'jira',
+            credentialEnvironment: ['JIRA_TOKEN'],
+            read: (request) =>
+              Promise.resolve(
+                ok({
+                  skill: 'jira',
+                  locator: request.locator,
+                  title: 'AVIA-12045: Linked scope',
+                  observedVersion: '2026-08-02T11:00:00.000Z',
+                  mediaType: 'application/json',
+                  content: { key: 'AVIA-12045' },
+                }),
+              ),
+          },
+        ]),
+      });
+      const commandId = 'tasker:avia-13236-short-bug:planning:1';
+
+      const failed = await coordinator.prepare('avia-13236-short-bug', 'fast', null, commandId);
+      const retried = await coordinator.prepare('avia-13236-short-bug', 'fast', null, commandId);
+
+      expect(failed).toMatchObject({
+        ok: true,
+        value: { status: 'failed', attempt: 1, evidenceBundle: { revision: 2 } },
+      });
+      expect(retried).toMatchObject({
+        ok: true,
+        value: { status: 'ready', attempt: 2, evidenceBundle: { revision: 2 } },
+      });
+      expect(plannerCalls).toBe(3);
     } finally {
       ledger.close();
       rmSync(directory, { recursive: true, force: true });

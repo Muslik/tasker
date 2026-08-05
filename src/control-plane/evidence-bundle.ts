@@ -3,12 +3,16 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import type { JsonValue, LedgerConflict } from '../ledger/types.js';
 import {
   EvidenceBundleReferenceSchema,
+  EvidenceBodyReferenceSchema,
   EvidenceBundleSchema,
   EvidenceEntrySchema,
+  PlanningEvidenceCaptureSchema,
   collectRepositoryEvidence,
   type EvidenceBundle,
+  type EvidenceBodyReference,
   type EvidenceBundleReference,
   type EvidenceEntry,
+  type PlanningEvidenceCapture,
 } from '../planning/index.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
@@ -45,10 +49,18 @@ export type EvidenceBundleStoreError =
       readonly artifactId: string;
       readonly expectedRevision: number;
       readonly actualRevision: number;
+    }
+  | { readonly kind: 'body_not_found'; readonly artifactId: string }
+  | {
+      readonly kind: 'body_checksum_mismatch';
+      readonly artifactId: string;
+      readonly expectedChecksum: string;
+      readonly actualChecksum: string;
     };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const aggregateIdFor = (taskReference: string): string => `evidence-bundle:${taskReference}`;
+const MAX_INLINE_EXTERNAL_EVIDENCE_BYTES = 64 * 1024;
 
 export class EvidenceBundleStore {
   public constructor(
@@ -109,6 +121,38 @@ export class EvidenceBundleStore {
       });
     }
     return ok({ reference, bundle: parsed.data });
+  }
+
+  public readMaterialized(
+    referenceInput: EvidenceBundleReference,
+  ): Outcome<EvidenceBundleRecord, EvidenceBundleStoreError> {
+    const stored = this.read(referenceInput);
+    if (!stored.ok) return stored;
+    const entries: EvidenceEntry[] = [];
+    for (const entry of stored.value.bundle.entries) {
+      const reference = EvidenceBodyReferenceSchema.safeParse(entry.content);
+      if (!reference.success) {
+        entries.push(entry);
+        continue;
+      }
+      const artifact = this.ledger.readArtifact(reference.data.artifactId);
+      if (artifact === null) {
+        return err({ kind: 'body_not_found', artifactId: reference.data.artifactId });
+      }
+      if (artifact.checksum !== reference.data.checksum) {
+        return err({
+          kind: 'body_checksum_mismatch',
+          artifactId: reference.data.artifactId,
+          expectedChecksum: reference.data.checksum,
+          actualChecksum: artifact.checksum,
+        });
+      }
+      entries.push(EvidenceEntrySchema.parse({ ...entry, content: artifact.payload }));
+    }
+    return ok({
+      reference: stored.value.reference,
+      bundle: EvidenceBundleSchema.parse({ ...stored.value.bundle, entries }),
+    });
   }
 
   public record(
@@ -206,6 +250,116 @@ export class EvidenceBundleStore {
       throw new Error('Evidence bundle retry budget exhausted without conflict');
     return err({ kind: 'ledger_conflict', conflict: lastConflict });
   }
+
+  public appendPlanningEvidence(
+    taskReference: string,
+    operationId: string,
+    capturesInput: readonly PlanningEvidenceCapture[],
+  ): Outcome<EvidenceBundleRecord, EvidenceBundleStoreError> {
+    const capturedAt = this.clock.now();
+    const entries: EvidenceEntry[] = [];
+    for (const capture of capturesInput.map((value) =>
+      PlanningEvidenceCaptureSchema.parse(value),
+    )) {
+      const serialized = JSON.stringify(capture.observation.content);
+      const contentSha256 = checksumString(serialized);
+      const content =
+        Buffer.byteLength(serialized, 'utf8') > MAX_INLINE_EXTERNAL_EVIDENCE_BYTES
+          ? this.recordEvidenceBody(
+              capture.observation.content,
+              capture.observation.mediaType,
+              contentSha256,
+            )
+          : ok(capture.observation.content);
+      if (!content.ok) return content;
+      entries.push(
+        evidenceEntry({
+          evidenceType: 'external_document',
+          title: capture.observation.title,
+          source: {
+            kind: 'external_system',
+            locator: `${capture.observation.skill}:${capture.observation.locator}`,
+          },
+          capturedAt,
+          observedVersion: capture.observation.observedVersion,
+          mediaType: capture.observation.mediaType,
+          introducedBy: { phase: 'planning', operationId },
+          content: content.value,
+          contentSha256,
+        }),
+      );
+    }
+    const latest = this.readLatest(taskReference);
+    if (!latest.ok) return latest;
+    const evidenceIds = new Set(latest.value?.bundle.entries.map(({ evidenceId }) => evidenceId));
+    for (const entry of entries) evidenceIds.add(entry.evidenceId);
+    const inputFingerprint = checksumString(JSON.stringify([...evidenceIds].sort()));
+    return this.record(taskReference, inputFingerprint, entries);
+  }
+
+  private recordEvidenceBody(
+    content: JsonValue,
+    mediaType: string,
+    contentSha256: string,
+  ): Outcome<EvidenceBodyReference, EvidenceBundleStoreError> {
+    const artifactId = `evidence-body:${contentSha256}`;
+    const existing = this.ledger.readArtifact(artifactId);
+    if (existing !== null) {
+      return ok(
+        EvidenceBodyReferenceSchema.parse({
+          kind: 'artifact',
+          artifactId,
+          checksum: existing.checksum,
+          byteLength: Buffer.byteLength(JSON.stringify(content), 'utf8'),
+          mediaType,
+        }),
+      );
+    }
+    const createdAt = this.clock.now();
+    const recorded = this.ledger.transact({
+      aggregate: {
+        aggregateId: artifactId,
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: `event:${artifactId}`,
+            eventType: 'EvidenceBodyRecorded',
+            eventSchemaVersion: 1,
+            payload: asJson({ artifactId, contentSha256 }),
+            actor: 'evidence_recorder',
+          },
+        ],
+      },
+      artifacts: [
+        {
+          artifactId,
+          artifactKind: 'evidence_body',
+          storageUri: `ledger://artifacts/${encodeURIComponent(artifactId)}`,
+          payload: content,
+          metadata: asJson({ mediaType, contentSha256 }),
+          createdAt,
+        },
+      ],
+      timestamp: createdAt,
+    });
+    if (!recorded.ok) {
+      const concurrentlyRecorded = this.ledger.readArtifact(artifactId);
+      if (concurrentlyRecorded === null) {
+        return err({ kind: 'ledger_conflict', conflict: recorded.error });
+      }
+    }
+    const artifact = this.ledger.readArtifact(artifactId);
+    if (artifact === null) return err({ kind: 'body_not_found', artifactId });
+    return ok(
+      EvidenceBodyReferenceSchema.parse({
+        kind: 'artifact',
+        artifactId,
+        checksum: artifact.checksum,
+        byteLength: Buffer.byteLength(JSON.stringify(content), 'utf8'),
+        mediaType,
+      }),
+    );
+  }
 }
 
 const evidenceEntry = (input: {
@@ -217,10 +371,13 @@ const evidenceEntry = (input: {
   readonly mediaType: string;
   readonly introducedBy: EvidenceEntry['provenance']['introducedBy'];
   readonly content: JsonValue;
+  readonly contentSha256?: string;
 }): EvidenceEntry => {
-  const contentSha256 = checksumString(
-    typeof input.content === 'string' ? input.content : JSON.stringify(input.content),
-  );
+  const contentSha256 =
+    input.contentSha256 ??
+    checksumString(
+      typeof input.content === 'string' ? input.content : JSON.stringify(input.content),
+    );
   const identity = checksumString(
     JSON.stringify({
       evidenceType: input.evidenceType,

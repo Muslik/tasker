@@ -67,6 +67,11 @@ const planTaskImplementation: TaskWorkflowActivities['planTaskImplementation'] =
     transcriptId: `planning-transcript:${input.commandId}`,
     attempt: 1,
     artifactId: `test-plan:${input.taskReference}`,
+    evidenceBundle: {
+      artifactId: `evidence-bundle:${input.taskReference}:r1:test`,
+      checksum: TEST_PROMPT_HASH,
+      revision: 1,
+    },
     requestedStrategy: input.requestedStrategy,
     selectedStrategy: input.requestedStrategy === 'ralplan' ? 'ralplan' : 'fast',
     receipt: {

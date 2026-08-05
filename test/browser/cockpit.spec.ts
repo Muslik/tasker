@@ -9,7 +9,6 @@ import {
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
 } from '../../src/control-plane/m1-contracts.js';
-import { WorkflowContinuationRecordSchema } from '../../src/control-plane/workflow-continuation-contracts.js';
 
 const readJson = async <T>(response: APIResponse, schema: ZodType<T>): Promise<T> => {
   if (!response.ok()) {
@@ -26,7 +25,11 @@ const loadTasks = async (page: Page) => {
 };
 
 const loadWorkflow = async (page: Page, fixtureId: string) => {
-  const response = await page.request.get(`/api/workflows/${encodeURIComponent(fixtureId)}`);
+  const path = `/api/workflows/${encodeURIComponent(fixtureId)}`;
+  await expect
+    .poll(async () => (await page.request.get(path)).status(), { timeout: 20_000 })
+    .toBe(200);
+  const response = await page.request.get(path);
   return readJson(response, WorkflowResponseSchema);
 };
 
@@ -234,7 +237,8 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
 
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
   await expect(page.getByTestId('plan-review-controls')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Plan review guidance' })).toHaveValue('');
+  const planGuidance = page.getByRole('textbox', { name: 'Plan review guidance' });
+  await expect(planGuidance).toHaveValue('', { timeout: 20_000 });
   await expect(page.getByTestId('implementation-plan')).toContainText(/attempt \d+/u);
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
@@ -242,9 +246,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   );
 });
 
-test('I can review an immutable workflow continuation without losing the parent run', async ({
-  page,
-}) => {
+test('a planning-time workflow change revises the draft before freeze', async ({ page }) => {
   const fixtureId = 'avia-13236-short-bug';
   const tasks = await loadTasks(page);
   const candidate = requireTask(
@@ -263,63 +265,29 @@ test('I can review an immutable workflow continuation without losing the parent 
     await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
   }
 
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('awaiting review');
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('twiket/ui-kit');
-  const continuationResponse = await page.request.get(`/api/workflows/${fixtureId}/continuation`);
-  const continuation = await readJson(continuationResponse, WorkflowContinuationRecordSchema);
-  if (continuation.status !== 'awaiting_review') {
-    throw new Error('Expected a reviewable continuation');
-  }
-  const continuationWorkflow = await loadWorkflow(page, continuation.candidate.taskReference);
-  expect(continuationWorkflow.view.workflow.graphHash).not.toBe(
-    parentBefore.view.workflow.graphHash,
-  );
-  await expect(page.getByTestId('workflow-sidebar')).toContainText('Continuation:');
-
-  const guidance = 'Keep the shared component, but add the targeted visual verification.';
-  await page.getByRole('textbox', { name: 'Workflow continuation guidance' }).fill(guidance);
-  await page
-    .getByTestId('workflow-continuation-review')
-    .getByRole('button', { name: 'Reject' })
-    .click();
-
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('attempt 2');
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('awaiting review');
-  const revisedResponse = await page.request.get(`/api/workflows/${fixtureId}/continuation`);
-  const revised = await readJson(revisedResponse, WorkflowContinuationRecordSchema);
-  if (revised.status !== 'awaiting_review') throw new Error('Expected a revised continuation');
-  expect(revised.candidate.taskReference).not.toBe(continuation.candidate.taskReference);
-  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
-  await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
-
-  await page.getByRole('button', { name: 'Accept workflow' }).click();
-
   await expect
     .poll(
       async () => {
-        const response = await page.request.get(`/api/workflows/${fixtureId}/continuation`);
-        const record = await readJson(response, WorkflowContinuationRecordSchema);
-        return record.status;
+        const run = await loadRun(page, fixtureId);
+        return run.status === 'waiting' ? run.wait.waitKind : run.status;
       },
       { timeout: 20_000 },
     )
-    .toBe('linked');
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('linked', {
-    timeout: 20_000,
-  });
-  await expect(page.getByTestId('workflow-continuation-review')).toContainText('Linked run');
-  await expect(page.getByTestId('selected-task')).toContainText('Linked continuation executing');
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Workflow continuation execution linked',
-  );
-  await expect
-    .poll(async () => {
-      const run = await loadRun(page, revised.candidate.taskReference);
-      return run.status === 'waiting' ? run.wait.waitKind : run.status;
-    })
     .toBe('code_review@1');
   const parentAfter = await loadWorkflow(page, fixtureId);
-  expect(parentAfter.view.workflow.graphHash).toBe(parentBefore.view.workflow.graphHash);
+  expect(parentAfter.view.workflow.graphHash).not.toBe(parentBefore.view.workflow.graphHash);
+  expect(JSON.stringify(parentAfter.view.workflow.graph)).toContain('twiket/ui-kit');
+  const run = await loadRun(page, fixtureId);
+  expect(run.lifecycle).toMatchObject({
+    phase: 'frozen',
+    receipt: { workflowHash: parentAfter.view.workflow.graphHash },
+  });
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Workflow change required',
+  );
+  await expect(page.getByTestId('task-activity-timeline')).toContainText(
+    'Implementation plan ready',
+  );
 });
 
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {

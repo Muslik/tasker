@@ -9,7 +9,10 @@ import {
   EvidenceBundleStore,
 } from '../../src/control-plane/evidence-bundle.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
-import { EvidenceEntrySchema } from '../../src/planning/evidence-bundle.js';
+import {
+  EvidenceBodyReferenceSchema,
+  EvidenceEntrySchema,
+} from '../../src/planning/evidence-bundle.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const entry = (suffix: string, capturedAt: string) =>
@@ -147,5 +150,58 @@ describe('evidence bundle recovery', () => {
         content: 'body',
       }),
     ).toThrow();
+  });
+
+  it('stores large planning evidence as a content-addressed body and materializes it for the planner', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-large-planning-evidence-'));
+    const clock = makeAdjustableClock('2026-08-05T10:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const store = new EvidenceBundleStore(ledger.repository, clock);
+      const content = { pageId: '42', body: 'external evidence '.repeat(8_000) };
+      const capture = {
+        request: {
+          requestId: 'architecture-page',
+          skill: 'confluence',
+          locator: '42',
+          purpose: 'Confirm the project delivery policy.',
+        },
+        observation: {
+          skill: 'confluence',
+          locator: '42',
+          title: 'Delivery policy',
+          observedVersion: '7:2026-08-05T09:00:00.000Z',
+          mediaType: 'application/json',
+          content,
+        },
+      } as const;
+
+      const recorded = store.appendPlanningEvidence('jira:AVIA-13235', 'planning:evidence:1', [
+        capture,
+      ]);
+      if (!recorded.ok) throw new Error(`Evidence append failed: ${recorded.error.kind}`);
+      const storedContent = EvidenceBodyReferenceSchema.parse(
+        recorded.value.bundle.entries[0]?.content,
+      );
+      expect(storedContent.byteLength).toBeGreaterThan(64 * 1024);
+      expect(ledger.repository.readArtifact(storedContent.artifactId)).toMatchObject({
+        artifactKind: 'evidence_body',
+        payload: content,
+      });
+
+      const materialized = store.readMaterialized(recorded.value.reference);
+      expect(materialized).toMatchObject({
+        ok: true,
+        value: { bundle: { entries: [{ content }] } },
+      });
+
+      const duplicate = store.appendPlanningEvidence('jira:AVIA-13235', 'planning:evidence:1', [
+        capture,
+      ]);
+      expect(duplicate).toEqual(recorded);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

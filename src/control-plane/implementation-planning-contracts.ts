@@ -6,7 +6,28 @@ import {
   PlanningStrategySchema,
 } from '../planning/implementation-plan.js';
 import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapshot.js';
+import { EvidenceBundleReferenceSchema } from '../planning/evidence-bundle.js';
 import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
+import { PlanningEvidenceRequestSchema } from '../planning/planning-evidence.js';
+
+const PlanningEvidencePendingObjectSchema = z
+  .object({
+    round: z.number().int().positive().max(3),
+    operationId: z.string().min(1),
+    requests: z.array(PlanningEvidenceRequestSchema).min(1).max(10),
+    receipt: ImplementationPlannerReceiptSchema,
+    requestedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const PlanningEvidencePendingSchema = PlanningEvidencePendingObjectSchema.readonly();
+
+export const PlanningEvidenceRoundSchema = PlanningEvidencePendingObjectSchema.extend({
+  evidenceBundle: EvidenceBundleReferenceSchema,
+  completedAt: z.iso.datetime(),
+})
+  .strict()
+  .readonly();
 
 export const PlanningFailureViewSchema = z
   .object({
@@ -32,6 +53,8 @@ const PlanningRecordBaseSchema = z.object({
   commandId: z.string().min(1).nullable(),
   transcriptId: z.string().min(1).nullable(),
   planningSnapshot: PlanningSnapshotReferenceSchema.nullable(),
+  evidenceBundle: EvidenceBundleReferenceSchema,
+  evidenceRounds: z.array(PlanningEvidenceRoundSchema).max(3),
   attempt: z.number().int().positive(),
   requestedStrategy: PlanningStrategyRequestSchema,
   selectedStrategy: PlanningStrategySchema,
@@ -41,7 +64,10 @@ const PlanningRecordBaseSchema = z.object({
 });
 
 export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status', [
-  PlanningRecordBaseSchema.extend({ status: z.literal('planning') }).strict(),
+  PlanningRecordBaseSchema.extend({
+    status: z.literal('planning'),
+    pendingEvidence: PlanningEvidencePendingSchema.nullable(),
+  }).strict(),
   PlanningRecordBaseSchema.extend({
     status: z.literal('ready'),
     completedAt: z.iso.datetime(),
@@ -71,10 +97,13 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
     status: z.literal('failed'),
     completedAt: z.iso.datetime(),
     failure: PlanningFailureViewSchema,
+    receipt: ImplementationPlannerReceiptSchema.nullable(),
   }).strict(),
 ]);
 
 export type ImplementationPlanningRecord = z.infer<typeof ImplementationPlanningRecordSchema>;
+export type PlanningEvidencePending = z.infer<typeof PlanningEvidencePendingSchema>;
+export type PlanningEvidenceRound = z.infer<typeof PlanningEvidenceRoundSchema>;
 export type ReadyImplementationPlanningRecord = Extract<
   ImplementationPlanningRecord,
   { readonly status: 'ready' }

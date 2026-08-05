@@ -7,6 +7,7 @@ export * from './implementation-plan.js';
 export * from './obligations.js';
 export * from './planner.js';
 export * from './presentation.js';
+export * from './planning-evidence.js';
 export * from './project-policies.js';
 export * from './proposal.js';
 export * from './repository-evidence.js';
