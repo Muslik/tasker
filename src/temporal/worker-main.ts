@@ -15,6 +15,7 @@ import {
 } from '../control-plane/workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
 import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
+import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
   AiAssistanceInitializeAdapter,
@@ -83,6 +84,7 @@ import {
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { createWorkflowAssemblyActivity } from './activities/workflow-assembly-activity.js';
 import { createWorkflowDraftRevisionActivity } from './activities/workflow-draft-revision-activity.js';
+import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
@@ -185,6 +187,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
+  const workflowFreezes = new WorkflowFreezeStore(ledger.repository, systemClock);
   const temporalCommandRunner = createTemporalActivityCommandRunner(
     nodeCommandRunner,
     planningTranscripts,
@@ -266,6 +269,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, planning),
       ...createPlanningActivity(planning),
       ...createWorkflowDraftRevisionActivity(workflowDraftRevisions, planning),
+      ...createWorkflowFreezeActivity(workflowFreezes),
       linkWorkflowContinuation: (input) => {
         const linked = workflowContinuation.linkExecution(input.parentTaskReference, {
           taskReference: input.childTaskReference,

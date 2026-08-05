@@ -84,6 +84,7 @@ const unavailableState = (
     outcome: null,
     reason,
     temporalStatus,
+    lifecycle: { phase: 'unknown' },
     executionContext: { status: 'unavailable' },
     planning: null,
     workflowChange: null,

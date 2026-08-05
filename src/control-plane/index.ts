@@ -10,4 +10,5 @@ export * from './workflow-generator.js';
 export * from './temporal-workflow-generator.js';
 export * from './workflow-continuation.js';
 export * from './workflow-draft-revision.js';
+export * from './workflow-freeze.js';
 export * from './execution-activity.js';

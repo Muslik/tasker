@@ -56,6 +56,9 @@ planning snapshots carry only its reference. Planning now runs before generic gr
 traversal. A planning-time workflow change creates a complete, deterministically
 validated and operation-idempotent draft revision; the planner checks it again, and
 product execution begins only after the plan fits and optional review completes.
+That boundary is recorded as an immutable freeze receipt binding the exact graph, plan,
+evidence snapshot, approval mode, and Temporal run; a persistence failure pauses the
+same run without discarding its managed worktree.
 Post-freeze discoveries still use validated Child Workflow continuation. External
 Jira/Confluence/Loop reads are not yet mediated back into the bundle. The company
 `ai-assistance` policy now contributes

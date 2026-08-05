@@ -119,6 +119,9 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `rejected_planning_delta_preserves_previous_draft_and_evidence`
 - `draft_revision_infrastructure_failure_waits_without_losing_workspace`
 - `execution_starts_only_with_frozen_workflow_hash`
+- `redelivered_freeze_returns_exact_immutable_receipt`
+- `conflicting_freeze_for_same_run_is_rejected`
+- `freeze_store_failure_waits_without_losing_run_or_workspace`
 - `plan_review_false_proceeds_after_valid_plan`
 - `plan_review_true_waits_for_approval`
 - `plan_feedback_creates_new_plan_attempt`

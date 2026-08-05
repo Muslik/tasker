@@ -9,6 +9,7 @@ import {
 } from '@temporalio/workflow';
 
 import type { CompiledWorkflow, CompiledWorkflowNode } from '../../workflow/index.js';
+import type { WorkflowFreezeApproval } from '../freeze-contracts.js';
 import type {
   PlanningActivityCommand,
   ResolveTaskWaitCommand,
@@ -105,6 +106,15 @@ const draftRevisionActivities = proxyActivities<
   },
 });
 
+const freezeActivities = proxyActivities<Pick<TaskWorkflowActivities, 'freezeTaskWorkflow'>>({
+  startToCloseTimeout: '1 minute',
+  retry: {
+    initialInterval: '1 second',
+    maximumInterval: '10 seconds',
+    maximumAttempts: 3,
+  },
+});
+
 const workspaceActivities = proxyActivities<Pick<TaskWorkflowActivities, 'prepareTaskWorkspace'>>({
   startToCloseTimeout: '5 minutes',
   scheduleToCloseTimeout: '30 minutes',
@@ -126,6 +136,10 @@ const continuationActivities = proxyActivities<
 type MutableNodeStates = Record<string, TemporalNodeStatus>;
 type MutableAttempts = Record<string, number>;
 type PredicateFacts = Record<string, boolean>;
+type AvailableTaskWorkflowPublicState = Exclude<
+  TaskWorkflowPublicState,
+  { readonly status: 'unavailable' }
+>;
 type Traversal =
   { readonly kind: 'continue' } | { readonly kind: 'finalized'; readonly outcome: string };
 
@@ -317,13 +331,14 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
   let draftRevisionSequence = 0;
   const completedLifecycleNodeIds = new Set<string>();
   const execution = workflowInfo();
-  let state: TaskWorkflowPublicState = {
+  let state: AvailableTaskWorkflowPublicState = {
     schemaVersion: 1,
     taskReference: input.taskReference,
     workflowId: execution.workflowId,
     runId: execution.runId,
     workflowHash: activeWorkflowHash,
     settings: input.settings,
+    lifecycle: { phase: 'draft' },
     executionContext: { status: 'preparing' },
     planning: null,
     workflowChange: null,
@@ -364,6 +379,9 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         return retryResolution(command.resolution);
       }
       if (state.wait.waitKind === 'draft_revision.guidance@1') {
+        return retryResolution(command.resolution);
+      }
+      if (state.wait.waitKind === 'workflow_freeze.retry@1') {
         return retryResolution(command.resolution);
       }
       if (state.wait.waitKind === 'workflow_change.review@1') {
@@ -632,14 +650,14 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     await ensureExecutionContext(initialLifecycle.step.id);
     await executePlanning({ kind: 'initial' });
 
+    let approval: WorkflowFreezeApproval;
     for (;;) {
       const lifecycle = findPlanningLifecycle(activeGraph);
       nodeStates[lifecycle.step.id] = 'succeeded';
       if (input.settings.planApproval === 'automatic') {
         nodeStates[lifecycle.gate.id] = 'skipped';
-        completedLifecycleNodeIds.add(lifecycle.step.id);
-        completedLifecycleNodeIds.add(lifecycle.gate.id);
-        return;
+        approval = { kind: 'automatic' };
+        break;
       }
       const resolution = await openWait(lifecycle.gate.id, lifecycle.gate.resumeWhen);
       const review = planReviewFrom(resolution);
@@ -648,9 +666,8 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       }
       if (review.decision === 'approve') {
         nodeStates[lifecycle.gate.id] = 'succeeded';
-        completedLifecycleNodeIds.add(lifecycle.step.id);
-        completedLifecycleNodeIds.add(lifecycle.gate.id);
-        return;
+        approval = { kind: 'operator_approved' };
+        break;
       }
       if (state.planning?.status !== 'ready') {
         throw ApplicationFailure.nonRetryable('Plan revision has no accepted source plan');
@@ -660,6 +677,38 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         sourceAttempt: state.planning.attempt,
         guidance: review.guidance,
       });
+    }
+
+    const lifecycle = findPlanningLifecycle(activeGraph);
+    if (state.executionContext.status !== 'ready' || state.planning?.status !== 'ready') {
+      throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted planning state');
+    }
+    const acceptedPlanning = state.planning;
+    const readyContext = state.executionContext;
+    for (;;) {
+      try {
+        const receipt = await freezeActivities.freezeTaskWorkflow({
+          taskReference: input.taskReference,
+          workflowId: execution.workflowId,
+          workflowRunId: execution.runId,
+          workflowHash: activeWorkflowHash,
+          planningAttempt: acceptedPlanning.attempt,
+          planningArtifactId: acceptedPlanning.artifactId,
+          planningSnapshot: readyContext.planningSnapshot,
+          approval,
+        });
+        state = { ...state, lifecycle: { phase: 'frozen', receipt } };
+        nodeStates[lifecycle.gate.id] = approval.kind === 'automatic' ? 'skipped' : 'succeeded';
+        completedLifecycleNodeIds.add(lifecycle.step.id);
+        completedLifecycleNodeIds.add(lifecycle.gate.id);
+        return;
+      } catch (error) {
+        if (isCancellation(error)) throw error;
+        const retry = await openWait(lifecycle.gate.id, 'workflow_freeze.retry@1');
+        if (!retryResolution(retry)) {
+          throw ApplicationFailure.nonRetryable('Workflow freeze retry payload is invalid');
+        }
+      }
     }
   };
 
@@ -858,9 +907,14 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     throw new Error('Validated workflow completed without a terminal outcome');
   }
   const terminalOutcome = traversal.outcome;
+  if (state.lifecycle.phase !== 'frozen') {
+    throw ApplicationFailure.nonRetryable('Execution completed without a workflow freeze receipt');
+  }
+  const frozenLifecycle = state.lifecycle;
 
   state = {
     ...state,
+    lifecycle: frozenLifecycle,
     status: 'completed',
     currentNodeId: null,
     wait: null,

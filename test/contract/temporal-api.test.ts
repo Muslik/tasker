@@ -21,6 +21,7 @@ import {
   type ResolveTaskWaitCommand,
   type StartTaskWorkflowInput,
   type TaskTemporalRunService,
+  type TaskWorkflowLifecycle,
   type TaskWorkflowPlanningState,
   type TaskWorkflowPublicState,
 } from '../../src/temporal/index.js';
@@ -35,6 +36,34 @@ class ContractTemporalRunService implements TaskTemporalRunService {
   public readonly resolutions: { taskReference: string; command: ResolveTaskWaitCommand }[] = [];
 
   public constructor(private readonly startsWithQuestion = false) {}
+
+  private frozenLifecycle(
+    input: Pick<
+      TaskWorkflowPublicState,
+      'taskReference' | 'workflowId' | 'runId' | 'workflowHash' | 'planning' | 'executionContext'
+    >,
+    approval: 'automatic' | 'operator_approved',
+  ): Extract<TaskWorkflowLifecycle, { readonly phase: 'frozen' }> {
+    if (input.executionContext.status !== 'ready') {
+      throw new Error('Contract run must have a prepared workspace before freeze');
+    }
+    return {
+      phase: 'frozen',
+      receipt: {
+        schemaVersion: 1,
+        receiptId: `workflow-freeze:${input.workflowId}:${input.runId}`,
+        taskReference: input.taskReference,
+        workflowId: input.workflowId,
+        workflowRunId: input.runId,
+        workflowHash: input.workflowHash,
+        planningAttempt: input.planning?.attempt ?? 1,
+        planningArtifactId: input.planning?.artifactId ?? `plan:${input.taskReference}:1`,
+        planningSnapshot: input.executionContext.planningSnapshot,
+        approval: { kind: approval },
+        frozenAt: '2026-08-03T00:00:00.000Z',
+      },
+    };
+  }
 
   private executionContext(
     input: StartTaskWorkflowInput,
@@ -134,7 +163,7 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       : input.settings.planApproval === 'required'
         ? { nodeId: 'review-plan', waitKind: 'plan.approved@1' }
         : { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' };
-    const state: TaskWorkflowPublicState = {
+    const baseState = {
       schemaVersion: 1,
       taskReference: input.taskReference,
       workflowId: `tasker:${input.taskReference}`,
@@ -150,6 +179,13 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       outcome: null,
       nodeStates: { [wait.nodeId]: 'waiting' },
       attempts: {},
+    } as const;
+    const state: TaskWorkflowPublicState = {
+      ...baseState,
+      lifecycle:
+        wait.waitKind === 'code_review@1'
+          ? this.frozenLifecycle(baseState, 'automatic')
+          : { phase: 'draft' },
     };
     this.runs.set(input.taskReference, state);
     return Promise.resolve(ok(state));
@@ -182,59 +218,71 @@ class ContractTemporalRunService implements TaskTemporalRunService {
       !Array.isArray(command.resolution)
         ? command.resolution
         : {};
-    const state: TaskWorkflowPublicState =
-      current.wait.waitKind === 'human_clarification'
-        ? {
-            ...current,
-            status: 'waiting',
-            currentNodeId: 'review-plan',
-            wait: { nodeId: 'review-plan', waitKind: 'plan.approved@1' },
-            planning: this.planning({ taskReference, settings: current.settings }, 'ready', 2),
-            outcome: null,
-            nodeStates: {
-              ...current.nodeStates,
-              [current.wait.nodeId]: 'succeeded',
-              'review-plan': 'waiting',
-            },
-          }
-        : current.wait.waitKind === 'plan.approved@1' && resolution.decision === 'request_changes'
-          ? {
-              ...current,
-              status: 'waiting',
-              currentNodeId: 'review-plan',
-              wait: { nodeId: 'review-plan', waitKind: 'plan.approved@1' },
-              planning: this.planning(
-                { taskReference, settings: current.settings },
-                'ready',
-                (current.planning?.attempt ?? 1) + 1,
-              ),
-              outcome: null,
-              nodeStates: { ...current.nodeStates, 'review-plan': 'waiting' },
-            }
-          : current.wait.waitKind === 'plan.approved@1'
-            ? {
-                ...current,
-                status: 'waiting',
-                currentNodeId: 'wait-for-code-review',
-                wait: { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' },
-                outcome: null,
-                nodeStates: {
-                  ...current.nodeStates,
-                  [current.wait.nodeId]: 'succeeded',
-                  'wait-for-code-review': 'waiting',
-                },
-              }
-            : {
-                ...current,
-                status: 'completed',
-                currentNodeId: null,
-                wait: null,
-                outcome: 'waiting_for_review',
-                nodeStates: {
-                  ...current.nodeStates,
-                  [current.wait.nodeId]: 'succeeded',
-                },
-              };
+    let state: TaskWorkflowPublicState;
+    if (current.wait.waitKind === 'human_clarification') {
+      state = {
+        ...current,
+        status: 'waiting',
+        currentNodeId: 'review-plan',
+        wait: { nodeId: 'review-plan', waitKind: 'plan.approved@1' },
+        planning: this.planning({ taskReference, settings: current.settings }, 'ready', 2),
+        outcome: null,
+        nodeStates: {
+          ...current.nodeStates,
+          [current.wait.nodeId]: 'succeeded',
+          'review-plan': 'waiting',
+        },
+      };
+    } else if (
+      current.wait.waitKind === 'plan.approved@1' &&
+      resolution.decision === 'request_changes'
+    ) {
+      state = {
+        ...current,
+        status: 'waiting',
+        currentNodeId: 'review-plan',
+        wait: { nodeId: 'review-plan', waitKind: 'plan.approved@1' },
+        planning: this.planning(
+          { taskReference, settings: current.settings },
+          'ready',
+          (current.planning?.attempt ?? 1) + 1,
+        ),
+        outcome: null,
+        nodeStates: { ...current.nodeStates, 'review-plan': 'waiting' },
+      };
+    } else if (current.wait.waitKind === 'plan.approved@1') {
+      state = {
+        ...current,
+        lifecycle: this.frozenLifecycle(current, 'operator_approved'),
+        status: 'waiting',
+        currentNodeId: 'wait-for-code-review',
+        wait: { nodeId: 'wait-for-code-review', waitKind: 'code_review@1' },
+        outcome: null,
+        nodeStates: {
+          ...current.nodeStates,
+          [current.wait.nodeId]: 'succeeded',
+          'wait-for-code-review': 'waiting',
+        },
+      };
+    } else if (current.lifecycle.phase === 'frozen') {
+      const lifecycle = current.lifecycle;
+      state = {
+        ...current,
+        lifecycle,
+        status: 'completed',
+        currentNodeId: null,
+        wait: null,
+        outcome: 'waiting_for_review',
+        nodeStates: {
+          ...current.nodeStates,
+          [current.wait.nodeId]: 'succeeded',
+        },
+      };
+    } else {
+      return Promise.resolve(
+        err({ kind: 'runtime_unavailable' as const, message: 'Draft workflow cannot complete' }),
+      );
+    }
     this.runs.set(taskReference, state);
     return Promise.resolve(ok(state));
   }

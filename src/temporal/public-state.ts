@@ -13,6 +13,7 @@ import {
   WorkspaceBootstrapReceiptSchema,
   WorkspaceLocatorSchema,
 } from '../workspaces/contracts.js';
+import { WorkflowFreezeReceiptSchema } from './freeze-contracts.js';
 
 export const TASK_WORKFLOW_SCHEMA_VERSION = 1;
 export const TASKER_TEMPORAL_TASK_QUEUE = 'tasker-local';
@@ -97,6 +98,17 @@ const TaskWorkflowStateBaseSchema = z
   })
   .strict();
 
+export const TaskWorkflowLifecycleSchema = z.discriminatedUnion('phase', [
+  z
+    .object({ phase: z.literal('draft') })
+    .strict()
+    .readonly(),
+  z
+    .object({ phase: z.literal('frozen'), receipt: WorkflowFreezeReceiptSchema })
+    .strict()
+    .readonly(),
+]);
+
 export const TaskWorkflowWaitSchema = z
   .object({
     nodeId: z.string().min(1),
@@ -107,24 +119,34 @@ export const TaskWorkflowWaitSchema = z
 export const TaskWorkflowPublicStateSchema = z.discriminatedUnion('status', [
   TaskWorkflowStateBaseSchema.extend({
     status: z.literal('running'),
+    lifecycle: TaskWorkflowLifecycleSchema,
     currentNodeId: z.string().min(1).nullable(),
     wait: z.null(),
     outcome: z.null(),
   }).strict(),
   TaskWorkflowStateBaseSchema.extend({
     status: z.literal('waiting'),
+    lifecycle: TaskWorkflowLifecycleSchema,
     currentNodeId: z.string().min(1),
     wait: TaskWorkflowWaitSchema,
     outcome: z.null(),
   }).strict(),
   TaskWorkflowStateBaseSchema.extend({
     status: z.literal('completed'),
+    lifecycle: z
+      .object({ phase: z.literal('frozen'), receipt: WorkflowFreezeReceiptSchema })
+      .strict()
+      .readonly(),
     currentNodeId: z.null(),
     wait: z.null(),
     outcome: z.string().min(1),
   }).strict(),
   TaskWorkflowStateBaseSchema.extend({
     status: z.literal('unavailable'),
+    lifecycle: z
+      .object({ phase: z.literal('unknown') })
+      .strict()
+      .readonly(),
     currentNodeId: z.null(),
     wait: z.null(),
     outcome: z.null(),
@@ -136,6 +158,7 @@ export const TaskWorkflowPublicStateSchema = z.discriminatedUnion('status', [
 export type TaskWorkflowSettings = z.infer<typeof TaskWorkflowSettingsSchema>;
 export type TaskWorkflowExecutionContext = z.infer<typeof TaskWorkflowExecutionContextSchema>;
 export type TaskWorkflowPlanningState = z.infer<typeof TaskWorkflowPlanningStateSchema>;
+export type TaskWorkflowLifecycle = z.infer<typeof TaskWorkflowLifecycleSchema>;
 export type TemporalNodeStatus = z.infer<typeof TemporalNodeStatusSchema>;
 export type TaskWorkflowWait = z.infer<typeof TaskWorkflowWaitSchema>;
 export type TaskWorkflowChange = TaskWorkflowPublicState['workflowChange'];

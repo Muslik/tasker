@@ -96,6 +96,14 @@ const linkWorkflowContinuation: TaskWorkflowActivities['linkWorkflowContinuation
 const reviseTaskWorkflowDraft: TaskWorkflowActivities['reviseTaskWorkflowDraft'] = () =>
   Promise.reject(new Error('Unexpected workflow draft revision'));
 
+const freezeTaskWorkflow: TaskWorkflowActivities['freezeTaskWorkflow'] = (input) =>
+  Promise.resolve({
+    ...input,
+    schemaVersion: 1,
+    receiptId: `workflow-freeze:${input.workflowId}:${input.workflowRunId}`,
+    frozenAt: '2026-08-05T00:00:00.000Z',
+  });
+
 export const testTaskWorkflowActivities = {
   prepareTaskWorkspace,
   executeStep,
@@ -105,5 +113,6 @@ export const testTaskWorkflowActivities = {
   evaluatePredicate,
   planTaskImplementation,
   reviseTaskWorkflowDraft,
+  freezeTaskWorkflow,
   linkWorkflowContinuation,
 } satisfies TaskWorkflowActivities;

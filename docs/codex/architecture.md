@@ -150,7 +150,13 @@ The first compiled draft is not yet executable or immutable. A planner
 `workflow_change_required` result is a proposal: Tasker applies it to the draft through
 the assembler, recompiles the complete graph, and runs deterministic validation again.
 After the plan fits and optional operator review succeeds, the accepted compiled graph,
-run policy, and hashes become the frozen execution input. Large prompts, repository
+run policy, and hashes become the frozen execution input only after Tasker persists an
+immutable receipt containing the task/run identity, graph hash, planning artifact and
+attempt, Evidence Bundle snapshot, approval mode, and timestamp. The receipt operation
+is idempotent: Activity redelivery returns the exact prior receipt, while a conflicting
+hash for the same run fails closed. Until receipt persistence succeeds, the public run
+remains `draft`; exhausted infrastructure retries open a durable operator wait and keep
+the same worktree. Large prompts, repository
 snapshots, transcripts, videos, and screenshots stay
 in the Tasker artifact store; history contains stable IDs, hashes, metadata, and bounded
 summaries. Secrets never enter Workflow input or Event History.

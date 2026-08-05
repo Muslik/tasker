@@ -165,6 +165,8 @@ describe('Temporal task workflow', () => {
     const planWait = await waitForWait(service, reviewedTask, 'plan.approved@1');
     expect(automaticWait.status).toBe('waiting');
     expect(planWait.status).toBe('waiting');
+    expect(automaticWait.lifecycle).toMatchObject({ phase: 'frozen' });
+    expect(planWait.lifecycle).toEqual({ phase: 'draft' });
 
     worker.shutdown();
     await workerRun;
@@ -610,13 +612,21 @@ describe('Temporal task workflow', () => {
 
     const secondReview = await waitForWait(service, taskReference, 'plan.approved@1');
     expect(secondReview.planning).toMatchObject({ status: 'ready', attempt: 3 });
+    expect(secondReview.lifecycle).toEqual({ phase: 'draft' });
     const approved = await service.resolveWait(taskReference, {
       nodeId: 'review-plan',
       waitKind: 'plan.approved@1',
       resolution: { decision: 'approve' },
     });
     expect(approved.ok).toBe(true);
-    await waitForWait(service, taskReference, 'code_review@1');
+    const frozen = await waitForWait(service, taskReference, 'code_review@1');
+    expect(frozen.lifecycle).toMatchObject({
+      phase: 'frozen',
+      receipt: {
+        planningAttempt: 3,
+        approval: { kind: 'operator_approved' },
+      },
+    });
 
     expect(commands.map((command) => command.kind)).toEqual([
       'initial',
@@ -779,6 +789,16 @@ describe('Temporal task workflow', () => {
       status: 'ready',
       planningSnapshot: { checksum: '1'.repeat(64) },
     });
+    expect(review.lifecycle).toMatchObject({
+      phase: 'frozen',
+      receipt: {
+        workflowHash: revisedInput.workflowHash,
+        planningAttempt: 2,
+        planningArtifactId: `plan:${taskReference}:revised`,
+        planningSnapshot: { checksum: '1'.repeat(64) },
+        approval: { kind: 'automatic' },
+      },
+    });
     expect(planningCommands).toEqual(['initial', 'revision']);
     expect(revisionRequests).toHaveLength(1);
     expect(revisionRequests[0]?.currentWorkflowHash).toBe(initial.workflowHash);
@@ -787,6 +807,51 @@ describe('Temporal task workflow', () => {
     );
     expect(revisionRequests[0]?.request.discoveredRepositories).toEqual(['twiket/ui-kit']);
     expect(runRegistry.read(taskReference)?.workflowHash).toBe(revisedInput.workflowHash);
+  }, 30_000);
+
+  it('keeps the prepared workspace while a failed freeze waits for recovery', async () => {
+    const taskReference = `freeze-recovery-${String(Date.now())}`;
+    let freezeDeliveries = 0;
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      freezeTaskWorkflow: () => {
+        freezeDeliveries += 1;
+        throw new Error('Ledger is temporarily unavailable');
+      },
+    });
+    const started = await service.start(
+      workflowInput('avia-13236-short-bug', taskReference, 'automatic'),
+    );
+    expect(started.ok).toBe(true);
+
+    const blocked = await waitForWait(service, taskReference, 'workflow_freeze.retry@1');
+    if (blocked.status !== 'waiting') throw new Error('Expected workflow freeze recovery wait');
+    expect(freezeDeliveries).toBe(3);
+    expect(blocked.lifecycle).toEqual({ phase: 'draft' });
+    expect(blocked.executionContext).toMatchObject({
+      status: 'ready',
+      workspace: { taskReference, workflowRunId: blocked.runId },
+    });
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker();
+    const resumed = await service.resolveWait(taskReference, {
+      nodeId: blocked.wait.nodeId,
+      waitKind: blocked.wait.waitKind,
+      resolution: { decision: 'resume' },
+    });
+    expect(resumed.ok).toBe(true);
+
+    const review = await waitForWait(service, taskReference, 'code_review@1');
+    expect(review.runId).toBe(blocked.runId);
+    expect(review.executionContext).toEqual(blocked.executionContext);
+    expect(review.lifecycle).toMatchObject({
+      phase: 'frozen',
+      receipt: { workflowRunId: blocked.runId, workflowHash: blocked.workflowHash },
+    });
   }, 30_000);
 
   it('waits for guidance when draft recompilation cannot recover automatically', async () => {

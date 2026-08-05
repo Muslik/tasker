@@ -162,13 +162,19 @@ repository/VPN failure leaves the Temporal run and prepared workspace intact and
 operator guidance after Activity retries are exhausted.
 
 After planning and optional review, the lifecycle marks its graph nodes complete and
-hands the accepted graph/hash to the generic interpreter. That handoff is the freeze:
-the execution traversal has no code path that replaces the active graph. A later
-execution-block `workflow_change_required` still opens continuation review and may
-start a Child Workflow, preserving the original prefix.
+persists an immutable freeze receipt before handing the accepted graph/hash to the
+generic interpreter. The receipt binds the task and Temporal run to the exact graph
+hash, planning attempt and artifact, planning Evidence Bundle snapshot, approval mode,
+and freeze time. Redelivery returns the same receipt; a different graph for the same
+run is rejected. The public run state is explicitly `draft` until that Activity
+completes and `frozen` afterwards. A ledger/VPN/infrastructure failure opens the durable
+`workflow_freeze.retry@1` wait with the same run and prepared workspace instead of
+restarting the task.
+
+The execution traversal has no code path that replaces the frozen active graph. A
+later execution-block `workflow_change_required` still opens continuation review and
+may start a Child Workflow, preserving the original prefix.
 
 The remaining evidence-boundary work is to mediate Jira/Confluence/Loop skill reads
 through provenance-producing Tasker adapters and move large external bodies into
-separately referenced artifacts. A compact explicit freeze receipt is also desirable
-for retrospective/export surfaces; Temporal history and the run projection already
-retain the accepted hash used for execution.
+separately referenced artifacts.

@@ -54,6 +54,7 @@ import {
   type WorkspaceConfiguration,
 } from '../../src/workspaces/index.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';
+import { testTaskWorkflowActivities } from '../helpers/temporal-activities.js';
 
 const workflowsPath = fileURLToPath(
   new URL('../../src/temporal/workflows/task-workflow.ts', import.meta.url),
@@ -350,6 +351,7 @@ describe('Temporal local mutation recovery', () => {
           evaluatePredicate: execution.evaluatePredicate,
           reviseTaskWorkflowDraft: () =>
             Promise.reject(new Error('Unexpected workflow draft revision')),
+          freezeTaskWorkflow: testTaskWorkflowActivities.freezeTaskWorkflow,
           linkWorkflowContinuation: () => Promise.resolve({ linked: true }),
         };
       };

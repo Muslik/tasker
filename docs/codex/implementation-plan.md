@@ -178,8 +178,11 @@ failures can resume as a new run without discarding persisted evidence. Planning
 workflow changes now produce immutable, operation-idempotent draft attempts through the
 normal assembler/compiler/validator path; the planner rechecks every accepted revision,
 and generic execution starts only after planning and optional review. Planning logic
-has been removed from the node interpreter. Mediating external evidence reads and an
-explicit retrospective-facing freeze receipt remain.
+has been removed from the node interpreter. An immutable, operation-idempotent freeze
+receipt now binds the accepted graph, plan, evidence snapshot, approval mode, and
+Temporal run before product execution begins. Failed receipt persistence opens a
+durable retry wait without losing the prepared workspace. Mediating external evidence
+reads remains.
 
 T2 exit gate:
 
@@ -448,11 +451,10 @@ Every milestone follows the same engineering order:
 
 ## 12. Immediate next step
 
-The Temporal cutover, local review/revision/reply lifecycle, Jira task admission,
-before-reproduction evidence attachment, and Jira review-ready effect are complete.
-Enable the explicit remote-effect flags together with `TASKER_EXTERNAL_EFFECT_TASKS` for one
-allowed pilot task. The Worker fails closed without the task allowlist, and an unlisted task is
-blocked before any remote adapter call. The pilot path
-remains Jira intake -> managed worktree -> agent implementation -> targeted
-verification -> validated PR draft -> safe push/PR -> Jenkins classification -> human
-review/revision.
+Complete the Evidence Bundle boundary: planner-initiated Jira, Confluence, and Loop
+reads must run through provenance-producing Tasker adapters and append immutable
+evidence before their result can influence an accepted plan or graph revision. Large
+external bodies must be stored as separately referenced artifacts rather than copied
+into Temporal history or provider-only transcripts. Then run one allowlisted pilot via
+Jira intake -> managed worktree -> agent implementation -> targeted verification ->
+validated PR draft -> safe push/PR -> Jenkins classification -> human review/revision.

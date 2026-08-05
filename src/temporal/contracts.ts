@@ -27,6 +27,7 @@ import {
   WorkspaceLocatorSchema,
 } from '../workspaces/contracts.js';
 import { WorkflowChangeRequestSchema } from '../workflow/index.js';
+import type { FreezeTaskWorkflowInput, WorkflowFreezeReceipt } from './freeze-contracts.js';
 
 export * from './public-state.js';
 
@@ -274,6 +275,7 @@ export type PrepareTaskWorkspaceInput = z.infer<typeof PrepareTaskWorkspaceInput
 export type PrepareTaskWorkspaceResult = z.infer<typeof PrepareTaskWorkspaceResultSchema>;
 export type ReviseTaskWorkflowDraftInput = z.infer<typeof ReviseTaskWorkflowDraftInputSchema>;
 export type ReviseTaskWorkflowDraftResult = z.infer<typeof ReviseTaskWorkflowDraftResultSchema>;
+export type { FreezeTaskWorkflowInput, WorkflowFreezeReceipt };
 export type { PlanningSnapshotReference };
 
 export interface TaskWorkflowActivities {
@@ -287,6 +289,7 @@ export interface TaskWorkflowActivities {
   reviseTaskWorkflowDraft(
     input: ReviseTaskWorkflowDraftInput,
   ): Promise<ReviseTaskWorkflowDraftResult>;
+  freezeTaskWorkflow(input: FreezeTaskWorkflowInput): Promise<WorkflowFreezeReceipt>;
   linkWorkflowContinuation(
     input: LinkWorkflowContinuationInput,
   ): Promise<LinkWorkflowContinuationResult>;
