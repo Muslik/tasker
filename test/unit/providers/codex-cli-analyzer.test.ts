@@ -89,7 +89,7 @@ class RecordingRunner implements WorkspaceCommandRunner {
 }
 
 describe('Codex CLI workflow analyzer', () => {
-  it('runs subscription CLI analysis in a read-only ephemeral sandbox with structured output', async () => {
+  it('runs subscription CLI analysis in a read-only Docker workspace with structured output', async () => {
     const output = validAnalyzerOutput();
     const runner = new RecordingRunner(providerMessage(output));
     const analyzer = new CodexCliWorkflowAnalyzer(runner);
@@ -151,12 +151,12 @@ describe('Codex CLI workflow analyzer', () => {
         'model_reasoning_effort="low"',
         '--ephemeral',
         '--skip-git-repo-check',
-        '--sandbox',
-        'read-only',
+        '--dangerously-bypass-approvals-and-sandbox',
         '--json',
         '-',
       ]),
     );
+    expect(executionRequest?.workspaceAccess).toBe('read_only');
     expect(runner.schema).toContain('sourceJson');
   });
 

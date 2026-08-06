@@ -156,6 +156,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
       command,
       args: ['--version'],
       cwd: request.repositoryPath,
+      workspaceAccess: 'read_only',
       stdin: '',
       timeoutMs: 10_000,
     });
@@ -206,8 +207,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
           `model_reasoning_effort="${request.strategy === 'ralplan' ? 'high' : 'low'}"`,
           '--ephemeral',
           '--skip-git-repo-check',
-          '--sandbox',
-          'read-only',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--cd',
           request.repositoryPath,
           '--output-schema',
@@ -216,6 +216,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
           '-',
         ],
         cwd: request.repositoryPath,
+        workspaceAccess: 'read_only',
         env: {
           CODEX_HOME: isolatedCodexHome,
           ...workspaceHarnessEnvironment(request.repositoryPath, preparedSkills.value.skillsRoot),
@@ -244,7 +245,7 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         return err({
           kind: 'provider_failed',
           exitCode: execution.exitCode,
-          message: providerFailureMessage(execution.stdout),
+          message: providerFailureMessage(execution.stdout, execution.stderr),
           stderr: execution.stderr,
         });
       }

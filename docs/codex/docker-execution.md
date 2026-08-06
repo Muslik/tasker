@@ -55,6 +55,14 @@ Git common directory, named cache volumes, network, and declared service contain
 durable across attempts. This gives cancellation a concrete container boundary while
 preserving all useful work.
 
+Provider containers are started with an interactive stdin pipe because Codex and Claude
+receive their task prompt through stdin. The provider's own process sandbox is disabled:
+Docker is the external sandbox boundary, and attempting to nest bubblewrap inside the
+container fails on standard Docker Desktop kernels. Tasker still enforces the effect
+boundary at the mount layer: analyzer/planner repository mounts are read-only, while an
+executable task block receives the read/write worktree declared by its contract. The
+Docker socket and arbitrary host paths are never exposed to the provider.
+
 ## Pinned policy and recovery
 
 `harness/company.json` owns Docker defaults: image, non-secret environment, common
@@ -74,6 +82,18 @@ was persisted before Worker/response loss is skipped on the next attempt; an
 unreceipted one is reconciled and repeated. Missing networks or services are reconciled
 by exact Tasker-owned identity. The worktree is never reset merely because
 infrastructure was temporarily unavailable.
+
+Before every provider or workflow-step attempt, Temporal reconciles the pinned receipt
+with Docker. An engine restart or image-store switch may make prior images and services
+disappear; Resume rebuilds/restarts them without replacing the run, worktree, bootstrap
+receipt, or planning snapshot.
+
+Planning snapshots are independently versioned immutable artifacts. Runtime-policy
+changes do not rewrite an accepted snapshot. A worker deployment must continue reading
+the historical snapshot schema referenced by an active Temporal run; new required
+snapshot fields require a new schema version. Runtime-only recovery attaches the Docker
+receipt to the existing execution context without rebuilding planning from a dirty
+worktree.
 
 Failures are classified before they become the operator wait: unavailable image or
 daemon, runtime identity conflict, receipt-store failure, failed bootstrap command, and
@@ -104,6 +124,7 @@ itself remains kernel infrastructure and is not emitted as fake workflow steps.
 
 - the exact worktree is bind-mounted read/write at its absolute path;
 - the managed source clone is mounted so Git worktree common-directory references work;
+- analyzer and implementation-planner commands remount those repository paths read-only;
 - only declared cache volumes and explicit provider temporary directories are mounted;
 - credentials are copied into an isolated provider directory or mounted through the
   existing exact harness env-file boundary;
@@ -131,3 +152,19 @@ To change setup for future tasks, edit the company/project `workspaceRuntime` ma
 To add a service, declare its command, aliases, environment, and readiness check. To
 change system packages/provider CLI versions, update the runner Dockerfile and image
 tag. None of these changes requires modifying the graph interpreter.
+
+## First real recovery pilot
+
+`AVIA-12045` proved the migration path on 2026-08-06 without creating a replacement
+task. One existing Temporal Run kept its original Workflow Run ID, managed worktree,
+branch, frozen planning snapshot, task network, cache volumes, and bootstrap progress
+while the operator fixed Docker image/bootstrap/service issues. Seven completed
+bootstrap receipts were reused. The `front-avia` service reached its HTTPS readiness
+probe and the next `bug.reproduce@1` attempt ran Codex plus Playwright inside Docker
+against that service.
+
+The pilot also exposed and fixed three cutover defects rather than hiding them with a
+host fallback: provider stdin required `docker run --interactive`; nested Codex
+bubblewrap had to yield to the Docker mount boundary; and the pre-Docker planning
+snapshot required an explicit historical schema reader. Each defect resumed the same
+workflow node after correction.

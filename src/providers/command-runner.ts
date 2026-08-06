@@ -8,6 +8,7 @@ export interface CommandRequest {
   readonly env?: Readonly<Record<string, string>>;
   readonly unsetEnv?: readonly string[];
   readonly mounts?: readonly CommandMount[];
+  readonly workspaceAccess?: 'read_only' | 'read_write';
   readonly stdin: string;
   readonly timeoutMs: number;
   readonly cancellationSignal?: AbortSignal;

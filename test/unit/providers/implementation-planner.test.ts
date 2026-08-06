@@ -133,8 +133,13 @@ describe('Codex CLI implementation planner', () => {
       },
     });
     expect(runner.requests[1]?.args).toEqual(
-      expect.arrayContaining(['--sandbox', 'read-only', '-c', 'model_reasoning_effort="low"']),
+      expect.arrayContaining([
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-c',
+        'model_reasoning_effort="low"',
+      ]),
     );
+    expect(runner.requests[1]?.workspaceAccess).toBe('read_only');
     expect(runner.requests[1]?.stdin).toContain('Use one bounded planning pass');
     expect(runner.requests[1]?.stdin).not.toContain('Invoke $ralplan');
     expect(runner.schema).toContain('decisionJson');
@@ -177,7 +182,11 @@ describe('Codex CLI implementation planner', () => {
       expect(result.ok).toBe(true);
       expect(runner.requests[1]).toMatchObject({ cwd: repositoryPath });
       expect(runner.requests[1]?.args).toEqual(
-        expect.arrayContaining(['--sandbox', 'read-only', '--cd', repositoryPath]),
+        expect.arrayContaining([
+          '--dangerously-bypass-approvals-and-sandbox',
+          '--cd',
+          repositoryPath,
+        ]),
       );
       expect(runner.requests[1]?.stdin).toContain('Selected read-only skills: jira');
       expect(runner.requests[1]?.env?.TASKER_SKILLS_ROOT).toMatch(/\/skills$/u);

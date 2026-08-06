@@ -123,6 +123,18 @@ instead of assuming a clean attempt.
 - execution-time `blocked` and `workflow_change_required` outcomes reopen durable waits
   on the same node, so the run can resume after operator guidance instead of restarting
   the task.
+- existing pre-Docker Temporal histories recover through versioned Workflow patches and
+  a runtime-only Activity. The recovery keeps the original workspace, bootstrap receipt,
+  planning snapshot, and execution prefix rather than rerunning preparation;
+- planning snapshot v4 remains readable without the later required Docker policy, while
+  newly captured snapshots use v5. Snapshot immutability is preserved instead of
+  backfilling the historical artifact from a potentially dirty worktree;
+- provider prompts cross `docker run --interactive`; Codex's nested bubblewrap is
+  disabled because Docker is the sandbox boundary. Analyzer/planner worktrees are still
+  bind-mounted read-only, and executable blocks receive the explicit read/write boundary;
+- the real `AVIA-12045` run reconciled a complete `front-avia` runtime and reached a
+  live Codex/Playwright reproduction attempt against the managed HTTPS service without
+  changing Workflow Run ID, branch, or worktree.
 - a disposable TypeScript feature ran through the built-in `front-avia` profile. The
   first Worker changed `src/passenger-name.ts` and stopped before acknowledging the
   Activity; a replacement Worker observed the dirty worktree, applied no duplicate

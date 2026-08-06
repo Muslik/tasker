@@ -287,15 +287,22 @@ describe('Temporal task workflow', () => {
     const taskReference = `jira-admission-${String(Date.now())}`;
     let admissionCalls = 0;
     let implementationCalls = 0;
+    let runtimePreparations = 0;
+    const runtimePreparationsAtAdmission: number[] = [];
     const workspacePaths = new Set<string>();
     worker.shutdown();
     await workerRun;
     await startWorker({
+      prepareTaskDockerRuntime: (input) => {
+        runtimePreparations += 1;
+        return testTaskWorkflowActivities.prepareTaskDockerRuntime(input);
+      },
       executeRemoteReconciledStep: (input) => {
         if (input.uses !== 'jira.start-work@1') {
           return testTaskWorkflowActivities.executeRemoteReconciledStep(input);
         }
         admissionCalls += 1;
+        runtimePreparationsAtAdmission.push(runtimePreparations);
         workspacePaths.add(input.workspace.path);
         return Promise.resolve(
           admissionCalls === 1
@@ -344,6 +351,12 @@ describe('Temporal task workflow', () => {
     expect(resumed.ok).toBe(true);
     await waitForWait(service, taskReference, 'code_review@1');
     expect(admissionCalls).toBe(2);
+    expect(runtimePreparationsAtAdmission).toHaveLength(2);
+    const [firstRuntimePreparation, secondRuntimePreparation] = runtimePreparationsAtAdmission;
+    if (firstRuntimePreparation === undefined || secondRuntimePreparation === undefined) {
+      throw new Error('Expected a runtime reconciliation before each Jira admission attempt');
+    }
+    expect(secondRuntimePreparation).toBe(firstRuntimePreparation + 1);
     expect(implementationCalls).toBe(1);
     expect(workspacePaths.size).toBe(1);
   }, 30_000);
@@ -529,6 +542,44 @@ describe('Temporal task workflow', () => {
     expect(review.executionContext).toMatchObject({
       status: 'ready',
       workspace: { taskReference, workflowRunId: blocked.runId },
+    });
+  }, 30_000);
+
+  it('adds Docker runtime to a prepared historical context without replacing its snapshot', async () => {
+    const taskReference = `docker-runtime-upgrade-${String(Date.now())}`;
+    let workspacePreparations = 0;
+    let runtimePreparations = 0;
+    worker.shutdown();
+    await workerRun;
+    await startWorker({
+      prepareTaskWorkspace: async (input) => {
+        workspacePreparations += 1;
+        const prepared = await testTaskWorkflowActivities.prepareTaskWorkspace(input);
+        const historical = Object.fromEntries(
+          Object.entries(prepared).filter(([key]) => key !== 'runtime'),
+        );
+        return historical as unknown as typeof prepared;
+      },
+      prepareTaskDockerRuntime: (input) => {
+        runtimePreparations += 1;
+        return testTaskWorkflowActivities.prepareTaskDockerRuntime(input);
+      },
+    });
+
+    const started = await service.start(
+      workflowInput('avia-13236-short-bug', taskReference, 'automatic'),
+    );
+    expect(started.ok).toBe(true);
+    const review = await waitForWait(service, taskReference, 'code_review@1');
+
+    expect(workspacePreparations).toBe(1);
+    expect(runtimePreparations).toBeGreaterThan(1);
+    expect(review.executionContext).toMatchObject({
+      status: 'ready',
+      runtime: { status: 'ready' },
+      planningSnapshot: {
+        artifactId: `planning-snapshot:${taskReference}:${review.workflowHash}`,
+      },
     });
   }, 30_000);
 

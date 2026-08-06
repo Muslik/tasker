@@ -11,6 +11,8 @@ import type {
   ResolvedWorkspaceRuntimePolicy,
 } from '../../workspaces/index.js';
 import {
+  PrepareTaskDockerRuntimeInputSchema,
+  PrepareTaskDockerRuntimeResultSchema,
   PrepareTaskWorkspaceInputSchema,
   PrepareTaskWorkspaceResultSchema,
   type PrepareTaskWorkspaceInput,
@@ -38,12 +40,20 @@ export interface TemporalWorkspaceRuntimePolicySource {
 
 const failure = (
   phase: string,
-  detail: { readonly kind: string; readonly message?: string },
+  detail: {
+    readonly kind: string;
+    readonly message?: string;
+    readonly command?: string;
+    readonly image?: string;
+    readonly service?: string;
+  },
 ): Error =>
   new Error(
     `Task workspace ${phase} failed: ${detail.kind}${
-      detail.message === undefined ? '' : `: ${detail.message}`
-    }`,
+      detail.command === undefined ? '' : ` [command: ${detail.command}]`
+    }${detail.image === undefined ? '' : ` [image: ${detail.image}]`}${
+      detail.service === undefined ? '' : ` [service: ${detail.service}]`
+    }${detail.message === undefined ? '' : `: ${detail.message}`}`,
   );
 
 export const createWorkspaceActivity = (
@@ -53,31 +63,9 @@ export const createWorkspaceActivity = (
   runtimes: DockerWorkspaceRuntimePreparer,
   runtimePolicies: TemporalWorkspaceRuntimePolicySource,
   snapshots: PlanningSnapshotSource,
-): Pick<TaskWorkflowActivities, 'prepareTaskWorkspace'> => ({
-  prepareTaskWorkspace: async (inputValue: PrepareTaskWorkspaceInput) => {
-    const input = PrepareTaskWorkspaceInputSchema.parse(inputValue);
+): Pick<TaskWorkflowActivities, 'prepareTaskWorkspace' | 'prepareTaskDockerRuntime'> => {
+  const prepareDockerRuntime = async (workspace: WorkspaceLocator) => {
     const context = Context.current();
-    context.heartbeat({ phase: 'resolve_repository' });
-
-    const subject = subjects.resolve(input.taskReference);
-    if (!subject.ok) throw failure('repository resolution', subject.error);
-
-    context.heartbeat({ phase: 'prepare_worktree' });
-    const prepared = await workspaces.prepare({
-      taskReference: input.taskReference,
-      workflowId: input.workflowId,
-      workflowRunId: input.workflowRunId,
-      workflowHash: input.workflowHash,
-      repositoryReference: subject.value.task.repository,
-      repositoryPath: subject.value.repositoryPath,
-    });
-    if (!prepared.ok) throw failure('preparation', prepared.error);
-
-    context.cancellationSignal.throwIfAborted();
-    context.heartbeat({ phase: 'bootstrap_harness' });
-    const bootstrapped = await bootstrap.prepare(prepared.value);
-    if (!bootstrapped.ok) throw failure('bootstrap', bootstrapped.error);
-
     context.cancellationSignal.throwIfAborted();
     context.heartbeat({ phase: 'prepare_docker_runtime' });
     const heartbeat = setInterval(() => {
@@ -86,8 +74,8 @@ export const createWorkspaceActivity = (
     const runtime = await (async () => {
       try {
         return await runtimes.prepare(
-          prepared.value,
-          runtimePolicies.resolve(prepared.value.repository.reference),
+          workspace,
+          runtimePolicies.resolve(workspace.repository.reference),
           {
             cancellationSignal: context.cancellationSignal,
             onProgress: (progress) => {
@@ -103,23 +91,63 @@ export const createWorkspaceActivity = (
       }
     })();
     if (!runtime.ok) throw failure('Docker runtime', runtime.error);
+    return runtime.value;
+  };
 
-    context.cancellationSignal.throwIfAborted();
-    context.heartbeat({ phase: 'snapshot_planning_input' });
-    const planningSnapshot = snapshots.createRunSnapshot(input.taskReference, input.workflowHash, {
-      workspaceId: prepared.value.workspaceId,
-      reference: prepared.value.repository.reference,
-      path: prepared.value.path,
-    });
-    if (!planningSnapshot.ok) {
-      throw failure('planning snapshot', planningSnapshot.error);
-    }
+  return {
+    prepareTaskWorkspace: async (inputValue: PrepareTaskWorkspaceInput) => {
+      const input = PrepareTaskWorkspaceInputSchema.parse(inputValue);
+      const context = Context.current();
+      context.heartbeat({ phase: 'resolve_repository' });
 
-    return PrepareTaskWorkspaceResultSchema.parse({
-      workspace: prepared.value,
-      bootstrap: bootstrapped.value,
-      runtime: runtime.value,
-      planningSnapshot: planningSnapshot.value,
-    });
-  },
-});
+      const subject = subjects.resolve(input.taskReference);
+      if (!subject.ok) throw failure('repository resolution', subject.error);
+
+      context.heartbeat({ phase: 'prepare_worktree' });
+      const prepared = await workspaces.prepare({
+        taskReference: input.taskReference,
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        workflowHash: input.workflowHash,
+        repositoryReference: subject.value.task.repository,
+        repositoryPath: subject.value.repositoryPath,
+      });
+      if (!prepared.ok) throw failure('preparation', prepared.error);
+
+      context.cancellationSignal.throwIfAborted();
+      context.heartbeat({ phase: 'bootstrap_harness' });
+      const bootstrapped = await bootstrap.prepare(prepared.value);
+      if (!bootstrapped.ok) throw failure('bootstrap', bootstrapped.error);
+
+      const runtime = await prepareDockerRuntime(prepared.value);
+
+      context.cancellationSignal.throwIfAborted();
+      context.heartbeat({ phase: 'snapshot_planning_input' });
+      const planningSnapshot = snapshots.createRunSnapshot(
+        input.taskReference,
+        input.workflowHash,
+        {
+          workspaceId: prepared.value.workspaceId,
+          reference: prepared.value.repository.reference,
+          path: prepared.value.path,
+        },
+      );
+      if (!planningSnapshot.ok) {
+        throw failure('planning snapshot', planningSnapshot.error);
+      }
+
+      return PrepareTaskWorkspaceResultSchema.parse({
+        workspace: prepared.value,
+        bootstrap: bootstrapped.value,
+        runtime,
+        planningSnapshot: planningSnapshot.value,
+      });
+    },
+    prepareTaskDockerRuntime: async (inputValue) => {
+      const input = PrepareTaskDockerRuntimeInputSchema.parse(inputValue);
+      return PrepareTaskDockerRuntimeResultSchema.parse(
+        await prepareDockerRuntime(input.workspace),
+      );
+    },
+  };
+};

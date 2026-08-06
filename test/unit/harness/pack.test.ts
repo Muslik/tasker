@@ -145,6 +145,21 @@ describe('file-backed harness pack', () => {
     );
   });
 
+  it('keeps mise configuration inside the writable workspace home volume', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+
+    expect(pack.company.workspaceRuntime.environment).toMatchObject({
+      HOME: '/tasker/home',
+      MISE_CONFIG_DIR: '/tasker/home/.config/mise',
+      PNPM_HOME: '/tasker/home/.local/share/pnpm',
+      PATH: '/tasker/home/.local/share/pnpm:/tasker/home/.local/share/pnpm/bin:/tasker/cache/mise/data/shims:/usr/local/bin:/usr/bin:/bin',
+    });
+    expect(pack.company.workspaceRuntime.cacheVolumes).toContainEqual({
+      id: 'home',
+      mountPath: '/tasker/home',
+    });
+  });
+
   it('declares Activity redelivery at the step contract boundary', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const deliveryFor = (reference: string) =>

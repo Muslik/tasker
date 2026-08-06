@@ -117,6 +117,10 @@ const prepareTaskWorkspace = (
     },
   });
 
+const prepareTaskDockerRuntime: TaskWorkflowActivities['prepareTaskDockerRuntime'] = ({
+  workspace,
+}) => Promise.resolve(testDockerRuntimeReceipt(workspace));
+
 const executeStep = (input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult> =>
   Promise.resolve({
     status: 'completed',
@@ -182,6 +186,7 @@ const freezeTaskWorkflow: TaskWorkflowActivities['freezeTaskWorkflow'] = (input)
 
 export const testTaskWorkflowActivities = {
   prepareTaskWorkspace,
+  prepareTaskDockerRuntime,
   executeStep,
   executeReadOnlyStep: executeStep,
   executeWorkspaceReconciledStep: executeStep,

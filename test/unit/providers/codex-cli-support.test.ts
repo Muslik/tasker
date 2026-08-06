@@ -26,4 +26,10 @@ describe('Codex CLI support', () => {
       "Invalid response schema: 'propertyNames' is not permitted.",
     );
   });
+
+  it('surfaces stderr when the provider exits before emitting JSONL', () => {
+    expect(providerFailureMessage('', 'No prompt provided via stdin.\n')).toBe(
+      'No prompt provided via stdin.',
+    );
+  });
 });

@@ -28,11 +28,12 @@ RUN npm install --global \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force
 
-ENV HOME=/tasker-home
+ENV HOME=/tasker/home
 ENV MISE_DATA_DIR=/mise-data
-ENV MISE_CONFIG_DIR=/tasker-home/.config/mise
+ENV MISE_CONFIG_DIR=/tasker/home/.config/mise
 ENV MISE_CACHE_DIR=/mise-cache
-ENV PATH=/mise-data/shims:/usr/local/bin:/usr/bin:/bin
+ENV PNPM_HOME=/tasker/home/.local/share/pnpm
+ENV PATH=/tasker/home/.local/share/pnpm:/tasker/home/.local/share/pnpm/bin:/mise-data/shims:/usr/local/bin:/usr/bin:/bin
 
 WORKDIR /workspace
 CMD ["bash"]

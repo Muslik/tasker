@@ -847,7 +847,7 @@ export class ImplementationPlanningCoordinator {
     if (evidenceBundle.value === null)
       return err({ kind: 'evidence_bundle_missing', taskReference });
     const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 4,
+      schemaVersion: 5,
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,

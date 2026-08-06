@@ -90,12 +90,14 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
 
   public async ensureDefaultImage(): Promise<string> {
     if (this.imagePreparation === null) {
-      this.imagePreparation = this.prepareDefaultImage().catch((error: unknown) => {
-        this.imagePreparation = null;
-        throw error;
-      });
+      this.imagePreparation = this.prepareDefaultImage();
     }
-    return this.imagePreparation;
+    const preparation = this.imagePreparation;
+    try {
+      return await preparation;
+    } finally {
+      if (this.imagePreparation === preparation) this.imagePreparation = null;
+    }
   }
 
   public async runInRuntime(
@@ -111,6 +113,7 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
       }),
       ...request.env,
     };
+    const workspaceReadOnly = request.workspaceAccess === 'read_only';
     const mounts = new Map<string, CommandMount>();
     const addMount = (mount: CommandMount): string | null => {
       const existing = mounts.get(mount.target);
@@ -125,18 +128,22 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
     };
     let mountConflict: string | null;
     if (runtime === null) {
-      mountConflict = addMount({ source: request.cwd, target: request.cwd, readOnly: false });
+      mountConflict = addMount({
+        source: request.cwd,
+        target: request.cwd,
+        readOnly: workspaceReadOnly,
+      });
     } else {
       mountConflict =
         addMount({
           source: runtime.workspacePath,
           target: runtime.workspacePath,
-          readOnly: false,
+          readOnly: workspaceReadOnly,
         }) ??
         addMount({
           source: runtime.repositorySourcePath,
           target: runtime.repositorySourcePath,
-          readOnly: false,
+          readOnly: workspaceReadOnly,
         });
     }
     for (const mount of request.mounts ?? []) {
@@ -146,7 +153,16 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
       return { status: 'spawn_failed', message: mountConflict, durationMs: 0 };
     }
 
-    const args = ['run', '--rm', '--init', '--name', name, '--label', 'tasker.managed=true'];
+    const args = [
+      'run',
+      '--rm',
+      '--init',
+      '--interactive',
+      '--name',
+      name,
+      '--label',
+      'tasker.managed=true',
+    ];
     if (runtime !== null) {
       args.push(
         '--label',

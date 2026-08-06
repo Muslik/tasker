@@ -237,6 +237,13 @@ export const PrepareTaskWorkspaceResultSchema = z
   .strict()
   .readonly();
 
+export const PrepareTaskDockerRuntimeInputSchema = z
+  .object({ workspace: WorkspaceLocatorSchema })
+  .strict()
+  .readonly();
+
+export const PrepareTaskDockerRuntimeResultSchema = DockerWorkspaceRuntimeReceiptSchema;
+
 export const ReviseTaskWorkflowDraftInputSchema = z
   .object({
     taskReference: z.string().min(1),
@@ -275,6 +282,8 @@ export type PlanningActivityCommand = z.infer<typeof PlanningActivityCommandSche
 export type PlanTaskImplementationInput = z.infer<typeof PlanTaskImplementationInputSchema>;
 export type PrepareTaskWorkspaceInput = z.infer<typeof PrepareTaskWorkspaceInputSchema>;
 export type PrepareTaskWorkspaceResult = z.infer<typeof PrepareTaskWorkspaceResultSchema>;
+export type PrepareTaskDockerRuntimeInput = z.infer<typeof PrepareTaskDockerRuntimeInputSchema>;
+export type PrepareTaskDockerRuntimeResult = z.infer<typeof PrepareTaskDockerRuntimeResultSchema>;
 export type ReviseTaskWorkflowDraftInput = z.infer<typeof ReviseTaskWorkflowDraftInputSchema>;
 export type ReviseTaskWorkflowDraftResult = z.infer<typeof ReviseTaskWorkflowDraftResultSchema>;
 export type { FreezeTaskWorkflowInput, WorkflowFreezeReceipt };
@@ -282,6 +291,9 @@ export type { PlanningSnapshotReference };
 
 export interface TaskWorkflowActivities {
   prepareTaskWorkspace(input: PrepareTaskWorkspaceInput): Promise<PrepareTaskWorkspaceResult>;
+  prepareTaskDockerRuntime(
+    input: PrepareTaskDockerRuntimeInput,
+  ): Promise<PrepareTaskDockerRuntimeResult>;
   executeStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   executeReadOnlyStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;
   executeWorkspaceReconciledStep(input: ExecuteTaskStepInput): Promise<ExecuteTaskStepResult>;

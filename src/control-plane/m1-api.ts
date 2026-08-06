@@ -245,7 +245,8 @@ const activityEntriesFromTemporalRun = (
   if (run === null) return [];
 
   const occurredAt =
-    run.executionContext.status === 'ready'
+    run.executionContext.status === 'ready' ||
+    run.executionContext.status === 'runtime_preparation_required'
       ? run.executionContext.workspace.preparedAt
       : new Date().toISOString();
 

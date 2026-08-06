@@ -55,6 +55,14 @@ export const TaskWorkflowExecutionContextSchema = z.discriminatedUnion('status',
   z.object({ status: z.literal('preparing') }).strict(),
   z
     .object({
+      status: z.literal('runtime_preparation_required'),
+      workspace: WorkspaceLocatorSchema,
+      bootstrap: WorkspaceBootstrapReceiptSchema,
+      planningSnapshot: PlanningSnapshotReferenceSchema,
+    })
+    .strict(),
+  z
+    .object({
       status: z.literal('ready'),
       workspace: WorkspaceLocatorSchema,
       bootstrap: WorkspaceBootstrapReceiptSchema,
@@ -168,3 +176,25 @@ export type TemporalNodeStatus = z.infer<typeof TemporalNodeStatusSchema>;
 export type TaskWorkflowWait = z.infer<typeof TaskWorkflowWaitSchema>;
 export type TaskWorkflowChange = TaskWorkflowPublicState['workflowChange'];
 export type TaskWorkflowPublicState = z.infer<typeof TaskWorkflowPublicStateSchema>;
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export const parseTaskWorkflowPublicState = (value: unknown): TaskWorkflowPublicState => {
+  if (!isRecord(value) || !isRecord(value.executionContext)) {
+    return TaskWorkflowPublicStateSchema.parse(value);
+  }
+
+  const executionContext = value.executionContext;
+  if (executionContext.status !== 'ready' || executionContext.runtime !== undefined) {
+    return TaskWorkflowPublicStateSchema.parse(value);
+  }
+
+  return TaskWorkflowPublicStateSchema.parse({
+    ...value,
+    executionContext: {
+      ...executionContext,
+      status: 'runtime_preparation_required',
+    },
+  });
+};

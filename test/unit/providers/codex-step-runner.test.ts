@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { openSqliteLedger } from '../../../src/ledger/index.js';
-import type { WorkspaceCommandRunner } from '../../../src/providers/index.js';
+import type { CommandRequest, WorkspaceCommandRunner } from '../../../src/providers/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import {
   CodexCliTaskStepAgentRunner,
@@ -48,6 +48,8 @@ describe('Codex task-step runner', () => {
       jiraSkill: string;
       prFinalizeVisible: boolean;
       outputSchema: string;
+      args: readonly string[];
+      workspaceAccess: CommandRequest['workspaceAccess'];
     }[] = [];
     const commands: WorkspaceCommandRunner = {
       executionEnvironment: 'docker_workspace',
@@ -75,6 +77,8 @@ describe('Codex task-step runner', () => {
           jiraSkill: readFileSync(join(skillsRoot, 'jira/SKILL.md'), 'utf8'),
           prFinalizeVisible: existsSync(join(skillsRoot, 'pr-finalize/SKILL.md')),
           outputSchema: readFileSync(schemaPath, 'utf8'),
+          args: request.args,
+          workspaceAccess: request.workspaceAccess,
         });
         return Promise.resolve({
           status: 'exited',
@@ -129,6 +133,8 @@ describe('Codex task-step runner', () => {
       expect(observations[0]?.outputSchema).not.toContain('oneOf');
       expect(observations[0]?.outputSchema).toContain('anyOf');
       expect(observations[0]?.outputSchema).toContain('additionalProperties');
+      expect(observations[0]?.args).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(observations[0]?.workspaceAccess).toBe('read_write');
     } finally {
       ledger.close();
     }

@@ -242,8 +242,8 @@ behavior tests, and a TypeScript build.
 
 ### 6.4 T3.1 — Docker-only execution cutover
 
-Implementation status on 2026-08-05: code cutover complete. There is no selectable
-host command backend for workflow analysis, implementation planning, agent/process
+Implementation status on 2026-08-06: code cutover and the first real recovery pilot are
+complete. There is no selectable host command backend for workflow analysis, implementation planning, agent/process
 blocks, mutation inspection, Playwright, project bootstrap, tests, or dev services.
 The host runner is private control-plane infrastructure for managed Git operations,
 Docker CLI operations, and typed external-system adapters.
@@ -260,11 +260,19 @@ Delivered behavior:
 6. infrastructure failures open `workspace.retry@1`, expose their classified cause,
    and resume the same worktree after the prerequisite is fixed;
 7. the analyzer can inspect runtime/service facts, while runtime setup remains kernel
-   infrastructure rather than hard-coded graph nodes.
+   infrastructure rather than hard-coded graph nodes;
+8. provider stdin crosses the Docker boundary, Codex uses Docker rather than nested
+   bubblewrap as its sandbox, and read-only planning is enforced by bind mounts;
+9. a pre-Docker active Temporal run can acquire a runtime receipt and continue from its
+   historical frozen planning snapshot without rebuilding the task.
 
 The unit/contract/recovery suite verifies the cutover and interrupted-preparation
-reconciliation. A full `front-avia` bootstrap is an environment smoke gate: it requires
-sufficient Docker Desktop storage and is not permission to fall back to the host.
+reconciliation. The real `AVIA-12045` pilot kept the same Workflow Run ID, worktree,
+branch, planning snapshot, and seven bootstrap receipts through image, toolchain,
+service, snapshot-compatibility, stdin, and nested-sandbox recovery. Its managed
+`front-avia` service passed the HTTPS readiness probe and Codex/Playwright executed the
+`bug.reproduce@1` block inside Docker. This closes the full-bootstrap environment smoke
+gate; it is not permission to add a host fallback.
 
 ## 7. T4 — Jira, Bitbucket, Jenkins/Allure, and review
 

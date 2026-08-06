@@ -135,7 +135,7 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         'mise settings add idiomatic_version_file_enable_tools node',
         'mise trust --all',
         'mise install',
-        'mise exec -- corepack enable --install-directory "$PNPM_HOME"',
+        'mkdir -p "$PNPM_HOME" && mise exec -- corepack enable --install-directory "$PNPM_HOME"',
         'pnpm config set store-dir /tasker/cache/pnpm-store --global',
       ];
       for (const command of [...systemBootstrap, ...policy.bootstrap]) {
@@ -360,7 +360,9 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         '--network',
         receipt.networkName,
       ];
-      for (const alias of service.aliases) args.push('--network-alias', alias);
+      for (const alias of service.aliases) {
+        args.push('--network-alias', alias, '--add-host', `${alias}:0.0.0.0`);
+      }
       args.push(
         '--volume',
         `${workspace.path}:${workspace.path}`,
@@ -420,6 +422,20 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         receipt.image,
       );
       if (succeeded(checked)) return;
+      const serviceState = await this.docker(
+        ['inspect', '--format', '{{.State.Status}} {{.State.ExitCode}}', containerName],
+        30_000,
+      );
+      if (succeeded(serviceState) && /^(?:dead|exited)\b/u.test(serviceState.stdout.trim())) {
+        const logs = await this.docker(['logs', '--tail', '100', containerName], 30_000);
+        fail({
+          kind: 'service_failed',
+          service: service.id,
+          message: `Docker service ${service.id} stopped (${serviceState.stdout.trim()}) before it became ready: ${
+            succeeded(logs) ? logs.stdout : messageFrom(logs)
+          }`,
+        });
+      }
       await new Promise<void>((resolve, reject) => {
         const finish = (): void => {
           options.cancellationSignal?.removeEventListener('abort', cancel);

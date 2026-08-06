@@ -13,7 +13,7 @@ import {
   ResolveTaskWaitCommandSchema,
   TaskWorkflowInputSchema,
   TaskWorkflowMemoSchema,
-  TaskWorkflowPublicStateSchema,
+  parseTaskWorkflowPublicState,
   type ResolveTaskWaitCommand,
   type StartTaskWorkflowInput,
   type TaskWorkflowMemo,
@@ -74,7 +74,7 @@ const unavailableState = (
   temporalStatus: string,
   reason: string,
 ): TaskWorkflowPublicState =>
-  TaskWorkflowPublicStateSchema.parse({
+  parseTaskWorkflowPublicState({
     ...memo,
     workflowId,
     runId,
@@ -199,7 +199,7 @@ export class TemporalTaskRunService implements TaskTemporalRunService {
     temporalStatus = 'RUNNING',
   ): Promise<TaskWorkflowPublicState> {
     try {
-      return TaskWorkflowPublicStateSchema.parse(
+      return parseTaskWorkflowPublicState(
         await this.client.withDeadline(Date.now() + this.configuration.queryTimeoutMs, () =>
           handle.query(taskWorkflowStateQuery),
         ),

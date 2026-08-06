@@ -106,6 +106,7 @@ export class CodexCliWorkflowAnalyzer {
       command,
       args: ['--version'],
       cwd: request.repositoryPath,
+      workspaceAccess: 'read_only',
       stdin: '',
       timeoutMs: 10_000,
     });
@@ -145,8 +146,7 @@ export class CodexCliWorkflowAnalyzer {
           'model_reasoning_effort="low"',
           '--ephemeral',
           '--skip-git-repo-check',
-          '--sandbox',
-          'read-only',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--cd',
           isolatedWorkspace,
           '--output-schema',
@@ -155,6 +155,7 @@ export class CodexCliWorkflowAnalyzer {
           '-',
         ],
         cwd: isolatedWorkspace,
+        workspaceAccess: 'read_only',
         env: { CODEX_HOME: isolatedCodexHome },
         mounts: [{ source: directory, target: directory, readOnly: false }],
         stdin: prompt,
@@ -175,7 +176,7 @@ export class CodexCliWorkflowAnalyzer {
         return err({
           kind: 'provider_failed',
           exitCode: execution.exitCode,
-          message: providerFailureMessage(execution.stdout),
+          message: providerFailureMessage(execution.stdout, execution.stderr),
           stderr: execution.stderr,
         });
       }

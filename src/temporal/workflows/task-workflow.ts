@@ -2,6 +2,7 @@ import {
   ApplicationFailure,
   condition,
   isCancellation,
+  patched,
   proxyActivities,
   setHandler,
   startChild,
@@ -115,7 +116,9 @@ const freezeActivities = proxyActivities<Pick<TaskWorkflowActivities, 'freezeTas
   },
 });
 
-const workspaceActivities = proxyActivities<Pick<TaskWorkflowActivities, 'prepareTaskWorkspace'>>({
+const workspaceActivities = proxyActivities<
+  Pick<TaskWorkflowActivities, 'prepareTaskWorkspace' | 'prepareTaskDockerRuntime'>
+>({
   startToCloseTimeout: '5 minutes',
   scheduleToCloseTimeout: '30 minutes',
   heartbeatTimeout: '30 seconds',
@@ -151,6 +154,10 @@ type PlanningLifecycle = {
 };
 
 const MAX_AUTOMATIC_DRAFT_REVISIONS = 3;
+const DOCKER_RUNTIME_RECOVERY_PATCH = 'docker-runtime-recovery-after-wait-v1';
+const DOCKER_RUNTIME_ACTIVITY_PATCH = 'docker-runtime-only-recovery-v1';
+const DOCKER_RUNTIME_WAIT_ESCAPE_PATCH = 'docker-runtime-only-after-workspace-wait-v1';
+const DOCKER_RUNTIME_RECONCILIATION_PATCH = 'docker-runtime-reconcile-before-attempt-v1';
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -525,6 +532,9 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       let result: TaskWorkflowPlanningState;
       for (;;) {
         markRunning(node.id);
+        if (patched(DOCKER_RUNTIME_RECONCILIATION_PATCH)) {
+          await prepareDockerExecutionContext(node.id);
+        }
         attempts[node.id] = (attempts[node.id] ?? 0) + 1;
         try {
           result = await planningActivities.planTaskImplementation({
@@ -617,9 +627,41 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
     }
   };
 
-  const ensureExecutionContext = async (nodeId: string): Promise<void> => {
-    if (state.executionContext.status === 'ready') return;
+  const prepareDockerExecutionContext = async (nodeId: string): Promise<void> => {
+    for (;;) {
+      const context = state.executionContext;
+      if (context.status !== 'ready' && context.status !== 'runtime_preparation_required') {
+        throw ApplicationFailure.nonRetryable(
+          'Docker runtime recovery has no prepared workspace context',
+        );
+      }
+      markRunning(nodeId);
+      try {
+        const runtime = await workspaceActivities.prepareTaskDockerRuntime({
+          workspace: context.workspace,
+        });
+        state = {
+          ...state,
+          executionContext: {
+            status: 'ready',
+            workspace: context.workspace,
+            bootstrap: context.bootstrap,
+            runtime,
+            planningSnapshot: context.planningSnapshot,
+          },
+        };
+        return;
+      } catch (error) {
+        if (isCancellation(error)) throw error;
+        const retry = await openWait(nodeId, 'workspace.retry@1');
+        if (!retryResolution(retry)) {
+          throw ApplicationFailure.nonRetryable('Workspace retry wait received invalid payload');
+        }
+      }
+    }
+  };
 
+  const prepareExecutionContext = async (nodeId: string): Promise<void> => {
     for (;;) {
       markRunning(nodeId);
       try {
@@ -646,8 +688,45 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
         if (!retryResolution(retry)) {
           throw ApplicationFailure.nonRetryable('Workspace retry wait received invalid payload');
         }
+        if (
+          (state.executionContext.status === 'ready' ||
+            state.executionContext.status === 'runtime_preparation_required') &&
+          patched(DOCKER_RUNTIME_WAIT_ESCAPE_PATCH)
+        ) {
+          await prepareDockerExecutionContext(nodeId);
+          return;
+        }
       }
     }
+  };
+
+  const ensureExecutionContext = async (nodeId: string): Promise<void> => {
+    if (
+      state.executionContext.status === 'ready' ||
+      state.executionContext.status === 'runtime_preparation_required'
+    ) {
+      return;
+    }
+    await prepareExecutionContext(nodeId);
+  };
+
+  const ensureDockerExecutionContext = async (nodeId: string): Promise<void> => {
+    if (state.executionContext.status === 'ready' && isRecord(state.executionContext.runtime)) {
+      return;
+    }
+    if (!patched(DOCKER_RUNTIME_ACTIVITY_PATCH)) {
+      await prepareExecutionContext(nodeId);
+      return;
+    }
+    await prepareDockerExecutionContext(nodeId);
+  };
+
+  const reconcileDockerExecutionContext = async (nodeId: string): Promise<void> => {
+    if (!patched(DOCKER_RUNTIME_RECONCILIATION_PATCH)) {
+      await ensureDockerExecutionContext(nodeId);
+      return;
+    }
+    await prepareDockerExecutionContext(nodeId);
   };
 
   const completePlanningLifecycle = async (): Promise<void> => {
@@ -771,14 +850,23 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       }
       case 'step': {
         await ensureExecutionContext(node.id);
-        if (state.executionContext.status !== 'ready') {
+        if (
+          state.executionContext.status !== 'ready' &&
+          state.executionContext.status !== 'runtime_preparation_required'
+        ) {
           throw ApplicationFailure.nonRetryable('Execution step has no prepared execution context');
         }
         let operatorGuidance = queuedOperatorGuidance;
         queuedOperatorGuidance = null;
         for (;;) {
+          if (patched(DOCKER_RUNTIME_RECOVERY_PATCH)) {
+            await reconcileDockerExecutionContext(node.id);
+          }
           const readyContext = state.executionContext;
-          if (readyContext.status !== 'ready') {
+          if (
+            readyContext.status !== 'ready' &&
+            readyContext.status !== 'runtime_preparation_required'
+          ) {
             throw ApplicationFailure.nonRetryable(
               'Execution step lost its prepared execution context',
             );

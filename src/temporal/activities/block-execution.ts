@@ -271,6 +271,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
       command,
       args: ['--version'],
       cwd: request.cwd,
+      workspaceAccess: 'read_write',
       stdin: '',
       timeoutMs: 10_000,
     });
@@ -327,8 +328,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
           'model_reasoning_effort="medium"',
           '--ephemeral',
           '--skip-git-repo-check',
-          '--sandbox',
-          'workspace-write',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--cd',
           request.cwd,
           '--output-schema',
@@ -337,6 +337,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
           '-',
         ],
         cwd: request.cwd,
+        workspaceAccess: 'read_write',
         env: {
           CODEX_HOME: isolatedCodexHome,
           ...harnessEnvironment,
@@ -359,7 +360,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
         return err({
           kind: 'provider_failed',
           exitCode: execution.exitCode,
-          message: providerFailureMessage(execution.stdout),
+          message: providerFailureMessage(execution.stdout, execution.stderr),
           stdout: execution.stdout,
           stderr: execution.stderr,
         });

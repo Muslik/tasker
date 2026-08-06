@@ -115,7 +115,14 @@ describe('Docker workspace runtime manager', () => {
       environment: { HOME: '/tasker/home' },
       bootstrap: ['pnpm install --frozen-lockfile'],
       cacheVolumes: [{ id: 'node-modules', mountPath: '/workspace/node_modules' }],
-      services: [],
+      services: [
+        {
+          id: 'app',
+          command: 'pnpm start',
+          aliases: ['local.example'],
+          environment: {},
+        },
+      ],
       policyHash: 'd'.repeat(64),
     };
 
@@ -150,6 +157,23 @@ describe('Docker workspace runtime manager', () => {
     expect(
       requests.filter(({ args }) => args[0] === 'run' && args.includes('tasker-volume')),
     ).toHaveLength(2);
+    expect(
+      requests.some(({ args }) =>
+        args.includes(
+          'mkdir -p "$PNPM_HOME" && mise exec -- corepack enable --install-directory "$PNPM_HOME"',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      requests.find(({ args }) => args[0] === 'run' && args.includes('--detach'))?.args,
+    ).toEqual(
+      expect.arrayContaining([
+        '--network-alias',
+        'local.example',
+        '--add-host',
+        'local.example:0.0.0.0',
+      ]),
+    );
     const receipt = await store.read(workspaceId);
     expect(receipt).toMatchObject({
       workspaceId,

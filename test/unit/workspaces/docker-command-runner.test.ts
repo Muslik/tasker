@@ -55,6 +55,54 @@ const successfulHost = (requests: CommandRequest[]): HostControlPlaneCommandRunn
 });
 
 describe('Docker workspace command runner', () => {
+  it('rechecks the default image after Docker changes its image store', async () => {
+    const path = root();
+    const requests: CommandRequest[] = [];
+    let inspections = 0;
+    const host: HostControlPlaneCommandRunner = {
+      executionEnvironment: 'host_control_plane',
+      run: vi.fn((request: CommandRequest) => {
+        requests.push(request);
+        if (request.args[0] === 'image' && request.args[1] === 'inspect') {
+          inspections += 1;
+          if (inspections === 2) {
+            return Promise.resolve({
+              status: 'exited' as const,
+              exitCode: 1,
+              stdout: '',
+              stderr: 'No such image',
+              durationMs: 1,
+            });
+          }
+          return Promise.resolve({
+            status: 'exited' as const,
+            exitCode: 0,
+            stdout: inspections === 1 ? 'sha256:before\n' : 'sha256:after\n',
+            stderr: '',
+            durationMs: 1,
+          });
+        }
+        return Promise.resolve({
+          status: 'exited' as const,
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          durationMs: 1,
+        });
+      }),
+    };
+    const runner = new DockerWorkspaceCommandRunner(
+      configuration(path),
+      host,
+      new DockerWorkspaceRuntimeStore(join(path, 'runtimes')),
+    );
+
+    await expect(runner.ensureDefaultImage()).resolves.toBe('sha256:before');
+    await expect(runner.ensureDefaultImage()).resolves.toBe('sha256:after');
+
+    expect(requests.filter(({ args }) => args[0] === 'build')).toHaveLength(1);
+  });
+
   it('runs an analyzer command in the workspace image instead of on the host', async () => {
     const path = root();
     const cwd = join(path, 'analysis');
@@ -71,7 +119,7 @@ describe('Docker workspace command runner', () => {
       args: ['--version'],
       cwd,
       env: { CODEX_HOME: join(cwd, 'codex-home') },
-      stdin: '',
+      stdin: 'Analyze this task.',
       timeoutMs: 10_000,
     });
 
@@ -80,6 +128,7 @@ describe('Docker workspace command runner', () => {
     expect(execution?.command).toBe('docker');
     expect(execution?.args).toEqual(
       expect.arrayContaining([
+        '--interactive',
         '--volume',
         `${cwd}:${cwd}`,
         '--workdir',
@@ -91,6 +140,7 @@ describe('Docker workspace command runner', () => {
         '--version',
       ]),
     );
+    expect(execution?.stdin).toBe('Analyze this task.');
     expect(execution?.args.join(' ')).not.toContain(join(cwd, 'codex-home'));
   });
 
@@ -118,5 +168,29 @@ describe('Docker workspace command runner', () => {
     if (result.status !== 'spawn_failed') throw new Error('Expected a closed runtime failure');
     expect(result.message).toContain('has no prepared Docker runtime');
     expect(requests).toHaveLength(0);
+  });
+
+  it('enforces read-only workspace access with a Docker bind mount', async () => {
+    const path = root();
+    const cwd = join(path, 'planning');
+    mkdirSync(cwd, { recursive: true });
+    const requests: CommandRequest[] = [];
+    const runner = new DockerWorkspaceCommandRunner(
+      configuration(path),
+      successfulHost(requests),
+      new DockerWorkspaceRuntimeStore(join(path, 'runtimes')),
+    );
+
+    await runner.run({
+      command: 'codex',
+      args: ['exec'],
+      cwd,
+      workspaceAccess: 'read_only',
+      stdin: 'Plan without changing the repository.',
+      timeoutMs: 10_000,
+    });
+
+    const execution = requests.find(({ args }) => args[0] === 'run');
+    expect(execution?.args).toEqual(expect.arrayContaining(['--volume', `${cwd}:${cwd}:ro`]));
   });
 });

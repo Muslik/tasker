@@ -127,7 +127,7 @@ const makeSnapshot = (
             },
           };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 4,
+    schemaVersion: 5,
     taskReference: 'task-ref',
     workflowHash: 'a'.repeat(64),
     task,
