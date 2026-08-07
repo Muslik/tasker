@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { harnessPolicyAppliesToTask, loadHarnessPack } from '../harness/index.js';
 import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
@@ -7,6 +7,7 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import {
   ImplementationPlanLinkSchema,
   PlanningClarificationAnswerCommandSchema,
+  PlanningStrategySchema,
   type PlanningStrategy,
   type PlanningStrategyRequest,
   type PlanningQuestionAnswer,
@@ -96,6 +97,50 @@ export type ImplementationPlanningStoreError =
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const aggregateIdFor = (taskReference: string): string => `implementation-plan:${taskReference}`;
+const planningEpisodeIdFor = (commandId: string | null): string | null => {
+  if (commandId === null) return null;
+  const episodeCommand = /^(.*:planning-episode:\d+):command:\d+$/u.exec(commandId);
+  return episodeCommand?.[1] ?? commandId;
+};
+const planningEpisodePayloadFor = (
+  commandId: string | null,
+): Readonly<Record<string, never>> | { readonly episodeId: string } => {
+  const episodeId = planningEpisodeIdFor(commandId);
+  return episodeId === null ? {} : { episodeId };
+};
+
+const PlanningActivityEventPayloadSchema = z.looseObject({
+  attempt: z.number().int().positive(),
+  episodeId: z.string().min(1).optional(),
+  selectedStrategy: PlanningStrategySchema.optional(),
+  strategy: PlanningStrategySchema.optional(),
+});
+
+type PlanningActivityStatus =
+  'running' | 'ready' | 'needs_clarification' | 'workflow_change_required' | 'paused';
+
+interface PlanningActivityEpisode {
+  readonly attempts: Set<number>;
+  strategy: PlanningStrategy;
+  status: PlanningActivityStatus;
+  sequence: number;
+  occurredAt: string;
+}
+
+const planningActivityDetail = (episode: PlanningActivityEpisode): string => {
+  const status =
+    episode.status === 'running'
+      ? 'Running'
+      : episode.status === 'ready'
+        ? 'Ready'
+        : episode.status === 'needs_clarification'
+          ? 'Waiting for clarification'
+          : episode.status === 'workflow_change_required'
+            ? 'Workflow change required'
+            : 'Paused after provider failure';
+  const attempts = episode.attempts.size;
+  return `${status} · ${episode.strategy} · ${String(attempts)} provider ${attempts === 1 ? 'attempt' : 'attempts'}.`;
+};
 
 export class ImplementationPlanningStore {
   public constructor(
@@ -264,6 +309,7 @@ export class ImplementationPlanningStore {
       attempt,
       requestedStrategy: input.requestedStrategy,
       selectedStrategy: input.selectedStrategy,
+      ...planningEpisodePayloadFor(input.commandId),
     });
   }
 
@@ -312,6 +358,7 @@ export class ImplementationPlanningStore {
         attempt: planning.attempt,
         strategy: planning.selectedStrategy,
         artifactId,
+        ...planningEpisodePayloadFor(planning.commandId),
       },
       {
         artifactId,
@@ -370,6 +417,7 @@ export class ImplementationPlanningStore {
         operationId: pending.operationId,
         requestCount: pending.requests.length,
         artifactId,
+        ...planningEpisodePayloadFor(planning.commandId),
       },
       {
         artifactId,
@@ -436,6 +484,7 @@ export class ImplementationPlanningStore {
       operationId: round.operationId,
       evidenceBundleArtifactId: evidenceBundle.artifactId,
       evidenceBundleRevision: evidenceBundle.revision,
+      ...planningEpisodePayloadFor(planning.commandId),
     });
     if (!saved.ok) return saved;
     if (saved.value.status !== 'planning') {
@@ -487,6 +536,7 @@ export class ImplementationPlanningStore {
               attempt: planning.attempt,
               artifactId,
               questionCount: planning.decision.questions.length,
+              ...planningEpisodePayloadFor(planning.commandId),
             }),
             actor: 'operator',
           },
@@ -550,6 +600,7 @@ export class ImplementationPlanningStore {
         attempt: planning.attempt,
         strategy: planning.selectedStrategy,
         failureKind: failure.kind,
+        ...planningEpisodePayloadFor(planning.commandId),
         ...(receipt === null ? {} : { artifactId }),
       },
       receipt === null
@@ -1064,7 +1115,66 @@ export class ImplementationPlanningCoordinator {
   }
 
   public readActivity(taskReference: string): OperatorActivityResponse['entries'] {
-    return this.store.listEvents(taskReference).map((event) => {
+    const entries: Array<OperatorActivityResponse['entries'][number]> = [];
+    const episodes = new Map<string, PlanningActivityEpisode>();
+    let legacyEpisodeId: string | null = null;
+
+    const recordEpisode = (
+      event: EventRecord,
+      status: PlanningActivityStatus,
+      terminal: boolean,
+    ): void => {
+      const payload = PlanningActivityEventPayloadSchema.safeParse(event.payload);
+      if (!payload.success) {
+        throw new Error(`Invalid implementation planning event payload: ${event.eventType}`);
+      }
+      const strategy = payload.data.selectedStrategy ?? payload.data.strategy;
+      if (strategy === undefined) {
+        throw new Error(`Implementation planning event has no strategy: ${event.eventType}`);
+      }
+      const explicitEpisodeId = payload.data.episodeId;
+      const episodeId = explicitEpisodeId ?? legacyEpisodeId ?? `legacy:${String(event.sequence)}`;
+      if (explicitEpisodeId === undefined && legacyEpisodeId === null) {
+        legacyEpisodeId = episodeId;
+      }
+      const existing = episodes.get(episodeId);
+      if (existing === undefined) {
+        episodes.set(episodeId, {
+          attempts: new Set([payload.data.attempt]),
+          strategy,
+          status,
+          sequence: event.sequence,
+          occurredAt: event.occurredAt,
+        });
+      } else {
+        existing.attempts.add(payload.data.attempt);
+        existing.strategy = strategy;
+        existing.status = status;
+        existing.sequence = event.sequence;
+        existing.occurredAt = event.occurredAt;
+      }
+      if (terminal && explicitEpisodeId === undefined) legacyEpisodeId = null;
+    };
+
+    for (const event of this.store.listEvents(taskReference)) {
+      switch (event.eventType) {
+        case 'ImplementationPlanningStarted':
+          recordEpisode(event, 'running', false);
+          continue;
+        case 'ImplementationPlanReady':
+          recordEpisode(event, 'ready', true);
+          continue;
+        case 'ImplementationPlanNeedsClarification':
+          recordEpisode(event, 'needs_clarification', true);
+          continue;
+        case 'ImplementationPlanWorkflowChangeRequired':
+          recordEpisode(event, 'workflow_change_required', true);
+          continue;
+        case 'ImplementationPlanningFailed':
+          recordEpisode(event, 'paused', false);
+          continue;
+      }
+
       const common = {
         sequence: event.sequence,
         occurredAt: event.occurredAt,
@@ -1072,66 +1182,60 @@ export class ImplementationPlanningCoordinator {
         level: 'info' as const,
       };
       switch (event.eventType) {
-        case 'ImplementationPlanningStarted':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            title: 'Implementation planning started',
-            detail:
-              'The selected subscription planner is inspecting the task and read-only repository.',
-          });
         case 'PlanningEvidenceRequested':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            title: 'Planner requested additional evidence',
-            detail:
-              'The request and provider cost receipt were persisted before the external read.',
-          });
+          entries.push(
+            OperatorActivityEntrySchema.parse({
+              ...common,
+              title: 'Planner requested additional evidence',
+              detail:
+                'The request and provider cost receipt were persisted before the external read.',
+            }),
+          );
+          break;
         case 'PlanningEvidenceAppended':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            title: 'Planning evidence appended',
-            detail:
-              'Tasker recorded the mediated result with provenance and resumed the same plan.',
-          });
-        case 'ImplementationPlanReady':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            title: 'Implementation plan ready',
-            detail: 'The typed plan and provider receipt were persisted before workflow execution.',
-          });
-        case 'ImplementationPlanNeedsClarification':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            level: 'warning',
-            title: 'Planning needs clarification',
-            detail: 'Execution is blocked until the operator answers the persisted questions.',
-          });
+          entries.push(
+            OperatorActivityEntrySchema.parse({
+              ...common,
+              title: 'Planning evidence appended',
+              detail:
+                'Tasker recorded the mediated result with provenance and resumed the same plan.',
+            }),
+          );
+          break;
         case 'PlanningClarificationAnswered':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            source: 'operator',
-            title: 'Planning clarification answered',
-            detail: 'The typed answers were persisted and a new planning attempt can begin.',
-          });
-        case 'ImplementationPlanWorkflowChangeRequired':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            level: 'warning',
-            title: 'Workflow change required',
-            detail: 'The grounded plan requires capabilities outside the compiled workflow.',
-          });
-        case 'ImplementationPlanningFailed':
-          return OperatorActivityEntrySchema.parse({
-            ...common,
-            level: 'warning',
-            title: 'Implementation planning paused',
-            detail:
-              'The provider attempt failed recoverably; retrying will not regenerate the workflow.',
-          });
+          entries.push(
+            OperatorActivityEntrySchema.parse({
+              ...common,
+              source: 'operator',
+              title: 'Planning clarification answered',
+              detail: 'The typed answers were persisted and the same planning episode resumed.',
+            }),
+          );
+          break;
         default:
           throw new Error(`Unmapped implementation planning event: ${event.eventType}`);
       }
-    });
+    }
+
+    for (const episode of episodes.values()) {
+      entries.push(
+        OperatorActivityEntrySchema.parse({
+          sequence: episode.sequence,
+          occurredAt: episode.occurredAt,
+          source: 'planner',
+          level:
+            episode.status === 'paused' ||
+            episode.status === 'needs_clarification' ||
+            episode.status === 'workflow_change_required'
+              ? 'warning'
+              : 'info',
+          title: 'Implementation planning',
+          detail: planningActivityDetail(episode),
+        }),
+      );
+    }
+
+    return entries.sort((left, right) => left.sequence - right.sequence);
   }
 
   public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {

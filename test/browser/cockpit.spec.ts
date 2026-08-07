@@ -222,7 +222,7 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   await expect(page.getByTestId('workflow-tree')).toBeVisible();
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
-  await expect(page.getByTestId('validation-panel')).toContainText('Validator passed');
+  await expect(page.getByTestId('validation-panel')).toContainText('Workflow graph valid');
   await expect(page.getByTestId('graph-hash')).not.toHaveText('not compiled');
   await expect(page.getByTestId('workflow-debug-details')).toContainText('Task-specific graph');
   await expect(page.getByRole('link', { name: 'Download graph JSON' })).toBeVisible();
@@ -304,7 +304,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(page.getByTestId('implementation-plan')).toContainText(/attempt \d+/u);
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   const activity = await loadActivity(page, fixtureId);
-  expect(activity.entries.some((entry) => entry.title === 'Implementation plan ready')).toBe(true);
+  expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
 });
 
 test('a planning-time workflow change revises the draft before freeze', async ({ page }) => {
@@ -344,8 +344,7 @@ test('a planning-time workflow change revises the draft before freeze', async ({
     receipt: { workflowHash: parentAfter.view.workflow.graphHash },
   });
   const activity = await loadActivity(page, fixtureId);
-  expect(activity.entries.some((entry) => entry.title === 'Workflow change required')).toBe(true);
-  expect(activity.entries.some((entry) => entry.title === 'Implementation plan ready')).toBe(true);
+  expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
 });
 
 test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
@@ -433,9 +432,7 @@ test('I can answer a blocking planning question and continue the same task', asy
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
     'Planning clarification answered',
   );
-  await expect(page.getByTestId('task-activity-timeline')).toContainText(
-    'Implementation plan ready',
-  );
+  await expect(page.getByTestId('task-activity-timeline')).toContainText('Implementation planning');
 });
 
 test('an invalid workflow is rejected and surfaces validation issues instead of a tree', async ({

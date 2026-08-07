@@ -158,6 +158,7 @@ const DOCKER_RUNTIME_RECOVERY_PATCH = 'docker-runtime-recovery-after-wait-v1';
 const DOCKER_RUNTIME_ACTIVITY_PATCH = 'docker-runtime-only-recovery-v1';
 const DOCKER_RUNTIME_WAIT_ESCAPE_PATCH = 'docker-runtime-only-after-workspace-wait-v1';
 const DOCKER_RUNTIME_RECONCILIATION_PATCH = 'docker-runtime-reconcile-before-attempt-v1';
+const PLANNING_ACTIVITY_EPISODE_PATCH = 'planning-activity-episode-v1';
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -335,9 +336,11 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
   let queuedOperatorGuidance: string | null = null;
   let pendingResolution: ResolveTaskWaitCommand | null = null;
   let planningCommandSequence = 0;
+  let planningEpisodeSequence = 0;
   let draftRevisionSequence = 0;
   const completedLifecycleNodeIds = new Set<string>();
   const execution = workflowInfo();
+  const planningActivityEpisodesEnabled = patched(PLANNING_ACTIVITY_EPISODE_PATCH);
   let state: AvailableTaskWorkflowPublicState = {
     schemaVersion: 1,
     taskReference: input.taskReference,
@@ -520,6 +523,10 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
   const executePlanning = async (initialCommand: PlanningActivityCommand): Promise<void> => {
     let command = initialCommand;
     let automaticRevisionCount = 0;
+    planningEpisodeSequence += 1;
+    const episodeId = planningActivityEpisodesEnabled
+      ? `${execution.workflowId}:${execution.runId}:planning-episode:${String(planningEpisodeSequence)}`
+      : null;
 
     for (;;) {
       const node = findPlanningLifecycle(activeGraph).step;
@@ -528,7 +535,10 @@ export async function taskWorkflow(rawInput: TaskWorkflowInput): Promise<TaskWor
       }
       const readyContext = state.executionContext;
       planningCommandSequence += 1;
-      const commandId = `${execution.workflowId}:${execution.runId}:planning:${String(planningCommandSequence)}`;
+      const commandId =
+        episodeId === null
+          ? `${execution.workflowId}:${execution.runId}:planning:${String(planningCommandSequence)}`
+          : `${episodeId}:command:${String(planningCommandSequence)}`;
       let result: TaskWorkflowPlanningState;
       for (;;) {
         markRunning(node.id);

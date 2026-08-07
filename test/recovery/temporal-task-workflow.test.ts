@@ -692,11 +692,11 @@ describe('Temporal task workflow', () => {
       'revision',
     ]);
     expect(new Set(commands.map((command) => command.commandId))).toHaveLength(3);
-    expect(
-      commands.every((command) =>
-        command.commandId.startsWith(`tasker:${taskReference}:${firstReview.runId}:planning:`),
-      ),
-    ).toBe(true);
+    expect(commands.map((command) => command.commandId)).toEqual([
+      `tasker:${taskReference}:${firstReview.runId}:planning-episode:1:command:1`,
+      `tasker:${taskReference}:${firstReview.runId}:planning-episode:1:command:2`,
+      `tasker:${taskReference}:${firstReview.runId}:planning-episode:2:command:3`,
+    ]);
     expect(new Set(commands.map((command) => command.snapshotChecksum))).toEqual(
       new Set(['0'.repeat(64)]),
     );

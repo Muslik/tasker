@@ -44,7 +44,7 @@ and policy documents remain outside Temporal Event History.
 Each logical provider command has a stable ID:
 
 ```text
-<temporal-workflow-id>:planning:<sequence>
+<temporal-workflow-id>:<run-id>:planning-episode:<episode-sequence>:command:<command-sequence>
 ```
 
 The implementation-planning projection records that ID before invoking the provider.
@@ -55,6 +55,14 @@ A changed graph hash or snapshot checksum fails closed before the provider is ca
 The provider subprocess receives Temporal cancellation and emits heartbeats at start,
 every ten seconds, and when stdout/stderr arrives. Workflow cancellation is propagated;
 it is not converted into an operator retry wait.
+
+An operator-visible planning episode begins whenever the Workflow enters implementation
+planning. Provider retries, evidence reads, clarification, and bounded automatic draft
+revision remain inside that episode. A later entry from plan review or another workflow
+stage starts a new episode. The product Activity projection renders one current summary
+row per episode with its final state, selected strategy, and provider-attempt count;
+individual `started` and recoverable `failed` events remain in the append-only ledger
+and transcript diagnostics instead of flooding the operator timeline.
 
 Provider stdout/stderr is appended before heartbeat progress to bounded SQLite artifact
 chunks. The Temporal state and implementation-plan projection contain only a stable
@@ -92,6 +100,8 @@ Temporal interpreter.
 - worker replacement while a planning question is open;
 - question answer followed by plan revision and approval in the same Workflow run;
 - Activity retry without duplicate provider completion;
+- provider retries collapse into one operator-visible planning episode, while a later
+  planning entry remains a separate timeline row;
 - immutable snapshot checksum across all attempts;
 - harness prompt edit does not alter an active run;
 - graph-hash mismatch stops before provider invocation;

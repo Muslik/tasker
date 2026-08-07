@@ -133,6 +133,66 @@ describe('implementation planning recovery', () => {
     }
   });
 
+  it('projects provider retries as one activity entry per planning episode', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-activity-'));
+    const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const service = createM1WorkflowService(ledger.repository, clock);
+      const generated = service.generate('avia-13236-short-bug');
+      if (!generated.ok) throw new Error('Expected workflow generation to succeed');
+      recordTestEvidenceBundle(ledger.repository, clock, 'avia-13236-short-bug');
+      const fallback = new DeterministicImplementationPlanner();
+      let calls = 0;
+      const coordinator = createImplementationPlanningCoordinator({
+        ledger: ledger.repository,
+        clock,
+        workflows: service,
+        subjects: new WorkflowGenerationSubjectSource(directory),
+        planner: {
+          plan: (request) => {
+            calls += 1;
+            return calls === 1
+              ? Promise.resolve(
+                  err({
+                    kind: 'provider_failed' as const,
+                    exitCode: 1,
+                    message: 'subscription provider disconnected',
+                    stderr: '',
+                  }),
+                )
+              : fallback.plan(request);
+          },
+        },
+      });
+      const firstEpisode = 'tasker:avia-13236-short-bug:planning-episode:1:command:1';
+      const secondEpisode = 'tasker:avia-13236-short-bug:planning-episode:2:command:2';
+      await coordinator.prepare('avia-13236-short-bug', 'fast', null, firstEpisode);
+      await coordinator.prepare('avia-13236-short-bug', 'fast', null, firstEpisode);
+      await coordinator.prepare('avia-13236-short-bug', 'fast', null, secondEpisode);
+
+      const activity = coordinator.readActivity('avia-13236-short-bug');
+
+      expect(activity).toMatchObject([
+        {
+          source: 'planner',
+          level: 'info',
+          title: 'Implementation planning',
+          detail: 'Ready · fast · 2 provider attempts.',
+        },
+        {
+          source: 'planner',
+          level: 'info',
+          title: 'Implementation planning',
+          detail: 'Ready · fast · 1 provider attempt.',
+        },
+      ]);
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('deduplicates a completed Temporal planning command after Activity retry', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-plan-command-retry-'));
     const clock = makeAdjustableClock('2026-08-02T12:00:00.000Z');
@@ -305,7 +365,14 @@ describe('implementation planning recovery', () => {
         'PlanningEvidenceAppended',
         'ImplementationPlanReady',
       ]);
-      expect(coordinator.readActivity('avia-13236-short-bug')).toHaveLength(4);
+      expect(coordinator.readActivity('avia-13236-short-bug')).toMatchObject([
+        { title: 'Planner requested additional evidence' },
+        { title: 'Planning evidence appended' },
+        {
+          title: 'Implementation planning',
+          detail: 'Ready · fast · 1 provider attempt.',
+        },
+      ]);
     } finally {
       ledger.close();
       rmSync(directory, { recursive: true, force: true });

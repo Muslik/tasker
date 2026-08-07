@@ -493,12 +493,19 @@ const SelectedTaskHeader = ({
   return (
     <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="mb-1 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">{task.taskId}</span>
-            <span className="text-muted-foreground/50">·</span>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              {task.taskId}
+            </span>
+            <span className="shrink-0 text-muted-foreground/50">·</span>
             <StateBadge className={statusTone(task.status)}>{statusLabel(task.status)}</StateBadge>
-            <StateBadge>{task.currentStage}</StateBadge>
+            <span
+              className="min-w-0 truncate text-xs text-muted-foreground"
+              title={task.currentStage}
+            >
+              {task.currentStage}
+            </span>
           </div>
           <h1 className="truncate text-lg font-semibold tracking-tight">{task.title}</h1>
           <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -511,7 +518,7 @@ const SelectedTaskHeader = ({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {canGenerate ? (
             <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
               {generating ? (
@@ -765,13 +772,7 @@ const OperatorIntervention = ({
   </section>
 );
 
-const ValidationSurface = ({
-  task,
-  view,
-}: {
-  readonly task: OperatorTaskSummary;
-  readonly view: WorkflowView;
-}) => {
+const ValidationSurface = ({ view }: { readonly view: WorkflowView }) => {
   const issues = view.workflow.validatorReport.issues;
   const blocked = view.workflow.status === 'rejected' || issues.length > 0;
 
@@ -790,9 +791,11 @@ const ValidationSurface = ({
         ) : (
           <CheckCircle2 className="size-4 text-emerald-400" />
         )}
-        <strong>{blocked ? 'Human review required' : 'Validator passed'}</strong>
+        <strong>{blocked ? 'Workflow graph rejected' : 'Workflow graph valid'}</strong>
         <span className="text-xs text-muted-foreground">
-          {task.currentStage} · {view.workflow.verificationPlan.profile.replaceAll('_', ' ')}
+          {issues.length > 0
+            ? `${String(issues.length)} validation ${issues.length === 1 ? 'issue' : 'issues'}`
+            : `Verification profile · ${view.workflow.verificationPlan.profile.replaceAll('_', ' ')}`}
         </span>
       </div>
       {issues.length === 0 ? null : (
@@ -965,11 +968,11 @@ const ImplementationPlanSurface = ({
   return (
     <Collapsible defaultOpen>
       <section
-        className="border-b border-border"
+        className="border-y border-border bg-muted/5"
         aria-label="Implementation plan"
         data-testid="implementation-plan"
       >
-        <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <GitBranch className="size-4 text-muted-foreground" />
@@ -987,7 +990,7 @@ const ImplementationPlanSurface = ({
           <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="px-5 pb-4">
+          <div className="border-t border-border/60 px-5 py-4">
             <p className="mb-3 max-w-4xl text-[13px] leading-5 text-muted-foreground">
               {plan.summary}
             </p>
@@ -1445,8 +1448,8 @@ const TaskDetails = ({
   const issueKey = state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
   return (
     <Collapsible defaultOpen>
-      <div className="border-b border-border" data-testid="jira-task-details">
-        <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+      <div className="border-y border-border bg-muted/5" data-testid="jira-task-details">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
           <div className="flex min-w-0 items-center gap-2">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <span className="text-sm font-medium">Task details</span>
@@ -1471,7 +1474,7 @@ const TaskDetails = ({
           <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="px-5 pb-5">
+          <div className="border-t border-border/60 px-5 py-5">
             {state.status === 'current' ? null : (
               <div
                 className="mb-4 flex items-center justify-between gap-3 bg-amber-500/7 px-3 py-2 text-xs text-amber-200"
@@ -1757,8 +1760,8 @@ const PlanningTranscriptSurface = ({
 
   return (
     <Collapsible defaultOpen={live}>
-      <section className="border-t border-border" aria-label="Planning agent log">
-        <CollapsibleTrigger className="group flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30">
+      <section className="border-y border-border bg-muted/5" aria-label="Planning agent log">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
           <div className="flex min-w-0 items-center gap-2">
             <Sparkles className="size-4 text-muted-foreground" />
             <strong className="text-sm">Agent log</strong>
@@ -2933,7 +2936,7 @@ export const App = () => {
                     onResume={handleResume}
                   />
                 ) : null}
-                {view === null ? null : <ValidationSurface task={selectedTask} view={view} />}
+                {view === null ? null : <ValidationSurface view={view} />}
                 <JiraPlanningSurface task={selectedTask} />
                 <WorkflowContinuationSurface
                   continuation={workflowContinuationState}
