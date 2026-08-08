@@ -467,7 +467,7 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
   ).toHaveCount(2);
 });
 
-test('reloading restores the persisted workflow for the selected task', async ({ page }) => {
+test('reloading restores the selected task before subscribing to live updates', async ({ page }) => {
   const tasks = await loadTasks(page);
   const backlog = requireTask(
     tasks.tasks.find((task) => task.id === 'avia-12536-feature-review'),
@@ -484,7 +484,23 @@ test('reloading restores the persisted workflow for the selected task', async ({
   const hash = workflow.view.workflow.graphHash;
   expect(hash).not.toBeNull();
 
+  const taskSnapshotLoaded = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/operator/tasks',
+  );
+  const liveUpdatesConnected = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/events',
+    { timeout: 15_000 },
+  );
+
   await page.reload();
+  const [taskSnapshotResponse, liveUpdatesRequest] = await Promise.all([
+    taskSnapshotLoaded,
+    liveUpdatesConnected,
+  ]);
+  const taskSnapshot = OperatorTaskListResponseSchema.parse(await taskSnapshotResponse.json());
+  expect(new URL(liveUpdatesRequest.url()).searchParams.get('after')).toBe(
+    String(taskSnapshot.streamCursor),
+  );
 
   await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('graph-hash')).toHaveText(hash ?? '', { timeout: 15_000 });

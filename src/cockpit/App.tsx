@@ -2099,6 +2099,7 @@ export const App = () => {
   const [tasks, setTasks] = useState<readonly OperatorTaskSummary[]>([]);
   const [repositories, setRepositories] = useState<readonly RepositoryCatalogEntry[]>([]);
   const [tasksStatus, setTasksStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [bootstrapStatus, setBootstrapStatus] = useState<'loading' | 'ready'>('loading');
   const [tasksMessage, setTasksMessage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>(() => readStoredSelection() ?? '');
   const [tasksCollapsed, setTasksCollapsed] = useState(readStoredTaskRailCollapsed);
@@ -2318,25 +2319,26 @@ export const App = () => {
   };
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
 
     const initialize = async (): Promise<void> => {
       const [nextSelectedId, catalog] = await Promise.all([
         refreshTasks(),
         listRepositories().catch(() => [] as const),
       ]);
-      if (active) setRepositories(catalog);
-      if (!active || nextSelectedId === null) {
+      if (!controller.signal.aborted) setRepositories(catalog);
+      if (controller.signal.aborted || nextSelectedId === null) {
         return;
       }
 
       await refreshSelection(nextSelectedId);
+      setBootstrapStatus('ready');
     };
 
     void initialize();
 
     return () => {
-      active = false;
+      controller.abort();
     };
   }, []);
 
@@ -2386,7 +2388,7 @@ export const App = () => {
   }, [selectedId, selectedTask?.status]);
 
   useEffect(() => {
-    if (selectedId.length === 0) {
+    if (bootstrapStatus !== 'ready' || selectedId.length === 0) {
       return;
     }
 
@@ -2416,7 +2418,7 @@ export const App = () => {
       source.close();
       setStreamStatus('offline');
     };
-  }, [selectedId.length]);
+  }, [bootstrapStatus, selectedId.length]);
 
   const handleSelectTask = (taskId: string): void => {
     setSelectedId(taskId);
