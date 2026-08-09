@@ -11,11 +11,10 @@ import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/e
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
 import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
-import { WorkflowDraftAssembler } from '../control-plane/workflow-draft-assembly.js';
-import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
+import { BootstrapContextAssembler } from '../control-plane/bootstrap-context-assembly.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
-import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
+import { loadHarnessPack } from '../harness/index.js';
 import {
   AiAssistanceInitializeAdapter,
   AiAssistanceRecordPlanAdapter,
@@ -47,7 +46,6 @@ import {
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
 import {
-  SubscriptionCliWorkflowAnalyzer,
   SubscriptionCliImplementationPlanner,
   DeterministicImplementationPlanner,
   nodeCommandRunner,
@@ -89,8 +87,8 @@ import {
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
-import { createWorkflowDraftAssemblyActivity } from './activities/workflow-draft-assembly-activity.js';
-import { createWorkflowDraftRevisionActivity } from './activities/workflow-draft-revision-activity.js';
+import { createBootstrapContextAssemblyActivity } from './activities/bootstrap-context-assembly-activity.js';
+import { createBootstrapInvestigationActivity } from './activities/bootstrap-investigation-activity.js';
 import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { connectTaskerTemporalWorker } from './worker.js';
@@ -213,25 +211,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     dockerCommands,
     planningTranscripts,
   );
-  const workflowAnalyzer = deterministicProvider
-    ? undefined
-    : new SubscriptionCliWorkflowAnalyzer(temporalCommandRunner, (repositoryReference) => {
-        const project = harnessPack.projects.find(
-          (candidate) => candidate.repository === repositoryReference,
-        );
-        return resolveWorkflowAnalyzerProfile(
-          harnessPack.company,
-          project?.executionProfileOverrides ?? null,
-        );
-      });
   const contextDiscovery = new ContextDiscoveryService(evidenceBundles, systemClock);
-  const workflowDraftRevisions = new WorkflowDraftRevisionCoordinator(
-    workflowService,
-    subjects,
-    workflowAnalyzer,
-    contextDiscovery,
-    repositoryCatalog,
-  );
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
@@ -244,14 +224,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ? new DeterministicImplementationPlanner()
       : new SubscriptionCliImplementationPlanner(temporalCommandRunner),
   });
-  const workflowDrafts = new WorkflowDraftAssembler(
-    workflowService,
-    subjects,
-    workflowAnalyzer,
-    contextDiscovery,
-    evidenceBundles,
-    planning,
-  );
+  const planningContexts = new BootstrapContextAssembler(subjects, contextDiscovery, planning);
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
   const reviewEvidence = new PullRequestReviewEvidenceStore(ledger.repository, systemClock);
   const mutationRecovery = new WorkspaceMutationRecoveryStore(
@@ -260,6 +233,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     new GitWorkspaceMutationInspector(dockerCommands),
   );
   const workspaceStore = new WorkspaceStore(ledger.repository, systemClock);
+  const blockReceipts = new BlockReceiptStore(ledger.repository, systemClock);
   const workspaces = new ManagedWorkspaceManager(
     loadWorkspaceConfiguration(),
     workspaceStore,
@@ -285,6 +259,18 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     bootstrapAdapter,
   );
   try {
+    const executionActivities = createTaskExecutionActivity({
+      snapshots: planningStore,
+      currentSteps: createCurrentStepRegistry(harnessPack),
+      traces: executionTraces,
+      mutationRecovery,
+      receipts: blockReceipts,
+      agentRunner: new SubscriptionCliTaskStepAgentRunner(dockerCommands),
+      commands: dockerCommands,
+      integrations: integrationAdapters,
+      evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),
+      workspaces: workspaceStore,
+    });
     const runtime = await connectTaskerTemporalWorker(configuration, {
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, dockerRuntimes, {
         resolve: (repositoryReference) =>
@@ -294,22 +280,16 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
               null,
           ),
       }),
-      ...createWorkflowDraftAssemblyActivity(workflowDrafts),
+      ...createBootstrapContextAssemblyActivity(planningContexts),
       ...createPlanningActivity(planning),
-      ...createWorkflowDraftRevisionActivity(workflowDraftRevisions, planning),
+      ...createBootstrapInvestigationActivity(
+        executionActivities,
+        planningStore,
+        blockReceipts,
+        evidenceBundles,
+      ),
       ...createWorkflowFreezeActivity(workflowFreezes),
-      ...createTaskExecutionActivity({
-        snapshots: planningStore,
-        currentSteps: createCurrentStepRegistry(harnessPack),
-        traces: executionTraces,
-        mutationRecovery,
-        receipts: new BlockReceiptStore(ledger.repository, systemClock),
-        agentRunner: new SubscriptionCliTaskStepAgentRunner(dockerCommands),
-        commands: dockerCommands,
-        integrations: integrationAdapters,
-        evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),
-        workspaces: workspaceStore,
-      }),
+      ...executionActivities,
     });
     try {
       const workerRun = runtime.worker.run();

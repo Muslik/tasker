@@ -3,6 +3,7 @@
   "reference": "ai.assistance.finalize@1",
   "policy": "ai-assistance",
   "description": "Harvest result, contribution, and verification evidence into the branch artifacts.",
+  "availableDuring": ["execution"],
   "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",
   "outputContract": "agent_output",

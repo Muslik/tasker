@@ -13,11 +13,12 @@ Temporal is the execution kernel. Tasker owns the product-specific layers around
 - Jira, Bitbucket, Jenkins/Allure, Confluence, provider, process, and worktree adapters;
 - operator UI, artifacts, transcripts, shadow API cost, elapsed time, and retrospective.
 
-There are no base workflow templates. The analyzer starts from an empty graph and uses
-registered building blocks plus company/project policy. A dedicated Temporal bootstrap
-Workflow now owns context discovery and initial draft assembly; it stores evidence and
-the compiled draft outside Temporal history and returns only the bounded result/hash.
-After planning and validation, the frozen graph is immutable input to a generic Temporal
+There are no base workflow templates. Bootstrap first persists a graph-free planning
+context and Evidence Bundle. The mandatory planner may request bounded pre-plan
+investigation, then returns the plan and the complete task-specific workflow using
+registered building blocks plus company/project policy. Tasker compiles and validates
+that untrusted candidate; no product graph exists before planning. After optional plan
+review and freeze, the graph is immutable input to a generic Temporal
 graph interpreter. Agent calls, project shell commands, builds, tests, and Playwright
 run only in Docker-backed Temporal Activities; typed remote APIs remain Activity
 adapters; review, clarification, translation, publication, CI, and
@@ -39,8 +40,9 @@ The versioned multi-project agent configuration copied into managed worktrees li
 
 ## Current implementation state
 
-Temporal is the only runtime. A Bootstrap Workflow owns workspace preparation, context,
-mandatory planning, optional plan review, deterministic validation, and freeze. A
+Temporal is the only runtime. A Bootstrap Workflow owns workspace preparation,
+graph-free context, mediated evidence, bounded pre-plan investigation, mandatory
+planning, optional plan review, deterministic validation, and freeze. A
 separate Execution Workflow receives only the frozen task graph and bounded context
 references. Planning nodes, Jira-specific behavior, Docker setup, and provider code do
 not live in the execution interpreter.

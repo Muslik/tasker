@@ -8,6 +8,8 @@ import type {
 } from '../../planning/index.js';
 import type { CommandRequest, WorkspaceCommandRunner } from '../../providers/command-runner.js';
 import type { Outcome } from '../../shared/outcome.js';
+import type { CompiledWorkflow } from '../../workflow/index.js';
+import type { EvidenceBundleReference } from '../../planning/evidence-bundle.js';
 import {
   PlanTaskImplementationInputSchema,
   BootstrapPlanningStateSchema,
@@ -30,24 +32,37 @@ export interface TemporalImplementationPlanningCoordinator {
   prepare(
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
+    commandId: string,
+    snapshotReference: PlanningSnapshotReference,
+    evidenceReference: EvidenceBundleReference,
     operatorGuidance?: string | null,
-    commandId?: string | null,
-    expectedWorkflowHash?: string | null,
-    snapshotReference?: PlanningSnapshotReference | null,
   ): Promise<PlanningOutcome>;
   answer(
     taskReference: string,
     answers: readonly PlanningQuestionAnswer[],
-    commandId?: string | null,
-    expectedWorkflowHash?: string | null,
-    snapshotReference?: PlanningSnapshotReference | null,
+    commandId: string,
+    snapshotReference: PlanningSnapshotReference,
+    evidenceReference: EvidenceBundleReference,
   ): Promise<PlanningOutcome>;
+  draftFor(record: Extract<ImplementationPlanningRecord, { readonly status: 'ready' }>): Outcome<
+    {
+      readonly workflowHash: string;
+      readonly graph: CompiledWorkflow;
+      readonly planningSnapshot: PlanningSnapshotReference;
+      readonly evidenceBundle: EvidenceBundleReference;
+    },
+    { readonly kind: string }
+  >;
 }
 
 const outcomeError = (outcome: Extract<PlanningOutcome, { readonly ok: false }>): Error =>
   new Error(`Implementation planning stopped: ${outcome.error.kind}`);
 
-const planningResult = (record: ImplementationPlanningRecord, commandId: string) => {
+const planningResult = (
+  record: ImplementationPlanningRecord,
+  commandId: string,
+  coordinator: TemporalImplementationPlanningCoordinator,
+) => {
   if (record.status === 'planning') {
     throw new Error('Implementation planning returned before the provider attempt completed');
   }
@@ -71,14 +86,17 @@ const planningResult = (record: ImplementationPlanningRecord, commandId: string)
   } as const;
 
   switch (record.status) {
-    case 'ready':
-      return BootstrapPlanningStateSchema.parse(common);
+    case 'ready': {
+      const draft = coordinator.draftFor(record);
+      if (!draft.ok) throw new Error(`Validated workflow is unavailable: ${draft.error.kind}`);
+      return BootstrapPlanningStateSchema.parse({ ...common, draft: draft.value });
+    }
     case 'needs_clarification':
       return BootstrapPlanningStateSchema.parse({
         ...common,
         questions: record.decision.questions,
       });
-    case 'workflow_change_required':
+    case 'investigation_required':
       return BootstrapPlanningStateSchema.parse({
         ...common,
         request: record.decision.request,
@@ -100,34 +118,43 @@ export const createPlanningActivity = (
           return coordinator.prepare(
             input.taskReference,
             input.requestedStrategy,
-            null,
             input.commandId,
-            input.workflowHash,
             input.planningSnapshot,
+            input.evidenceBundle,
+            null,
           );
         case 'clarification':
           return coordinator.answer(
             input.taskReference,
             input.command.answers,
             input.commandId,
-            input.workflowHash,
             input.planningSnapshot,
+            input.evidenceBundle,
+          );
+        case 'investigation_completed':
+          return coordinator.prepare(
+            input.taskReference,
+            input.requestedStrategy,
+            input.commandId,
+            input.planningSnapshot,
+            input.evidenceBundle,
+            'The requested pre-plan investigation completed. Use the appended evidence and produce the plan and execution workflow.',
           );
         case 'revision':
           return coordinator.prepare(
             input.taskReference,
             input.requestedStrategy,
-            input.command.guidance,
             input.commandId,
-            input.workflowHash,
             input.planningSnapshot,
+            input.evidenceBundle,
+            input.command.guidance,
           );
       }
     })();
 
     context.cancellationSignal.throwIfAborted();
     if (!outcome.ok) throw outcomeError(outcome);
-    return planningResult(outcome.value, input.commandId);
+    return planningResult(outcome.value, input.commandId, coordinator);
   },
 });
 

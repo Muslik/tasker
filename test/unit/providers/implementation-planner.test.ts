@@ -9,8 +9,15 @@ import {
   type CommandResult,
   type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
+import { getHarnessPack } from '../../../src/harness/index.js';
+import { analyzeTaskFixture, findTaskFixture } from '../../../src/planning/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
+
+const task = findTaskFixture('avia-13236-short-bug');
+if (task === undefined) throw new Error('Missing planner test fixture');
+const proposal = analyzeTaskFixture(task);
+if (!proposal.ok) throw new Error('Invalid planner test fixture');
 
 const readyDecision = {
   status: 'ready',
@@ -31,6 +38,12 @@ const readyDecision = {
     assumptions: [],
     risks: [],
     acceptanceCriteria: ['The marker uses the expected color.'],
+  },
+  followUps: [],
+  workflow: {
+    assemblyDecisions: proposal.value.assemblyDecisions,
+    source: proposal.value.source,
+    verificationPlan: proposal.value.verificationPlan,
   },
 } as const;
 
@@ -153,11 +166,14 @@ const request = (strategy: 'fast' | 'ralplan') => ({
   mediatedCredentialEnvironment: [],
   promptTemplate: '{{strategyInstruction}}\n{{plannerContext}}\n{{repositoryEvidence}}',
   context: {
+    task,
     taskSnapshot: { taskId: 'AVIA-13235', summary: 'Repair seat marker color' },
-    workflow: { kind: 'sequence', id: 'delivery' },
+    blocks: getHarnessPack().steps.map(({ block }) => block),
     evidenceBundle: makeEvidenceBundle(),
     repositoryReference: 'onetwotrip/front-avia',
     operatorGuidance: null,
+    validationFeedback: [],
+    previousDecision: null,
   },
 });
 

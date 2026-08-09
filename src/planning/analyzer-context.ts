@@ -29,6 +29,7 @@ const stepHarnessMetadata = (reference: string) => {
   if (source === undefined) return {};
 
   return {
+    availableDuring: source.block.availableDuring,
     description: source.block.description,
     stage: source.block.stage,
     completion: source.block.completion,
@@ -58,17 +59,23 @@ export const createWorkflowAnalyzerContext = (
 
   const pack = getHarnessPack();
   const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, fixture));
+  const harnessProject = pack.projects.find(
+    (candidate) => candidate.repository === targetRepository,
+  );
   const availableSteps = new Set(
     pack.steps
       .filter((step) => {
-        if (step.policy === undefined) return true;
-        const owner = pack.policies.find((policy) => policy.id === step.policy);
-        return owner !== undefined && harnessPolicyAppliesToTask(owner, fixture);
+        if (step.policy !== undefined) {
+          const owner = pack.policies.find((policy) => policy.id === step.policy);
+          if (owner === undefined || !harnessPolicyAppliesToTask(owner, fixture)) return false;
+        }
+        if (step.block.executor.kind !== 'process') return true;
+        return (
+          harnessProject?.processCommands[step.block.executor.executor] !== undefined ||
+          pack.company.processCommands[step.block.executor.executor] !== undefined
+        );
       })
       .map(({ reference }) => reference),
-  );
-  const harnessProject = pack.projects.find(
-    (candidate) => candidate.repository === targetRepository,
   );
   const workspaceRuntime = resolveWorkspaceRuntimePolicy(pack.company, harnessProject ?? null);
 

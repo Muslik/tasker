@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { CompletionEvaluator } from '../blocks/index.js';
+import type { BlockDefinition, CompletionEvaluator } from '../blocks/index.js';
 import type { HarnessStepManifest, HarnessStepSource } from './contracts.js';
 import type { StepTypeContract } from '../workflow/index.js';
 
@@ -13,8 +13,10 @@ export const taskInputSchema = z
   .strict();
 
 export const reproductionInputSchema = taskInputSchema.extend({
-  phase: z.enum(['before', 'after']),
+  phase: z.literal('after'),
 });
+
+export const investigationInputSchema = taskInputSchema;
 
 export const verificationInputSchema = z
   .object({
@@ -72,24 +74,23 @@ const ReproductionEvidenceSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
-export const reproductionOutputSchema = z.discriminatedUnion('phase', [
-  z
-    .object({
-      summary: z.string().min(1),
-      phase: z.literal('before'),
-      outcome: z.literal('reproduced'),
-      evidence: z.array(ReproductionEvidenceSchema).min(1),
-    })
-    .strict(),
-  z
-    .object({
-      summary: z.string().min(1),
-      phase: z.literal('after'),
-      outcome: z.literal('verified_fixed'),
-      evidence: z.array(ReproductionEvidenceSchema).min(1),
-    })
-    .strict(),
-]);
+export const reproductionOutputSchema = z
+  .object({
+    summary: z.string().min(1),
+    phase: z.literal('after'),
+    outcome: z.literal('verified_fixed'),
+    evidence: z.array(ReproductionEvidenceSchema).min(1),
+  })
+  .strict();
+
+export const investigationOutputSchema = z
+  .object({
+    summary: z.string().min(1),
+    outcome: z.enum(['reproduced', 'not_reproduced', 'inconclusive']),
+    observations: z.array(z.string().min(1)).min(1).max(50),
+    evidence: z.array(ReproductionEvidenceSchema).max(30),
+  })
+  .strict();
 
 export const processOutputSchema = z
   .object({
@@ -172,6 +173,8 @@ const contractSchemas = {
   agent_output: agentOutputSchema,
   ci_observation_output: ciObservationOutputSchema,
   integration_output: integrationOutputSchema,
+  investigation_input: investigationInputSchema,
+  investigation_output: investigationOutputSchema,
   process_input: processInputSchema,
   process_output: processOutputSchema,
   pull_request_input: pullRequestInputSchema,
@@ -199,6 +202,7 @@ export const stepDefinitionFromManifest = (manifest: HarnessStepManifest): Harne
     ...(manifest.policy === undefined ? {} : { policy: manifest.policy }),
     description: manifest.description,
     stage: manifest.stage,
+    availableDuring: manifest.availableDuring,
     inputContract: manifest.inputContract,
     outputContract: manifest.outputContract,
     executor: manifest.executor,
@@ -247,6 +251,7 @@ const agentStep = (
   options: {
     readonly description: string;
     readonly stage: { readonly id: string; readonly label: string };
+    readonly availableDuring?: BlockDefinition['availableDuring'];
     readonly profile: string;
     readonly completion: CompletionEvaluator;
     readonly inputSchema?: z.ZodType;
@@ -265,6 +270,7 @@ const agentStep = (
   reference: `${id}@1`,
   description: options.description,
   stage: options.stage,
+  availableDuring: options.availableDuring ?? ['execution'],
   inputContract: options.inputContract ?? 'task_input',
   outputContract: options.outputContract ?? 'agent_output',
   executor: {
@@ -308,6 +314,7 @@ const processStep = (
   reference: `${id}@1`,
   description: options.description,
   stage: options.stage,
+  availableDuring: ['execution'],
   inputContract: 'process_input',
   outputContract: 'process_output',
   executor: { kind: 'process', executor: options.executor },
@@ -350,6 +357,7 @@ const integrationStep = (
   reference: `${id}@1`,
   description: options.description,
   stage: options.stage,
+  availableDuring: ['execution'],
   inputContract: options.inputContract ?? 'task_input',
   outputContract: options.outputContract ?? 'integration_output',
   executor: { kind: 'integration', adapter: options.adapter },
@@ -379,8 +387,34 @@ const stages = {
 } as const;
 
 export const TWIKET_HARNESS_STEPS = [
+  agentStep('bug.investigate', {
+    description:
+      'Ground the reported bug before planning and preserve observed behavior as planning evidence.',
+    stage: stages.investigation,
+    availableDuring: ['bootstrap_investigation'],
+    profile: 'investigation',
+    completion: {
+      kind: 'structured_evidence',
+      source: 'task_output',
+      requiredArtifactKinds: ['investigation-result'],
+    },
+    inputSchema: investigationInputSchema,
+    outputSchema: investigationOutputSchema,
+    inputContract: 'investigation_input',
+    outputContract: 'investigation_output',
+    prompt: 'prompts/steps/bug-investigate.md',
+    skills: ['playwright-demo', 'jenkins'],
+    artifactContracts: ['investigation-result'],
+    allowedEffects: ['command.run'],
+    requiredCapabilities: ['command.run', 'repository.read'],
+    workflowChanges: [
+      'cross_repository_dependency',
+      'task_scope_changed',
+      'verification_scope_changed',
+    ],
+  }),
   agentStep('bug.reproduce', {
-    description: 'Reproduce a bug before or after implementation and preserve evidence.',
+    description: 'Repeat the investigated scenario after implementation and preserve fix evidence.',
     stage: stages.investigation,
     profile: 'investigation',
     completion: {
@@ -515,6 +549,7 @@ export const TWIKET_HARNESS_STEPS = [
     reference: 'unsafe.effect@1',
     description: 'Invalid fixture used to prove effect validation.',
     stage: stages.delivery,
+    availableDuring: ['execution'],
     inputContract: 'task_input',
     outputContract: 'integration_output',
     executor: { kind: 'integration', adapter: 'invalid.remote-write@1' },

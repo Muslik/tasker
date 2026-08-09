@@ -11,6 +11,7 @@ import {
 import type { JsonValue } from '../../workflow/index.js';
 import type {
   BootstrapDraftState,
+  BootstrapContextState,
   BootstrapPlanningState,
   BootstrapStageStatus,
   BootstrapWorkflowActivities,
@@ -41,12 +42,13 @@ const activities = proxyActivities<BootstrapWorkflowActivities>({
 const STAGES = [
   'workspace',
   'context',
+  'investigation',
   'planning',
   'plan_review',
   'freeze',
   'execution_start',
 ] as const;
-const MAX_AUTOMATIC_DRAFT_REVISIONS = 3;
+const MAX_INVESTIGATION_ROUNDS = 3;
 
 type Stage = (typeof STAGES)[number];
 type AvailableBootstrapState = Extract<
@@ -103,16 +105,17 @@ export async function bootstrapWorkflowV3(
 ): Promise<BootstrapWorkflowResult> {
   const execution = workflowInfo();
   let workspaceContext: BootstrapWorkspaceContext | null = null;
+  let planningContext: BootstrapContextState | null = null;
   let draft: BootstrapDraftState | null = null;
   let planning: BootstrapPlanningState | null = null;
   let pendingResolution: ResolveBootstrapWaitCommand | null = null;
   let planningCommandSequence = 0;
-  let draftRevisionSequence = 0;
   const nodeStates: Record<string, BootstrapStageStatus> = Object.fromEntries(
     STAGES.map((stage) => [stage, 'planned' as const]),
   );
   const attempts: Record<string, number> = {};
   const currentWorkspaceContext = (): BootstrapWorkspaceContext | null => workspaceContext;
+  const currentContext = (): BootstrapContextState | null => planningContext;
   const currentDraft = (): BootstrapDraftState | null => draft;
   const currentPlanning = (): BootstrapPlanningState | null => planning;
   let state: AvailableBootstrapState = {
@@ -125,6 +128,7 @@ export async function bootstrapWorkflowV3(
     settings: input.settings,
     phase: 'workspace',
     workspaceContext: null,
+    context: null,
     draft: null,
     planning: null,
     freezeReceipt: null,
@@ -160,6 +164,7 @@ export async function bootstrapWorkflowV3(
       workflowHash: draft?.workflowHash ?? null,
       phase,
       workspaceContext,
+      context: planningContext,
       draft,
       planning,
       status: 'running',
@@ -175,6 +180,7 @@ export async function bootstrapWorkflowV3(
       ...state,
       workflowHash: draft?.workflowHash ?? null,
       workspaceContext,
+      context: planningContext,
       draft,
       planning,
       status: 'waiting',
@@ -215,27 +221,26 @@ export async function bootstrapWorkflowV3(
     markRunning('context', 'context');
     attempts.context = (attempts.context ?? 0) + 1;
     try {
-      draft = await activities.assembleTaskWorkflowDraft({
+      planningContext = await activities.assembleTaskPlanningContext({
         taskReference: input.taskReference,
         workflowId: execution.workflowId,
         workflowRunId: execution.runId,
-        operationId: `${execution.workflowId}:${execution.runId}:draft:initial`,
+        operationId: `${execution.workflowId}:${execution.runId}:context:initial`,
         workspace: workspaceContext.workspace,
       });
       nodeStates.context = 'succeeded';
       break;
     } catch (error) {
       if (isCancellation(error)) throw error;
-      await openWait('context', 'context.retry@1', 'Context discovery or draft assembly failed');
+      await openWait('context', 'context.retry@1', 'Context discovery failed');
     }
   }
 
   const preparedWorkspaceContext = workspaceContext;
-  let workingDraft = draft;
-
+  let activeContext: BootstrapContextState = planningContext;
   const runPlanning = async (initialCommand: PlanningActivityCommand): Promise<void> => {
     let command = initialCommand;
-    let automaticRevisionCount = 0;
+    let investigationRounds = 0;
     for (;;) {
       planningCommandSequence += 1;
       const commandId = `${execution.workflowId}:${execution.runId}:planning:${String(planningCommandSequence)}`;
@@ -246,8 +251,8 @@ export async function bootstrapWorkflowV3(
         try {
           result = await activities.planTaskImplementation({
             taskReference: input.taskReference,
-            workflowHash: workingDraft.workflowHash,
-            planningSnapshot: workingDraft.planningSnapshot,
+            planningSnapshot: activeContext.planningSnapshot,
+            evidenceBundle: activeContext.evidenceBundle,
             commandId,
             requestedStrategy: input.settings.planningStrategy,
             command,
@@ -259,10 +264,12 @@ export async function bootstrapWorkflowV3(
         }
       }
       planning = result;
-      workingDraft = { ...workingDraft, evidenceBundle: result.evidenceBundle };
-      draft = workingDraft;
-      state = { ...state, planning, draft: workingDraft };
+      activeContext = { ...activeContext, evidenceBundle: result.evidenceBundle };
+      planningContext = activeContext;
+      state = { ...state, planning, context: activeContext };
       if (result.status === 'ready') {
+        draft = result.draft;
+        if (investigationRounds === 0) nodeStates.investigation = 'skipped';
         nodeStates.planning = 'succeeded';
         return;
       }
@@ -279,59 +286,70 @@ export async function bootstrapWorkflowV3(
         command = { kind: 'clarification', sourceAttempt: result.attempt, answers };
         continue;
       }
-      if (automaticRevisionCount >= MAX_AUTOMATIC_DRAFT_REVISIONS) {
+      investigationRounds += 1;
+      if (investigationRounds > MAX_INVESTIGATION_ROUNDS) {
         const resolution = await openWait(
-          'planning',
-          'draft_revision.guidance@1',
-          'Automatic draft revision budget exhausted',
+          'investigation',
+          'investigation.guidance@1',
+          'Pre-plan investigation budget exhausted',
         );
         const guidance = retryGuidanceFrom(resolution);
         if (guidance === null) {
-          throw ApplicationFailure.nonRetryable('Draft revision requires operator guidance');
+          throw ApplicationFailure.nonRetryable('Investigation retry requires guidance');
         }
-        automaticRevisionCount = 0;
+        investigationRounds = 0;
         command = { kind: 'revision', sourceAttempt: result.attempt, guidance };
         continue;
       }
-      draftRevisionSequence += 1;
-      try {
-        const revised = await activities.reviseTaskWorkflowDraft({
-          taskReference: input.taskReference,
-          workflowId: execution.workflowId,
-          workflowRunId: execution.runId,
-          currentWorkflowHash: workingDraft.workflowHash,
-          operationId: `${execution.workflowId}:${execution.runId}:draft-revision:${String(draftRevisionSequence)}`,
-          request: result.request,
-          workspace: preparedWorkspaceContext.workspace,
-        });
-        workingDraft = {
-          ...workingDraft,
-          graph: revised.graph,
-          workflowHash: revised.workflowHash,
-          planningSnapshot: revised.planningSnapshot,
-        };
-        draft = workingDraft;
-        automaticRevisionCount += 1;
-        command = {
-          kind: 'revision',
-          sourceAttempt: result.attempt,
-          guidance:
-            'The requested workflow change was recompiled and validated. Verify the revised draft.',
-        };
-      } catch (error) {
-        if (isCancellation(error)) throw error;
-        const resolution = await openWait(
-          'planning',
-          'draft_revision.guidance@1',
-          'Draft revision failed',
-        );
-        const guidance = retryGuidanceFrom(resolution);
-        if (guidance === null) {
-          throw ApplicationFailure.nonRetryable('Draft revision requires operator guidance');
+      markRunning('investigation', 'investigation');
+      for (const step of result.request.steps) {
+        let operatorGuidance: string | null = null;
+        for (;;) {
+          const attemptKey = `investigation:${step.id}`;
+          attempts[attemptKey] = (attempts[attemptKey] ?? 0) + 1;
+          let investigated;
+          try {
+            investigated = await activities.runBootstrapInvestigation({
+              taskReference: input.taskReference,
+              workflowId: execution.workflowId,
+              workflowRunId: execution.runId,
+              contextHash: activeContext.contextHash,
+              planningSnapshot: activeContext.planningSnapshot,
+              workspace: preparedWorkspaceContext.workspace,
+              step,
+              blockRun: attempts[attemptKey] ?? 1,
+              operatorGuidance,
+            });
+          } catch (error) {
+            if (isCancellation(error)) throw error;
+            const resolution = await openWait(
+              'investigation',
+              'investigation.retry@1',
+              `Pre-plan investigation ${step.id} failed`,
+            );
+            operatorGuidance = retryGuidanceFrom(resolution);
+            markRunning('investigation', 'investigation');
+            continue;
+          }
+          if (investigated.status !== 'needs_input') {
+            activeContext = {
+              ...activeContext,
+              evidenceBundle: investigated.evidenceBundle,
+            };
+            planningContext = activeContext;
+            break;
+          }
+          const resolution = await openWait(
+            'investigation',
+            investigated.waitKind,
+            investigated.summary,
+          );
+          operatorGuidance = retryGuidanceFrom(resolution);
+          markRunning('investigation', 'investigation');
         }
-        automaticRevisionCount = 0;
-        command = { kind: 'revision', sourceAttempt: result.attempt, guidance };
       }
+      nodeStates.investigation = 'succeeded';
+      command = { kind: 'investigation_completed', sourceAttempt: result.attempt };
     }
   };
 
@@ -367,14 +385,16 @@ export async function bootstrapWorkflowV3(
   }
 
   const acceptedWorkspaceContext = currentWorkspaceContext();
+  const acceptedContext = currentContext();
   const acceptedDraft = currentDraft();
   const acceptedPlanning = currentPlanning();
   if (
     acceptedWorkspaceContext === null ||
+    acceptedContext === null ||
     acceptedDraft === null ||
     acceptedPlanning?.status !== 'ready'
   ) {
-    throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted draft and plan');
+    throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted candidate and plan');
   }
   let freezeReceipt;
   for (;;) {
@@ -446,6 +466,7 @@ export async function bootstrapWorkflowV3(
     workflowHash: acceptedDraft.workflowHash,
     phase: 'execution',
     workspaceContext: acceptedWorkspaceContext,
+    context: acceptedContext,
     draft: acceptedDraft,
     planning: acceptedPlanning,
     freezeReceipt,

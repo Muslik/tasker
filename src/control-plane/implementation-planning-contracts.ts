@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   ImplementationPlanningDecisionSchema,
+  ReadyImplementationPlanningDecisionSchema,
   PlanningStrategyRequestSchema,
   PlanningStrategySchema,
 } from '../planning/implementation-plan.js';
@@ -61,6 +62,9 @@ const PlanningRecordBaseSchema = z.object({
   selectionReason: z.string().min(1),
   startedAt: z.iso.datetime(),
   operatorGuidance: z.string().min(1).max(10_000).nullable(),
+  validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),
+  validationRevision: z.number().int().nonnegative().max(3),
+  previousDecision: ReadyImplementationPlanningDecisionSchema.nullable(),
 });
 
 export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status', [
@@ -73,6 +77,8 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
     completedAt: z.iso.datetime(),
     artifactId: z.string().min(1),
     decision: ImplementationPlanningDecisionSchema.and(z.object({ status: z.literal('ready') })),
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    executionSnapshot: PlanningSnapshotReferenceSchema,
     receipt: ImplementationPlannerReceiptSchema,
   }).strict(),
   PlanningRecordBaseSchema.extend({
@@ -85,11 +91,11 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
     receipt: ImplementationPlannerReceiptSchema,
   }).strict(),
   PlanningRecordBaseSchema.extend({
-    status: z.literal('workflow_change_required'),
+    status: z.literal('investigation_required'),
     completedAt: z.iso.datetime(),
     artifactId: z.string().min(1),
     decision: ImplementationPlanningDecisionSchema.and(
-      z.object({ status: z.literal('workflow_change_required') }),
+      z.object({ status: z.literal('investigation_required') }),
     ),
     receipt: ImplementationPlannerReceiptSchema,
   }).strict(),

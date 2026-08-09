@@ -615,7 +615,7 @@ const SelectedTaskHeader = ({
                 Sync
               </Button>
             </>
-          ) : workflow.status === 'ready' && !canStart ? (
+          ) : workflow.status === 'ready' && workflow.response.status === 'ready' && !canStart ? (
             <StateBadge className="bg-emerald-500/12 text-emerald-300">Workflow ready</StateBadge>
           ) : null}
         </div>
@@ -942,28 +942,19 @@ const ImplementationPlanSurface = ({
       </section>
     );
   }
-  if (record.status === 'workflow_change_required') {
+  if (record.status === 'investigation_required') {
     return (
-      <section
-        className="border-b border-border px-5 py-4"
-        aria-label="Implementation plan"
-        data-testid="implementation-plan"
-      >
-        <div className="mb-1 flex items-center gap-2 text-sm">
-          <GitBranch className="size-4 text-amber-300" />
-          <strong>Workflow change required</strong>
+      <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
+        <div className="flex items-center gap-2 text-sm">
+          <LoaderCircle className="size-4 animate-spin text-primary" />
+          <strong>Pre-plan investigation</strong>
           <StateBadge>{record.selectedStrategy}</StateBadge>
-          <span className="text-[11px] text-muted-foreground">attempt {record.attempt}</span>
           <PlanningSnapshotTag record={record} />
         </div>
-        <p className="text-sm text-muted-foreground">{record.decision.request.reason}</p>
-        {record.operatorGuidance === null ? null : (
-          <p className="mt-1 text-xs text-muted-foreground">Operator: {record.operatorGuidance}</p>
-        )}
+        <p className="mt-1 text-xs text-muted-foreground">{record.decision.request.reason}</p>
       </section>
     );
   }
-
   const plan = record.decision.plan;
   const measuredTokens = record.receipt.usage.inputTokens + record.receipt.usage.outputTokens;
   const apiCost =

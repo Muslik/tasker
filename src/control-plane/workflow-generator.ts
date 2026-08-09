@@ -1,5 +1,10 @@
 import type { JiraIssueService, JiraWorkflowPlanningSource } from '../integrations/index.js';
-import { findTaskFixture, TaskFixtureSchema, type EvidenceBundle } from '../planning/index.js';
+import {
+  findTaskFixture,
+  TaskFixtureSchema,
+  type EvidenceBundle,
+  type EvidenceBundleReference,
+} from '../planning/index.js';
 import type {
   WorkflowAnalyzerFailure,
   WorkflowAnalyzerRequest,
@@ -27,7 +32,12 @@ export interface WorkflowContextDiscovery {
     readonly plannerContext: JsonValue;
     readonly repositoryReference: string;
     readonly repositoryPath: string;
-  }): Promise<Outcome<{ readonly bundle: EvidenceBundle }, EvidenceBundleStoreError>>;
+  }): Promise<
+    Outcome<
+      { readonly bundle: EvidenceBundle; readonly reference: EvidenceBundleReference },
+      EvidenceBundleStoreError
+    >
+  >;
 }
 
 const qualifiedRepositoryReference = (aliases: readonly string[]): string | null =>

@@ -6,12 +6,11 @@ import {
 } from '../../../src/harness/index.js';
 import { RunPlanningSnapshotSchema } from '../../../src/planning/run-planning-snapshot.js';
 
-const snapshot = () => {
+const baseSnapshot = () => {
   const pack = loadHarnessPack();
   return {
-    schemaVersion: 7,
+    schemaVersion: 8 as const,
     taskReference: 'jira:AVIA-12045',
-    workflowHash: 'a'.repeat(64),
     task: {
       origin: 'jira',
       fixtureId: 'jira:AVIA-12045',
@@ -27,12 +26,6 @@ const snapshot = () => {
       proposalVariant: 'valid',
     },
     taskSnapshot: {},
-    workflow: {},
-    evidenceBundle: {
-      artifactId: 'evidence-bundle:jira:AVIA-12045:r1',
-      checksum: 'b'.repeat(64),
-      revision: 1,
-    },
     repository: {
       workspaceId: 'c'.repeat(24),
       reference: 'onetwotrip/front-avia',
@@ -57,8 +50,33 @@ const snapshot = () => {
 };
 
 describe('run planning snapshot', () => {
+  it('separates graph-free planning context from the frozen execution snapshot', () => {
+    const context = RunPlanningSnapshotSchema.parse({
+      ...baseSnapshot(),
+      kind: 'planning_context',
+      contextHash: 'a'.repeat(64),
+    });
+    const execution = RunPlanningSnapshotSchema.parse({
+      ...baseSnapshot(),
+      kind: 'execution',
+      workflowHash: 'a'.repeat(64),
+      workflow: {},
+      evidenceBundle: {
+        artifactId: 'evidence-bundle:jira:AVIA-12045:r1',
+        checksum: 'b'.repeat(64),
+        revision: 1,
+      },
+    });
+
+    expect(context.kind).toBe('planning_context');
+    expect('workflow' in context).toBe(false);
+    expect(execution.kind).toBe('execution');
+    if (execution.kind !== 'execution') throw new Error('Expected execution snapshot');
+    expect(execution.workflowHash).toBe('a'.repeat(64));
+  });
+
   it('requires the current Docker runtime policy', () => {
-    const current = snapshot();
+    const current = baseSnapshot();
     const company = Object.fromEntries(
       Object.entries(current.harness.company).filter(([key]) => key !== 'workspaceRuntime'),
     );
@@ -66,16 +84,20 @@ describe('run planning snapshot', () => {
     expect(
       RunPlanningSnapshotSchema.safeParse({
         ...current,
+        kind: 'planning_context',
+        contextHash: 'a'.repeat(64),
         harness: { ...current.harness, company },
       }).success,
     ).toBe(false);
   });
 
-  it('rejects snapshots from deleted runtime versions', () => {
+  it('rejects the deleted schema v7 shape', () => {
     expect(
       RunPlanningSnapshotSchema.safeParse({
-        ...snapshot(),
-        schemaVersion: 6,
+        ...baseSnapshot(),
+        schemaVersion: 7,
+        workflowHash: 'a'.repeat(64),
+        workflow: {},
       }).success,
     ).toBe(false);
   });

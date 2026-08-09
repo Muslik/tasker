@@ -91,15 +91,16 @@ hash. Receipts expose the actual CLI version, session, token usage, duration, pr
 hash, and reported API-equivalent cost where available. There is no legacy model field,
 hard-coded `gpt-5.4` path, or silent provider fallback.
 
-Phase 4A is complete: Generate starts Bootstrap v3 without a graph/hash, managed
-worktree and Docker preparation precede repository analysis, draft revision is durable,
-and freeze precedes the explicit Run command. The v2 bootstrap is deleted with no
-compatibility path.
+Phase 4B is complete: Generate starts Bootstrap v3 without a graph/hash, prepares the
+managed worktree and Docker runtime, persists graph-free context and evidence, and runs
+mandatory planning. The planner may request registered investigation blocks and owns
+the first complete workflow candidate. Deterministic compilation and validation feed
+bounded corrections back to planning before optional review and freeze. The former
+pre-planning assembler, draft-revision Activity, schema v7 reader, and `phase=before`
+execution reproduction are deleted with no compatibility path.
 
-The next active boundary is Phase 4B: replace fixture-shaped initial draft assembly
-with analyzer-selected pre-plan investigation, feed observed evidence into mandatory
-planning, and make the planner's accepted output the complete task-specific execution
-draft before validation and freeze.
+The next active boundary is Phase 5: project bootstrap state and block receipts into
+readable macro stages without changing the immutable execution graph.
 
 ## Phase 0 exit gate
 
@@ -141,7 +142,7 @@ draft before validation and freeze.
   subscription CLIs;
 - company routing, project overrides, and explicit operator overrides have deterministic
   precedence and reject an unknown profile;
-- the current run snapshot accepts only schema v7 and contains the complete resolved
+- the current run snapshot accepts only schema v8 and contains the complete resolved
   profile for every agent block and both planner strategies;
 - the operator session banner shows the actual profile, provider, model, effort, time,
   measured tokens, and API-equivalent cost status.

@@ -3,6 +3,7 @@
   "reference": "review.acknowledge@1",
   "policy": "review-feedback",
   "description": "Reply to pull-request review threads after their requested changes are published and verified.",
+  "availableDuring": ["execution"],
   "stage": { "id": "review", "label": "Review" },
   "inputContract": "task_input",
   "outputContract": "integration_output",

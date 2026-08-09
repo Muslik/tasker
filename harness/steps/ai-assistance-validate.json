@@ -3,6 +3,7 @@
   "reference": "ai.assistance.validate@1",
   "policy": "ai-assistance",
   "description": "Deterministically validate AI-assistance artifacts and the pull-request section.",
+  "availableDuring": ["execution"],
   "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "pull_request_input",
   "outputContract": "integration_output",

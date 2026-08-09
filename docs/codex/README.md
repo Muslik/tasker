@@ -14,7 +14,7 @@ Read these in order:
 1. [`architecture.md`](architecture.md) — ownership boundaries, lifecycle, block
    semantics, recovery, operator projection, and invariants.
 2. [`planning-lifecycle.md`](planning-lifecycle.md) — context discovery, mandatory
-   planning, optional plan review, draft revision, validation, and freeze.
+   planning, optional plan review, candidate revision, validation, and freeze.
 3. [`implementation-plan.md`](implementation-plan.md) — phased route from the current
    kernel cutover to the pilot release.
 4. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
@@ -32,7 +32,9 @@ history is the audit trail; they are not inputs to new work.
 
 ## Current cut
 
-- Bootstrap and Execution Workflow v2 are the only worker/API path.
+- Bootstrap v3 and Execution v2 are the only worker/API path.
+- Bootstrap persists a graph-free planning context; the mandatory planner owns the
+  first complete execution workflow candidate after any selected investigation.
 - Planning and plan review belong to Bootstrap and are absent from execution graphs.
 - Jira before-reproduction attachment policy is removed; reproduction evidence stays
   private to execution unless an explicit final-demo policy publishes it later.

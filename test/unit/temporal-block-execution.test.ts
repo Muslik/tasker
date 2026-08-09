@@ -122,6 +122,7 @@ const makeSnapshot = (
   const step = {
     reference: current.reference,
     block,
+    activityDelivery: current.contract.activityDelivery,
     resolvedCommand:
       current.block.executor.kind === 'process'
         ? (snapshotProject.processCommands[current.block.executor.executor] ??
@@ -138,7 +139,8 @@ const makeSnapshot = (
         : null,
   };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 7,
+    schemaVersion: 8,
+    kind: 'execution',
     taskReference: 'task-ref',
     workflowHash: WORKFLOW_HASH,
     task,
@@ -347,7 +349,7 @@ describe('temporal block execution activity', () => {
         workflowId: stubWorkspace.workflowId,
         workflowRunId: stubWorkspace.workflowRunId,
         workflowHash: WORKFLOW_HASH,
-        nodeId: 'reproduce-before',
+        nodeId: 'reproduce-after',
         stepAttempt: 1,
         uses: 'bug.reproduce@1',
         activityDelivery: { kind: 'workspace_reconciled' },
@@ -358,8 +360,8 @@ describe('temporal block execution activity', () => {
         },
         operatorGuidance: null,
         input: {
-          objective: 'Reproduce the reported bug before changing the code',
-          phase: 'before',
+          objective: 'Repeat the investigated scenario and prove the fix',
+          phase: 'after',
           repository: fixture.repository,
           taskId: fixture.taskId,
         },

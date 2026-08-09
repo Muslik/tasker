@@ -670,6 +670,33 @@ export class M1WorkflowService {
     });
   }
 
+  public assembleFromImplementationPlanAtOperation(
+    fixture: TaskFixture,
+    output: WorkflowAnalyzerOutput,
+    operationId: string,
+  ): Outcome<WorkflowResponse, M1ServiceError> {
+    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
+    if (!completed.ok) return completed;
+    if (completed.value !== null) return ok(completed.value);
+
+    const proposal = createWorkflowProposalFromAnalyzerOutput(
+      fixture,
+      'implementation-planner@2',
+      output,
+    );
+    if (!proposal.ok) {
+      return err({
+        kind: 'planner_contract_failure',
+        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+      });
+    }
+
+    return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), undefined, {
+      operationId,
+      replaceValid: true,
+    });
+  }
+
   public reviseFromAnalyzerOutputForTask(
     fixture: TaskFixture,
     output: WorkflowAnalyzerOutput,

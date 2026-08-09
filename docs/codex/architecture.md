@@ -105,17 +105,18 @@ Repeated Jira synchronization updates the cached snapshot and `syncedAt`; it doe
 append activity-log noise. A VPN/403/network failure changes sync health only. It does
 not invalidate the cached task, delete a workflow, or restart completed work.
 
-## 5. Context, draft assembly, planning, and freeze
+## 5. Context, planning, candidate validation, and freeze
 
 Every task receives a newly assembled graph. There is no default bugfix, feature,
 translation, or PR template.
 
-The canonical lifecycle is `bootstrap workflow -> draft workflow -> frozen execution
-workflow`; see [`planning-lifecycle.md`](planning-lifecycle.md). The bootstrap is a
-durable infrastructure protocol, not a reusable business graph. Context discovery
-creates an append-only Evidence Bundle, the analyzer may select bounded pre-plan
-investigation, and the mandatory planning agent produces or revises the complete
-task-specific draft before product effects begin.
+The canonical lifecycle is `bootstrap run -> graph-free planning context -> planner
+candidate -> frozen execution workflow`; see
+[`planning-lifecycle.md`](planning-lifecycle.md). Bootstrap is a durable infrastructure
+protocol, not a reusable business graph. Context discovery creates an append-only
+Evidence Bundle. The mandatory planner may select bounded pre-plan investigation and
+then produces the first complete task-specific workflow candidate before product
+effects begin.
 
 Assembly input is a bounded, provenance-bearing planner context:
 
@@ -124,9 +125,10 @@ Assembly input is a bounded, provenance-bearing planner context:
 - global company policy and project-specific workflow policy;
 - registered block catalog with typed input/output/effect contracts;
 - mandatory obligations and safety constraints;
-- exact prompt, skill, policy, and analyzer versions/hashes.
+- exact prompt, skill, policy, and provider-profile versions/hashes.
 
-The analyzer emits untrusted `WorkflowSource` JSON. A deterministic compiler parses,
+The planner's `ready` decision emits untrusted `WorkflowSource` JSON together with the
+implementation plan and optional follow-ups. A deterministic compiler parses,
 canonicalizes, validates, and hashes it. The compiler may reject a graph but never
 silently insert missing nodes; otherwise the UI's “why this workflow” provenance would
 be false.
@@ -146,9 +148,10 @@ does not receive Tasker's private before-reproduction evidence automatically; fi
 demo evidence may be published during delivery when the task policy requests it.
 These obligations add no vendor branches to the compiler or Temporal Workflow.
 
-The first compiled draft is not yet executable or immutable. A planner
-`workflow_change_required` result is a proposal: Tasker applies it to the draft through
-the assembler, recompiles the complete graph, and runs deterministic validation again.
+The first compiled candidate is not yet executable or immutable. Validation rejection
+persists exact feedback plus the rejected `ready` decision and asks the planner for a
+complete replacement candidate. Tasker never patches compiled IR or inserts nodes
+silently.
 
 Bootstrap v3 is the only bootstrap runtime. The previous bootstrap implementation,
 precompiled-graph generation path, workflow IDs, and tests are deleted rather than
@@ -308,8 +311,10 @@ operator-visible state, not permission to retry blindly.
 
 ## 8. Planning and questions
 
-An implementation plan is always created after graph assembly and early repository
-analysis. `planReviewRequired` is chosen when starting the task:
+An implementation plan is always created after graph-free context discovery and any
+planner-selected investigation. The same `ready` decision contains the plan and the
+first complete workflow candidate. `planReviewRequired` is chosen when starting the
+task:
 
 - `false`: an accepted plan proceeds automatically;
 - `true`: the Workflow waits for operator approval or revision.
@@ -392,10 +397,11 @@ classifies failures:
 - unknown -> diagnostic Activity, then question or guidance wait after its budget.
 
 Verification scope is task-specific. Project policy and changed-surface evidence may
-select build-only, targeted tests, full validation, Allure inspection, before/after
-reproduction, or screenshot snapshot updates. A bug without usable Jira reproduction
-must attempt reproduction; successful “before” video/screenshots become linked Tasker
-artifacts and may be attached/commented to Jira only through explicit effect policy.
+select build-only, targeted tests, full validation, Allure inspection, post-fix
+reproduction, or screenshot snapshot updates. When a bug needs grounding, the planner
+selects a bootstrap-only investigation block before producing the graph. Successful
+“before” evidence remains a private Tasker artifact; only an explicit final-demo policy
+may publish evidence externally.
 
 ## 12. Operator console and observability
 

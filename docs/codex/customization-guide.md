@@ -40,18 +40,18 @@ task + linked context + bounded repository evidence
              append-only Evidence Bundle
                          |
                          v
-              analyzer proposes draft graph
-                         |
-                         v
-       parse -> ABI/effect/capability/semantic validation
-                         |
-                         v
        mandatory planner + selected read-only skills
                          |
-          plan + questions + graph proposal
+       questions / selected investigation blocks
                          |
                          v
-        reassemble -> compile -> validate -> review
+        appended investigation evidence, then re-plan
+                         |
+                         v
+          implementation plan + workflow candidate
+                         |
+                         v
+             compile -> validate -> optional review
                          |
                  frozen graph hash
                          |
@@ -62,12 +62,13 @@ task + linked context + bounded repository evidence
        registered Activities execute individual blocks
 ```
 
-Context discovery gathers enough evidence for the analyzer to choose relevant blocks
-and order. The planner always checks that hypothesis and may propose a draft revision.
-The validator decides whether each proposal is safe and complete. The interpreter sees
-only the frozen graph and records execution progress. Activities perform I/O. Keeping
-these roles separate is what lets a new company or process replace one layer without
-rewriting the application. See
+Context discovery gathers a bounded starting evidence set without creating a graph.
+The mandatory planner decides whether it needs a blocking answer, a registered
+investigation block, or can return the plan and first complete workflow candidate. The
+validator decides whether each candidate is safe and complete. The interpreter sees only
+the frozen graph and records execution progress. Activities perform I/O. Keeping these
+roles separate is what lets a new company or process replace one layer without rewriting
+the application. See
 [`planning-lifecycle.md`](planning-lifecycle.md) for the complete lifecycle.
 
 ## 3. Add a workflow block

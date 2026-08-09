@@ -3,6 +3,7 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import {
   createWorkflowAnalyzerContext,
   TaskFixtureSchema,
+  type WorkflowChangeRequest,
   type TaskFixture,
 } from '../planning/index.js';
 import type { RepositoryCatalog, RepositoryResolution } from '../repositories/catalog.js';
@@ -17,7 +18,6 @@ import {
   type OperatorTaskSummary,
   type WorkflowResponse,
 } from './m1-contracts.js';
-import type { ImplementationPlanningRecord } from './implementation-planning-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import type {
   WorkflowAnalyzer,
@@ -39,10 +39,14 @@ export * from './workflow-continuation-contracts.js';
 
 export const WORKFLOW_CONTINUATION_PROJECTION = 'workflow_continuation_by_parent';
 
-type WorkflowChangePlanningRecord = Pick<
-  Extract<ImplementationPlanningRecord, { readonly status: 'workflow_change_required' }>,
-  'artifactId' | 'attempt' | 'decision'
->;
+interface WorkflowChangePlanningRecord {
+  readonly artifactId: string;
+  readonly attempt: number;
+  readonly decision: {
+    readonly status: 'workflow_change_required';
+    readonly request: WorkflowChangeRequest;
+  };
+}
 
 type WorkflowContinuationStoreError =
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict }

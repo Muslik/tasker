@@ -12,6 +12,8 @@ import {
   type ImplementationPlanningDecision,
   type PlanningStrategy,
 } from '../planning/implementation-plan.js';
+import { analyzeTaskFixture } from '../planning/proposal.js';
+import { WorkflowSourceSchema } from '../workflow/index.js';
 import {
   PlanningEvidenceRequestSchema,
   type PlanningEvidenceRequest,
@@ -107,9 +109,13 @@ planning uncertainty. Do not start a consensus or implementation workflow.`;
     }.`,
     plannerContext: JSON.stringify(
       {
-        workflow: request.context.workflow,
+        task: request.context.task,
+        taskSnapshot: request.context.taskSnapshot,
+        blocks: request.context.blocks,
         repositoryReference: request.context.repositoryReference,
         operatorGuidance: request.context.operatorGuidance,
+        validationFeedback: request.context.validationFeedback,
+        previousDecision: request.context.previousDecision,
       },
       null,
       2,
@@ -372,6 +378,12 @@ export class DeterministicImplementationPlanner implements ImplementationPlanner
     const context = ImplementationPlannerContextSchema.parse(request.context);
     const repository = context.repositoryReference;
     const guidance = context.operatorGuidance;
+    const analyzed = analyzeTaskFixture(context.task);
+    if (!analyzed.ok) {
+      return Promise.resolve(
+        err({ kind: 'invalid_planner_output', issues: ['Deterministic fixture is invalid.'] }),
+      );
+    }
     const decision = ImplementationPlanningDecisionSchema.parse({
       status: 'ready',
       plan: {
@@ -404,27 +416,31 @@ export class DeterministicImplementationPlanner implements ImplementationPlanner
           {
             id: 'verify-observable-result',
             title: 'Verify the observable result',
-            objective: 'Run the verification profile already selected by the compiled workflow.',
+            objective: 'Select and run the verification required by the task and discovered scope.',
             repository,
             files: [],
-            verification: [
-              'Complete the compiled workflow verification step without unexplained failures.',
-            ],
+            verification: ['Complete the selected verification without unexplained failures.'],
           },
         ],
         assumptions: [
-          'The compiled workflow already contains every required repository and effect boundary.',
+          'The current evidence exposes every repository and external effect required for execution.',
         ],
         risks: [
           {
             risk: 'Execution may discover a cross-repository dependency not visible during planning.',
-            mitigation: 'Return workflow_change_required and preserve the completed prefix.',
+            mitigation: 'Request a durable runtime continuation and preserve the completed prefix.',
           },
         ],
         acceptanceCriteria: [
           'The task-visible behavior matches the requested outcome.',
           'The configured verification profile completes with durable evidence.',
         ],
+      },
+      followUps: [],
+      workflow: {
+        assemblyDecisions: analyzed.value.assemblyDecisions,
+        source: WorkflowSourceSchema.parse(analyzed.value.source),
+        verificationPlan: analyzed.value.verificationPlan,
       },
     });
     const promptHash = sha256(JSON.stringify({ context, strategy: request.strategy }));

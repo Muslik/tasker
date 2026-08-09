@@ -2,6 +2,7 @@
   "schemaVersion": 2,
   "reference": "ci.observe@1",
   "description": "Observe the exact Jenkins branch build and classify its terminal result.",
+  "availableDuring": ["execution"],
   "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",
   "outputContract": "ci_observation_output",

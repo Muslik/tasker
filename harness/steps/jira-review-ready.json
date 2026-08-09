@@ -3,6 +3,7 @@
   "reference": "jira.review-ready@1",
   "policy": "jira-lifecycle",
   "description": "Move an admitted Jira issue to code review and publish one compact pull-request link.",
+  "availableDuring": ["execution"],
   "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",
   "outputContract": "integration_output",

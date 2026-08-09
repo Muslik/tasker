@@ -2,6 +2,7 @@
   "schemaVersion": 2,
   "reference": "review.revise@1",
   "description": "Apply actionable human pull-request feedback with exact imported provenance.",
+  "availableDuring": ["execution"],
   "stage": { "id": "review", "label": "Review" },
   "inputContract": "task_input",
   "outputContract": "agent_output",

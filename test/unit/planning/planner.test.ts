@@ -268,7 +268,7 @@ describe('M1 task workflow planning', () => {
           issues: [
             {
               code: 'unsatisfied_workflow_obligation',
-              details: { obligationId: 'bug-requires-before-and-after-evidence' },
+              details: { obligationId: 'bug-requires-after-evidence' },
             },
           ],
         },

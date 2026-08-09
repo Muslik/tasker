@@ -277,32 +277,32 @@ describe('file-backed harness pack', () => {
     expect(skillsFor('verify.full@1')).not.toContain('playwright-demo');
   });
 
-  it('requires typed phase-compatible evidence for successful reproduction', () => {
+  it('requires typed post-fix evidence for successful reproduction', () => {
     const reproduction = getHarnessStepDefinition('bug.reproduce@1');
     if (reproduction === undefined) throw new Error('Expected reproduction block');
 
     expect(
       reproduction.contract.outputSchema.safeParse({
-        summary: 'Visible bug reproduced',
-        phase: 'before',
-        outcome: 'reproduced',
-        evidence: [{ kind: 'video', path: 'evidence/before.mp4', mimeType: 'video/mp4' }],
+        summary: 'Visible bug fixed',
+        phase: 'after',
+        outcome: 'verified_fixed',
+        evidence: [{ kind: 'video', path: 'evidence/after.mp4', mimeType: 'video/mp4' }],
       }).success,
     ).toBe(true);
     expect(
       reproduction.contract.outputSchema.safeParse({
         summary: 'Claimed success without proof',
-        phase: 'before',
-        outcome: 'reproduced',
+        phase: 'after',
+        outcome: 'verified_fixed',
         evidence: [],
       }).success,
     ).toBe(false);
     expect(
       reproduction.contract.outputSchema.safeParse({
         summary: 'Mismatched media metadata',
-        phase: 'before',
-        outcome: 'reproduced',
-        evidence: [{ kind: 'video', path: 'evidence/before.png', mimeType: 'image/png' }],
+        phase: 'after',
+        outcome: 'verified_fixed',
+        evidence: [{ kind: 'video', path: 'evidence/after.png', mimeType: 'image/png' }],
       }).success,
     ).toBe(false);
   });

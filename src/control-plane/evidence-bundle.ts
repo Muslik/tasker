@@ -1,4 +1,5 @@
 import { checksumString } from '../ledger/checksum.js';
+import type { BlockReceipt } from '../blocks/index.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type { JsonValue, LedgerConflict } from '../ledger/types.js';
 import {
@@ -289,6 +290,34 @@ export class EvidenceBundleStore {
         }),
       );
     }
+    const latest = this.readLatest(taskReference);
+    if (!latest.ok) return latest;
+    const evidenceIds = new Set(latest.value?.bundle.entries.map(({ evidenceId }) => evidenceId));
+    for (const entry of entries) evidenceIds.add(entry.evidenceId);
+    const inputFingerprint = checksumString(JSON.stringify([...evidenceIds].sort()));
+    return this.record(taskReference, inputFingerprint, entries);
+  }
+
+  public appendInvestigationEvidence(
+    taskReference: string,
+    operationId: string,
+    receipts: readonly BlockReceipt[],
+  ): Outcome<EvidenceBundleRecord, EvidenceBundleStoreError> {
+    const entries = receipts.map((receipt) => {
+      const content = asJson(receipt);
+      const contentSha256 = checksumString(JSON.stringify(content));
+      return evidenceEntry({
+        evidenceType: 'investigation_result',
+        title: `${receipt.blockReference}: ${receipt.claim.summary}`,
+        source: { kind: 'block_receipt', locator: receipt.receiptId },
+        capturedAt: receipt.completedAt,
+        observedVersion: receipt.blockDefinitionHash,
+        mediaType: 'application/vnd.tasker.block-receipt+json',
+        introducedBy: { phase: 'investigation', operationId },
+        content,
+        contentSha256,
+      });
+    });
     const latest = this.readLatest(taskReference);
     if (!latest.ok) return latest;
     const evidenceIds = new Set(latest.value?.bundle.entries.map(({ evidenceId }) => evidenceId));

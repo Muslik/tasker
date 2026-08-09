@@ -2,6 +2,7 @@
   "schemaVersion": 2,
   "reference": "pr.describe@1",
   "description": "Compose a provider-neutral pull-request draft from task and durable run evidence.",
+  "availableDuring": ["execution"],
   "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "pull_request_input",
   "outputContract": "agent_output",

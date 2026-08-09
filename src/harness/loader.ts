@@ -191,6 +191,7 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
         reference: step.reference,
         description: step.description,
         stage: step.stage,
+        availableDuring: step.availableDuring,
         inputContract: step.inputContract,
         outputContract: step.outputContract,
         executor,

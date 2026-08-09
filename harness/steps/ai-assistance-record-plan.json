@@ -3,6 +3,7 @@
   "reference": "ai.assistance.record_plan@1",
   "policy": "ai-assistance",
   "description": "Record the accepted implementation plan without reconstructing it from a later diff.",
+  "availableDuring": ["execution"],
   "stage": { "id": "preparation", "label": "Prepare" },
   "inputContract": "task_input",
   "outputContract": "integration_output",

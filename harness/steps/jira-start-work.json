@@ -3,6 +3,7 @@
   "reference": "jira.start-work@1",
   "policy": "jira-lifecycle",
   "description": "Assign and transition an eligible Jira issue into active work using reconciled effects.",
+  "availableDuring": ["execution"],
   "stage": { "id": "preparation", "label": "Prepare" },
   "inputContract": "task_input",
   "outputContract": "integration_output",

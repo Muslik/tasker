@@ -14,12 +14,7 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
-import {
-  getHarnessPack,
-  harnessPolicyAppliesToTask,
-  harnessPolicyStepMarkerMatches,
-} from '../harness/index.js';
-import type { JsonValue } from '../workflow/schema.js';
+import { getHarnessPack, harnessPolicyAppliesToTask } from '../harness/index.js';
 
 interface TaskContext {
   readonly description: string;
@@ -67,9 +62,9 @@ const taskInput = (task: TaskContext, objective: string) => ({
   taskId: task.taskId,
 });
 
-const reproductionInput = (task: TaskContext, phase: 'before' | 'after', objective: string) => ({
+const reproductionInput = (task: TaskContext, objective: string) => ({
   ...taskInput(task, objective),
-  phase,
+  phase: 'after' as const,
 });
 
 const verificationInput = (task: TaskContext, profile: string) => ({
@@ -146,50 +141,6 @@ const beforeCodeReviewPolicySteps = (
             obligation.direction === 'before' &&
             obligation.trigger.kind === 'wait' &&
             obligation.trigger.reference === 'code_review@1',
-        )
-        .flatMap((obligation) =>
-          obligation.ordered
-            .filter(
-              (marker) =>
-                marker.kind === 'step' &&
-                pack.steps.find((candidate) => candidate.reference === marker.reference)?.policy ===
-                  policy.id,
-            )
-            .map((marker) => ({ policy, reference: marker.reference })),
-        ),
-    )
-    .filter(
-      (candidate, index, candidates) =>
-        candidates.findIndex(({ reference }) => reference === candidate.reference) === index,
-    );
-
-  return references.map(({ policy, reference }) =>
-    step(
-      `${prefix}policy-${policy.id}-${reference.split('@')[0]?.replaceAll('.', '-') ?? 'step'}`,
-      {
-        uses: reference,
-        with: taskInput(task, policy.description),
-      },
-    ),
-  );
-};
-
-const afterStepPolicySteps = (
-  task: TaskContext & PolicyTaskContext,
-  triggerReference: string,
-  triggerInput: JsonValue,
-  prefix: string,
-): readonly WorkflowNodeSource[] => {
-  const pack = getHarnessPack();
-  const references = pack.policies
-    .filter((policy) => harnessPolicyAppliesToTask(policy, task))
-    .flatMap((policy) =>
-      policy.obligations
-        .filter(
-          (obligation) =>
-            obligation.direction === 'after' &&
-            obligation.trigger.kind === 'step' &&
-            harnessPolicyStepMarkerMatches(obligation.trigger, triggerReference, triggerInput),
         )
         .flatMap((obligation) =>
           obligation.ordered
@@ -297,24 +248,6 @@ const shortBugfixRoot = (task: TaskContext & PolicyTaskContext): WorkflowNodeSou
     ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
-    step('reproduce-before', {
-      uses: 'bug.reproduce@1',
-      with: reproductionInput(
-        task,
-        'before',
-        'Reproduce the reported behavior and preserve before evidence.',
-      ),
-    }),
-    ...afterStepPolicySteps(
-      task,
-      'bug.reproduce@1',
-      reproductionInput(
-        task,
-        'before',
-        'Reproduce the reported behavior and preserve before evidence.',
-      ),
-      'before-reproduction-',
-    ),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
       until: 'attempt.succeeded@1',
@@ -331,11 +264,7 @@ const shortBugfixRoot = (task: TaskContext & PolicyTaskContext): WorkflowNodeSou
     }),
     step('reproduce-after', {
       uses: 'bug.reproduce@1',
-      with: reproductionInput(
-        task,
-        'after',
-        'Repeat the reproduction and preserve after evidence.',
-      ),
+      with: reproductionInput(task, 'Repeat the reproduction and preserve after evidence.'),
     }),
     ...pullRequestReadiness(task),
     finalize('review-complete', { outcome: 'done' }),

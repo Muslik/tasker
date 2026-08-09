@@ -1,11 +1,11 @@
 import { z } from 'zod';
 
 import {
+  PrePlanInvestigationRequestSchema,
   PlanningQuestionAnswerSchema,
   PlanningQuestionSchema,
   PlanningStrategyRequestSchema,
   PlanningStrategySchema,
-  WorkflowChangeRequestSchema,
 } from '../../planning/implementation-plan.js';
 import {
   PlanningSnapshotReferenceSchema,
@@ -57,14 +57,17 @@ const BootstrapPlanningBaseSchema = z.object({
 });
 
 export const BootstrapPlanningStateSchema = z.discriminatedUnion('status', [
-  BootstrapPlanningBaseSchema.extend({ status: z.literal('ready') }).strict(),
+  BootstrapPlanningBaseSchema.extend({
+    status: z.literal('ready'),
+    draft: z.lazy(() => BootstrapDraftStateSchema),
+  }).strict(),
   BootstrapPlanningBaseSchema.extend({
     status: z.literal('needs_clarification'),
     questions: z.array(PlanningQuestionSchema).min(1).max(10),
   }).strict(),
   BootstrapPlanningBaseSchema.extend({
-    status: z.literal('workflow_change_required'),
-    request: WorkflowChangeRequestSchema,
+    status: z.literal('investigation_required'),
+    request: PrePlanInvestigationRequestSchema,
   }).strict(),
 ]);
 
@@ -81,6 +84,15 @@ export const BootstrapDraftStateSchema = z
   .object({
     workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
     graph: CompiledWorkflowSchema,
+    planningSnapshot: PlanningSnapshotReferenceSchema,
+    evidenceBundle: EvidenceBundleReferenceSchema,
+  })
+  .strict()
+  .readonly();
+
+export const BootstrapContextStateSchema = z
+  .object({
+    contextHash: z.string().regex(/^[a-f0-9]{64}$/u),
     planningSnapshot: PlanningSnapshotReferenceSchema,
     evidenceBundle: EvidenceBundleReferenceSchema,
   })
@@ -120,6 +132,7 @@ const BootstrapWorkflowStateBaseSchema = z
     phase: z.enum([
       'workspace',
       'context',
+      'investigation',
       'planning',
       'plan_review',
       'freezing',
@@ -127,6 +140,7 @@ const BootstrapWorkflowStateBaseSchema = z
       'execution',
     ]),
     workspaceContext: BootstrapWorkspaceContextSchema.nullable(),
+    context: BootstrapContextStateSchema.nullable(),
     draft: BootstrapDraftStateSchema.nullable(),
     planning: BootstrapPlanningStateSchema.nullable(),
     freezeReceipt: WorkflowFreezeReceiptSchema.nullable(),
@@ -188,6 +202,12 @@ export const PlanningActivityCommandSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('investigation_completed'),
+      sourceAttempt: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('revision'),
       sourceAttempt: z.number().int().positive(),
       guidance: z.string().trim().min(1).max(10_000),
@@ -198,8 +218,8 @@ export const PlanningActivityCommandSchema = z.discriminatedUnion('kind', [
 export const PlanTaskImplementationInputSchema = z
   .object({
     taskReference: z.string().min(1),
-    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
     planningSnapshot: PlanningSnapshotReferenceSchema,
+    evidenceBundle: EvidenceBundleReferenceSchema,
     commandId: z.string().min(1),
     requestedStrategy: PlanningStrategyRequestSchema,
     command: PlanningActivityCommandSchema,
@@ -225,7 +245,7 @@ export const PrepareTaskWorkspaceResultSchema = z
   .strict()
   .readonly();
 
-export const AssembleTaskWorkflowDraftInputSchema = z
+export const AssembleTaskPlanningContextInputSchema = z
   .object({
     taskReference: z.string().min(1),
     workflowId: z.string().min(1),
@@ -236,29 +256,41 @@ export const AssembleTaskWorkflowDraftInputSchema = z
   .strict()
   .readonly();
 
-export const AssembleTaskWorkflowDraftResultSchema = BootstrapDraftStateSchema;
+export const AssembleTaskPlanningContextResultSchema = BootstrapContextStateSchema;
 
-export const ReviseTaskWorkflowDraftInputSchema = z
+export const RunBootstrapInvestigationInputSchema = z
   .object({
     taskReference: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
-    currentWorkflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
-    operationId: z.string().min(1),
-    request: WorkflowChangeRequestSchema,
-    workspace: WorkspaceLocatorSchema,
-  })
-  .strict()
-  .readonly();
-
-export const ReviseTaskWorkflowDraftResultSchema = z
-  .object({
-    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
-    graph: CompiledWorkflowSchema,
+    contextHash: z.string().regex(/^[a-f0-9]{64}$/u),
     planningSnapshot: PlanningSnapshotReferenceSchema,
+    workspace: WorkspaceLocatorSchema,
+    step: PrePlanInvestigationRequestSchema.shape.steps.element,
+    blockRun: z.number().int().positive(),
+    operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
   })
   .strict()
   .readonly();
+
+const BootstrapInvestigationResultBaseSchema = z.object({ summary: z.string().min(1) });
+
+export const RunBootstrapInvestigationResultSchema = z.discriminatedUnion('status', [
+  BootstrapInvestigationResultBaseSchema.extend({
+    status: z.literal('completed'),
+    evidenceBundle: EvidenceBundleReferenceSchema,
+  }).strict(),
+  BootstrapInvestigationResultBaseSchema.extend({
+    status: z.literal('needs_input'),
+    waitKind: z.string().min(1),
+  }).strict(),
+  BootstrapInvestigationResultBaseSchema.extend({
+    status: z.literal('continuation_required'),
+    waitKind: z.string().min(1),
+    requestReference: z.string().min(1),
+    evidenceBundle: EvidenceBundleReferenceSchema,
+  }).strict(),
+]);
 
 export const BootstrapWorkflowResultSchema = z
   .object({
@@ -273,6 +305,7 @@ export type TaskRunSettings = z.infer<typeof TaskRunSettingsSchema>;
 export type BootstrapWorkflowInput = z.infer<typeof BootstrapWorkflowInputSchema>;
 export type BootstrapPlanningState = z.infer<typeof BootstrapPlanningStateSchema>;
 export type BootstrapWorkspaceContext = z.infer<typeof BootstrapWorkspaceContextSchema>;
+export type BootstrapContextState = z.infer<typeof BootstrapContextStateSchema>;
 export type BootstrapDraftState = z.infer<typeof BootstrapDraftStateSchema>;
 export type BootstrapStageStatus = z.infer<typeof BootstrapStageStatusSchema>;
 export type BootstrapWorkflowPublicState = z.infer<typeof BootstrapWorkflowPublicStateSchema>;
@@ -282,21 +315,25 @@ export type PlanningActivityCommand = z.infer<typeof PlanningActivityCommandSche
 export type PlanTaskImplementationInput = z.infer<typeof PlanTaskImplementationInputSchema>;
 export type PrepareTaskWorkspaceInput = z.infer<typeof PrepareTaskWorkspaceInputSchema>;
 export type PrepareTaskWorkspaceResult = z.infer<typeof PrepareTaskWorkspaceResultSchema>;
-export type AssembleTaskWorkflowDraftInput = z.infer<typeof AssembleTaskWorkflowDraftInputSchema>;
-export type AssembleTaskWorkflowDraftResult = z.infer<typeof AssembleTaskWorkflowDraftResultSchema>;
-export type ReviseTaskWorkflowDraftInput = z.infer<typeof ReviseTaskWorkflowDraftInputSchema>;
-export type ReviseTaskWorkflowDraftResult = z.infer<typeof ReviseTaskWorkflowDraftResultSchema>;
+export type AssembleTaskPlanningContextInput = z.infer<
+  typeof AssembleTaskPlanningContextInputSchema
+>;
+export type AssembleTaskPlanningContextResult = z.infer<
+  typeof AssembleTaskPlanningContextResultSchema
+>;
+export type RunBootstrapInvestigationInput = z.infer<typeof RunBootstrapInvestigationInputSchema>;
+export type RunBootstrapInvestigationResult = z.infer<typeof RunBootstrapInvestigationResultSchema>;
 export type BootstrapWorkflowResult = z.infer<typeof BootstrapWorkflowResultSchema>;
 export type { FreezeTaskWorkflowInput, WorkflowFreezeReceipt, PlanningSnapshotReference };
 
 export interface BootstrapWorkflowActivities {
   prepareTaskWorkspace(input: PrepareTaskWorkspaceInput): Promise<PrepareTaskWorkspaceResult>;
-  assembleTaskWorkflowDraft(
-    input: AssembleTaskWorkflowDraftInput,
-  ): Promise<AssembleTaskWorkflowDraftResult>;
+  assembleTaskPlanningContext(
+    input: AssembleTaskPlanningContextInput,
+  ): Promise<AssembleTaskPlanningContextResult>;
   planTaskImplementation(input: PlanTaskImplementationInput): Promise<BootstrapPlanningState>;
-  reviseTaskWorkflowDraft(
-    input: ReviseTaskWorkflowDraftInput,
-  ): Promise<ReviseTaskWorkflowDraftResult>;
+  runBootstrapInvestigation(
+    input: RunBootstrapInvestigationInput,
+  ): Promise<RunBootstrapInvestigationResult>;
   freezeTaskWorkflow(input: FreezeTaskWorkflowInput): Promise<WorkflowFreezeReceipt>;
 }

@@ -9,7 +9,7 @@ import {
 import { ResolvedExecutionProfileSchema } from '../harness/execution-profile-contracts.js';
 import { TaskFixtureSchema } from './fixtures.js';
 import type { Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema, StepActivityDeliverySchema } from '../workflow/schema.js';
 import { EvidenceBundleReferenceSchema } from './evidence-bundle.js';
 
 const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -34,6 +34,7 @@ const SnapshottedStepSchema = z
   .object({
     reference: z.string().min(1),
     block: BlockDefinitionSchema,
+    activityDelivery: StepActivityDeliverySchema,
     resolvedCommand: z.string().min(1).nullable(),
     executionProfile: ResolvedExecutionProfileSchema.nullable(),
   })
@@ -66,29 +67,46 @@ const SnapshottedHarnessSchema = z
   })
   .strict();
 
-export const RunPlanningSnapshotSchema = z
-  .object({
-    schemaVersion: z.literal(7),
-    taskReference: z.string().min(1),
-    workflowHash: ContentHashSchema,
-    task: TaskFixtureSchema,
-    taskSnapshot: JsonValueSchema,
-    workflow: JsonValueSchema,
-    evidenceBundle: EvidenceBundleReferenceSchema,
-    repository: z
-      .object({
-        workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
-        reference: z.string().min(1),
-        path: z.string().min(1),
-      })
-      .strict(),
-    harness: SnapshottedHarnessSchema,
-    createdAt: z.iso.datetime(),
-  })
+const RunSnapshotBaseSchema = z.object({
+  schemaVersion: z.literal(8),
+  taskReference: z.string().min(1),
+  task: TaskFixtureSchema,
+  taskSnapshot: JsonValueSchema,
+  repository: z
+    .object({
+      workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
+      reference: z.string().min(1),
+      path: z.string().min(1),
+    })
+    .strict(),
+  harness: SnapshottedHarnessSchema,
+  createdAt: z.iso.datetime(),
+});
+
+export const PlanningContextSnapshotSchema = RunSnapshotBaseSchema.extend({
+  kind: z.literal('planning_context'),
+  contextHash: ContentHashSchema,
+})
   .strict()
   .readonly();
 
+export const ExecutionRunSnapshotSchema = RunSnapshotBaseSchema.extend({
+  kind: z.literal('execution'),
+  workflowHash: ContentHashSchema,
+  workflow: JsonValueSchema,
+  evidenceBundle: EvidenceBundleReferenceSchema,
+})
+  .strict()
+  .readonly();
+
+export const RunPlanningSnapshotSchema = z.discriminatedUnion('kind', [
+  PlanningContextSnapshotSchema,
+  ExecutionRunSnapshotSchema,
+]);
+
 export type PlanningSnapshotReference = z.infer<typeof PlanningSnapshotReferenceSchema>;
+export type PlanningContextSnapshot = z.infer<typeof PlanningContextSnapshotSchema>;
+export type ExecutionRunSnapshot = z.infer<typeof ExecutionRunSnapshotSchema>;
 export type RunPlanningSnapshot = z.infer<typeof RunPlanningSnapshotSchema>;
 
 export interface PlanningSnapshotWorkspace {
@@ -98,9 +116,11 @@ export interface PlanningSnapshotWorkspace {
 }
 
 export interface PlanningSnapshotSource {
-  createRunSnapshot(
+  createPlanningContextSnapshot(
     taskReference: string,
-    workflowHash: string,
     workspace: PlanningSnapshotWorkspace,
-  ): Outcome<PlanningSnapshotReference, { readonly kind: string }>;
+  ): Outcome<
+    { readonly reference: PlanningSnapshotReference; readonly contextHash: string },
+    { readonly kind: string }
+  >;
 }

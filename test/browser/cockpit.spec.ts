@@ -208,6 +208,9 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
     'Workflow compiled and persisted',
   );
   await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
+    'reproduce-after',
+  );
+  await expect(page.getByRole('complementary', { name: 'Current workflow' })).not.toContainText(
     'reproduce-before',
   );
 });
@@ -314,7 +317,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
 });
 
-test('a planning-time workflow change revises the draft before freeze', async ({ page }) => {
+test('the planner owns a cross-repository workflow candidate before freeze', async ({ page }) => {
   const fixtureId = 'avia-13236-short-bug';
   const tasks = await loadTasks(page);
   const candidate = requireTask(
@@ -420,7 +423,7 @@ test('the project profile explains why inline copy adds no translation wait', as
   await expect(page.getByTestId('task-activity-timeline')).toContainText('Implementation planning');
 });
 
-test('an invalid workflow is rejected and surfaces validation issues instead of a tree', async ({
+test('an invalid planner candidate pauses planning without an executable graph', async ({
   page,
 }) => {
   const tasks = await loadTasks(page);
@@ -435,15 +438,18 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
   await clickTask(page, invalid.id);
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
+  await waitForRunWait(page, invalid.id, 'planning.retry@1');
   const workflow = await loadWorkflow(page, invalid.id);
+
   expect(workflow.status).toBe('rejected');
+  expect(workflow.view.workflow.graphHash).toBeNull();
   expect(workflow.view.workflow.tree).toBeNull();
   expect(workflow.view.workflow.validatorReport.issues.length).toBeGreaterThan(0);
-
   await expect(page.getByTestId('validation-errors')).toBeVisible();
-  await expect(page.getByTestId('workflow-sidebar')).toContainText('rejected');
   await expect(page.getByTestId('workflow-tree')).toHaveCount(0);
-  await waitForRunWait(page, invalid.id, 'context.retry@1');
+  await expect(page.getByText('Action required', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('selected-task')).toContainText('Implementation planning failed');
+  await expect(page.getByTestId('selected-task')).not.toContainText('Workflow ready');
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
 });
 

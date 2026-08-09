@@ -9,6 +9,7 @@ import {
 import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
+import { checksumString } from '../ledger/checksum.js';
 import {
   ImplementationPlanLinkSchema,
   PlanningClarificationAnswerCommandSchema,
@@ -21,7 +22,11 @@ import {
 import type { EvidenceBundleReference, PlanningEvidenceCapture } from '../planning/index.js';
 import {
   PlanningSnapshotReferenceSchema,
+  PlanningContextSnapshotSchema,
+  ExecutionRunSnapshotSchema,
   RunPlanningSnapshotSchema,
+  type ExecutionRunSnapshot,
+  type PlanningContextSnapshot,
   type PlanningSnapshotReference,
   type PlanningSnapshotWorkspace,
   type RunPlanningSnapshot,
@@ -122,7 +127,7 @@ const PlanningActivityEventPayloadSchema = z.looseObject({
 });
 
 type PlanningActivityStatus =
-  'running' | 'ready' | 'needs_clarification' | 'workflow_change_required' | 'paused';
+  'running' | 'ready' | 'needs_clarification' | 'investigation_required' | 'paused';
 
 interface PlanningActivityEpisode {
   readonly attempts: Set<number>;
@@ -140,8 +145,8 @@ const planningActivityDetail = (episode: PlanningActivityEpisode): string => {
         ? 'Ready'
         : episode.status === 'needs_clarification'
           ? 'Waiting for clarification'
-          : episode.status === 'workflow_change_required'
-            ? 'Workflow change required'
+          : episode.status === 'investigation_required'
+            ? 'Investigation required'
             : 'Paused after provider failure';
   const attempts = episode.attempts.size;
   return `${status} · ${episode.strategy} · ${String(attempts)} provider ${attempts === 1 ? 'attempt' : 'attempts'}.`;
@@ -182,11 +187,13 @@ export class ImplementationPlanningStore {
       : this.ledger.listEvents(aggregateIdFor(taskReference));
   }
 
-  public createRunSnapshot(
+  public persistRunSnapshot(
     snapshotInput: RunPlanningSnapshot,
   ): Outcome<PlanningSnapshotReference, ImplementationPlanningStoreError> {
     const snapshot = RunPlanningSnapshotSchema.parse(snapshotInput);
-    const artifactId = `planning-snapshot:${snapshot.taskReference}:${snapshot.repository.workspaceId}:${snapshot.workflowHash}`;
+    const snapshotHash =
+      snapshot.kind === 'planning_context' ? snapshot.contextHash : snapshot.workflowHash;
+    const artifactId = `planning-snapshot:${snapshot.taskReference}:${snapshot.repository.workspaceId}:${snapshot.kind}:${snapshotHash}`;
     const existing = this.ledger.readArtifact(artifactId);
     if (existing !== null) {
       const parsed = RunPlanningSnapshotSchema.safeParse(existing.payload);
@@ -211,7 +218,7 @@ export class ImplementationPlanningStore {
             eventId: `event:${aggregateId}:1`,
             eventType: 'PlanningRunSnapshotCreated',
             eventSchemaVersion: 1,
-            payload: asJson({ artifactId, workflowHash: snapshot.workflowHash }),
+            payload: asJson({ artifactId, kind: snapshot.kind, snapshotHash }),
             actor: 'kernel',
           },
         ],
@@ -224,7 +231,8 @@ export class ImplementationPlanningStore {
           payload: asJson(snapshot),
           metadata: asJson({
             taskReference: snapshot.taskReference,
-            workflowHash: snapshot.workflowHash,
+            kind: snapshot.kind,
+            snapshotHash,
             companyId: snapshot.harness.company.id,
             companyVersion: snapshot.harness.company.version,
           }),
@@ -287,6 +295,8 @@ export class ImplementationPlanningStore {
     readonly selectedStrategy: PlanningStrategy;
     readonly selectionReason: string;
     readonly operatorGuidance: string | null;
+    readonly previousDecision:
+      Extract<ImplementationPlanningRecord, { readonly status: 'ready' }>['decision'] | null;
   }): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
     const current = this.read(input.taskReference);
     if (!current.ok) return current;
@@ -307,6 +317,9 @@ export class ImplementationPlanningStore {
       selectionReason: input.selectionReason,
       startedAt,
       operatorGuidance: input.operatorGuidance,
+      validationFeedback: [],
+      validationRevision: 0,
+      previousDecision: input.previousDecision,
       pendingEvidence: null,
     });
     return this.persist(record, 'ImplementationPlanningStarted', {
@@ -321,6 +334,10 @@ export class ImplementationPlanningStore {
   public complete(
     planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     result: { readonly ok: true; readonly value: ImplementationPlannerDecisionSuccess },
+    materialized: {
+      readonly workflowHash: string;
+      readonly executionSnapshot: PlanningSnapshotReference;
+    } | null,
   ): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
     const current = this.read(planning.taskReference);
     if (!current.ok) return current;
@@ -331,6 +348,9 @@ export class ImplementationPlanningStore {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
     }
     const completedAt = this.clock.now();
+    if (result.value.decision.status === 'ready' && materialized === null) {
+      throw new Error('Ready planning decision has no validated execution workflow');
+    }
     const artifactId = `implementation-plan:${planning.taskReference}:attempt-${String(planning.attempt)}`;
     const { pendingEvidence, ...completedPlanning } = current.value;
     void pendingEvidence;
@@ -341,11 +361,17 @@ export class ImplementationPlanningStore {
       artifactId,
       decision: result.value.decision,
       receipt: result.value.receipt,
+      ...(result.value.decision.status === 'ready'
+        ? {
+            workflowHash: materialized?.workflowHash,
+            executionSnapshot: materialized?.executionSnapshot,
+          }
+        : {}),
     });
     if (
       record.status !== 'ready' &&
       record.status !== 'needs_clarification' &&
-      record.status !== 'workflow_change_required'
+      record.status !== 'investigation_required'
     ) {
       throw new Error('Planning completion did not produce a decision record');
     }
@@ -354,7 +380,7 @@ export class ImplementationPlanningStore {
         ? 'ImplementationPlanReady'
         : record.status === 'needs_clarification'
           ? 'ImplementationPlanNeedsClarification'
-          : 'ImplementationPlanWorkflowChangeRequired';
+          : 'ImplementationPlanInvestigationRequired';
     return this.persist(
       record,
       eventType,
@@ -372,7 +398,7 @@ export class ImplementationPlanningStore {
             ? 'implementation_plan'
             : record.status === 'needs_clarification'
               ? 'planning_questions'
-              : 'workflow_change_request',
+              : 'investigation_request',
         storageUri: `ledger://artifacts/${artifactId}`,
         payload: asJson(record.decision),
         metadata: asJson({
@@ -494,6 +520,44 @@ export class ImplementationPlanningStore {
     if (!saved.ok) return saved;
     if (saved.value.status !== 'planning') {
       throw new Error('Persisted planning evidence changed the planning state');
+    }
+    return ok(saved.value);
+  }
+
+  public recordValidationRejection(
+    planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
+    issues: readonly string[],
+    rejectedDecision: Extract<
+      ImplementationPlanningRecord,
+      { readonly status: 'ready' }
+    >['decision'],
+  ): Outcome<
+    Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
+    ImplementationPlanningStoreError
+  > {
+    const current = this.read(planning.taskReference);
+    if (!current.ok) return current;
+    if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
+      return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
+    }
+    const updated = ImplementationPlanningRecordSchema.parse({
+      ...current.value,
+      validationFeedback: [...current.value.validationFeedback, ...issues].slice(-50),
+      validationRevision: current.value.validationRevision + 1,
+      previousDecision: rejectedDecision,
+    });
+    if (updated.status !== 'planning') {
+      throw new Error('Workflow validation feedback changed the planning state');
+    }
+    const saved = this.persist(updated, 'ImplementationWorkflowCandidateRejected', {
+      taskReference: planning.taskReference,
+      attempt: planning.attempt,
+      issues: [...issues],
+      ...planningEpisodePayloadFor(planning.commandId),
+    });
+    if (!saved.ok) return saved;
+    if (saved.value.status !== 'planning') {
+      throw new Error('Persisted workflow validation feedback changed the planning state');
     }
     return ok(saved.value);
   }
@@ -727,18 +791,6 @@ export type ImplementationPlanningError =
 
 const MAX_PLANNING_EVIDENCE_ROUNDS = 3;
 
-const countWorkflowNodes = (value: JsonValue): number => {
-  if (Array.isArray(value)) {
-    return value.reduce<number>((total, child) => total + countWorkflowNodes(child), 0);
-  }
-  if (value === null || typeof value !== 'object') return 0;
-  const ownNode = typeof value.kind === 'string' ? 1 : 0;
-  return (
-    ownNode +
-    Object.values(value).reduce<number>((total, child) => total + countWorkflowNodes(child), 0)
-  );
-};
-
 const snapshotPrompt = (prompt: LoadedPrompt) => ({
   relativePath: prompt.relativePath,
   content: prompt.content,
@@ -748,19 +800,27 @@ const snapshotPrompt = (prompt: LoadedPrompt) => ({
 const snapshotHarness = (
   pack: LoadedHarnessPack,
   repositoryReference: string,
-  workflowGraph: JsonValue,
+  workflowGraph: JsonValue | null,
   task: WorkflowGenerationSubject['task'],
 ) => {
   const implementationPlannerSkills = pack.company.systemPrompts.implementationPlannerSkills;
-  const graph = CompiledWorkflowSchema.parse(workflowGraph);
   const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
   const profileOverrides = project?.executionProfileOverrides ?? null;
-  const referencedSteps = new Set(graph.metadata.references.stepTypes);
+  const referencedSteps =
+    workflowGraph === null
+      ? null
+      : new Set(CompiledWorkflowSchema.parse(workflowGraph).metadata.references.stepTypes);
   const steps = pack.steps
-    .filter((step) => referencedSteps.has(step.reference))
+    .filter((step) => referencedSteps === null || referencedSteps.has(step.reference))
+    .filter(
+      (step) =>
+        step.block.executor.kind !== 'process' ||
+        resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project) !== null,
+    )
     .map((step) => ({
       reference: step.reference,
       block: step.block,
+      activityDelivery: step.contract.activityDelivery,
       resolvedCommand:
         step.block.executor.kind === 'process'
           ? resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project)
@@ -803,21 +863,16 @@ const resolveSnapshottedProcessCommand = (
   executor: string,
   pack: LoadedHarnessPack,
   project: LoadedHarnessPack['projects'][number] | undefined,
-): string => {
-  const command = project?.processCommands[executor] ?? pack.company.processCommands[executor];
-  if (command === undefined) throw new Error(`Unconfigured process executor ${executor}`);
-  return command;
-};
+): string | null =>
+  project?.processCommands[executor] ?? pack.company.processCommands[executor] ?? null;
 
 const selectStrategy = (
   requested: PlanningStrategyRequest,
   subject: WorkflowGenerationSubject,
-  workflow: JsonValue,
 ): { readonly strategy: PlanningStrategy; readonly reason: string } => {
   if (requested !== 'auto') {
     return { strategy: requested, reason: `The operator explicitly selected ${requested}.` };
   }
-  const nodeCount = countWorkflowNodes(workflow);
   if (subject.task.family === 'shared_component') {
     return {
       strategy: 'ralplan',
@@ -826,7 +881,8 @@ const selectStrategy = (
   }
   return {
     strategy: 'fast',
-    reason: `The task stays in one repository and its compiled workflow has ${String(nodeCount)} bounded nodes.`,
+    reason:
+      'The task currently stays within one repository and does not require consensus planning.',
   };
 };
 
@@ -847,10 +903,64 @@ export class ImplementationPlanningCoordinator {
     private readonly evidenceReaders: PlanningEvidenceReaderRegistry | null,
   ) {}
 
-  public createRunSnapshot(
+  public createPlanningContextSnapshot(
+    taskReference: string,
+    workspace: PlanningSnapshotWorkspace,
+  ): Outcome<
+    { readonly reference: PlanningSnapshotReference; readonly contextHash: string },
+    ImplementationPlanningError
+  > {
+    const subject = this.subjects.resolve(taskReference);
+    if (!subject.ok) return err({ kind: 'subject', error: subject.error });
+    if (subject.value.task.repository !== workspace.reference) {
+      return err({
+        kind: 'workspace_repository_mismatch',
+        taskReference,
+        expectedReference: subject.value.task.repository,
+        actualReference: workspace.reference,
+      });
+    }
+    const harness = snapshotHarness(
+      this.harnessPackSource(),
+      subject.value.task.repository,
+      null,
+      subject.value.task,
+    );
+    const contextHash = checksumString(
+      JSON.stringify({
+        task: subject.value.task,
+        taskSnapshot: subject.value.taskSnapshot,
+        repository: workspace,
+        harness,
+      }),
+    );
+    const snapshot: PlanningContextSnapshot = PlanningContextSnapshotSchema.parse({
+      schemaVersion: 8,
+      kind: 'planning_context',
+      taskReference,
+      contextHash,
+      task: subject.value.task,
+      taskSnapshot: subject.value.taskSnapshot,
+      repository: {
+        workspaceId: workspace.workspaceId,
+        reference: subject.value.task.repository,
+        path: workspace.path,
+      },
+      harness,
+      createdAt: this.store.now(),
+    });
+    const stored = this.store.persistRunSnapshot(snapshot);
+    return stored.ok
+      ? ok({ reference: stored.value, contextHash })
+      : err({ kind: 'store', error: stored.error });
+  }
+
+  public createExecutionSnapshot(
     taskReference: string,
     expectedWorkflowHash: string,
+    evidenceBundle: EvidenceBundleReference,
     workspace: PlanningSnapshotWorkspace,
+    planningContextReference: PlanningSnapshotReference,
   ): Outcome<PlanningSnapshotReference, ImplementationPlanningError> {
     const subject = this.subjects.resolve(taskReference);
     if (!subject.ok) return err({ kind: 'subject', error: subject.error });
@@ -878,32 +988,40 @@ export class ImplementationPlanningCoordinator {
     }
     const graph = JsonValueSchema.safeParse(workflow.value.view.workflow.graph);
     if (!graph.success) return err({ kind: 'workflow_not_ready', taskReference });
-    const evidenceBundle = this.evidenceBundles.readLatest(taskReference);
-    if (!evidenceBundle.ok) return err({ kind: 'evidence_bundle', error: evidenceBundle.error });
-    if (evidenceBundle.value === null)
-      return err({ kind: 'evidence_bundle_missing', taskReference });
-    const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 7,
+    const planningContext = this.store.readRunSnapshot(planningContextReference);
+    if (!planningContext.ok) return err({ kind: 'store', error: planningContext.error });
+    if (
+      planningContext.value.kind !== 'planning_context' ||
+      planningContext.value.taskReference !== taskReference
+    ) {
+      return err({ kind: 'workflow_not_ready', taskReference });
+    }
+    const referencedSteps = new Set(
+      CompiledWorkflowSchema.parse(graph.data).metadata.references.stepTypes,
+    );
+    const snapshot: ExecutionRunSnapshot = ExecutionRunSnapshotSchema.parse({
+      schemaVersion: 8,
+      kind: 'execution',
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,
       taskSnapshot: subject.value.taskSnapshot,
       workflow: JsonValueSchema.parse(workflow.value.view.workflow),
-      evidenceBundle: evidenceBundle.value.reference,
+      evidenceBundle,
       repository: {
         workspaceId: workspace.workspaceId,
         reference: subject.value.task.repository,
         path: workspace.path,
       },
-      harness: snapshotHarness(
-        this.harnessPackSource(),
-        subject.value.task.repository,
-        graph.data,
-        subject.value.task,
-      ),
+      harness: {
+        ...planningContext.value.harness,
+        steps: planningContext.value.harness.steps.filter(({ reference }) =>
+          referencedSteps.has(reference),
+        ),
+      },
       createdAt: this.store.now(),
     });
-    const stored = this.store.createRunSnapshot(snapshot);
+    const stored = this.store.persistRunSnapshot(snapshot);
     return stored.ok ? stored : err({ kind: 'store', error: stored.error });
   }
 
@@ -927,21 +1045,21 @@ export class ImplementationPlanningCoordinator {
   public prepare(
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
+    commandId: string,
+    snapshotReference: PlanningSnapshotReference,
+    evidenceReference: EvidenceBundleReference,
     operatorGuidance: string | null = null,
-    commandId: string | null = null,
-    expectedWorkflowHash: string | null = null,
-    snapshotReference: PlanningSnapshotReference | null = null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
-    const inFlightKey = `${taskReference}:${commandId ?? 'legacy'}`;
+    const inFlightKey = `${taskReference}:${commandId}`;
     const current = this.inFlight.get(inFlightKey);
     if (current !== undefined) return current;
     const pending = this.prepareOnce(
       taskReference,
       requestedStrategy,
-      operatorGuidance,
       commandId,
-      expectedWorkflowHash,
       snapshotReference,
+      evidenceReference,
+      operatorGuidance,
     ).finally(() => {
       this.inFlight.delete(inFlightKey);
     });
@@ -952,9 +1070,9 @@ export class ImplementationPlanningCoordinator {
   public answer(
     taskReference: string,
     answersInput: readonly PlanningQuestionAnswer[],
-    commandId: string | null = null,
-    expectedWorkflowHash: string | null = null,
-    snapshotReference: PlanningSnapshotReference | null = null,
+    commandId: string,
+    snapshotReference: PlanningSnapshotReference,
+    evidenceReference: EvidenceBundleReference,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
     const command = PlanningClarificationAnswerCommandSchema.safeParse({
       answers: answersInput,
@@ -972,15 +1090,15 @@ export class ImplementationPlanningCoordinator {
     }
     const current = this.store.read(taskReference);
     if (!current.ok) return Promise.resolve(err({ kind: 'store', error: current.error }));
-    if (commandId !== null && current.value?.commandId === commandId) {
+    if (current.value?.commandId === commandId) {
       if (current.value.status === 'failed' || current.value.status === 'planning') {
         return this.prepare(
           taskReference,
           current.value.requestedStrategy,
-          current.value.operatorGuidance,
           commandId,
-          expectedWorkflowHash,
           snapshotReference,
+          evidenceReference,
+          current.value.operatorGuidance,
         );
       }
       return Promise.resolve(ok(current.value));
@@ -1040,10 +1158,10 @@ export class ImplementationPlanningCoordinator {
     return this.prepare(
       taskReference,
       current.value.requestedStrategy,
-      guidance,
       commandId,
-      expectedWorkflowHash,
       snapshotReference,
+      evidenceReference,
+      guidance,
     );
   }
 
@@ -1053,6 +1171,35 @@ export class ImplementationPlanningCoordinator {
       attempt: record.attempt,
       requestedStrategy: record.requestedStrategy,
       selectedStrategy: record.selectedStrategy,
+    });
+  }
+
+  public draftFor(record: ReadyImplementationPlanningRecord): Outcome<
+    {
+      readonly workflowHash: string;
+      readonly graph: z.infer<typeof CompiledWorkflowSchema>;
+      readonly planningSnapshot: PlanningSnapshotReference;
+      readonly evidenceBundle: EvidenceBundleReference;
+    },
+    ImplementationPlanningError
+  > {
+    const workflow = this.workflows.read(record.taskReference);
+    if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
+    if (
+      workflow.value?.status !== 'ready' ||
+      workflow.value.view.workflow.graphHash !== record.workflowHash
+    ) {
+      return err({ kind: 'workflow_not_ready', taskReference: record.taskReference });
+    }
+    const graph = CompiledWorkflowSchema.safeParse(workflow.value.view.workflow.graph);
+    if (!graph.success) {
+      return err({ kind: 'workflow_not_ready', taskReference: record.taskReference });
+    }
+    return ok({
+      workflowHash: record.workflowHash,
+      graph: graph.data,
+      planningSnapshot: record.executionSnapshot,
+      evidenceBundle: record.evidenceBundle,
     });
   }
 
@@ -1087,12 +1234,12 @@ export class ImplementationPlanningCoordinator {
         updatedAt: record.completedAt,
       };
     }
-    if (record.status === 'workflow_change_required') {
+    if (record.status === 'investigation_required') {
       return {
         ...task,
         status: 'needs_attention',
         attention: 'operator',
-        currentStage: 'Workflow change required',
+        currentStage: 'Pre-plan investigation required',
         updatedAt: record.completedAt,
       };
     }
@@ -1152,8 +1299,8 @@ export class ImplementationPlanningCoordinator {
         case 'ImplementationPlanNeedsClarification':
           recordEpisode(event, 'needs_clarification', true);
           continue;
-        case 'ImplementationPlanWorkflowChangeRequired':
-          recordEpisode(event, 'workflow_change_required', true);
+        case 'ImplementationPlanInvestigationRequired':
+          recordEpisode(event, 'investigation_required', true);
           continue;
         case 'ImplementationPlanningFailed':
           recordEpisode(event, 'paused', false);
@@ -1197,6 +1344,16 @@ export class ImplementationPlanningCoordinator {
             }),
           );
           break;
+        case 'ImplementationWorkflowCandidateRejected':
+          entries.push(
+            OperatorActivityEntrySchema.parse({
+              ...common,
+              level: 'warning',
+              title: 'Workflow candidate rejected',
+              detail: 'The deterministic validator returned exact feedback to the same planner.',
+            }),
+          );
+          break;
         default:
           throw new Error(`Unmapped implementation planning event: ${event.eventType}`);
       }
@@ -1211,7 +1368,7 @@ export class ImplementationPlanningCoordinator {
           level:
             episode.status === 'paused' ||
             episode.status === 'needs_clarification' ||
-            episode.status === 'workflow_change_required'
+            episode.status === 'investigation_required'
               ? 'warning'
               : 'info',
           title: 'Implementation planning',
@@ -1239,136 +1396,58 @@ export class ImplementationPlanningCoordinator {
   private async prepareOnce(
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
+    commandId: string,
+    snapshotReference: PlanningSnapshotReference,
+    evidenceReference: EvidenceBundleReference,
     operatorGuidance: string | null,
-    commandId: string | null,
-    expectedWorkflowHash: string | null,
-    snapshotReference: PlanningSnapshotReference | null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
     const existing = this.store.read(taskReference);
     if (!existing.ok) return err({ kind: 'store', error: existing.error });
     if (
-      commandId !== null &&
       existing.value?.commandId === commandId &&
       existing.value.status !== 'planning' &&
       existing.value.status !== 'failed'
     ) {
       return ok(existing.value);
     }
-    if (
-      commandId === null &&
-      operatorGuidance === null &&
-      existing.value !== null &&
-      existing.value.status !== 'failed' &&
-      existing.value.status !== 'planning' &&
-      existing.value.requestedStrategy === requestedStrategy
-    ) {
-      return ok(existing.value);
+
+    const loaded = this.store.readRunSnapshot(snapshotReference);
+    if (!loaded.ok) return err({ kind: 'store', error: loaded.error });
+    if (loaded.value.kind !== 'planning_context' || loaded.value.taskReference !== taskReference) {
+      return err({ kind: 'workflow_not_ready', taskReference });
     }
-
-    const planningInput = (() => {
-      if (snapshotReference !== null) {
-        const loaded = this.store.readRunSnapshot(snapshotReference);
-        if (!loaded.ok) return err({ kind: 'store' as const, error: loaded.error });
-        if (
-          loaded.value.taskReference !== taskReference ||
-          (expectedWorkflowHash !== null && loaded.value.workflowHash !== expectedWorkflowHash)
-        ) {
-          return err({
-            kind: 'workflow_snapshot_mismatch' as const,
-            taskReference,
-            expectedHash: expectedWorkflowHash ?? loaded.value.workflowHash,
-            actualHash: loaded.value.workflowHash,
-          });
-        }
-        const evidenceBundle = this.evidenceBundles.read(loaded.value.evidenceBundle);
-        if (!evidenceBundle.ok) {
-          return err({ kind: 'evidence_bundle' as const, error: evidenceBundle.error });
-        }
-        return ok({
-          subject: {
-            schemaVersion: 1 as const,
-            repositoryPath: loaded.value.repository.path,
-            task: loaded.value.task,
-            taskSnapshot: loaded.value.taskSnapshot,
-          },
-          workflowJson: loaded.value.workflow,
-          evidenceBundle: evidenceBundle.value,
-          promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
-          plannerSkills: loaded.value.harness.implementationPlanner.skills,
-          plannerProfiles: loaded.value.harness.implementationPlanner.profiles,
-        });
-      }
-
-      const subject = this.subjects.resolve(taskReference);
-      if (!subject.ok) return err({ kind: 'subject' as const, error: subject.error });
-      const workflow = this.workflows.read(taskReference);
-      if (!workflow.ok) return err({ kind: 'subject' as const, error: workflow.error });
-      if (workflow.value?.status !== 'ready') {
-        return err({ kind: 'workflow_not_ready' as const, taskReference });
-      }
-      if (
-        expectedWorkflowHash !== null &&
-        workflow.value.view.workflow.graphHash !== expectedWorkflowHash
-      ) {
-        return err({
-          kind: 'workflow_snapshot_mismatch' as const,
-          taskReference,
-          expectedHash: expectedWorkflowHash,
-          actualHash: workflow.value.view.workflow.graphHash,
-        });
-      }
-      const evidenceBundle = this.evidenceBundles.readLatest(taskReference);
-      if (!evidenceBundle.ok) {
-        return err({ kind: 'evidence_bundle' as const, error: evidenceBundle.error });
-      }
-      if (evidenceBundle.value === null) {
-        return err({ kind: 'evidence_bundle_missing' as const, taskReference });
-      }
-      const pack = this.harnessPackSource();
-      const project = pack.projects.find(
-        (candidate) => candidate.repository === subject.value.task.repository,
-      );
-      return ok({
-        subject: subject.value,
-        workflowJson: JsonValueSchema.parse(workflow.value.view.workflow),
-        evidenceBundle: evidenceBundle.value,
-        promptTemplate: pack.prompts.implementationPlanner.content,
-        plannerSkills: pack.company.systemPrompts.implementationPlannerSkills,
-        plannerProfiles: {
-          fast: resolveImplementationPlannerProfile(
-            pack.company,
-            project?.executionProfileOverrides ?? null,
-            'fast',
-          ),
-          ralplan: resolveImplementationPlannerProfile(
-            pack.company,
-            project?.executionProfileOverrides ?? null,
-            'ralplan',
-          ),
-        },
-      });
-    })();
-    if (!planningInput.ok) return planningInput;
-    const selection = selectStrategy(
-      requestedStrategy,
-      planningInput.value.subject,
-      planningInput.value.workflowJson,
-    );
+    const suppliedEvidence = this.evidenceBundles.read(evidenceReference);
+    if (!suppliedEvidence.ok) {
+      return err({ kind: 'evidence_bundle', error: suppliedEvidence.error });
+    }
+    const subject = {
+      schemaVersion: 1 as const,
+      repositoryPath: loaded.value.repository.path,
+      task: loaded.value.task,
+      taskSnapshot: loaded.value.taskSnapshot,
+    };
+    const planningInput = {
+      subject,
+      blocks: loaded.value.harness.steps.map(({ block }) => block),
+      promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
+      plannerSkills: loaded.value.harness.implementationPlanner.skills,
+      plannerProfiles: loaded.value.harness.implementationPlanner.profiles,
+      workspace: loaded.value.repository,
+    };
+    const selection = selectStrategy(requestedStrategy, planningInput.subject);
     const begun =
-      commandId !== null &&
-      existing.value?.commandId === commandId &&
-      existing.value.status === 'planning'
+      existing.value?.commandId === commandId && existing.value.status === 'planning'
         ? ok(existing.value)
         : this.store.begin({
             taskReference,
             commandId,
             planningSnapshot: snapshotReference,
-            evidenceBundle:
-              existing.value?.evidenceBundle ?? planningInput.value.evidenceBundle.reference,
+            evidenceBundle: suppliedEvidence.value.reference,
             requestedStrategy,
             selectedStrategy: selection.strategy,
             selectionReason: selection.reason,
             operatorGuidance,
+            previousDecision: existing.value?.status === 'ready' ? existing.value.decision : null,
           });
     if (!begun.ok) return err({ kind: 'store', error: begun.error });
     if (begun.value.status !== 'planning') {
@@ -1381,7 +1460,7 @@ export class ImplementationPlanningCoordinator {
       return err({ kind: 'evidence_bundle', error: evidenceBundle.error });
     }
     const mediatedSkills = (this.evidenceReaders?.supportedSkills() ?? []).filter((skill) =>
-      planningInput.value.plannerSkills.includes(skill),
+      planningInput.plannerSkills.includes(skill),
     );
     const mediatedCredentialEnvironment =
       this.evidenceReaders?.credentialEnvironment(mediatedSkills) ?? [];
@@ -1416,20 +1495,23 @@ export class ImplementationPlanningCoordinator {
 
       const result = await this.planner.plan({
         operationId: commandId,
-        repositoryPath: planningInput.value.subject.repositoryPath,
+        repositoryPath: planningInput.subject.repositoryPath,
         strategy: selection.strategy,
-        profile: planningInput.value.plannerProfiles[selection.strategy],
-        skills: planningInput.value.plannerSkills,
+        profile: planningInput.plannerProfiles[selection.strategy],
+        skills: planningInput.plannerSkills,
         mediatedSkills,
         mediatedCredentialEnvironment,
         context: {
-          taskSnapshot: planningInput.value.subject.taskSnapshot,
-          workflow: planningInput.value.workflowJson,
+          task: planningInput.subject.task,
+          taskSnapshot: planningInput.subject.taskSnapshot,
+          blocks: planningInput.blocks,
           evidenceBundle: evidenceBundle.value.bundle,
-          repositoryReference: planningInput.value.subject.task.repository,
+          repositoryReference: planningInput.subject.task.repository,
           operatorGuidance,
+          validationFeedback: planning.validationFeedback,
+          previousDecision: planning.previousDecision,
         },
-        promptTemplate: planningInput.value.promptTemplate,
+        promptTemplate: planningInput.promptTemplate,
       });
       if (!result.ok) {
         const failed = this.store.fail(planning, result.error);
@@ -1447,10 +1529,129 @@ export class ImplementationPlanningCoordinator {
         return failed.ok ? failed : err({ kind: 'store', error: failed.error });
       }
       if (result.value.decision !== null) {
-        const completed = this.store.complete(planning, {
-          ok: true,
-          value: { ...result.value, decision: result.value.decision },
-        });
+        if (result.value.decision.status === 'investigation_required') {
+          const blockByReference = new Map(
+            planningInput.blocks.map((block) => [block.reference, block] as const),
+          );
+          const issues = result.value.decision.request.steps.flatMap((step) => {
+            const block = blockByReference.get(step.uses);
+            if (block === undefined) return [`Investigation selected unknown block ${step.uses}.`];
+            return block.availableDuring.includes('bootstrap_investigation')
+              ? []
+              : [`Block ${step.uses} is not available during bootstrap investigation.`];
+          });
+          if (issues.length > 0) {
+            const failed = this.store.fail(
+              planning,
+              { kind: 'invalid_planner_output', issues },
+              result.value.receipt,
+            );
+            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+          }
+        }
+
+        let materialized: {
+          readonly workflowHash: string;
+          readonly executionSnapshot: PlanningSnapshotReference;
+        } | null = null;
+        if (result.value.decision.status === 'ready') {
+          const candidateNumber = planning.validationRevision + 1;
+          const operationId = `${commandId}:workflow-candidate:${String(candidateNumber)}`;
+          const assembled = this.workflows.assembleFromImplementationPlanAtOperation(
+            planningInput.subject.task,
+            result.value.decision.workflow,
+            operationId,
+          );
+          if (!assembled.ok) {
+            const failed = this.store.fail(
+              planning,
+              {
+                kind: 'invalid_planner_output',
+                issues: [`Workflow assembly failed: ${assembled.error.kind}`],
+              },
+              result.value.receipt,
+            );
+            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+          }
+          if (
+            assembled.value.status !== 'ready' ||
+            assembled.value.view.workflow.graphHash === null
+          ) {
+            const issues = assembled.value.view.workflow.validatorReport.issues.map(
+              ({ message }) => message,
+            );
+            if (planning.validationRevision >= 2) {
+              const failed = this.store.fail(
+                planning,
+                { kind: 'invalid_planner_output', issues },
+                result.value.receipt,
+              );
+              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+            }
+            const rejected = this.store.recordValidationRejection(
+              planning,
+              issues,
+              result.value.decision,
+            );
+            if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
+            planning = rejected.value;
+            continue;
+          }
+          const workflowHash = assembled.value.view.workflow.graphHash;
+          const graph = CompiledWorkflowSchema.safeParse(assembled.value.view.workflow.graph);
+          if (!graph.success) {
+            const failed = this.store.fail(
+              planning,
+              { kind: 'invalid_planner_output', issues: ['Compiled workflow graph is corrupt.'] },
+              result.value.receipt,
+            );
+            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+          }
+          const blockByReference = new Map(
+            planningInput.blocks.map((block) => [block.reference, block] as const),
+          );
+          const phaseIssues = graph.data.metadata.references.stepTypes.flatMap((reference) => {
+            const block = blockByReference.get(reference);
+            return block?.availableDuring.includes('execution') === true
+              ? []
+              : [`Block ${reference} is not available during execution.`];
+          });
+          if (phaseIssues.length > 0) {
+            if (planning.validationRevision >= 2) {
+              const failed = this.store.fail(
+                planning,
+                { kind: 'invalid_planner_output', issues: phaseIssues },
+                result.value.receipt,
+              );
+              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+            }
+            const rejected = this.store.recordValidationRejection(
+              planning,
+              phaseIssues,
+              result.value.decision,
+            );
+            if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
+            planning = rejected.value;
+            continue;
+          }
+          const executionSnapshot = this.createExecutionSnapshot(
+            taskReference,
+            workflowHash,
+            planning.evidenceBundle,
+            planningInput.workspace,
+            snapshotReference,
+          );
+          if (!executionSnapshot.ok) return executionSnapshot;
+          materialized = { workflowHash, executionSnapshot: executionSnapshot.value };
+        }
+        const completed = this.store.complete(
+          planning,
+          {
+            ok: true,
+            value: { ...result.value, decision: result.value.decision },
+          },
+          materialized,
+        );
         return completed.ok ? completed : err({ kind: 'store', error: completed.error });
       }
       const evidenceRequests = result.value.evidenceRequests ?? [];
@@ -1466,7 +1667,7 @@ export class ImplementationPlanningCoordinator {
         return failed.ok ? failed : err({ kind: 'store', error: failed.error });
       }
       const requestIssues = evidenceRequests.flatMap((request) => {
-        if (!planningInput.value.plannerSkills.includes(request.skill)) {
+        if (!planningInput.plannerSkills.includes(request.skill)) {
           return [
             `Evidence request ${request.requestId} selected undeclared skill ${request.skill}.`,
           ];
@@ -1499,7 +1700,7 @@ export class ImplementationPlanningCoordinator {
         return failed.ok ? failed : err({ kind: 'store', error: failed.error });
       }
       const round = planning.evidenceRounds.length + 1;
-      const operationId = `${commandId ?? `planning:${taskReference}:${String(planning.attempt)}`}:evidence:${String(round)}`;
+      const operationId = `${commandId}:evidence:${String(round)}`;
       const recorded = this.store.recordEvidenceRequest(planning, {
         round,
         operationId,

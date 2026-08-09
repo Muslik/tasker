@@ -35,10 +35,11 @@ export const WORKFLOW_OBLIGATIONS = [
     reason: 'Every PR task must expose CI classification and the human review boundary.',
   },
   {
-    id: 'bug-requires-before-and-after-evidence',
+    id: 'bug-requires-after-evidence',
     trigger: 'the admitted task is a bug',
-    requires: ['bug.reproduce@1 phase=before', 'bug.reproduce@1 phase=after'],
-    reason: 'A bug fix needs evidence that the reported behavior existed and no longer exists.',
+    requires: ['bug.reproduce@1 phase=after'],
+    reason:
+      'The frozen execution workflow must prove the bug no longer exists; before evidence belongs to pre-plan investigation.',
   },
 ] as const;
 
@@ -233,16 +234,14 @@ export const validateWorkflowObligations = (
       .flat()
       .filter((marker) => marker.kind === 'step' && marker.reference === 'bug.reproduce@1')
       .map(phaseOf);
-    for (const phase of ['before', 'after'] as const) {
-      if (!reproductionPhases.includes(phase)) {
-        issues.push(
-          issue(
-            'bug-requires-before-and-after-evidence',
-            `Bug workflow is missing bug.reproduce@1 with phase=${phase}`,
-            ['root'],
-          ),
-        );
-      }
+    if (!reproductionPhases.includes('after')) {
+      issues.push(
+        issue(
+          'bug-requires-after-evidence',
+          'Bug workflow is missing bug.reproduce@1 with phase=after',
+          ['root'],
+        ),
+      );
     }
   }
 

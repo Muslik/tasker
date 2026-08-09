@@ -31,8 +31,8 @@ Every accepted implementation must prove:
   semantic obligations validate;
 - context discovery and every planner read append provenance-bearing evidence instead
   of overwriting prior observations;
-- initial context discovery and draft assembly run through Temporal, reuse a persisted
-  accepted draft, and can resume after a transient bootstrap run exhausts its retries;
+- initial context discovery and mandatory planning run through Temporal, reuse persisted
+  evidence and an accepted planner decision, and resume after transient bootstrap failure;
 - a draft graph cannot execute product effects before planning, recompilation,
   deterministic validation, and configured plan review complete;
 - a planning workflow proposal cannot mutate the draft or bypass the compiler directly;
@@ -148,9 +148,10 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `poll_observation_and_webhook_for_same_ci_build_collapse_to_one_event`
 - `wait_timeout_opens_configured_escalation_not_task_restart`
 
-### 4.4 Workflow change
+### 4.4 Candidate revision and runtime workflow change
 
-- `planning_change_revises_draft_without_starting_child_execution_workflow`
+- `planning_ready_creates_first_complete_candidate`
+- `invalid_candidate_feedback_replans_without_execution`
 - `workflow_change_required_stops_original_suffix`
 - `invalid_revision_is_rejected_and_visible`
 - `pilot_policy_waits_for_revision_review`

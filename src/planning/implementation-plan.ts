@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 import { JsonValueSchema } from '../workflow/schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
+import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
+import { TaskFixtureSchema } from './fixtures.js';
+import { BlockDefinitionSchema } from '../blocks/contracts.js';
 
 export const PlanningStrategyRequestSchema = z.enum(['auto', 'fast', 'ralplan']);
 export const PlanningStrategySchema = z.enum(['fast', 'ralplan']);
@@ -66,6 +69,29 @@ export const PlanningClarificationAnswerCommandSchema = z
   })
   .strict();
 
+export const ImplementationPlanFollowUpSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    title: z.string().min(1).max(200),
+    reason: z.string().min(1).max(2_000),
+  })
+  .strict();
+
+export const PrePlanInvestigationStepSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    uses: z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u),
+    with: JsonValueSchema,
+  })
+  .strict();
+
+export const PrePlanInvestigationRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(4_000),
+    steps: z.array(PrePlanInvestigationStepSchema).min(1).max(5),
+  })
+  .strict();
+
 export const WorkflowChangeRequestSchema = z
   .object({
     reason: z.string().min(1).max(4_000),
@@ -75,13 +101,17 @@ export const WorkflowChangeRequestSchema = z
   })
   .strict();
 
+export const ReadyImplementationPlanningDecisionSchema = z
+  .object({
+    status: z.literal('ready'),
+    plan: ImplementationPlanSchema,
+    followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
+    workflow: WorkflowAnalyzerOutputSchema,
+  })
+  .strict();
+
 export const ImplementationPlanningDecisionSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('ready'),
-      plan: ImplementationPlanSchema,
-    })
-    .strict(),
+  ReadyImplementationPlanningDecisionSchema,
   z
     .object({
       status: z.literal('needs_clarification'),
@@ -90,19 +120,22 @@ export const ImplementationPlanningDecisionSchema = z.discriminatedUnion('status
     .strict(),
   z
     .object({
-      status: z.literal('workflow_change_required'),
-      request: WorkflowChangeRequestSchema,
+      status: z.literal('investigation_required'),
+      request: PrePlanInvestigationRequestSchema,
     })
     .strict(),
 ]);
 
 export const ImplementationPlannerContextSchema = z
   .object({
+    task: TaskFixtureSchema,
     taskSnapshot: JsonValueSchema,
-    workflow: JsonValueSchema,
+    blocks: z.array(BlockDefinitionSchema).min(1),
     evidenceBundle: EvidenceBundleSchema,
     repositoryReference: z.string().min(1),
     operatorGuidance: z.string().min(1).max(10_000).nullable(),
+    validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),
+    previousDecision: ReadyImplementationPlanningDecisionSchema.nullable(),
   })
   .strict();
 
@@ -115,5 +148,9 @@ export type PlanningClarificationAnswerCommand = z.infer<
   typeof PlanningClarificationAnswerCommandSchema
 >;
 export type WorkflowChangeRequest = z.infer<typeof WorkflowChangeRequestSchema>;
+export type PrePlanInvestigationRequest = z.infer<typeof PrePlanInvestigationRequestSchema>;
+export type ReadyImplementationPlanningDecision = z.infer<
+  typeof ReadyImplementationPlanningDecisionSchema
+>;
 export type ImplementationPlanningDecision = z.infer<typeof ImplementationPlanningDecisionSchema>;
 export type ImplementationPlannerContext = z.infer<typeof ImplementationPlannerContextSchema>;

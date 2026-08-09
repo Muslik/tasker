@@ -137,6 +137,7 @@ export const ExecutionBlockResultSchema = z.discriminatedUnion('status', [
     status: z.literal('continuation_required'),
     waitKind: z.string().min(1),
     requestReference: z.string().min(1),
+    receiptReference: z.string().min(1),
   })
     .strict()
     .readonly(),

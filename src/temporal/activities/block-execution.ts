@@ -1774,6 +1774,7 @@ const executionResultFromReceipt = (receipt: BlockReceipt) => {
         summary: receipt.claim.summary,
         waitKind: `${receipt.blockReference}.continuation-required@1`,
         requestReference: receipt.claim.requestReference,
+        receiptReference: receipt.receiptId,
       };
   }
 };

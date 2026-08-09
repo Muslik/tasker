@@ -187,7 +187,9 @@ describe('subscription CLI workflow analyzer', () => {
     expect(executionRequest?.stdin).toContain('Construct the complete graph from an empty root');
     expect(executionRequest?.stdin).toContain('NEVER return top-level keys such as schemaVersion');
     expect(executionRequest?.stdin).not.toContain('copying plannerContext.baseTemplate');
-    expect(executionRequest?.stdin).toContain('Do not emit bootstrap-only analysis steps');
+    expect(executionRequest?.stdin).toContain(
+      'Do not emit context discovery, implementation planning, or plan-review nodes',
+    );
     expect(runner.requests[1]?.args).toEqual(
       expect.arrayContaining([
         'exec',

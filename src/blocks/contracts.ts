@@ -65,6 +65,7 @@ export const BlockDefinitionSchema = z
     reference: VersionedReferenceSchema,
     description: z.string().min(1),
     stage: BlockStageSchema,
+    availableDuring: z.array(z.enum(['bootstrap_investigation', 'execution'])).min(1),
     inputContract: z.string().min(1),
     outputContract: z.string().min(1),
     executor: BlockExecutorSchema,

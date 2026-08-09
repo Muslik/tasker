@@ -62,47 +62,11 @@ export const testTemporalActivities = {
       },
     });
   },
-  assembleTaskWorkflowDraft: (input) =>
+  assembleTaskPlanningContext: (input) =>
     Promise.resolve({
-      workflowHash: 'a'.repeat(64),
-      graph: {
-        metadata: {
-          compilerVersion: 4 as const,
-          irVersion: 'm2' as const,
-          workflowId: 'bootstrap-v3-fixture',
-          workflowVersion: 1,
-          references: {
-            predicates: ['review.completed@1'],
-            stepTypes: ['fixture.implement@1'],
-            waits: ['code_review@1'],
-          },
-        },
-        root: {
-          kind: 'sequence' as const,
-          id: 'delivery',
-          children: [
-            {
-              kind: 'step' as const,
-              id: 'implement',
-              uses: 'fixture.implement@1',
-              activityDelivery: { kind: 'workspace_reconciled' as const },
-              with: {},
-            },
-            {
-              kind: 'wait' as const,
-              id: 'code-review',
-              for: 'code_review@1',
-              resolutionMapping: {
-                discriminator: 'decision',
-                cases: { approved: { 'review.completed@1': true } },
-              },
-            },
-            { kind: 'finalize' as const, id: 'accepted', outcome: 'accepted' },
-          ],
-        },
-      },
+      contextHash: HASH,
       planningSnapshot: {
-        artifactId: `planning-snapshot:${input.taskReference}:draft`,
+        artifactId: `planning-snapshot:${input.taskReference}:context`,
         checksum: HASH,
       },
       evidenceBundle: {
@@ -126,6 +90,54 @@ export const testTemporalActivities = {
       requestedStrategy: input.requestedStrategy,
       selectedStrategy:
         input.requestedStrategy === 'ralplan' ? ('ralplan' as const) : ('fast' as const),
+      draft: {
+        workflowHash: 'a'.repeat(64),
+        graph: {
+          metadata: {
+            compilerVersion: 4 as const,
+            irVersion: 'm2' as const,
+            workflowId: 'bootstrap-v3-fixture',
+            workflowVersion: 1,
+            references: {
+              predicates: ['review.completed@1'],
+              stepTypes: ['fixture.implement@1'],
+              waits: ['code_review@1'],
+            },
+          },
+          root: {
+            kind: 'sequence' as const,
+            id: 'delivery',
+            children: [
+              {
+                kind: 'step' as const,
+                id: 'implement',
+                uses: 'fixture.implement@1',
+                activityDelivery: { kind: 'workspace_reconciled' as const },
+                with: {},
+              },
+              {
+                kind: 'wait' as const,
+                id: 'code-review',
+                for: 'code_review@1',
+                resolutionMapping: {
+                  discriminator: 'decision',
+                  cases: { approved: { 'review.completed@1': true } },
+                },
+              },
+              { kind: 'finalize' as const, id: 'accepted', outcome: 'accepted' },
+            ],
+          },
+        },
+        planningSnapshot: {
+          artifactId: `planning-snapshot:${input.taskReference}:execution`,
+          checksum: HASH,
+        },
+        evidenceBundle: {
+          artifactId: `evidence-bundle:${input.taskReference}:r1:test`,
+          checksum: HASH,
+          revision: 1,
+        },
+      },
       receipt: {
         status: 'completed' as const,
         provider: 'deterministic' as const,
@@ -149,7 +161,16 @@ export const testTemporalActivities = {
         hypotheticalApiCostUsd: 0,
       },
     }),
-  reviseTaskWorkflowDraft: () => Promise.reject(new Error('Unexpected draft revision')),
+  runBootstrapInvestigation: (input) =>
+    Promise.resolve({
+      status: 'completed' as const,
+      summary: `${input.step.uses} completed`,
+      evidenceBundle: {
+        artifactId: `evidence-bundle:${input.taskReference}:r2:investigation`,
+        checksum: HASH,
+        revision: 2,
+      },
+    }),
   freezeTaskWorkflow: (input) =>
     Promise.resolve({
       ...input,

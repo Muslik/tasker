@@ -37,6 +37,7 @@ const bootstrapWait = (
     settings: input.settings,
     phase: waitKind === 'plan.approved@1' ? 'plan_review' : 'planning',
     workspaceContext: null,
+    context: null,
     draft: null,
     planning: null,
     freezeReceipt: null,

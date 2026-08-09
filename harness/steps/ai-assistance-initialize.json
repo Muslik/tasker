@@ -3,6 +3,7 @@
   "reference": "ai.assistance.initialize@1",
   "policy": "ai-assistance",
   "description": "Create the versioned AI-assistance task workspace before implementation planning.",
+  "availableDuring": ["execution"],
   "stage": { "id": "preparation", "label": "Prepare" },
   "inputContract": "task_input",
   "outputContract": "integration_output",

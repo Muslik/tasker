@@ -22,21 +22,23 @@ import {
   resolvePackagePublicationPolicy,
   resolveProjectWorkflowProfile,
 } from './project-policies.js';
+import {
+  VerificationPlanSchema,
+  WorkflowAnalyzerOutputSchema,
+  WorkflowAssemblyDecisionSchema,
+  type WorkflowAssemblyDecision,
+} from './workflow-proposal-contracts.js';
 
-export const VerificationProfileSchema = z.enum([
-  'full',
-  'full_with_visual',
-  'targeted',
-  'translation_and_targeted',
-]);
-
-export const VerificationPlanSchema = z
-  .object({
-    checks: z.array(z.string().min(1)).min(1),
-    profile: VerificationProfileSchema,
-    rationale: z.string().min(1),
-  })
-  .strict();
+export {
+  VerificationPlanSchema,
+  VerificationProfileSchema,
+  WorkflowAnalyzerOutputSchema,
+  WorkflowAssemblyDecisionSchema,
+} from './workflow-proposal-contracts.js';
+export type {
+  WorkflowAnalyzerOutput,
+  WorkflowAssemblyDecision,
+} from './workflow-proposal-contracts.js';
 
 export const ExpectedArtifactSchema = z
   .object({
@@ -60,24 +62,6 @@ export const CapabilityMetadataSchema = z
   })
   .strict();
 
-export const WorkflowAssemblyDecisionSchema = z
-  .object({
-    id: z.string().min(1),
-    title: z.string().min(1),
-    source: z.string().min(1),
-    reason: z.string().min(1),
-    effect: z.string().min(1),
-  })
-  .strict();
-
-export const WorkflowAnalyzerOutputSchema = z
-  .object({
-    assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
-    source: WorkflowSourceSchema,
-    verificationPlan: VerificationPlanSchema,
-  })
-  .strict();
-
 export const AnalyzerVersionSchema = z.string().regex(/^[a-z][a-z0-9_-]*@[1-9]\d*$/u);
 
 export const WorkflowProposalArtifactSchema = z
@@ -95,10 +79,8 @@ export const WorkflowProposalArtifactSchema = z
   .strict();
 
 export type WorkflowProposalArtifact = z.infer<typeof WorkflowProposalArtifactSchema>;
-export type WorkflowAnalyzerOutput = z.infer<typeof WorkflowAnalyzerOutputSchema>;
 export type ExpectedArtifact = z.infer<typeof ExpectedArtifactSchema>;
 export type WaitMetadata = z.infer<typeof WaitMetadataSchema>;
-export type WorkflowAssemblyDecision = z.infer<typeof WorkflowAssemblyDecisionSchema>;
 
 const ProposalInputIssueSchema = z
   .object({
@@ -249,7 +231,7 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
       reason: `The intake classified this task as ${fixture.family}.`,
       effect:
         fixture.family === 'short_bugfix'
-          ? 'Add before/after reproduction, bounded repair, verification, CI, and review blocks.'
+          ? 'Use bootstrap investigation evidence, then add bounded repair, post-fix proof, CI, and review blocks.'
           : 'Compose the required implementation, verification, CI, and review blocks.',
     },
     {
@@ -301,8 +283,9 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
         id: 'reproduction-required',
         title: 'Reproduction required',
         source: 'task-snapshot',
-        reason: 'The task is a bug and the fixture requires reproduction evidence.',
-        effect: 'Add reproduce-bug before implementation and targeted verification.',
+        reason:
+          'The task is a bug and bootstrap must ground the reported behavior before planning.',
+        effect: 'Use investigation evidence to plan the repair and require post-fix reproduction.',
       });
       break;
 

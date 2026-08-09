@@ -229,12 +229,13 @@ prompts, source code, transcripts, videos, or arbitrary provider output. Search
 Attributes contain only operational lookup fields such as Tasker task ID, lifecycle
 state, attention state, repository key, and graph revision.
 
-## 9. Draft revisions and execution continuations
+## 9. Candidate revisions and execution continuations
 
-Before product execution, the workflow graph is a draft. A planning Activity may return
-`workflow_change_required`, but this is only a proposal. The assembler applies the
-proposal to workflow source, the compiler recompiles the complete graph, and all
-deterministic validators run again. Only the accepted post-planning graph is frozen.
+Before product execution, no graph exists until the mandatory planner returns `ready`
+with a plan and complete workflow candidate. The compiler and all deterministic
+validators run against that candidate. Rejection is persisted with exact feedback and
+the rejected decision; the planner must return a complete replacement candidate. Only
+an accepted candidate can be frozen.
 
 After freeze, an execution Activity may return `workflow_change_required`. A planning
 Activity then produces a new compiled continuation artifact. The Workflow records its
@@ -245,8 +246,8 @@ result. This preserves the accepted parent graph and its completed prefix withou
 teaching the interpreter how to mutate graph input. Ordinary branches inside an
 accepted graph remain interpreter nodes and do not create Child Workflows.
 
-During the pilot, a run-policy flag requires operator approval for draft revisions and
-execution continuations.
+During the pilot, a run-policy flag may require operator approval for the accepted plan
+and candidate, and separately for execution continuations.
 Later, validator-approved low-risk classes can auto-apply. Validation cannot be
 disabled.
 

@@ -30,6 +30,8 @@ export const HarnessContractNameSchema = z.enum([
   'agent_output',
   'ci_observation_output',
   'integration_output',
+  'investigation_input',
+  'investigation_output',
   'process_input',
   'process_output',
   'pull_request_input',
@@ -70,6 +72,7 @@ export const HarnessStepManifestSchema = z
     policy: PolicyIdSchema.optional(),
     description: z.string().min(1),
     stage: BlockStageSchema,
+    availableDuring: z.array(z.enum(['bootstrap_investigation', 'execution'])).min(1),
     inputContract: HarnessContractNameSchema,
     outputContract: HarnessContractNameSchema,
     executor: HarnessBlockExecutorManifestSchema,
@@ -177,6 +180,7 @@ export interface HarnessStepSource {
   readonly policy?: string;
   readonly description: string;
   readonly stage: z.infer<typeof BlockStageSchema>;
+  readonly availableDuring: BlockDefinition['availableDuring'];
   readonly inputContract: z.infer<typeof HarnessContractNameSchema>;
   readonly outputContract: z.infer<typeof HarnessContractNameSchema>;
   readonly contract: StepTypeContract;

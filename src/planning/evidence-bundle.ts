@@ -26,7 +26,14 @@ export const EvidenceBodyReferenceSchema = z
 
 export const EvidenceSourceSchema = z
   .object({
-    kind: z.enum(['task_system', 'repository', 'harness', 'operator', 'external_system']),
+    kind: z.enum([
+      'task_system',
+      'repository',
+      'harness',
+      'operator',
+      'external_system',
+      'block_receipt',
+    ]),
     locator: z.string().min(1),
   })
   .strict()
@@ -41,7 +48,13 @@ export const EvidenceProvenanceSchema = z
     mediaType: z.string().min(1),
     introducedBy: z
       .object({
-        phase: z.enum(['context_discovery', 'planning', 'operator', 'continuation']),
+        phase: z.enum([
+          'context_discovery',
+          'investigation',
+          'planning',
+          'operator',
+          'continuation',
+        ]),
         operationId: z.string().min(1).nullable(),
       })
       .strict()
@@ -60,6 +73,7 @@ export const EvidenceEntrySchema = z
       'harness_context',
       'operator_guidance',
       'external_document',
+      'investigation_result',
     ]),
     title: z.string().min(1).max(300),
     provenance: EvidenceProvenanceSchema,
