@@ -29,14 +29,15 @@ const bootstrapWait = (
 ): TaskRunPublicState =>
   BootstrapWorkflowPublicStateSchema.parse({
     runtime: 'bootstrap',
-    schemaVersion: 2,
+    schemaVersion: 3,
     taskReference: input.taskReference,
-    workflowId: `tasker:v2:${input.taskReference}`,
+    workflowId: `tasker:v3:${input.taskReference}`,
     runId: `run:${input.taskReference}`,
-    workflowHash: input.workflowHash,
+    workflowHash: null,
     settings: input.settings,
     phase: waitKind === 'plan.approved@1' ? 'plan_review' : 'planning',
-    executionContext: null,
+    workspaceContext: null,
+    draft: null,
     planning: null,
     freezeReceipt: null,
     executionWorkflowId: null,
@@ -83,21 +84,23 @@ const setup = () => {
     ledger.repository,
     makeAdjustableClock('2026-08-09T00:00:00.000Z'),
   );
-  const generated = service.generate('avia-13236-short-bug');
-  if (!generated.ok) throw new Error(`Fixture generation failed: ${generated.error.kind}`);
   const runs = new ContractTaskRunService();
   const api = buildM1Api({ service, temporalRunService: runs });
-  return { api, runs, generated };
+  return { api, runs };
 };
 
-describe('Temporal v2 HTTP contract', () => {
-  it('starts the bootstrap workflow with immutable v2 settings and compiled graph', async () => {
-    const { api, runs, generated } = setup();
+describe('Temporal v3 bootstrap HTTP contract', () => {
+  it('starts durable bootstrap without requiring a precompiled graph', async () => {
+    const { api, runs } = setup();
     const response = await api.inject({
       method: 'POST',
-      url: '/api/workflows/avia-13236-short-bug/start',
+      url: '/api/workflows/avia-13236-short-bug/generate',
       payload: {
-        settings: { planReview: 'automatic', planningStrategy: 'fast' },
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          executionStart: 'manual',
+        },
       },
     });
     await api.close();
@@ -105,14 +108,17 @@ describe('Temporal v2 HTTP contract', () => {
     expect(response.statusCode).toBe(200);
     expect(ExecutionRunViewSchema.parse(response.json())).toMatchObject({
       runtime: 'bootstrap',
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: 'waiting',
     });
     expect(runs.starts).toHaveLength(1);
     expect(runs.starts[0]).toMatchObject({
-      schemaVersion: 2,
-      workflowHash: generated.value.view.workflow.graphHash,
-      settings: { planReview: 'automatic', planningStrategy: 'fast' },
+      schemaVersion: 3,
+      settings: {
+        planReview: 'automatic',
+        planningStrategy: 'fast',
+        executionStart: 'manual',
+      },
     });
   });
 
@@ -120,8 +126,14 @@ describe('Temporal v2 HTTP contract', () => {
     const { api, runs } = setup();
     await api.inject({
       method: 'POST',
-      url: '/api/workflows/avia-13236-short-bug/start',
-      payload: { settings: { planReview: 'required', planningStrategy: 'auto' } },
+      url: '/api/workflows/avia-13236-short-bug/generate',
+      payload: {
+        settings: {
+          planReview: 'required',
+          planningStrategy: 'auto',
+          executionStart: 'manual',
+        },
+      },
     });
 
     const response = await api.inject({

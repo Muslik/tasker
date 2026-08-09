@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BootstrapWorkflowInput } from '../../src/temporal/bootstrap-kernel/contracts.js';
 import { TemporalTaskRunService } from '../../src/temporal/client.js';
 import type { TaskRunPublicState } from '../../src/temporal/public-state.js';
-import { testTemporalV2Activities } from '../helpers/temporal-v2-activities.js';
+import { testTemporalActivities } from '../helpers/temporal-activities.js';
 
 const workflowsPath = fileURLToPath(
   new URL('../../src/temporal/workflows/index.ts', import.meta.url),
@@ -17,61 +17,24 @@ const inputFor = (
   taskReference: string,
   planReview: 'required' | 'automatic',
 ): BootstrapWorkflowInput => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   taskReference,
-  workflowHash: 'a'.repeat(64),
-  settings: { planReview, planningStrategy: 'fast' },
-  graph: {
-    metadata: {
-      compilerVersion: 4,
-      irVersion: 'm2',
-      workflowId: 'bootstrap-v2-fixture',
-      workflowVersion: 1,
-      references: {
-        predicates: ['review.completed@1'],
-        stepTypes: ['fixture.implement@1'],
-        waits: ['code_review@1'],
-      },
-    },
-    root: {
-      kind: 'sequence',
-      id: 'delivery',
-      children: [
-        {
-          kind: 'step',
-          id: 'implement',
-          uses: 'fixture.implement@1',
-          activityDelivery: { kind: 'workspace_reconciled' },
-          with: {},
-        },
-        {
-          kind: 'wait',
-          id: 'code-review',
-          for: 'code_review@1',
-          resolutionMapping: {
-            discriminator: 'decision',
-            cases: { approved: { 'review.completed@1': true } },
-          },
-        },
-        { kind: 'finalize', id: 'accepted', outcome: 'accepted' },
-      ],
-    },
-  },
+  settings: { planReview, planningStrategy: 'fast', executionStart: 'automatic' },
 });
 
-describe('Bootstrap Workflow v2 recovery', () => {
+describe('Bootstrap Workflow v3 recovery', () => {
   let environment: TestWorkflowEnvironment;
   let worker: Worker;
   let workerRun: Promise<void>;
   let runs: TemporalTaskRunService;
-  const taskQueue = `tasker-bootstrap-v2-${String(process.pid)}`;
+  const taskQueue = `tasker-bootstrap-v3-${String(process.pid)}`;
 
   const startWorker = async (): Promise<void> => {
     worker = await Worker.create({
       connection: environment.nativeConnection,
       taskQueue,
       workflowsPath,
-      activities: testTemporalV2Activities,
+      activities: testTemporalActivities,
       maxCachedWorkflows: 0,
     });
     workerRun = worker.run();
@@ -124,7 +87,11 @@ describe('Bootstrap Workflow v2 recovery', () => {
     expect(
       await runs.start({
         ...inputFor('fixture:reviewed', 'required'),
-        settings: { planReview: 'automatic', planningStrategy: 'fast' },
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          executionStart: 'automatic',
+        },
       }),
     ).toEqual({
       ok: false,

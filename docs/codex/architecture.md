@@ -97,8 +97,9 @@ not mutated. Before implementation planning, Tasker creates a managed branch/wor
 materializes the pinned harness profile, and prepares its Docker runtime. Its locator,
 harness receipt, and Docker receipt are product
 artifacts recorded by the preparation Activity and referenced by durable Workflow
-state. The API request contains portable task/graph/settings data; it does not perform
-runner-local filesystem work before Temporal starts.
+state. The API request contains only the task reference and immutable run settings. It
+does not contain a graph/hash and does not perform runner-local filesystem work before
+Temporal starts.
 
 Repeated Jira synchronization updates the cached snapshot and `syncedAt`; it does not
 append activity-log noise. A VPN/403/network failure changes sync health only. It does
@@ -112,9 +113,9 @@ translation, or PR template.
 The canonical lifecycle is `bootstrap workflow -> draft workflow -> frozen execution
 workflow`; see [`planning-lifecycle.md`](planning-lifecycle.md). The bootstrap is a
 durable infrastructure protocol, not a reusable business graph. Context discovery
-creates an append-only Evidence Bundle, the analyzer assembles a complete task-specific
-draft, and the mandatory planning agent may propose revisions before product effects
-begin.
+creates an append-only Evidence Bundle, the analyzer may select bounded pre-plan
+investigation, and the mandatory planning agent produces or revises the complete
+task-specific draft before product effects begin.
 
 Assembly input is a bounded, provenance-bearing planner context:
 
@@ -148,6 +149,10 @@ These obligations add no vendor branches to the compiler or Temporal Workflow.
 The first compiled draft is not yet executable or immutable. A planner
 `workflow_change_required` result is a proposal: Tasker applies it to the draft through
 the assembler, recompiles the complete graph, and runs deterministic validation again.
+
+Bootstrap v3 is the only bootstrap runtime. The previous bootstrap implementation,
+precompiled-graph generation path, workflow IDs, and tests are deleted rather than
+supported in parallel.
 After the plan fits and optional operator review succeeds, the accepted compiled graph,
 run policy, and hashes become the frozen execution input only after Tasker persists an
 immutable receipt containing the task/run identity, graph hash, planning artifact and

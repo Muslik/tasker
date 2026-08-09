@@ -60,7 +60,7 @@ Do not create one queue per task or repository.
 Register two stable Workflow entry points with separate responsibilities:
 
 ```ts
-BootstrapWorkflowV2(input: BootstrapWorkflowInput): Promise<BootstrapWorkflowResult>
+BootstrapWorkflowV3(input: BootstrapWorkflowInput): Promise<BootstrapWorkflowResult>
 ExecutionWorkflowV2(input: ExecutionWorkflowInput): Promise<ExecutionWorkflowResult>
 ```
 
@@ -69,23 +69,26 @@ draft validation, and freeze. Execution receives the frozen graph and opaque con
 references only. A validated continuation starts a new Bootstrap or Execution Workflow
 according to whether it needs planning or is already frozen.
 
-Workflow input contains only bounded, immutable, non-secret data:
+Bootstrap input contains only bounded, immutable, non-secret data:
 
-- task/run IDs;
-- compiled graph and IR ABI version;
-- block/policy/prompt/skill hashes;
-- artifact references;
-- run policy, including plan-review and graph-revision-review settings;
-- provider/capability choices that are safe to persist.
+- task reference;
+- planning strategy and optional plan-review policy;
+- manual or automatic execution-start policy.
+
+It does not contain a graph, graph hash, repository path, or planning snapshot. Bootstrap
+creates those only after the managed worktree and Docker runtime exist. Execution input
+then receives the frozen compiled graph, IR ABI version, and opaque artifact/context
+references needed to interpret it.
 
 Workflow code may use Temporal Workflow APIs, pure helpers, and deterministic Tasker IR
 logic. It may not import filesystem, database, network, provider, Jira, Bitbucket, or
 process modules.
 
-Development histories created before Workflow v2 are unsupported and disposable. Once
-real pilot runs exist, use Worker Versioning and replay tests for histories created by
-released v2+ builds. IR/block versions protect frozen run data; they do not reintroduce
-parsers for deleted development schemas.
+Development histories created before Bootstrap v3 are unsupported and disposable. The
+v2 bootstrap implementation, workflow IDs, queue name, API path, and tests are deleted;
+there is no compatibility worker or fallback parser. Once real pilot runs exist, use
+Worker Versioning and replay tests for histories created by released builds. IR/block
+versions protect frozen run data; they do not reintroduce deleted development schemas.
 
 ## 4. Messages
 

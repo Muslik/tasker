@@ -170,6 +170,7 @@ export const DEFAULT_RUN_START_COMMAND = {
   settings: {
     planReview: 'required',
     planningStrategy: 'auto',
+    executionStart: 'manual',
   },
 } as const satisfies z.input<typeof RunStartCommandSchema>;
 

@@ -8,7 +8,6 @@ export const PrepareWorkspaceRequestSchema = z
     taskReference: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
-    workflowHash: ContentHashSchema,
     repositoryReference: z.string().min(1),
     repositoryPath: z.string().min(1),
   })
@@ -22,7 +21,6 @@ export const WorkspaceLocatorSchema = z
     taskReference: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
-    workflowHash: ContentHashSchema,
     repository: z
       .object({
         reference: z.string().min(1),

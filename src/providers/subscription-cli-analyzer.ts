@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -127,12 +127,9 @@ export class SubscriptionCliWorkflowAnalyzer {
     const directory = await mkdtemp(join(tmpdir(), 'tasker-workflow-analyzer-'));
     const schemaPath = join(directory, 'workflow-analyzer-output.schema.json');
     const providerConfigurationRoot = join(directory, 'provider-home');
-    const isolatedWorkspace = join(directory, 'workspace');
-
     try {
       if (profile.provider === 'codex') await prepareIsolatedCodexHome(providerConfigurationRoot);
       else await prepareIsolatedClaudeHome(providerConfigurationRoot);
-      await mkdir(isolatedWorkspace, { recursive: true });
       await writeFile(
         schemaPath,
         `${JSON.stringify(codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema), null, 2)}\n`,
@@ -155,7 +152,7 @@ export class SubscriptionCliWorkflowAnalyzer {
                 '--skip-git-repo-check',
                 '--dangerously-bypass-approvals-and-sandbox',
                 '--cd',
-                isolatedWorkspace,
+                request.repositoryPath,
                 '--output-schema',
                 schemaPath,
                 '--json',
@@ -175,7 +172,7 @@ export class SubscriptionCliWorkflowAnalyzer {
                 '--json-schema',
                 JSON.stringify(outputSchema),
               ],
-        cwd: isolatedWorkspace,
+        cwd: request.repositoryPath,
         workspaceAccess: 'read_only',
         env:
           profile.provider === 'codex'

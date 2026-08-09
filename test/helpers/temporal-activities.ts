@@ -3,7 +3,7 @@ import type { ExecutionWorkflowActivities } from '../../src/temporal/execution-k
 
 const HASH = '0'.repeat(64);
 
-export const testTemporalV2Activities = {
+export const testTemporalActivities = {
   prepareTaskWorkspace: (input) => {
     const workspace = {
       schemaVersion: 1 as const,
@@ -11,13 +11,12 @@ export const testTemporalV2Activities = {
       taskReference: input.taskReference,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
-      workflowHash: input.workflowHash,
       repository: {
         reference: 'fixture/repository',
         sourcePath: '/tasker/repositories/fixture',
         baseCommit: '0'.repeat(40),
       },
-      runnerId: 'temporal-v2-test',
+      runnerId: 'temporal-test',
       path: '/tasker/worktrees/fixture',
       branch: `tasker/${input.taskReference}`,
       preparedAt: '2026-08-09T00:00:00.000Z',
@@ -28,7 +27,7 @@ export const testTemporalV2Activities = {
         schemaVersion: 1 as const,
         operationId: `workspace:${workspace.workspaceId}:bootstrap@1`,
         workspaceId: workspace.workspaceId,
-        adapterId: 'temporal-v2-test',
+        adapterId: 'temporal-test',
         adapterVersion: '1',
         profile: 'fixture',
         files: [],
@@ -61,12 +60,57 @@ export const testTemporalV2Activities = {
         preparedAt: '2026-08-09T00:00:00.000Z',
         updatedAt: '2026-08-09T00:00:00.000Z',
       },
-      planningSnapshot: {
-        artifactId: `planning-snapshot:${input.taskReference}:${input.workflowHash}`,
-        checksum: HASH,
-      },
     });
   },
+  assembleTaskWorkflowDraft: (input) =>
+    Promise.resolve({
+      workflowHash: 'a'.repeat(64),
+      graph: {
+        metadata: {
+          compilerVersion: 4 as const,
+          irVersion: 'm2' as const,
+          workflowId: 'bootstrap-v3-fixture',
+          workflowVersion: 1,
+          references: {
+            predicates: ['review.completed@1'],
+            stepTypes: ['fixture.implement@1'],
+            waits: ['code_review@1'],
+          },
+        },
+        root: {
+          kind: 'sequence' as const,
+          id: 'delivery',
+          children: [
+            {
+              kind: 'step' as const,
+              id: 'implement',
+              uses: 'fixture.implement@1',
+              activityDelivery: { kind: 'workspace_reconciled' as const },
+              with: {},
+            },
+            {
+              kind: 'wait' as const,
+              id: 'code-review',
+              for: 'code_review@1',
+              resolutionMapping: {
+                discriminator: 'decision',
+                cases: { approved: { 'review.completed@1': true } },
+              },
+            },
+            { kind: 'finalize' as const, id: 'accepted', outcome: 'accepted' },
+          ],
+        },
+      },
+      planningSnapshot: {
+        artifactId: `planning-snapshot:${input.taskReference}:draft`,
+        checksum: HASH,
+      },
+      evidenceBundle: {
+        artifactId: `evidence-bundle:${input.taskReference}:r1:test`,
+        checksum: HASH,
+        revision: 1,
+      },
+    }),
   planTaskImplementation: (input) =>
     Promise.resolve({
       status: 'ready' as const,
@@ -88,12 +132,12 @@ export const testTemporalV2Activities = {
         plannerVersion: 'implementation-planner@2',
         profile: 'deterministic',
         profileSha256: HASH,
-        cliVersion: 'temporal-v2-test@1',
+        cliVersion: 'temporal-test@1',
         model: 'deterministic',
         effort: 'low' as const,
         serviceTier: null,
         strategy: input.requestedStrategy === 'ralplan' ? ('ralplan' as const) : ('fast' as const),
-        sessionId: `temporal-v2-test:${input.commandId}`,
+        sessionId: `temporal-test:${input.commandId}`,
         promptHash: HASH,
         durationMs: 0,
         usage: {

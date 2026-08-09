@@ -27,7 +27,7 @@ import {
   executionWorkflowStateQuery,
   resolveExecutionWaitUpdate,
 } from './execution-kernel/messages.js';
-import { bootstrapWorkflowV2 } from './workflows/bootstrap-workflow-v2.js';
+import { bootstrapWorkflowV3 } from './workflows/bootstrap-workflow-v3.js';
 import type { executionWorkflowV2 } from './workflows/execution-workflow-v2.js';
 import type { TaskRunPublicState } from './public-state.js';
 export type TaskRunError =
@@ -52,7 +52,7 @@ export interface TemporalClientConfiguration {
   readonly updateTimeoutMs: number;
 }
 
-export const TASKER_TEMPORAL_TASK_QUEUE = 'tasker-v2';
+export const TASKER_TEMPORAL_TASK_QUEUE = 'tasker-v3';
 
 export const DEFAULT_TEMPORAL_CLIENT_CONFIGURATION = {
   address: '127.0.0.1:7233',
@@ -62,7 +62,7 @@ export const DEFAULT_TEMPORAL_CLIENT_CONFIGURATION = {
   updateTimeoutMs: 10_000,
 } as const satisfies TemporalClientConfiguration;
 
-const bootstrapWorkflowIdFor = (taskReference: string): string => `tasker:v2:${taskReference}`;
+const bootstrapWorkflowIdFor = (taskReference: string): string => `tasker:v3:${taskReference}`;
 
 const messageFrom = (error: unknown): string => {
   const messages: string[] = [];
@@ -87,9 +87,9 @@ const sameImmutableInput = (
   state: BootstrapWorkflowPublicState,
   input: BootstrapWorkflowInput,
 ): boolean =>
-  state.workflowHash === input.workflowHash &&
   state.settings.planReview === input.settings.planReview &&
-  state.settings.planningStrategy === input.settings.planningStrategy;
+  state.settings.planningStrategy === input.settings.planningStrategy &&
+  state.settings.executionStart === input.settings.executionStart;
 
 export class TemporalTaskRunService implements TaskRunService {
   public constructor(
@@ -102,7 +102,7 @@ export class TemporalTaskRunService implements TaskRunService {
   ): Promise<Outcome<TaskRunPublicState, TaskRunError>> {
     const input = BootstrapWorkflowInputSchema.parse(inputValue);
     try {
-      await this.client.workflow.start(bootstrapWorkflowV2, {
+      await this.client.workflow.start(bootstrapWorkflowV3, {
         workflowId: bootstrapWorkflowIdFor(input.taskReference),
         taskQueue: this.configuration.taskQueue,
         args: [input],
@@ -110,7 +110,6 @@ export class TemporalTaskRunService implements TaskRunService {
           tasker: {
             schemaVersion: input.schemaVersion,
             taskReference: input.taskReference,
-            workflowHash: input.workflowHash,
             settings: input.settings,
           },
         },
@@ -163,7 +162,7 @@ export class TemporalTaskRunService implements TaskRunService {
 
     try {
       if (bootstrap.value.executionWorkflowId === null) {
-        const handle = this.client.workflow.getHandle<typeof bootstrapWorkflowV2>(
+        const handle = this.client.workflow.getHandle<typeof bootstrapWorkflowV3>(
           bootstrapWorkflowIdFor(taskReference),
         );
         await this.client.withDeadline(Date.now() + this.configuration.updateTimeoutMs, () =>
@@ -194,7 +193,7 @@ export class TemporalTaskRunService implements TaskRunService {
   private async readBootstrap(
     taskReference: string,
   ): Promise<Outcome<BootstrapWorkflowPublicState | null, TaskRunError>> {
-    const handle = this.client.workflow.getHandle<typeof bootstrapWorkflowV2>(
+    const handle = this.client.workflow.getHandle<typeof bootstrapWorkflowV3>(
       bootstrapWorkflowIdFor(taskReference),
     );
     try {

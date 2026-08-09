@@ -174,6 +174,7 @@ export class WorkflowDraftRevisionCoordinator {
     for (const target of targets.value) {
       const discovered = await this.contextDiscovery.discover({
         taskReference: input.taskReference,
+        operationId: input.operationId,
         taskSnapshot,
         plannerContext: analyzerContext.plannerContext,
         repositoryReference: target.reference,

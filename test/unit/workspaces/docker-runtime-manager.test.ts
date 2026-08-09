@@ -97,7 +97,6 @@ describe('Docker workspace runtime manager', () => {
       taskReference: 'AVIA-12045',
       workflowId: 'tasker:AVIA-12045',
       workflowRunId: 'run-1',
-      workflowHash: 'b'.repeat(64),
       repository: {
         reference: 'onetwotrip/front-avia',
         sourcePath: repositoryPath,

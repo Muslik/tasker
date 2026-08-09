@@ -421,6 +421,7 @@ export class ContextDiscoveryService {
 
   public async discover(input: {
     readonly taskReference: string;
+    readonly operationId: string;
     readonly taskSnapshot: JsonValue;
     readonly plannerContext: JsonValue;
     readonly repositoryReference: string;
@@ -437,7 +438,7 @@ export class ContextDiscoveryService {
         capturedAt,
         observedVersion: taskObservedVersion(input.taskSnapshot, taskContentSha256),
         mediaType: 'application/json',
-        introducedBy: { phase: 'context_discovery', operationId: null },
+        introducedBy: { phase: 'context_discovery', operationId: input.operationId },
         content: input.taskSnapshot,
       }),
       evidenceEntry({
@@ -447,7 +448,7 @@ export class ContextDiscoveryService {
         capturedAt,
         observedVersion: checksumString(JSON.stringify(input.plannerContext)),
         mediaType: 'application/json',
-        introducedBy: { phase: 'context_discovery', operationId: null },
+        introducedBy: { phase: 'context_discovery', operationId: input.operationId },
         content: input.plannerContext,
       }),
       evidenceEntry({
@@ -457,7 +458,7 @@ export class ContextDiscoveryService {
         capturedAt,
         observedVersion: repository.inventorySha256,
         mediaType: 'application/json',
-        introducedBy: { phase: 'context_discovery', operationId: null },
+        introducedBy: { phase: 'context_discovery', operationId: input.operationId },
         content: JsonValueSchema.parse({
           repositoryReference: input.repositoryReference,
           files: repository.files,
@@ -474,7 +475,7 @@ export class ContextDiscoveryService {
           capturedAt,
           observedVersion: document.contentSha256,
           mediaType: 'text/plain',
-          introducedBy: { phase: 'context_discovery', operationId: null },
+          introducedBy: { phase: 'context_discovery', operationId: input.operationId },
           content: document.content,
         }),
       ),

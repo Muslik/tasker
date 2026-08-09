@@ -1,10 +1,5 @@
 import type { JiraIssueService, JiraWorkflowPlanningSource } from '../integrations/index.js';
-import {
-  createWorkflowAnalyzerContext,
-  findTaskFixture,
-  TaskFixtureSchema,
-  type EvidenceBundle,
-} from '../planning/index.js';
+import { findTaskFixture, TaskFixtureSchema, type EvidenceBundle } from '../planning/index.js';
 import type {
   WorkflowAnalyzerFailure,
   WorkflowAnalyzerRequest,
@@ -12,21 +7,11 @@ import type {
 } from '../providers/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema, type JsonValue } from '../workflow/index.js';
-import {
-  WorkflowGenerationSubjectSchema,
-  type WorkflowGenerationSubject,
-  type WorkflowResponse,
-} from './m1-contracts.js';
+import { WorkflowGenerationSubjectSchema, type WorkflowGenerationSubject } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import type { EvidenceBundleStoreError } from './evidence-bundle.js';
 
 export type { WorkflowGenerationSubject } from './m1-contracts.js';
-
-export type WorkflowGenerationResult = Outcome<WorkflowResponse, M1ServiceError>;
-
-export interface WorkflowGenerator {
-  generate(taskReference: string): Promise<WorkflowGenerationResult>;
-}
 
 export interface WorkflowAnalyzer {
   analyze(
@@ -37,6 +22,7 @@ export interface WorkflowAnalyzer {
 export interface WorkflowContextDiscovery {
   discover(input: {
     readonly taskReference: string;
+    readonly operationId: string;
     readonly taskSnapshot: JsonValue;
     readonly plannerContext: JsonValue;
     readonly repositoryReference: string;
@@ -145,77 +131,6 @@ export class WorkflowGenerationSubjectSource {
     }
 
     return taskFromJira(taskReference, source.value);
-  }
-}
-
-export class CodexWorkflowGenerator implements WorkflowGenerator {
-  private readonly inFlight = new Map<string, Promise<WorkflowGenerationResult>>();
-
-  public constructor(
-    private readonly service: M1WorkflowService,
-    private readonly subjects: WorkflowGenerationSubjectSource,
-    private readonly analyzer: WorkflowAnalyzer | undefined,
-    private readonly contextDiscovery: WorkflowContextDiscovery,
-  ) {}
-
-  public generate(taskReference: string): Promise<WorkflowGenerationResult> {
-    const current = this.inFlight.get(taskReference);
-    if (current !== undefined) return current;
-
-    const generation = this.generateOnce(taskReference).finally(() => {
-      this.inFlight.delete(taskReference);
-    });
-    this.inFlight.set(taskReference, generation);
-    return generation;
-  }
-
-  private async generateOnce(taskReference: string): Promise<WorkflowGenerationResult> {
-    const existing = this.service.read(taskReference);
-    if (!existing.ok) return existing;
-    if (existing.value?.status === 'ready') return { ok: true, value: existing.value };
-
-    const subject = this.subjects.resolve(taskReference);
-    if (!subject.ok) return subject;
-
-    const analyzerContext = createWorkflowAnalyzerContext(
-      subject.value.task,
-      subject.value.taskSnapshot,
-    );
-    const evidence = await this.contextDiscovery.discover({
-      taskReference,
-      taskSnapshot: subject.value.taskSnapshot,
-      plannerContext: analyzerContext.plannerContext,
-      repositoryReference: subject.value.task.repository,
-      repositoryPath: subject.value.repositoryPath,
-    });
-    if (!evidence.ok) {
-      return err({
-        kind: 'generation_blocked',
-        taskReference,
-        reason: `Context discovery failed: ${evidence.error.kind}`,
-      });
-    }
-    if (this.analyzer === undefined) return this.service.generateTask(subject.value.task);
-
-    const analyzed = await this.analyzer.analyze({
-      ...analyzerContext,
-      repositoryPath: subject.value.repositoryPath,
-      repositoryReference: subject.value.task.repository,
-      evidenceBundle: evidence.value.bundle,
-    });
-    if (!analyzed.ok) {
-      return err({
-        kind: 'provider_failure',
-        provider: 'subscription_cli',
-        failure: analyzed.error,
-      });
-    }
-
-    return this.service.generateFromAnalyzerOutputForTask(
-      subject.value.task,
-      analyzed.value.output,
-      analyzed.value.receipt,
-    );
   }
 }
 

@@ -35,13 +35,12 @@ import {
 } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
-import { providerFailureSummary, type WorkflowGenerator } from './workflow-generator.js';
+import { providerFailureSummary } from './workflow-generator.js';
 import {
   type TaskRunError,
   type TaskRunPublicState,
   type TaskRunService,
 } from '../temporal/index.js';
-import { CompiledWorkflowSchema } from '../workflow/index.js';
 
 const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
 const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
@@ -59,7 +58,6 @@ export interface BuildM1ApiOptions {
   readonly service: M1WorkflowService;
   readonly cockpitDirectory?: string | undefined;
   readonly logger?: boolean | undefined;
-  readonly workflowGenerator?: WorkflowGenerator | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly workflowContinuation?: WorkflowContinuationCoordinator | undefined;
@@ -175,10 +173,17 @@ const applyTemporalRunToTask = (
     case 'waiting': {
       const codeReview = run.wait.waitKind === 'code_review@1';
       const planReview = run.wait.waitKind === 'plan.approved@1';
+      const executionStart = run.wait.waitKind === 'execution.start@1';
       return OperatorTaskSummarySchema.parse({
         ...task,
-        status: codeReview ? 'code_review' : planReview ? 'plan_review' : 'waiting',
-        attention: 'operator',
+        status: codeReview
+          ? 'code_review'
+          : planReview
+            ? 'plan_review'
+            : executionStart
+              ? 'planned'
+              : 'waiting',
+        attention: executionStart ? 'none' : 'operator',
         currentStage:
           run.wait.reason ??
           (codeReview
@@ -582,37 +587,22 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
-    const command = RunStartCommandSchema.safeParse(
-      request.body === undefined || request.body === null
-        ? DEFAULT_RUN_START_COMMAND
-        : request.body,
-    );
-    if (!command.success) {
-      return reply.code(400).send(apiError('invalid_run_settings', 'Run settings are invalid'));
-    }
-    const workflow = options.service.read(params.data.fixtureId);
-    if (!workflow.ok) return sendServiceError(reply, workflow.error);
-    if (workflow.value === null) {
-      return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
-    }
-    if (workflow.value.status !== 'ready') {
+    const current = await temporalRunService.read(params.data.fixtureId);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.runtime !== 'bootstrap' ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'execution.start@1'
+    ) {
       return reply
         .code(409)
-        .send(apiError('workflow_not_executable', 'Only a valid compiled workflow can start'));
+        .send(apiError('workflow_not_ready', 'The frozen workflow is not waiting to execute'));
     }
-    const graph = CompiledWorkflowSchema.safeParse(workflow.value.view.workflow.graph);
-    const workflowHash = workflow.value.view.workflow.graphHash;
-    if (!graph.success || workflowHash === null) {
-      return reply
-        .code(500)
-        .send(apiError('workflow_projection_corrupt', 'Compiled workflow graph is invalid'));
-    }
-    const started = await temporalRunService.start({
-      schemaVersion: 2,
-      taskReference: params.data.fixtureId,
-      workflowHash,
-      graph: graph.data,
-      settings: command.data.settings,
+    const started = await temporalRunService.resolveWait(params.data.fixtureId, {
+      nodeId: current.value.wait.nodeId,
+      waitKind: current.value.wait.waitKind,
+      resolution: { decision: 'start' },
     });
     return started.ok
       ? sendTemporalState(reply, params.data.fixtureId, started.value)
@@ -856,13 +846,22 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
-    const result =
-      options.workflowGenerator === undefined
-        ? options.service.generate(params.data.fixtureId)
-        : await options.workflowGenerator.generate(params.data.fixtureId);
-    if (!result.ok) return sendServiceError(reply, result.error);
-
-    return reply.send(WorkflowResponseSchema.parse(result.value));
+    const command = RunStartCommandSchema.safeParse(
+      request.body === undefined || request.body === null
+        ? DEFAULT_RUN_START_COMMAND
+        : request.body,
+    );
+    if (!command.success) {
+      return reply.code(400).send(apiError('invalid_run_settings', 'Run settings are invalid'));
+    }
+    const started = await temporalRunService.start({
+      schemaVersion: 3,
+      taskReference: params.data.fixtureId,
+      settings: command.data.settings,
+    });
+    return started.ok
+      ? sendTemporalState(reply, params.data.fixtureId, started.value)
+      : sendTemporalRunError(reply, started.error);
   });
 
   api.get('/api/workflows/:fixtureId/graph.json', async (request, reply) => {

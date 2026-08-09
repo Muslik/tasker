@@ -131,12 +131,6 @@ const subjects = new control.WorkflowGenerationSubjectSource(
 );
 const evidenceBundles = new control.EvidenceBundleStore(ledger.repository, shared.systemClock);
 const contextDiscovery = new control.ContextDiscoveryService(evidenceBundles, shared.systemClock);
-const workflowGenerator = new control.CodexWorkflowGenerator(
-  service,
-  subjects,
-  undefined,
-  contextDiscovery,
-);
 const deterministicPlanner = new providers.DeterministicImplementationPlanner();
 const e2eAnalyzer = {
   analyze: async (request) => {
@@ -260,6 +254,14 @@ const workflowDraftRevisions = new control.WorkflowDraftRevisionCoordinator(
   repositoryCatalog,
 );
 const workflowFreezes = new control.WorkflowFreezeStore(ledger.repository, shared.systemClock);
+const workflowDrafts = new control.WorkflowDraftAssembler(
+  service,
+  subjects,
+  undefined,
+  contextDiscovery,
+  evidenceBundles,
+  implementationPlanning,
+);
 const workflowContinuation = control.createWorkflowContinuationCoordinator({
   ledger: ledger.repository,
   clock: shared.systemClock,
@@ -313,6 +315,7 @@ const dockerRuntimeFor = (workspace) => ({
 
 const workflowActivities = {
   ...planningActivity,
+  ...temporal.createWorkflowDraftAssemblyActivity(workflowDrafts),
   ...temporal.createWorkflowDraftRevisionActivity(workflowDraftRevisions, implementationPlanning),
   ...temporal.createWorkflowFreezeActivity(workflowFreezes),
   prepareTaskWorkspace: async (input) => {
@@ -321,14 +324,13 @@ const workflowActivities = {
       throw new Error(`missing subject for ${input.taskReference}`);
     }
     const workspaceId = workspaceIdFor(input.taskReference);
-    const workspacePath = resolve('.tasker/e2e-workspaces', input.taskReference);
+    const workspacePath = subject.value.repositoryPath;
     const workspace = {
       schemaVersion: 1,
       workspaceId,
       taskReference: input.taskReference,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
-      workflowHash: input.workflowHash,
       repository: {
         reference: subject.value.task.repository,
         sourcePath: subject.value.repositoryPath,
@@ -339,18 +341,6 @@ const workflowActivities = {
       branch: `tasker/${input.taskReference}`,
       preparedAt: '2026-08-03T00:00:00.000Z',
     };
-    const planningSnapshot = implementationPlanning.createRunSnapshot(
-      input.taskReference,
-      input.workflowHash,
-      {
-        workspaceId,
-        reference: subject.value.task.repository,
-        path: workspace.path,
-      },
-    );
-    if (!planningSnapshot.ok) {
-      throw new Error(`planning snapshot failed: ${planningSnapshot.error.kind}`);
-    }
     return {
       workspace,
       bootstrap: {
@@ -364,7 +354,6 @@ const workflowActivities = {
         completedAt: '2026-08-03T00:00:00.000Z',
       },
       runtime: dockerRuntimeFor(workspace),
-      planningSnapshot: planningSnapshot.value,
     };
   },
   runExecutionBlock: async (input) => ({
@@ -387,7 +376,6 @@ const workerRun = worker.run();
 const api = control.buildM1Api({
   service,
   jiraIssueService,
-  workflowGenerator,
   implementationPlanning,
   workflowContinuation,
   temporalRunService,

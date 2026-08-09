@@ -174,7 +174,7 @@ describe('subscription CLI workflow analyzer', () => {
     });
     const executionRequest = runner.requests[1];
     expect(executionRequest?.command).toBe('codex');
-    expect(executionRequest?.cwd).toMatch(/tasker-workflow-analyzer-.+\/workspace$/u);
+    expect(executionRequest?.cwd).toBe('/tmp/repository');
     expect(executionRequest?.env?.CODEX_HOME).toMatch(
       /tasker-workflow-analyzer-.+\/provider-home$/u,
     );

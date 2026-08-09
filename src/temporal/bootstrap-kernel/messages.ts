@@ -7,10 +7,10 @@ import type {
 } from './contracts.js';
 
 export const bootstrapWorkflowStateQuery = defineQuery<BootstrapWorkflowPublicState>(
-  'tasker.bootstrapWorkflowV2.state',
+  'tasker.bootstrapWorkflowV3.state',
 );
 
 export const resolveBootstrapWaitUpdate = defineUpdate<
   ResolveBootstrapWaitReceipt,
   [ResolveBootstrapWaitCommand]
->('tasker.bootstrapWorkflowV2.resolveWait');
+>('tasker.bootstrapWorkflowV3.resolveWait');

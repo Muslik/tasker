@@ -11,6 +11,7 @@ import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/e
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
 import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
+import { WorkflowDraftAssembler } from '../control-plane/workflow-draft-assembly.js';
 import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
@@ -88,6 +89,7 @@ import {
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
+import { createWorkflowDraftAssemblyActivity } from './activities/workflow-draft-assembly-activity.js';
 import { createWorkflowDraftRevisionActivity } from './activities/workflow-draft-revision-activity.js';
 import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
@@ -242,6 +244,14 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ? new DeterministicImplementationPlanner()
       : new SubscriptionCliImplementationPlanner(temporalCommandRunner),
   });
+  const workflowDrafts = new WorkflowDraftAssembler(
+    workflowService,
+    subjects,
+    workflowAnalyzer,
+    contextDiscovery,
+    evidenceBundles,
+    planning,
+  );
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
   const reviewEvidence = new PullRequestReviewEvidenceStore(ledger.repository, systemClock);
   const mutationRecovery = new WorkspaceMutationRecoveryStore(
@@ -276,21 +286,15 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {
-      ...createWorkspaceActivity(
-        subjects,
-        workspaces,
-        bootstrap,
-        dockerRuntimes,
-        {
-          resolve: (repositoryReference) =>
-            resolveWorkspaceRuntimePolicy(
-              harnessPack.company,
-              harnessPack.projects.find((project) => project.repository === repositoryReference) ??
-                null,
-            ),
-        },
-        planning,
-      ),
+      ...createWorkspaceActivity(subjects, workspaces, bootstrap, dockerRuntimes, {
+        resolve: (repositoryReference) =>
+          resolveWorkspaceRuntimePolicy(
+            harnessPack.company,
+            harnessPack.projects.find((project) => project.repository === repositoryReference) ??
+              null,
+          ),
+      }),
+      ...createWorkflowDraftAssemblyActivity(workflowDrafts),
       ...createPlanningActivity(planning),
       ...createWorkflowDraftRevisionActivity(workflowDraftRevisions, planning),
       ...createWorkflowFreezeActivity(workflowFreezes),

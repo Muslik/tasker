@@ -799,6 +799,7 @@ export class WorkflowContinuationCoordinator {
     const analyzerContext = createWorkflowAnalyzerContext(fixture, taskSnapshot);
     const evidence = await this.contextDiscovery.discover({
       taskReference: fixture.fixtureId,
+      operationId: `continuation:${fixture.fixtureId}`,
       taskSnapshot,
       plannerContext: analyzerContext.plannerContext,
       repositoryReference: fixture.repository,

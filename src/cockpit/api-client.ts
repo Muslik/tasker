@@ -255,32 +255,32 @@ export const retryWorkflowContinuation = async (
   return parsed.data;
 };
 
-export const generateWorkflow = async (fixtureId: string): Promise<WorkflowResponse> => {
+export const generateWorkflow = async (
+  fixtureId: string,
+  commandInput: RunStartCommand,
+): Promise<ExecutionRunView> => {
+  const command = RunStartCommandSchema.parse(commandInput);
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/generate`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(command),
   });
 
   if (!result.response.ok) {
     throw failureFrom(result);
   }
 
-  const parsed = WorkflowResponseSchema.safeParse(result.body);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) {
-    throw new Error('Generated workflow does not match the cockpit contract');
+    throw new Error('Bootstrap run does not match the cockpit contract');
   }
 
   return parsed.data;
 };
 
-export const startWorkflow = async (
-  fixtureId: string,
-  commandInput: RunStartCommand,
-): Promise<ExecutionRunView> => {
-  const command = RunStartCommandSchema.parse(commandInput);
+export const startWorkflow = async (fixtureId: string): Promise<ExecutionRunView> => {
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/start`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(command),
   });
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);

@@ -10,13 +10,14 @@ import {
 
 import type { JsonValue } from '../../workflow/index.js';
 import type {
-  BootstrapExecutionContext,
+  BootstrapDraftState,
   BootstrapPlanningState,
   BootstrapStageStatus,
   BootstrapWorkflowActivities,
   BootstrapWorkflowInput,
   BootstrapWorkflowPublicState,
   BootstrapWorkflowResult,
+  BootstrapWorkspaceContext,
   PlanningActivityCommand,
   ResolveBootstrapWaitCommand,
 } from '../bootstrap-kernel/contracts.js';
@@ -37,9 +38,17 @@ const activities = proxyActivities<BootstrapWorkflowActivities>({
   },
 });
 
-const STAGES = ['workspace', 'planning', 'plan_review', 'freeze'] as const;
+const STAGES = [
+  'workspace',
+  'context',
+  'planning',
+  'plan_review',
+  'freeze',
+  'execution_start',
+] as const;
 const MAX_AUTOMATIC_DRAFT_REVISIONS = 3;
 
+type Stage = (typeof STAGES)[number];
 type AvailableBootstrapState = Extract<
   BootstrapWorkflowPublicState,
   { readonly status: 'running' | 'waiting' | 'completed' }
@@ -89,13 +98,12 @@ const clarificationAnswersFrom = (
   return answers.length === resolution.answers.length && answers.length > 0 ? answers : null;
 };
 
-export async function bootstrapWorkflowV2(
+export async function bootstrapWorkflowV3(
   input: BootstrapWorkflowInput,
 ): Promise<BootstrapWorkflowResult> {
   const execution = workflowInfo();
-  let activeGraph = input.graph;
-  let activeWorkflowHash = input.workflowHash;
-  let executionContext: BootstrapExecutionContext | null = null;
+  let workspaceContext: BootstrapWorkspaceContext | null = null;
+  let draft: BootstrapDraftState | null = null;
   let planning: BootstrapPlanningState | null = null;
   let pendingResolution: ResolveBootstrapWaitCommand | null = null;
   let planningCommandSequence = 0;
@@ -104,18 +112,20 @@ export async function bootstrapWorkflowV2(
     STAGES.map((stage) => [stage, 'planned' as const]),
   );
   const attempts: Record<string, number> = {};
+  const currentWorkspaceContext = (): BootstrapWorkspaceContext | null => workspaceContext;
+  const currentDraft = (): BootstrapDraftState | null => draft;
   const currentPlanning = (): BootstrapPlanningState | null => planning;
-  const currentExecutionContext = (): BootstrapExecutionContext | null => executionContext;
   let state: AvailableBootstrapState = {
     runtime: 'bootstrap',
-    schemaVersion: 2,
+    schemaVersion: 3,
     taskReference: input.taskReference,
     workflowId: execution.workflowId,
     runId: execution.runId,
-    workflowHash: activeWorkflowHash,
+    workflowHash: null,
     settings: input.settings,
     phase: 'workspace',
-    executionContext: null,
+    workspaceContext: null,
+    draft: null,
     planning: null,
     freezeReceipt: null,
     executionWorkflowId: null,
@@ -143,16 +153,14 @@ export async function bootstrapWorkflowV2(
     return { nodeId: command.nodeId, waitKind: command.waitKind, accepted: true };
   });
 
-  const markRunning = (
-    stage: (typeof STAGES)[number],
-    phase: AvailableBootstrapState['phase'],
-  ): void => {
+  const markRunning = (stage: Stage, phase: AvailableBootstrapState['phase']): void => {
     nodeStates[stage] = 'running';
     state = {
       ...state,
-      workflowHash: activeWorkflowHash,
+      workflowHash: draft?.workflowHash ?? null,
       phase,
-      executionContext,
+      workspaceContext,
+      draft,
       planning,
       status: 'running',
       currentNodeId: stage,
@@ -161,16 +169,13 @@ export async function bootstrapWorkflowV2(
     };
   };
 
-  const openWait = async (
-    stage: (typeof STAGES)[number],
-    waitKind: string,
-    reason?: string,
-  ): Promise<JsonValue> => {
+  const openWait = async (stage: Stage, waitKind: string, reason?: string): Promise<JsonValue> => {
     nodeStates[stage] = 'waiting';
     state = {
       ...state,
-      workflowHash: activeWorkflowHash,
-      executionContext,
+      workflowHash: draft?.workflowHash ?? null,
+      workspaceContext,
+      draft,
       planning,
       status: 'waiting',
       currentNodeId: stage,
@@ -189,33 +194,49 @@ export async function bootstrapWorkflowV2(
     return resolution;
   };
 
-  const prepareWorkspace = async (): Promise<void> => {
-    for (;;) {
-      markRunning('workspace', 'workspace');
-      attempts.workspace = (attempts.workspace ?? 0) + 1;
-      try {
-        executionContext = await activities.prepareTaskWorkspace({
-          taskReference: input.taskReference,
-          workflowId: execution.workflowId,
-          workflowRunId: execution.runId,
-          workflowHash: activeWorkflowHash,
-        });
-        nodeStates.workspace = 'succeeded';
-        return;
-      } catch (error) {
-        if (isCancellation(error)) throw error;
-        await openWait('workspace', 'workspace.retry@1', 'Workspace preparation failed');
-      }
+  for (;;) {
+    markRunning('workspace', 'workspace');
+    attempts.workspace = (attempts.workspace ?? 0) + 1;
+    try {
+      workspaceContext = await activities.prepareTaskWorkspace({
+        taskReference: input.taskReference,
+        workflowId: execution.workflowId,
+        workflowRunId: execution.runId,
+      });
+      nodeStates.workspace = 'succeeded';
+      break;
+    } catch (error) {
+      if (isCancellation(error)) throw error;
+      await openWait('workspace', 'workspace.retry@1', 'Workspace preparation failed');
     }
-  };
+  }
+
+  for (;;) {
+    markRunning('context', 'context');
+    attempts.context = (attempts.context ?? 0) + 1;
+    try {
+      draft = await activities.assembleTaskWorkflowDraft({
+        taskReference: input.taskReference,
+        workflowId: execution.workflowId,
+        workflowRunId: execution.runId,
+        operationId: `${execution.workflowId}:${execution.runId}:draft:initial`,
+        workspace: workspaceContext.workspace,
+      });
+      nodeStates.context = 'succeeded';
+      break;
+    } catch (error) {
+      if (isCancellation(error)) throw error;
+      await openWait('context', 'context.retry@1', 'Context discovery or draft assembly failed');
+    }
+  }
+
+  const preparedWorkspaceContext = workspaceContext;
+  let workingDraft = draft;
 
   const runPlanning = async (initialCommand: PlanningActivityCommand): Promise<void> => {
     let command = initialCommand;
     let automaticRevisionCount = 0;
     for (;;) {
-      if (executionContext === null) {
-        throw ApplicationFailure.nonRetryable('Planning has no prepared workspace');
-      }
       planningCommandSequence += 1;
       const commandId = `${execution.workflowId}:${execution.runId}:planning:${String(planningCommandSequence)}`;
       let result: BootstrapPlanningState;
@@ -225,8 +246,8 @@ export async function bootstrapWorkflowV2(
         try {
           result = await activities.planTaskImplementation({
             taskReference: input.taskReference,
-            workflowHash: activeWorkflowHash,
-            planningSnapshot: executionContext.planningSnapshot,
+            workflowHash: workingDraft.workflowHash,
+            planningSnapshot: workingDraft.planningSnapshot,
             commandId,
             requestedStrategy: input.settings.planningStrategy,
             command,
@@ -238,7 +259,9 @@ export async function bootstrapWorkflowV2(
         }
       }
       planning = result;
-      state = { ...state, planning };
+      workingDraft = { ...workingDraft, evidenceBundle: result.evidenceBundle };
+      draft = workingDraft;
+      state = { ...state, planning, draft: workingDraft };
       if (result.status === 'ready') {
         nodeStates.planning = 'succeeded';
         return;
@@ -276,17 +299,18 @@ export async function bootstrapWorkflowV2(
           taskReference: input.taskReference,
           workflowId: execution.workflowId,
           workflowRunId: execution.runId,
-          currentWorkflowHash: activeWorkflowHash,
+          currentWorkflowHash: workingDraft.workflowHash,
           operationId: `${execution.workflowId}:${execution.runId}:draft-revision:${String(draftRevisionSequence)}`,
           request: result.request,
-          workspace: executionContext.workspace,
+          workspace: preparedWorkspaceContext.workspace,
         });
-        activeGraph = revised.graph;
-        activeWorkflowHash = revised.workflowHash;
-        executionContext = {
-          ...executionContext,
+        workingDraft = {
+          ...workingDraft,
+          graph: revised.graph,
+          workflowHash: revised.workflowHash,
           planningSnapshot: revised.planningSnapshot,
         };
+        draft = workingDraft;
         automaticRevisionCount += 1;
         command = {
           kind: 'revision',
@@ -311,7 +335,6 @@ export async function bootstrapWorkflowV2(
     }
   };
 
-  await prepareWorkspace();
   await runPlanning({ kind: 'initial' });
 
   let approval: { readonly kind: 'automatic' | 'operator_approved' };
@@ -343,10 +366,15 @@ export async function bootstrapWorkflowV2(
     }
   }
 
-  const acceptedExecutionContext = currentExecutionContext();
+  const acceptedWorkspaceContext = currentWorkspaceContext();
+  const acceptedDraft = currentDraft();
   const acceptedPlanning = currentPlanning();
-  if (acceptedExecutionContext === null || acceptedPlanning?.status !== 'ready') {
-    throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted planning state');
+  if (
+    acceptedWorkspaceContext === null ||
+    acceptedDraft === null ||
+    acceptedPlanning?.status !== 'ready'
+  ) {
+    throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted draft and plan');
   }
   let freezeReceipt;
   for (;;) {
@@ -357,10 +385,10 @@ export async function bootstrapWorkflowV2(
         taskReference: input.taskReference,
         workflowId: execution.workflowId,
         workflowRunId: execution.runId,
-        workflowHash: activeWorkflowHash,
+        workflowHash: acceptedDraft.workflowHash,
         planningAttempt: acceptedPlanning.attempt,
         planningArtifactId: acceptedPlanning.artifactId,
-        planningSnapshot: acceptedExecutionContext.planningSnapshot,
+        planningSnapshot: acceptedDraft.planningSnapshot,
         evidenceBundle: acceptedPlanning.evidenceBundle,
         approval,
       });
@@ -372,6 +400,16 @@ export async function bootstrapWorkflowV2(
     }
   }
 
+  if (input.settings.executionStart === 'manual') {
+    await openWait(
+      'execution_start',
+      'execution.start@1',
+      'Workflow and plan are ready for execution',
+    );
+  } else {
+    nodeStates.execution_start = 'skipped';
+  }
+
   const executionWorkflowId = `tasker:execution:v2:${input.taskReference}`;
   const child = await startChild(executionWorkflowV2, {
     workflowId: executionWorkflowId,
@@ -379,18 +417,18 @@ export async function bootstrapWorkflowV2(
       {
         schemaVersion: 2,
         taskReference: input.taskReference,
-        workflowHash: activeWorkflowHash,
-        graph: activeGraph,
+        workflowHash: acceptedDraft.workflowHash,
+        graph: acceptedDraft.graph,
         contextReferences: [
           {
             kind: 'workspace',
-            reference: acceptedExecutionContext.workspace.workspaceId,
-            hash: acceptedExecutionContext.workspace.repository.baseCommit,
+            reference: acceptedWorkspaceContext.workspace.workspaceId,
+            hash: acceptedWorkspaceContext.workspace.repository.baseCommit,
           },
           {
             kind: 'planning_snapshot',
-            reference: acceptedExecutionContext.planningSnapshot.artifactId,
-            hash: acceptedExecutionContext.planningSnapshot.checksum,
+            reference: acceptedDraft.planningSnapshot.artifactId,
+            hash: acceptedDraft.planningSnapshot.checksum,
           },
         ],
       },
@@ -399,15 +437,16 @@ export async function bootstrapWorkflowV2(
       taskerExecution: {
         schemaVersion: 2,
         taskReference: input.taskReference,
-        workflowHash: activeWorkflowHash,
+        workflowHash: acceptedDraft.workflowHash,
       },
     },
   });
   state = {
     ...state,
-    workflowHash: activeWorkflowHash,
+    workflowHash: acceptedDraft.workflowHash,
     phase: 'execution',
-    executionContext: acceptedExecutionContext,
+    workspaceContext: acceptedWorkspaceContext,
+    draft: acceptedDraft,
     planning: acceptedPlanning,
     freezeReceipt,
     executionWorkflowId,
@@ -428,7 +467,7 @@ export async function bootstrapWorkflowV2(
   };
   return {
     taskReference: input.taskReference,
-    workflowHash: activeWorkflowHash,
+    workflowHash: acceptedDraft.workflowHash,
     outcome: result.outcome,
   };
 }

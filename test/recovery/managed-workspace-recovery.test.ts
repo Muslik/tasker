@@ -55,7 +55,6 @@ const setup = () => {
     taskReference: 'fixture:change-file',
     workflowId: 'tasker:fixture:change-file',
     workflowRunId: 'run-1',
-    workflowHash: 'a'.repeat(64),
     repositoryReference: 'example/fixture',
     repositoryPath,
   };

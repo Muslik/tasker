@@ -49,10 +49,22 @@ const clickTask = async (page: Page, fixtureId: string) => {
   await page.getByTestId(`task-item-${fixtureId}`).click();
 };
 
-type LoadedTasks = Awaited<ReturnType<typeof loadTasks>>;
+const generateAutomatically = async (page: Page): Promise<void> => {
+  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
+  await page.getByRole('button', { name: 'Generate workflow' }).click();
+};
 
-const pickBacklogTask = (tasks: LoadedTasks['tasks']) =>
-  tasks.find((task) => task.status === 'backlog' && task.planning.status === 'available') ?? null;
+const waitForRunWait = async (page: Page, fixtureId: string, waitKind: string): Promise<void> => {
+  await expect
+    .poll(
+      async () => {
+        const run = await loadRun(page, fixtureId);
+        return run.status === 'waiting' ? run.wait.waitKind : run.status;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(waitKind);
+};
 
 const requireTask = <T>(value: T | null | undefined, message: string): T => {
   if (value === null || value === undefined) {
@@ -185,6 +197,8 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
 
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
+  await waitForRunWait(page, 'jira:AVIA-13235', 'plan.approved@1');
+
   const workflow = await loadWorkflow(page, 'jira:AVIA-13235');
   expect(workflow).toMatchObject({
     status: 'ready',
@@ -203,13 +217,14 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
 }) => {
   const tasks = await loadTasks(page);
   const backlog = requireTask(
-    pickBacklogTask(tasks.tasks),
-    'Expected at least one backlog task in the queue',
+    tasks.tasks.find((task) => task.id === 'avia-13236-short-bug'),
+    'Expected the short bug task in the queue',
   );
 
   await page.goto('/');
   await clickTask(page, backlog.id);
-  await page.getByRole('button', { name: 'Generate workflow' }).click();
+  await generateAutomatically(page);
+  await waitForRunWait(page, backlog.id, 'execution.start@1');
 
   const workflow = await loadWorkflow(page, backlog.id);
   expect(workflow.status).toBe('ready');
@@ -276,19 +291,11 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
 
   await page.goto('/');
   await clickTask(page, fixtureId);
-  const startButton = page.getByRole('button', { name: 'Test workflow', exact: true });
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
-    await expect(startButton).toBeVisible();
-  }
-  if (candidate.status === 'backlog' || candidate.status === 'planned') {
-    await expect(page.getByRole('combobox', { name: 'Planning strategy' })).toHaveValue('auto');
-    await expect(
-      page.getByRole('checkbox', { name: 'Review plan before execution' }),
-    ).toBeChecked();
-    await startButton.click();
   }
 
+  await waitForRunWait(page, fixtureId, 'plan.approved@1');
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
   await expect(page.getByTestId('implementation-plan')).toContainText(
     'Implement the requested task',
@@ -318,26 +325,14 @@ test('a planning-time workflow change revises the draft before freeze', async ({
   await page.goto('/');
   await clickTask(page, fixtureId);
   if (candidate.status === 'backlog') {
-    await page.getByRole('button', { name: 'Generate workflow' }).click();
-  }
-  const parentBefore = await loadWorkflow(page, fixtureId);
-  if (candidate.status === 'backlog' || candidate.status === 'planned') {
-    await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
-    await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
+    await generateAutomatically(page);
   }
 
-  await expect
-    .poll(
-      async () => {
-        const run = await loadRun(page, fixtureId);
-        return run.status === 'waiting' ? run.wait.waitKind : run.status;
-      },
-      { timeout: 20_000 },
-    )
-    .toBe('code_review@1');
+  await waitForRunWait(page, fixtureId, 'execution.start@1');
   const parentAfter = await loadWorkflow(page, fixtureId);
-  expect(parentAfter.view.workflow.graphHash).not.toBe(parentBefore.view.workflow.graphHash);
   expect(JSON.stringify(parentAfter.view.workflow.graph)).toContain('twiket/ui-kit');
+  await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
+  await waitForRunWait(page, fixtureId, 'code_review@1');
   const run = await loadRun(page, fixtureId);
   expect(run).toMatchObject({
     runtime: 'execution',
@@ -359,12 +354,12 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
-  if (candidate.status === 'plan_review') {
+  const current = await loadRun(page, candidate.id);
+  if (current.status === 'waiting' && current.wait.waitKind === 'plan.approved@1') {
     await page.getByRole('button', { name: 'Approve plan' }).click();
-  } else {
-    await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
-    await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
   }
+  await waitForRunWait(page, candidate.id, 'execution.start@1');
+  await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
 
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review', {
     timeout: 20_000,
@@ -388,7 +383,15 @@ test('the project profile explains why inline copy adds no translation wait', as
 
   await page.goto('/');
   await clickTask(page, inlineCopy.id);
-  await page.getByRole('button', { name: 'Generate workflow' }).click();
+  await generateAutomatically(page);
+
+  await waitForRunWait(page, inlineCopy.id, 'human_clarification');
+  await expect(page.getByTestId('planning-clarification')).toBeVisible();
+  await page
+    .getByRole('textbox', { name: 'Should this copy stay local to the application?' })
+    .fill('Yes, keep the copy in the application locale JSON.');
+  await page.getByRole('button', { name: 'Continue planning' }).click();
+  await waitForRunWait(page, inlineCopy.id, 'execution.start@1');
 
   const workflow = await loadWorkflow(page, inlineCopy.id);
   expect(workflow.view.workflow.waits.map((wait) => wait.waitKind)).not.toContain(
@@ -410,24 +413,6 @@ test('the project profile explains why inline copy adds no translation wait', as
   await expect(page.getByTestId('workflow-decision-list')).toContainText(
     'add no translation commands or wait',
   );
-});
-
-test('I can answer a blocking planning question and continue the same task', async ({ page }) => {
-  const fixtureId = 'avia-14002-inline-copy';
-
-  await page.goto('/');
-  await clickTask(page, fixtureId);
-  await page.getByRole('checkbox', { name: 'Review plan before execution' }).uncheck();
-  await page.getByRole('button', { name: 'Test workflow', exact: true }).click();
-
-  await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Waiting');
-  await expect(page.getByTestId('planning-clarification')).toBeVisible();
-  await page
-    .getByRole('textbox', { name: 'Should this copy stay local to the application?' })
-    .fill('Yes, keep the copy in the application locale JSON.');
-  await page.getByRole('button', { name: 'Continue planning' }).click();
-
-  await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Code review');
   await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
     'Planning clarification answered',
@@ -458,13 +443,8 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
   await expect(page.getByTestId('validation-errors')).toBeVisible();
   await expect(page.getByTestId('workflow-sidebar')).toContainText('rejected');
   await expect(page.getByTestId('workflow-tree')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Regenerate workflow' })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Regenerate workflow' }).click();
-
-  await expect(
-    page.getByTestId('task-activity-timeline').getByText('Workflow rejected'),
-  ).toHaveCount(2);
+  await waitForRunWait(page, invalid.id, 'context.retry@1');
+  await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
 });
 
 test('reloading restores the selected task before subscribing to live updates', async ({
@@ -479,7 +459,8 @@ test('reloading restores the selected task before subscribing to live updates', 
   await page.goto('/');
   await clickTask(page, backlog.id);
   if (backlog.status === 'backlog') {
-    await page.getByRole('button', { name: 'Generate workflow' }).click();
+    await generateAutomatically(page);
+    await waitForRunWait(page, backlog.id, 'execution.start@1');
   }
 
   const workflow = await loadWorkflow(page, backlog.id);
@@ -515,8 +496,8 @@ test('a ledger event from another page refreshes the visible task status', async
 }) => {
   const tasks = await loadTasks(page);
   const backlog = requireTask(
-    tasks.tasks.find((task) => task.status === 'backlog' && task.origin.kind === 'fixture'),
-    'Expected a backlog fixture that can emit a ledger event',
+    tasks.tasks.find((task) => task.id === 'invalid-missing-terminal'),
+    'Expected an unused invalid fixture that can emit a ledger event',
   );
 
   await page.goto('/');
@@ -559,9 +540,8 @@ test('a ledger event from another page refreshes the visible task status', async
   expect(parsedLedgerEvent.fixtureId).toBe(backlog.id);
 
   const generatedWorkflow = await loadWorkflow(page, backlog.id);
-  const expectedStatus = generatedWorkflow.status === 'ready' ? 'Planned' : 'Workflow rejected';
-
-  await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText(expectedStatus);
+  expect(generatedWorkflow.status).toBe('rejected');
+  await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText('Waiting');
   await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('validation-panel')).toBeVisible();
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();

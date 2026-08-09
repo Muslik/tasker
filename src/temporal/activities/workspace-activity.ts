@@ -1,6 +1,5 @@
 import { Context } from '@temporalio/activity';
 
-import type { PlanningSnapshotSource } from '../../planning/run-planning-snapshot.js';
 import type { Outcome } from '../../shared/outcome.js';
 import type {
   PrepareWorkspaceRequest,
@@ -60,7 +59,6 @@ export const createWorkspaceActivity = (
   bootstrap: WorkspaceBootstrapper,
   runtimes: DockerWorkspaceRuntimePreparer,
   runtimePolicies: TemporalWorkspaceRuntimePolicySource,
-  snapshots: PlanningSnapshotSource,
 ): Pick<BootstrapWorkflowActivities, 'prepareTaskWorkspace'> => {
   const prepareDockerRuntime = async (workspace: WorkspaceLocator) => {
     const context = Context.current();
@@ -106,7 +104,6 @@ export const createWorkspaceActivity = (
         taskReference: input.taskReference,
         workflowId: input.workflowId,
         workflowRunId: input.workflowRunId,
-        workflowHash: input.workflowHash,
         repositoryReference: subject.value.task.repository,
         repositoryPath: subject.value.repositoryPath,
       });
@@ -119,26 +116,10 @@ export const createWorkspaceActivity = (
 
       const runtime = await prepareDockerRuntime(prepared.value);
 
-      context.cancellationSignal.throwIfAborted();
-      context.heartbeat({ phase: 'snapshot_planning_input' });
-      const planningSnapshot = snapshots.createRunSnapshot(
-        input.taskReference,
-        input.workflowHash,
-        {
-          workspaceId: prepared.value.workspaceId,
-          reference: prepared.value.repository.reference,
-          path: prepared.value.path,
-        },
-      );
-      if (!planningSnapshot.ok) {
-        throw failure('planning snapshot', planningSnapshot.error);
-      }
-
       return PrepareTaskWorkspaceResultSchema.parse({
         workspace: prepared.value,
         bootstrap: bootstrapped.value,
         runtime,
-        planningSnapshot: planningSnapshot.value,
       });
     },
   };

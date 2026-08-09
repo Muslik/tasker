@@ -60,7 +60,6 @@ const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
     taskReference: task.fixtureId,
     workflowId: `tasker:${task.fixtureId}`,
     workflowRunId: 'run-1',
-    workflowHash: 'c'.repeat(64),
     repository: {
       reference: task.repository,
       sourcePath: '/tmp/source',

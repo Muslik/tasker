@@ -70,7 +70,7 @@ Each phase follows this order:
 
 ## Current implementation cut
 
-Temporal kernel v2 is the only runtime path. Bootstrap owns preparation, context,
+Bootstrap v3 plus Execution v2 is the only runtime path. Bootstrap owns preparation, context,
 planning, review, validation, and freeze; Execution owns deterministic traversal of the
 frozen graph. The old Workflow type, compatibility parser, registry, state adapter,
 tests, and Jira before-evidence policy are deleted.
@@ -91,10 +91,15 @@ hash. Receipts expose the actual CLI version, session, token usage, duration, pr
 hash, and reported API-equivalent cost where available. There is no legacy model field,
 hard-coded `gpt-5.4` path, or silent provider fallback.
 
-The next active boundary is honest bootstrap: replace fixture-shaped early analysis
-with task/repository context discovery, bounded investigation, mandatory planning,
-draft recompilation, validation, optional operator review, and freeze of the resulting
-task-specific graph.
+Phase 4A is complete: Generate starts Bootstrap v3 without a graph/hash, managed
+worktree and Docker preparation precede repository analysis, draft revision is durable,
+and freeze precedes the explicit Run command. The v2 bootstrap is deleted with no
+compatibility path.
+
+The next active boundary is Phase 4B: replace fixture-shaped initial draft assembly
+with analyzer-selected pre-plan investigation, feed observed evidence into mandatory
+planning, and make the planner's accepted output the complete task-specific execution
+draft before validation and freeze.
 
 ## Phase 0 exit gate
 

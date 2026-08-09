@@ -87,7 +87,6 @@ const requestFor = (
     taskReference: task.fixtureId,
     workflowId: `tasker:${task.fixtureId}`,
     workflowRunId: 'run-1',
-    workflowHash: 'b'.repeat(64),
     repository: {
       reference: task.repository,
       sourcePath: '/repositories/front-avia',

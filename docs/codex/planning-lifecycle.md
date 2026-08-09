@@ -31,7 +31,11 @@ executed for product effects.
 flowchart LR
   T["Normalized task + repository binding"] --> C["Durable context discovery"]
   C --> E["Evidence Bundle revision"]
-  E --> A["Workflow assembler"]
+  E --> S{"Pre-plan investigation needed?"}
+  S -->|yes| I["Bounded investigation blocks"]
+  I --> E2["Append observed evidence"]
+  S -->|no| A["Workflow assembler"]
+  E2 --> A
   A --> D["Draft workflow"]
   D --> P["Mandatory planning agent"]
   E --> P
@@ -144,24 +148,23 @@ Initial planning revisions and execution-time continuations are deliberately dif
 
 ## Migration status
 
-As of 2026-08-09, Tasker persists a typed, append-only Evidence Bundle with provenance,
-deduplicated immutable revisions, and restart-safe references. A dedicated Temporal
-bootstrap Workflow now invokes context discovery and initial draft assembly through one
-heartbeat-enabled Activity. The HTTP Generate action waits for that durable result;
-repeated requests reuse an accepted draft, rejected drafts receive a new bootstrap
-identity, and an exhausted transient failure can start a replacement run after the
-infrastructure is restored. Temporal history receives only the bounded status and graph
-hash; evidence and graph bodies remain Tasker artifacts.
+As of 2026-08-10, Bootstrap v3 is the only bootstrap runtime. `Generate workflow`
+starts Temporal with only the task reference and immutable run settings. Temporal then
+prepares the managed worktree, pinned harness, and Docker runtime before context
+discovery or repository analysis. Context discovery and initial draft assembly run as a
+heartbeat-enabled Activity with a stable operation ID. Temporal history receives only
+bounded public state and artifact/hash references; evidence and graph bodies remain
+Tasker artifacts.
 
 Workflow analysis and implementation planning consume the same bundle. Planning
 snapshots carry only the immutable initial bundle reference. The planner also receives
 the block's snapshotted read-only skills and may inspect the read-only worktree; external
 system reads must use the mediated request protocol and append a newer bundle revision.
 
-The v4 kernel cutover removed planning lifecycle discovery together with the old
-`taskWorkflow`. Bootstrap returns a typed frozen-workflow handoff; Execution accepts
-that handoff directly and contains no planning-step or plan-gate names. Pre-v4 Workflow
-histories are deleted development data, not a compatibility surface.
+The old bootstrap, hidden pre-Temporal generator, graph-bearing Generate input,
+workflow IDs, queue name, and tests are deleted. There is no compatibility route.
+Bootstrap hands a frozen graph to Execution v2, whose interpreter still contains no
+planning, provider, Jira, repository, or Docker logic.
 
 A planning `workflow_change_required` result invokes a heartbeat-enabled draft
 revision Activity. That Activity resolves newly discovered repositories, appends
@@ -187,6 +190,13 @@ run is rejected. The public run state is explicitly `draft` until that Activity
 completes and `frozen` afterwards. A ledger/VPN/infrastructure failure opens the durable
 `workflow_freeze.retry@1` wait with the same run and prepared workspace instead of
 restarting the task.
+
+This is the Phase 4A vertical slice, not the full honest-bootstrap target. The initial
+Activity still assembles a complete draft before implementation planning. Phase 4B must
+replace that fixture-shaped shortcut with analyzer-selected pre-plan investigation
+(including `bug.investigate` when required) and planner-owned production of the complete
+execution draft. Until that lands, a successful v3 run proves the durable ordering and
+recovery boundary, not that investigation planning is complete.
 
 The execution traversal has no code path that replaces the frozen active graph. A
 later execution-block `workflow_change_required` still opens continuation review and

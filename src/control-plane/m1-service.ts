@@ -581,6 +581,20 @@ export class M1WorkflowService {
     return this.persistPlanning(fixture, planTaskWorkflow(fixture));
   }
 
+  public assembleTaskAtOperation(
+    fixture: TaskFixture,
+    operationId: string,
+  ): Outcome<WorkflowResponse, M1ServiceError> {
+    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
+    if (!completed.ok) return completed;
+    if (completed.value !== null) return ok(completed.value);
+
+    return this.persistPlanning(fixture, planTaskWorkflow(fixture), undefined, {
+      operationId,
+      replaceValid: true,
+    });
+  }
+
   public generateContinuationTask(fixture: TaskFixture): Outcome<WorkflowResponse, M1ServiceError> {
     const existing = this.read(fixture.fixtureId);
     if (!existing.ok) return existing;
@@ -626,6 +640,34 @@ export class M1WorkflowService {
     }
 
     return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), receipt);
+  }
+
+  public assembleFromAnalyzerOutputAtOperation(
+    fixture: TaskFixture,
+    output: WorkflowAnalyzerOutput,
+    receipt: WorkflowAnalyzerReceipt,
+    operationId: string,
+  ): Outcome<WorkflowResponse, M1ServiceError> {
+    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
+    if (!completed.ok) return completed;
+    if (completed.value !== null) return ok(completed.value);
+
+    const proposal = createWorkflowProposalFromAnalyzerOutput(
+      fixture,
+      receipt.analyzerVersion,
+      output,
+    );
+    if (!proposal.ok) {
+      return err({
+        kind: 'planner_contract_failure',
+        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+      });
+    }
+
+    return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), receipt, {
+      operationId,
+      replaceValid: true,
+    });
   }
 
   public reviseFromAnalyzerOutputForTask(

@@ -1,15 +1,15 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
-  CodexWorkflowGenerator,
   ContextDiscoveryService,
   createM1WorkflowService,
   EvidenceBundleStore,
   WorkflowGenerationSubjectSource,
+  WorkflowDraftAssembler,
   type WorkflowAnalyzer,
 } from '../../src/control-plane/index.js';
 import type { JiraIssuePort } from '../../src/integrations/index.js';
@@ -36,8 +36,8 @@ afterEach(() => {
   }
 });
 
-describe('Jira workflow generation', () => {
-  it('gives the analyzer the complete Jira snapshot and managed checkout before persisting its graph', async () => {
+describe('Jira workflow draft assembly', () => {
+  it('analyzes the managed worktree inside durable bootstrap before persisting its graph', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-jira-workflow-'));
     const clock = makeAdjustableClock('2026-08-02T00:00:00.000Z');
     const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
@@ -139,24 +139,56 @@ describe('Jira workflow generation', () => {
       },
     };
     const service = createM1WorkflowService(ledger.repository, clock);
-    const generator = new CodexWorkflowGenerator(
+    const workspacePath = join(directory, 'managed-worktree');
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(join(workspacePath, 'README.md'), '# Managed task worktree\n', 'utf8');
+    const generator = new WorkflowDraftAssembler(
       service,
       new WorkflowGenerationSubjectSource(directory, jiraService),
       analyzer,
       new ContextDiscoveryService(new EvidenceBundleStore(ledger.repository, clock), clock),
+      new EvidenceBundleStore(ledger.repository, clock),
+      {
+        createRunSnapshot: (taskReference, workflowHash) =>
+          ok({
+            artifactId: `planning-snapshot:${taskReference}:${workflowHash}`,
+            checksum: 'f'.repeat(64),
+          }),
+      },
     );
 
-    const rejected = await generator.generate('jira:AVIA-13235');
-    const generated = await generator.generate('jira:AVIA-13235');
-
-    expect(rejected).toMatchObject({ ok: true, value: { status: 'rejected' } });
-    expect(generated).toMatchObject({
-      ok: true,
-      value: {
-        status: 'ready',
-        view: { fixture: { id: 'jira:AVIA-13235' }, workflow: { status: 'valid' } },
+    const workspace = {
+      schemaVersion: 1 as const,
+      workspaceId: 'a'.repeat(24),
+      taskReference: 'jira:AVIA-13235',
+      workflowId: 'tasker:v3:jira:AVIA-13235',
+      workflowRunId: 'run-1',
+      repository: {
+        reference: 'onetwotrip/front-avia',
+        sourcePath: '/managed/repositories/front-avia',
+        baseCommit: 'b'.repeat(40),
       },
+      runnerId: 'test',
+      path: workspacePath,
+      branch: 'tasker/avia-13235',
+      preparedAt: '2026-08-02T00:00:00.000Z',
+    };
+    const rejected = await generator.assemble({
+      taskReference: 'jira:AVIA-13235',
+      operationId: 'draft:1',
+      workspace,
     });
+    const generated = await generator.assemble({
+      taskReference: 'jira:AVIA-13235',
+      operationId: 'draft:2',
+      workspace,
+    });
+
+    expect(rejected).toMatchObject({ ok: false, error: { kind: 'workflow_rejected' } });
+    expect(generated.ok).toBe(true);
+    if (!generated.ok) throw new Error(`Expected accepted draft: ${generated.error.kind}`);
+    expect(generated.value.workflowHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(generated.value.graph.metadata.workflowId).toBeTruthy();
     expect(requests).toHaveLength(2);
     const request = requests[1];
     if (request === undefined) throw new Error('Expected a retry analyzer request');
@@ -174,7 +206,7 @@ describe('Jira workflow generation', () => {
       })
       .loose()
       .parse(request.taskSnapshot);
-    expect(request.repositoryPath).toBe('/work/front-avia');
+    expect(request.repositoryPath).toBe(workspacePath);
     expect(evidence.origin).toBe('jira');
     expect(evidence.issue.issueKey).toBe('AVIA-13235');
     expect(evidence.issue.attachments.map((attachment) => attachment.filename)).toContain(

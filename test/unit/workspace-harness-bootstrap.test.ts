@@ -41,7 +41,6 @@ const locatorFor = (
   taskReference: 'AVIA-12329',
   workflowId: 'tasker/AVIA-12329',
   workflowRunId: 'run-1',
-  workflowHash: 'b'.repeat(64),
   repository: {
     reference,
     sourcePath: repository.path,

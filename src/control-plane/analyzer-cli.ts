@@ -120,6 +120,7 @@ export const runAnalyzerCli = async (
       systemClock,
     ).discover({
       taskReference: fixtureId,
+      operationId: `analyzer-cli:${fixtureId}`,
       taskSnapshot: analyzerContext.taskSnapshot,
       plannerContext: analyzerContext.plannerContext,
       repositoryReference: fixture.repository,

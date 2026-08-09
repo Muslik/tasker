@@ -97,6 +97,7 @@ describe('evidence bundle recovery', () => {
       );
       const input = {
         taskReference: 'jira:AVIA-13235',
+        operationId: 'test:context-discovery',
         taskSnapshot: { issue: { updatedAt: '2026-08-04T18:00:00.000Z' } },
         plannerContext: { harness: { companyVersion: '1' } },
         repositoryReference: 'onetwotrip/front-avia',

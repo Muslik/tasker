@@ -525,20 +525,6 @@ const SelectedTaskHeader = ({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {canGenerate ? (
-            <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
-              {generating ? (
-                <LoaderCircle data-icon="inline-start" className="animate-spin" />
-              ) : (
-                <Sparkles data-icon="inline-start" />
-              )}
-              {generating
-                ? 'Generating…'
-                : task.status === 'workflow_rejected'
-                  ? 'Regenerate workflow'
-                  : 'Generate workflow'}
-            </Button>
-          ) : null}
-          {canStart ? (
             <>
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span className="sr-only">Planning strategy</span>
@@ -546,7 +532,7 @@ const SelectedTaskHeader = ({
                   className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
                   aria-label="Planning strategy"
                   value={planningStrategy}
-                  disabled={starting}
+                  disabled={generating}
                   onChange={(event) => {
                     onPlanningStrategyChange(event.target.value as PlanningStrategyRequest);
                   }}
@@ -562,22 +548,36 @@ const SelectedTaskHeader = ({
                   type="checkbox"
                   aria-label="Review plan before execution"
                   checked={requirePlanApproval}
-                  disabled={starting}
+                  disabled={generating}
                   onChange={(event) => {
                     onRequirePlanApprovalChange(event.target.checked);
                   }}
                 />
                 Review plan
               </label>
-              <Button size="sm" type="button" onClick={onStart} disabled={starting}>
-                {starting ? (
+              <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
+                {generating ? (
                   <LoaderCircle data-icon="inline-start" className="animate-spin" />
                 ) : (
-                  <Play data-icon="inline-start" />
+                  <Sparkles data-icon="inline-start" />
                 )}
-                {starting ? 'Testing…' : 'Test workflow'}
+                {generating
+                  ? 'Generating…'
+                  : task.status === 'workflow_rejected'
+                    ? 'Regenerate workflow'
+                    : 'Generate workflow'}
               </Button>
             </>
+          ) : null}
+          {canStart ? (
+            <Button size="sm" type="button" onClick={onStart} disabled={starting}>
+              {starting ? (
+                <LoaderCircle data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Play data-icon="inline-start" />
+              )}
+              {starting ? 'Starting…' : 'Run workflow'}
+            </Button>
           ) : null}
           {task.origin.kind === 'jira' ? (
             <>
@@ -2460,8 +2460,16 @@ export const App = () => {
     }
 
     const taskReference = selectedTask.id;
+    const requirePlanApproval = planApprovalDrafts.get(taskReference) ?? true;
+    const planningStrategy = planningStrategyDrafts.get(taskReference) ?? 'auto';
     setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
-    void generateWorkflow(taskReference)
+    void generateWorkflow(taskReference, {
+      settings: {
+        planReview: requirePlanApproval ? 'required' : 'automatic',
+        planningStrategy,
+        executionStart: 'manual',
+      },
+    })
       .then(async () => {
         const nextSelectedId = await refreshTasks();
         if (nextSelectedId !== null) {
@@ -2489,15 +2497,8 @@ export const App = () => {
   const handleStart = (): void => {
     if (selectedTask === null || selectedTask.status !== 'planned') return;
     const taskReference = selectedTask.id;
-    const requirePlanApproval = planApprovalDrafts.get(taskReference) ?? true;
-    const planningStrategy = planningStrategyDrafts.get(taskReference) ?? 'auto';
     setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
-    void startWorkflow(taskReference, {
-      settings: {
-        planReview: requirePlanApproval ? 'required' : 'automatic',
-        planningStrategy,
-      },
-    })
+    void startWorkflow(taskReference)
       .then(async () => {
         await refreshTasks();
         if (selectedIdRef.current === taskReference) {

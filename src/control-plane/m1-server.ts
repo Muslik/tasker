@@ -37,12 +37,12 @@ import {
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
 import { buildM1Api } from './m1-api.js';
-import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
+import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { createM1WorkflowService } from './m1-service.js';
-import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
+import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
@@ -136,12 +136,6 @@ export const startM1Server = async (): Promise<void> => {
     repositories: repositoryCatalog,
   });
   const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
-  const workflowGenerator = new CodexWorkflowGenerator(
-    service,
-    subjects,
-    continuationAnalyzer,
-    new ContextDiscoveryService(evidenceBundles, systemClock),
-  );
   const bitbucketReview =
     bitbucketConfiguration === null
       ? undefined
@@ -155,7 +149,6 @@ export const startM1Server = async (): Promise<void> => {
     service,
     jiraIssueService,
     logger: true,
-    workflowGenerator,
     implementationPlanning,
     workflowContinuation,
     executionActivity: new LedgerExecutionActivityReader(ledger.repository),

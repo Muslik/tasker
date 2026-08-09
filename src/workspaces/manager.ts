@@ -75,7 +75,6 @@ const sameIdentity = (left: WorkspaceLocator, right: WorkspaceLocator): boolean 
   left.taskReference === right.taskReference &&
   left.workflowId === right.workflowId &&
   left.workflowRunId === right.workflowRunId &&
-  left.workflowHash === right.workflowHash &&
   left.repository.reference === right.repository.reference &&
   left.repository.sourcePath === right.repository.sourcePath &&
   left.repository.baseCommit === right.repository.baseCommit &&
@@ -101,7 +100,6 @@ export class ManagedWorkspaceManager {
         taskReference: request.taskReference,
         workflowId: request.workflowId,
         workflowRunId: request.workflowRunId,
-        workflowHash: request.workflowHash,
         repositoryReference: request.repositoryReference,
         runnerId: this.configuration.runnerId,
       }),
@@ -199,7 +197,6 @@ export class ManagedWorkspaceManager {
         taskReference: request.taskReference,
         workflowId: request.workflowId,
         workflowRunId: request.workflowRunId,
-        workflowHash: request.workflowHash,
         repository: {
           reference: request.repositoryReference,
           sourcePath: resolve(request.repositoryPath),
@@ -239,7 +236,6 @@ export class ManagedWorkspaceManager {
       taskReference: request.taskReference,
       workflowId: request.workflowId,
       workflowRunId: request.workflowRunId,
-      workflowHash: request.workflowHash,
       repository: {
         reference: request.repositoryReference,
         sourcePath: resolve(request.repositoryPath),
