@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "twiket-frontend",
   "version": "1",
   "availableCapabilities": [
@@ -44,6 +44,86 @@
     "implementationPlanner": "prompts/implementation-planner.md",
     "implementationPlannerSkills": ["jira", "confluence", "loop"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
+  },
+  "executionProfiles": {
+    "workflow-analysis": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "timeoutMs": 600000,
+      "serviceTier": "fast"
+    },
+    "planning-fast": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "timeoutMs": 600000,
+      "serviceTier": "fast"
+    },
+    "planning-ralplan": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "timeoutMs": 1800000,
+      "serviceTier": "fast"
+    },
+    "investigation": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "timeoutMs": 2100000,
+      "serviceTier": "fast"
+    },
+    "implementation": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "timeoutMs": 2100000,
+      "serviceTier": "fast"
+    },
+    "verification": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "documentation": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "timeoutMs": 600000,
+      "serviceTier": "fast"
+    },
+    "review": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "claude-ralplan": {
+      "provider": "claude",
+      "command": "claude",
+      "model": "opus",
+      "effort": "high",
+      "timeoutMs": 1800000
+    }
+  },
+  "executionProfileRouting": {
+    "workflowAnalyzer": "workflow-analysis",
+    "implementationPlanner": {
+      "fast": "planning-fast",
+      "ralplan": "planning-ralplan"
+    }
   },
   "globalPackageRules": [
     {

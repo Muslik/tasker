@@ -366,7 +366,7 @@ export class M1WorkflowStore {
           sessionId: analyzerReceipt.sessionId,
           usage: asJson(analyzerReceipt.usage),
         },
-        actor: 'codex_cli_analyzer',
+        actor: 'subscription_cli_analyzer',
       });
     }
 

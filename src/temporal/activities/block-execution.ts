@@ -15,7 +15,11 @@ import {
   type BlockReceiptStore,
   type CompletionVerdict,
 } from '../../blocks/index.js';
-import type { LoadedHarnessPack, LoadedHarnessStep } from '../../harness/index.js';
+import type {
+  LoadedHarnessPack,
+  LoadedHarnessStep,
+  ResolvedExecutionProfile,
+} from '../../harness/index.js';
 import {
   emptyIntegrationStepAdapterRegistry,
   type IntegrationStepAdapterRegistry,
@@ -34,9 +38,10 @@ import type {
 import {
   codexOutputJsonSchema,
   prepareIsolatedCodexHome,
-  parseCodexStream,
   providerFailureMessage,
 } from '../../providers/codex-cli-support.js';
+import { prepareIsolatedClaudeHome } from '../../providers/claude-cli-support.js';
+import { parseSubscriptionCliStream } from '../../providers/subscription-cli-stream.js';
 import {
   prepareAgentSkills,
   type AgentProvider,
@@ -219,12 +224,12 @@ export interface TaskStepActivityContext {
 
 export interface TaskStepAgentRequest {
   readonly operationId: string;
+  readonly profile: ResolvedExecutionProfile;
   readonly prompt: string;
   readonly skills: readonly string[];
   readonly recovery: TaskStepRecoveryContext;
   readonly outputSchema: z.ZodType;
   readonly cwd: string;
-  readonly timeoutMs: number;
   readonly runtime: TaskStepActivityContext;
   readonly transcriptStore: TemporalTaskStepTraceStore;
 }
@@ -261,27 +266,17 @@ export type TaskStepAgentFailure =
   | { readonly kind: 'invalid_output'; readonly issues: readonly string[] };
 
 export interface TaskStepAgentRunner {
-  readonly provider: AgentProvider;
   run(request: TaskStepAgentRequest): Promise<Outcome<TaskStepAgentResult, TaskStepAgentFailure>>;
 }
 
-export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
-  public readonly provider = 'codex' as const;
-
-  public constructor(
-    private readonly runner: WorkspaceCommandRunner,
-    private readonly options: {
-      readonly command?: string;
-      readonly model?: string;
-      readonly serviceTier?: 'fast' | 'flex';
-      readonly timeoutMs?: number;
-    } = {},
-  ) {}
+export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
+  public constructor(private readonly runner: WorkspaceCommandRunner) {}
 
   public async run(
     request: TaskStepAgentRequest,
   ): Promise<Outcome<TaskStepAgentResult, TaskStepAgentFailure>> {
-    const command = this.options.command ?? 'codex';
+    const profile = request.profile;
+    const command = profile.command;
     const version = await this.runner.run({
       command,
       args: ['--version'],
@@ -294,20 +289,25 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
       return err({ kind: 'provider_unavailable', message: version.message });
     }
     if (version.status !== 'exited' || version.exitCode !== 0) {
-      return err({ kind: 'provider_unavailable', message: 'Codex CLI version probe failed' });
+      return err({
+        kind: 'provider_unavailable',
+        message: `${profile.provider} CLI version probe failed`,
+      });
     }
 
     const directory = await mkdtemp(join(tmpdir(), 'tasker-step-agent-'));
     const schemaPath = join(directory, 'task-step-output.schema.json');
-    const isolatedCodexHome = join(directory, 'codex-home');
-    const model = this.options.model ?? 'gpt-5.4';
-    const serviceTier = this.options.serviceTier ?? 'fast';
+    const isolatedConfigurationRoot = join(directory, 'provider-home');
     try {
-      await prepareIsolatedCodexHome(isolatedCodexHome);
+      if (profile.provider === 'codex') {
+        await prepareIsolatedCodexHome(isolatedConfigurationRoot);
+      } else {
+        await prepareIsolatedClaudeHome(isolatedConfigurationRoot);
+      }
       const preparedSkills = await prepareAgentSkills({
-        provider: 'codex',
+        provider: profile.provider,
         repositoryPath: request.cwd,
-        configurationRoot: isolatedCodexHome,
+        configurationRoot: isolatedConfigurationRoot,
         skills: [...request.skills],
       });
       if (!preparedSkills.ok) return err(preparedSkills.error);
@@ -316,6 +316,7 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
         `${JSON.stringify(codexOutputJsonSchema(request.outputSchema), null, 2)}\n`,
         'utf8',
       );
+      const outputSchema = codexOutputJsonSchema(request.outputSchema);
       const harnessEnvironment = workspaceHarnessEnvironment(
         request.cwd,
         preparedSkills.value.skillsRoot,
@@ -333,33 +334,52 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
           : [];
       const execution = await this.runCommand(request, {
         command,
-        args: [
-          'exec',
-          '--model',
-          model,
-          '-c',
-          `service_tier="${serviceTier}"`,
-          '-c',
-          'model_reasoning_effort="medium"',
-          '--ephemeral',
-          '--skip-git-repo-check',
-          '--dangerously-bypass-approvals-and-sandbox',
-          '--cd',
-          request.cwd,
-          '--output-schema',
-          schemaPath,
-          '--json',
-          '-',
-        ],
+        args:
+          profile.provider === 'codex'
+            ? [
+                'exec',
+                '--model',
+                profile.model,
+                '-c',
+                `service_tier="${profile.serviceTier}"`,
+                '-c',
+                `model_reasoning_effort="${profile.effort}"`,
+                '--ephemeral',
+                '--skip-git-repo-check',
+                '--dangerously-bypass-approvals-and-sandbox',
+                '--cd',
+                request.cwd,
+                '--output-schema',
+                schemaPath,
+                '--json',
+                '-',
+              ]
+            : [
+                '--print',
+                '--model',
+                profile.model,
+                '--effort',
+                profile.effort,
+                '--output-format',
+                'stream-json',
+                '--verbose',
+                '--no-session-persistence',
+                '--dangerously-skip-permissions',
+                '--json-schema',
+                JSON.stringify(outputSchema),
+                ...preparedSkills.value.cliArguments,
+              ],
         cwd: request.cwd,
         workspaceAccess: 'read_write',
         env: {
-          CODEX_HOME: isolatedCodexHome,
+          ...(profile.provider === 'codex'
+            ? { CODEX_HOME: isolatedConfigurationRoot }
+            : { HOME: isolatedConfigurationRoot }),
           ...harnessEnvironment,
         },
         mounts: [{ source: directory, target: directory, readOnly: false }, ...extraMounts],
         stdin: request.prompt,
-        timeoutMs: request.timeoutMs,
+        timeoutMs: profile.timeoutMs,
       });
       if (execution.status === 'spawn_failed') {
         return err({ kind: 'provider_unavailable', message: execution.message });
@@ -380,15 +400,9 @@ export class CodexCliTaskStepAgentRunner implements TaskStepAgentRunner {
           stderr: execution.stderr,
         });
       }
-      const stream = parseCodexStream(execution.stdout);
+      const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) return err(stream.error);
-      let finalMessage: unknown;
-      try {
-        finalMessage = JSON.parse(stream.value.finalMessage) as unknown;
-      } catch {
-        return err({ kind: 'invalid_output', issues: ['Final agent message was not JSON'] });
-      }
-      const parsed = request.outputSchema.safeParse(finalMessage);
+      const parsed = request.outputSchema.safeParse(stream.value.finalMessage);
       if (!parsed.success) {
         return err({
           kind: 'invalid_output',
@@ -1279,6 +1293,13 @@ export const executeRegisteredTaskStep = async (
   }
 
   if (snapshottedStep.block.executor.kind === 'agent') {
+    if (snapshottedStep.executionProfile === null) {
+      return block(
+        `Execution profile for ${input.uses} is absent from the immutable planning snapshot`,
+        blockingWaitKindFor(input.uses),
+      );
+    }
+    const executionProfile = snapshottedStep.executionProfile;
     const repository = readRepositoryFromInput(validatedInput.data);
     if (repository !== null && repository !== snapshot.repository.reference) {
       const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
@@ -1336,12 +1357,12 @@ export const executeRegisteredTaskStep = async (
     });
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),
+      profile: executionProfile,
       prompt,
       skills: snapshottedStep.block.executor.skills,
       recovery,
       outputSchema: AgentStepProviderOutcomeSchema,
       cwd: input.workspace.path,
-      timeoutMs: 35 * 60_000,
       runtime,
       transcriptStore: dependencies.traces,
     });
@@ -1358,7 +1379,7 @@ export const executeRegisteredTaskStep = async (
         provider.error,
         'stdout' in provider.error ? provider.error.stdout : '',
         'stderr' in provider.error ? provider.error.stderr : '',
-        dependencies.agentRunner.provider,
+        executionProfile.provider,
       );
     }
     const decodedDecision = decodeAgentStepOutcome(provider.value.finalMessage);
@@ -1372,7 +1393,7 @@ export const executeRegisteredTaskStep = async (
         decodedDecision.error,
         provider.value.stdout,
         provider.value.stderr,
-        dependencies.agentRunner.provider,
+        executionProfile.provider,
       );
     }
     const decision = decodedDecision.value;
@@ -1385,7 +1406,7 @@ export const executeRegisteredTaskStep = async (
         { kind: 'agent_blocked', reason: decision.reason, details: decision.details },
         provider.value.stdout,
         provider.value.stderr,
-        dependencies.agentRunner.provider,
+        executionProfile.provider,
       );
     }
     if (decision.status === 'workflow_change_required') {
@@ -1407,7 +1428,7 @@ export const executeRegisteredTaskStep = async (
           },
           provider.value.stdout,
           provider.value.stderr,
-          dependencies.agentRunner.provider,
+          executionProfile.provider,
         );
       }
       const result = ExecuteTaskStepResultSchema.parse({
@@ -1426,7 +1447,7 @@ export const executeRegisteredTaskStep = async (
         stepReference: input.uses,
         stepAttempt: input.stepAttempt,
         runner: 'agent',
-        command: dependencies.agentRunner.provider,
+        command: executionProfile.provider,
         args: [],
         cwd: input.workspace.path,
         exitCode: 0,
@@ -1456,7 +1477,7 @@ export const executeRegisteredTaskStep = async (
         },
         provider.value.stdout,
         provider.value.stderr,
-        dependencies.agentRunner.provider,
+        executionProfile.provider,
       );
     }
     const outputRecord = validatedOutput.data as {
@@ -1481,14 +1502,23 @@ export const executeRegisteredTaskStep = async (
       stepReference: input.uses,
       stepAttempt: input.stepAttempt,
       runner: 'agent',
-      command: dependencies.agentRunner.provider,
+      command: executionProfile.provider,
       args: [],
       cwd: input.workspace.path,
       exitCode: 0,
       status: 'completed',
       stdout: provider.value.stdout,
       stderr: provider.value.stderr,
-      details: { output: validatedOutput.data },
+      details: {
+        output: validatedOutput.data,
+        executionProfile: {
+          provider: executionProfile.provider,
+          profile: executionProfile.name,
+          profileSha256: executionProfile.configurationSha256,
+          model: executionProfile.model,
+          effort: executionProfile.effort,
+        },
+      },
       result,
     });
     if (!persisted.ok || persisted.value.result === null) {

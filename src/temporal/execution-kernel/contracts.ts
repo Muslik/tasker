@@ -4,7 +4,7 @@ import {
   CompiledWorkflowSchema,
   JsonValueSchema,
   StepActivityDeliverySchema,
-} from '../../workflow/index.js';
+} from '../../workflow/schema.js';
 
 export const EXECUTION_WORKFLOW_SCHEMA_VERSION = 2;
 

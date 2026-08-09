@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BlockReceiptStore } from '../../src/blocks/index.js';
-import { loadHarnessPack } from '../../src/harness/index.js';
+import {
+  loadHarnessPack,
+  resolveAgentExecutionProfile,
+  resolveImplementationPlannerProfile,
+} from '../../src/harness/index.js';
 import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { findTaskFixture } from '../../src/planning/index.js';
@@ -124,9 +128,17 @@ const makeSnapshot = (
           pack.company.processCommands[current.block.executor.executor] ??
           'unconfigured process executor')
         : null,
+    executionProfile:
+      current.block.executor.kind === 'agent'
+        ? resolveAgentExecutionProfile(
+            pack.company,
+            snapshotProject.executionProfileOverrides ?? null,
+            current.block.executor.profile,
+          )
+        : null,
   };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskReference: 'task-ref',
     workflowHash: 'a'.repeat(64),
     task,
@@ -151,6 +163,18 @@ const makeSnapshot = (
       implementationPlanner: {
         prompt: pack.prompts.implementationPlanner,
         skills: ['jira', 'confluence', 'loop'],
+        profiles: {
+          fast: resolveImplementationPlannerProfile(
+            pack.company,
+            snapshotProject.executionProfileOverrides ?? null,
+            'fast',
+          ),
+          ralplan: resolveImplementationPlannerProfile(
+            pack.company,
+            snapshotProject.executionProfileOverrides ?? null,
+            'ralplan',
+          ),
+        },
       },
       policies: pack.policies,
       steps: [step],
@@ -172,7 +196,6 @@ describe('temporal block execution activity', () => {
     const prompts: string[] = [];
     const selectedSkills: (readonly string[])[] = [];
     const agentRunner: TaskStepAgentRunner = {
-      provider: 'codex',
       run: (request) => {
         prompts.push(request.prompt);
         selectedSkills.push(request.skills);
@@ -290,7 +313,7 @@ describe('temporal block execution activity', () => {
       currentSteps: createCurrentStepRegistry(pack),
       traces,
       mutationRecovery,
-      agentRunner: { provider: 'codex' as const, run },
+      agentRunner: { run },
       commands: workspaceCommands(),
       workspaces: stubWorkspaceStore,
     };
@@ -349,7 +372,6 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         agentRunner: {
-          provider: 'codex',
           run: () =>
             Promise.resolve(
               ok({
@@ -423,7 +445,7 @@ describe('temporal block execution activity', () => {
       currentSteps: createCurrentStepRegistry(pack),
       traces,
       mutationRecovery,
-      agentRunner: { provider: 'codex' as const, run },
+      agentRunner: { run },
       commands: workspaceCommands(),
       workspaces: stubWorkspaceStore,
     };
@@ -514,7 +536,6 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         agentRunner: {
-          provider: 'codex',
           run: vi.fn(),
         },
         commands: workspaceCommands(commands),
@@ -598,7 +619,6 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         agentRunner: {
-          provider: 'codex',
           run: vi.fn(),
         },
         commands: workspaceCommands(commands),
@@ -667,7 +687,7 @@ describe('temporal block execution activity', () => {
       currentSteps: createCurrentStepRegistry(pack),
       traces,
       mutationRecovery,
-      agentRunner: { provider: 'codex' as const, run: vi.fn() },
+      agentRunner: { run: vi.fn() },
       commands: workspaceCommands(),
       workspaces: stubWorkspaceStore,
       integrations: new IntegrationStepAdapterRegistry([
@@ -723,7 +743,7 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         receipts,
-        agentRunner: { provider: 'codex', run },
+        agentRunner: { run },
         commands: workspaceCommands(),
         workspaces: stubWorkspaceStore,
       },
@@ -782,7 +802,6 @@ describe('temporal block execution activity', () => {
         mutationRecovery,
         receipts,
         agentRunner: {
-          provider: 'codex',
           run: () =>
             Promise.resolve(
               ok({

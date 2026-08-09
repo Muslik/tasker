@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
-import { BlockDefinitionSchema } from '../blocks/index.js';
+import { BlockDefinitionSchema } from '../blocks/contracts.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
   HarnessProjectManifestSchema,
 } from '../harness/contracts.js';
+import { ResolvedExecutionProfileSchema } from '../harness/execution-profile-contracts.js';
 import { TaskFixtureSchema } from './fixtures.js';
 import type { Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../workflow/schema.js';
@@ -34,6 +35,7 @@ const SnapshottedStepSchema = z
     reference: z.string().min(1),
     block: BlockDefinitionSchema,
     resolvedCommand: z.string().min(1).nullable(),
+    executionProfile: ResolvedExecutionProfileSchema.nullable(),
   })
   .strict();
 
@@ -51,6 +53,12 @@ const SnapshottedHarnessSchema = z
       .object({
         prompt: SnapshottedPromptSchema,
         skills: z.array(z.string().min(1)),
+        profiles: z
+          .object({
+            fast: ResolvedExecutionProfileSchema,
+            ralplan: ResolvedExecutionProfileSchema,
+          })
+          .strict(),
       })
       .strict(),
     policies: z.array(HarnessPolicyManifestSchema),
@@ -60,7 +68,7 @@ const SnapshottedHarnessSchema = z
 
 export const RunPlanningSnapshotSchema = z
   .object({
-    schemaVersion: z.literal(6),
+    schemaVersion: z.literal(7),
     taskReference: z.string().min(1),
     workflowHash: ContentHashSchema,
     task: TaskFixtureSchema,

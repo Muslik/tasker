@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,8 +8,9 @@ import { z } from 'zod';
 import { openSqliteLedger } from '../../../src/ledger/index.js';
 import type { CommandRequest, WorkspaceCommandRunner } from '../../../src/providers/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
+import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 import {
-  CodexCliTaskStepAgentRunner,
+  SubscriptionCliTaskStepAgentRunner,
   TemporalTaskStepTraceStore,
 } from '../../../src/temporal/activities/block-execution.js';
 
@@ -30,7 +31,34 @@ const codexStream = (finalMessage: string): string =>
     }),
   ].join('\n');
 
-describe('Codex task-step runner', () => {
+const claudeStream = (finalMessage: unknown): string =>
+  JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: '',
+    structured_output: finalMessage,
+    session_id: 'claude-step-1',
+    usage: {
+      input_tokens: 10,
+      cache_creation_input_tokens: 1,
+      cache_read_input_tokens: 2,
+      output_tokens: 4,
+    },
+  });
+
+const outputSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('done'),
+      done: z.literal(true),
+      labels: z.record(z.string(), z.string()),
+    })
+    .strict(),
+  z.object({ status: z.literal('blocked'), reason: z.string() }).strict(),
+]);
+
+describe('subscription CLI task-step runner', () => {
   it('invokes Codex with only the step-scoped skill view', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-codex-step-workspace-'));
     for (const skill of ['jira', 'pr-finalize']) {
@@ -93,26 +121,17 @@ describe('Codex task-step runner', () => {
     };
     const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
-    const runner = new CodexCliTaskStepAgentRunner(commands);
+    const runner = new SubscriptionCliTaskStepAgentRunner(commands);
 
     try {
       const result = await runner.run({
         operationId: 'workflow:step:attempt-1',
+        profile: TEST_CODEX_PROFILE,
         prompt: 'Return the result.',
         skills: ['jira'],
         recovery: { kind: 'single_attempt' },
-        outputSchema: z.discriminatedUnion('status', [
-          z
-            .object({
-              status: z.literal('done'),
-              done: z.literal(true),
-              labels: z.record(z.string(), z.string()),
-            })
-            .strict(),
-          z.object({ status: z.literal('blocked'), reason: z.string() }).strict(),
-        ]),
+        outputSchema,
         cwd: repositoryPath,
-        timeoutMs: 10_000,
         runtime: {
           attempt: 1,
           cancellationSignal: new AbortController().signal,
@@ -137,6 +156,77 @@ describe('Codex task-step runner', () => {
       expect(observations[0]?.workspaceAccess).toBe('read_write');
     } finally {
       ledger.close();
+    }
+  });
+
+  it('runs the same step contract through a selected Claude subscription profile', async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-claude-step-workspace-'));
+    const requests: CommandRequest[] = [];
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run: (request) => {
+        requests.push(request);
+        if (request.args[0] === '--version') {
+          return Promise.resolve({
+            status: 'exited',
+            exitCode: 0,
+            stdout: '2.1.224 (Claude Code)\n',
+            stderr: '',
+            durationMs: 1,
+          });
+        }
+        return Promise.resolve({
+          status: 'exited',
+          exitCode: 0,
+          stdout: claudeStream({ status: 'done', done: true, labels: { result: 'verified' } }),
+          stderr: '',
+          durationMs: 2,
+        });
+      },
+    };
+    const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const runner = new SubscriptionCliTaskStepAgentRunner(commands);
+
+    try {
+      const result = await runner.run({
+        operationId: 'workflow:claude-step:attempt-1',
+        profile: TEST_CLAUDE_PROFILE,
+        prompt: 'Return the result.',
+        skills: [],
+        recovery: { kind: 'single_attempt' },
+        outputSchema,
+        cwd: repositoryPath,
+        runtime: {
+          attempt: 1,
+          cancellationSignal: new AbortController().signal,
+          heartbeat: () => {},
+        },
+        transcriptStore: traces,
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        value: { finalMessage: { done: true, labels: { result: 'verified' } } },
+      });
+      expect(requests[1]?.args).toEqual(
+        expect.arrayContaining([
+          '--print',
+          '--model',
+          'sonnet',
+          '--effort',
+          'high',
+          '--output-format',
+          'stream-json',
+          '--json-schema',
+        ]),
+      );
+      expect(requests[1]?.env?.HOME).toMatch(/provider-home$/u);
+      expect(requests[1]?.env?.CODEX_HOME).toBeUndefined();
+      expect(requests[1]?.workspaceAccess).toBe('read_write');
+    } finally {
+      ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
     }
   });
 });

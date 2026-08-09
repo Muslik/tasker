@@ -4,7 +4,11 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
-import { getHarnessPack, renderPromptTemplate } from '../harness/index.js';
+import {
+  getHarnessPack,
+  renderPromptTemplate,
+  type ResolvedExecutionProfile,
+} from '../harness/index.js';
 import {
   VerificationPlanSchema,
   WorkflowAssemblyDecisionSchema,
@@ -17,11 +21,12 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
   codexOutputJsonSchema,
-  parseCodexStream,
   prepareIsolatedCodexHome,
   providerFailureMessage,
   sha256,
 } from './codex-cli-support.js';
+import { prepareIsolatedClaudeHome } from './claude-cli-support.js';
+import { parseSubscriptionCliStream } from './subscription-cli-stream.js';
 import { WorkflowAnalyzerReceiptSchema, type WorkflowAnalyzerReceipt } from './contracts.js';
 
 const WorkflowAnalyzerProviderOutputSchema = z
@@ -32,18 +37,19 @@ const WorkflowAnalyzerProviderOutputSchema = z
   })
   .strict();
 
-export interface CodexWorkflowAnalyzerRequest extends WorkflowAnalyzerContext {
+export interface WorkflowAnalyzerRequest extends WorkflowAnalyzerContext {
   readonly repositoryPath: string;
+  readonly repositoryReference: string;
   readonly evidenceBundle: EvidenceBundle;
 }
 
-export interface CodexWorkflowAnalyzerSuccess {
+export interface WorkflowAnalyzerSuccess {
   readonly output: WorkflowAnalyzerOutput;
   readonly receipt: WorkflowAnalyzerReceipt;
   readonly stderr: string;
 }
 
-export type CodexWorkflowAnalyzerFailure =
+export type WorkflowAnalyzerFailure =
   | {
       readonly kind: 'provider_unavailable';
       readonly message: string;
@@ -68,7 +74,7 @@ export type CodexWorkflowAnalyzerFailure =
       readonly issues: readonly string[];
     };
 
-const analyzerPrompt = (request: CodexWorkflowAnalyzerRequest): string =>
+const analyzerPrompt = (request: WorkflowAnalyzerRequest): string =>
   renderPromptTemplate(getHarnessPack().prompts.workflowAnalyzer.content, {
     taskSnapshot: JSON.stringify(request.taskSnapshot, null, 2),
     plannerContext: JSON.stringify(request.plannerContext, null, 2),
@@ -87,21 +93,17 @@ const analyzerPrompt = (request: CodexWorkflowAnalyzerRequest): string =>
     ),
   });
 
-export class CodexCliWorkflowAnalyzer {
+export class SubscriptionCliWorkflowAnalyzer {
   public constructor(
     private readonly runner: WorkspaceCommandRunner,
-    private readonly options: {
-      readonly command?: string;
-      readonly model?: string;
-      readonly serviceTier?: 'fast' | 'flex';
-      readonly timeoutMs?: number;
-    } = {},
+    private readonly profileFor: (repositoryReference: string) => ResolvedExecutionProfile,
   ) {}
 
   public async analyze(
-    request: CodexWorkflowAnalyzerRequest,
-  ): Promise<Outcome<CodexWorkflowAnalyzerSuccess, CodexWorkflowAnalyzerFailure>> {
-    const command = this.options.command ?? 'codex';
+    request: WorkflowAnalyzerRequest,
+  ): Promise<Outcome<WorkflowAnalyzerSuccess, WorkflowAnalyzerFailure>> {
+    const profile = this.profileFor(request.repositoryReference);
+    const command = profile.command;
     const version = await this.runner.run({
       command,
       args: ['--version'],
@@ -115,51 +117,73 @@ export class CodexCliWorkflowAnalyzer {
       return err({ kind: 'provider_unavailable', message: version.message });
     }
     if (version.status !== 'exited' || version.exitCode !== 0) {
-      return err({ kind: 'provider_unavailable', message: 'Codex CLI version probe failed' });
+      return err({
+        kind: 'provider_unavailable',
+        message: `${profile.provider} CLI version probe failed`,
+      });
     }
 
     const prompt = analyzerPrompt(request);
-    const directory = await mkdtemp(join(tmpdir(), 'tasker-codex-analyzer-'));
+    const directory = await mkdtemp(join(tmpdir(), 'tasker-workflow-analyzer-'));
     const schemaPath = join(directory, 'workflow-analyzer-output.schema.json');
-    const isolatedCodexHome = join(directory, 'codex-home');
+    const providerConfigurationRoot = join(directory, 'provider-home');
     const isolatedWorkspace = join(directory, 'workspace');
-    const model = this.options.model ?? 'gpt-5.4';
-    const serviceTier = this.options.serviceTier ?? 'fast';
 
     try {
-      await prepareIsolatedCodexHome(isolatedCodexHome);
+      if (profile.provider === 'codex') await prepareIsolatedCodexHome(providerConfigurationRoot);
+      else await prepareIsolatedClaudeHome(providerConfigurationRoot);
       await mkdir(isolatedWorkspace, { recursive: true });
       await writeFile(
         schemaPath,
         `${JSON.stringify(codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema), null, 2)}\n`,
         'utf8',
       );
+      const outputSchema = codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema);
       const execution = await this.runner.run({
         command,
-        args: [
-          'exec',
-          '--model',
-          model,
-          '-c',
-          `service_tier="${serviceTier}"`,
-          '-c',
-          'model_reasoning_effort="low"',
-          '--ephemeral',
-          '--skip-git-repo-check',
-          '--dangerously-bypass-approvals-and-sandbox',
-          '--cd',
-          isolatedWorkspace,
-          '--output-schema',
-          schemaPath,
-          '--json',
-          '-',
-        ],
+        args:
+          profile.provider === 'codex'
+            ? [
+                'exec',
+                '--model',
+                profile.model,
+                '-c',
+                `service_tier="${profile.serviceTier}"`,
+                '-c',
+                `model_reasoning_effort="${profile.effort}"`,
+                '--ephemeral',
+                '--skip-git-repo-check',
+                '--dangerously-bypass-approvals-and-sandbox',
+                '--cd',
+                isolatedWorkspace,
+                '--output-schema',
+                schemaPath,
+                '--json',
+                '-',
+              ]
+            : [
+                '--print',
+                '--model',
+                profile.model,
+                '--effort',
+                profile.effort,
+                '--output-format',
+                'stream-json',
+                '--verbose',
+                '--no-session-persistence',
+                '--dangerously-skip-permissions',
+                '--json-schema',
+                JSON.stringify(outputSchema),
+              ],
         cwd: isolatedWorkspace,
         workspaceAccess: 'read_only',
-        env: { CODEX_HOME: isolatedCodexHome },
+        env:
+          profile.provider === 'codex'
+            ? { CODEX_HOME: providerConfigurationRoot }
+            : { HOME: providerConfigurationRoot },
         mounts: [{ source: directory, target: directory, readOnly: false }],
         stdin: prompt,
-        timeoutMs: this.options.timeoutMs ?? 10 * 60_000,
+        timeoutMs: profile.timeoutMs,
       });
 
       if (execution.status === 'spawn_failed') {
@@ -181,21 +205,14 @@ export class CodexCliWorkflowAnalyzer {
         });
       }
 
-      const stream = parseCodexStream(execution.stdout);
+      const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) {
         return stream;
       }
 
-      let providerOutputInput: unknown;
-      try {
-        providerOutputInput = JSON.parse(stream.value.finalMessage) as unknown;
-      } catch {
-        return err({
-          kind: 'invalid_analyzer_output',
-          issues: ['Final agent message was not JSON'],
-        });
-      }
-      const providerOutput = WorkflowAnalyzerProviderOutputSchema.safeParse(providerOutputInput);
+      const providerOutput = WorkflowAnalyzerProviderOutputSchema.safeParse(
+        stream.value.finalMessage,
+      );
       if (!providerOutput.success) {
         return err({
           kind: 'invalid_analyzer_output',
@@ -234,21 +251,24 @@ export class CodexCliWorkflowAnalyzer {
         stderr: execution.stderr,
         receipt: WorkflowAnalyzerReceiptSchema.parse({
           status: 'completed',
-          provider: 'codex_cli',
-          analyzerVersion: 'codex-cli@1',
+          provider: profile.provider === 'codex' ? 'codex_cli' : 'claude_cli',
+          analyzerVersion: 'workflow-analyzer@2',
+          profile: profile.name,
+          profileSha256: profile.configurationSha256,
           cliVersion: version.stdout.trim(),
-          model,
-          serviceTier,
+          model: profile.model,
+          effort: profile.effort,
+          serviceTier: profile.provider === 'codex' ? profile.serviceTier : null,
           sessionId: stream.value.sessionId,
           promptHash: sha256(prompt),
           durationMs: execution.durationMs,
           usage: {
-            inputTokens: stream.value.usage.input_tokens,
-            cachedInputTokens: stream.value.usage.cached_input_tokens,
-            outputTokens: stream.value.usage.output_tokens,
-            reasoningOutputTokens: stream.value.usage.reasoning_output_tokens ?? 0,
+            inputTokens: stream.value.usage.inputTokens,
+            cachedInputTokens: stream.value.usage.cachedInputTokens,
+            outputTokens: stream.value.usage.outputTokens,
+            reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
           },
-          hypotheticalApiCostUsd: null,
+          hypotheticalApiCostUsd: stream.value.reportedCostUsd,
         }),
       });
     } finally {

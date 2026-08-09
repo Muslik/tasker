@@ -6,9 +6,9 @@ import {
   type EvidenceBundle,
 } from '../planning/index.js';
 import type {
-  CodexWorkflowAnalyzerFailure,
-  CodexWorkflowAnalyzerRequest,
-  CodexWorkflowAnalyzerSuccess,
+  WorkflowAnalyzerFailure,
+  WorkflowAnalyzerRequest,
+  WorkflowAnalyzerSuccess,
 } from '../providers/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema, type JsonValue } from '../workflow/index.js';
@@ -30,8 +30,8 @@ export interface WorkflowGenerator {
 
 export interface WorkflowAnalyzer {
   analyze(
-    request: CodexWorkflowAnalyzerRequest,
-  ): Promise<Outcome<CodexWorkflowAnalyzerSuccess, CodexWorkflowAnalyzerFailure>>;
+    request: WorkflowAnalyzerRequest,
+  ): Promise<Outcome<WorkflowAnalyzerSuccess, WorkflowAnalyzerFailure>>;
 }
 
 export interface WorkflowContextDiscovery {
@@ -200,12 +200,13 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
     const analyzed = await this.analyzer.analyze({
       ...analyzerContext,
       repositoryPath: subject.value.repositoryPath,
+      repositoryReference: subject.value.task.repository,
       evidenceBundle: evidence.value.bundle,
     });
     if (!analyzed.ok) {
       return err({
         kind: 'provider_failure',
-        provider: 'codex_cli',
+        provider: 'subscription_cli',
         failure: analyzed.error,
       });
     }
@@ -218,12 +219,12 @@ export class CodexWorkflowGenerator implements WorkflowGenerator {
   }
 }
 
-export const providerFailureSummary = (failure: CodexWorkflowAnalyzerFailure): string => {
+export const providerFailureSummary = (failure: WorkflowAnalyzerFailure): string => {
   switch (failure.kind) {
     case 'provider_unavailable':
       return failure.message;
     case 'provider_timed_out':
-      return `Codex timed out after ${String(Math.round(failure.durationMs))} ms`;
+      return `Agent provider timed out after ${String(Math.round(failure.durationMs))} ms`;
     case 'provider_failed':
       return failure.message;
     case 'invalid_event_stream':

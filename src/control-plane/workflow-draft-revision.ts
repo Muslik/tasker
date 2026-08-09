@@ -199,6 +199,7 @@ export class WorkflowDraftRevisionCoordinator {
     const analyzed = await this.analyzer.analyze({
       ...analyzerContext,
       repositoryPath: subject.value.repositoryPath,
+      repositoryReference: subject.value.task.repository,
       evidenceBundle: bundle,
     });
     if (!analyzed.ok) {

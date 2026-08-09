@@ -4,6 +4,7 @@ export * from './execution-kernel/contracts.js';
 export * from './execution-kernel/messages.js';
 export * from './task-step-output.js';
 export * from './client.js';
+export * from './public-state.js';
 export * from './freeze-contracts.js';
 export * from './worker.js';
 export * from './activities/block-execution-contracts.js';

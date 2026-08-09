@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
-import { renderPromptTemplate } from '../harness/index.js';
+import { renderPromptTemplate, type ResolvedExecutionProfile } from '../harness/index.js';
 import {
   ImplementationPlannerContextSchema,
   ImplementationPlanningDecisionSchema,
@@ -20,11 +20,12 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
   codexOutputJsonSchema,
-  parseCodexStream,
   prepareIsolatedCodexHome,
   providerFailureMessage,
   sha256,
 } from './codex-cli-support.js';
+import { prepareIsolatedClaudeHome } from './claude-cli-support.js';
+import { parseSubscriptionCliStream } from './subscription-cli-stream.js';
 import {
   prepareAgentSkills,
   type PrepareAgentSkillsFailure,
@@ -46,6 +47,7 @@ export interface ImplementationPlannerRequest {
   readonly operationId: string | null;
   readonly repositoryPath: string;
   readonly strategy: PlanningStrategy;
+  readonly profile: ResolvedExecutionProfile;
   readonly skills: readonly string[];
   readonly mediatedSkills: readonly string[];
   readonly mediatedCredentialEnvironment: readonly string[];
@@ -132,17 +134,8 @@ using the provider output contract. Tasker will perform the read, append immutab
 run planning again with the updated bundle.
 `;
 
-export class CodexCliImplementationPlanner implements ImplementationPlanner {
-  public constructor(
-    private readonly runner: WorkspaceCommandRunner,
-    private readonly options: {
-      readonly command?: string;
-      readonly model?: string;
-      readonly serviceTier?: 'fast' | 'flex';
-      readonly fastTimeoutMs?: number;
-      readonly ralplanTimeoutMs?: number;
-    } = {},
-  ) {}
+export class SubscriptionCliImplementationPlanner implements ImplementationPlanner {
+  public constructor(private readonly runner: WorkspaceCommandRunner) {}
 
   public async plan(
     requestInput: ImplementationPlannerRequest,
@@ -151,7 +144,8 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
       ...requestInput,
       context: ImplementationPlannerContextSchema.parse(requestInput.context),
     };
-    const command = this.options.command ?? 'codex';
+    const profile = request.profile;
+    const command = profile.command;
     const version = await this.runner.run({
       command,
       args: ['--version'],
@@ -164,25 +158,30 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
       return err({ kind: 'provider_unavailable', message: version.message });
     }
     if (version.status !== 'exited' || version.exitCode !== 0) {
-      return err({ kind: 'provider_unavailable', message: 'Codex CLI version probe failed' });
+      return err({
+        kind: 'provider_unavailable',
+        message: `${profile.provider} CLI version probe failed`,
+      });
     }
 
     const directory = await mkdtemp(join(tmpdir(), 'tasker-implementation-planner-'));
     const schemaPath = join(directory, 'implementation-planner-output.schema.json');
-    const isolatedCodexHome = join(directory, 'codex-home');
-    const model = this.options.model ?? 'gpt-5.4';
-    const serviceTier = this.options.serviceTier ?? 'fast';
+    const providerConfigurationRoot = join(directory, 'provider-home');
 
     try {
       const prompt = plannerPrompt(request);
-      await prepareIsolatedCodexHome(isolatedCodexHome, {
-        includePlanningSurfaces: request.strategy === 'ralplan',
-      });
-      await mkdir(isolatedCodexHome, { recursive: true });
+      if (profile.provider === 'codex') {
+        await prepareIsolatedCodexHome(providerConfigurationRoot, {
+          includePlanningSurfaces: request.strategy === 'ralplan',
+        });
+      } else {
+        await prepareIsolatedClaudeHome(providerConfigurationRoot);
+      }
+      await mkdir(providerConfigurationRoot, { recursive: true });
       const preparedSkills = await prepareAgentSkills({
-        provider: 'codex',
+        provider: profile.provider,
         repositoryPath: request.repositoryPath,
-        configurationRoot: isolatedCodexHome,
+        configurationRoot: providerConfigurationRoot,
         skills: [...request.skills],
         skillOverrides: Object.fromEntries(
           request.mediatedSkills.map((skill) => [skill, mediatedSkill(skill)]),
@@ -194,41 +193,58 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         `${JSON.stringify(codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema), null, 2)}\n`,
         'utf8',
       );
+      const outputSchema = codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema);
       const execution = await this.runner.run({
         ...(request.operationId === null ? {} : { operationId: request.operationId }),
         command,
-        args: [
-          'exec',
-          '--model',
-          model,
-          '-c',
-          `service_tier="${serviceTier}"`,
-          '-c',
-          `model_reasoning_effort="${request.strategy === 'ralplan' ? 'high' : 'low'}"`,
-          '--ephemeral',
-          '--skip-git-repo-check',
-          '--dangerously-bypass-approvals-and-sandbox',
-          '--cd',
-          request.repositoryPath,
-          '--output-schema',
-          schemaPath,
-          '--json',
-          '-',
-        ],
+        args:
+          profile.provider === 'codex'
+            ? [
+                'exec',
+                '--model',
+                profile.model,
+                '-c',
+                `service_tier="${profile.serviceTier}"`,
+                '-c',
+                `model_reasoning_effort="${profile.effort}"`,
+                '--ephemeral',
+                '--skip-git-repo-check',
+                '--dangerously-bypass-approvals-and-sandbox',
+                '--cd',
+                request.repositoryPath,
+                '--output-schema',
+                schemaPath,
+                '--json',
+                '-',
+              ]
+            : [
+                '--print',
+                '--model',
+                profile.model,
+                '--effort',
+                profile.effort,
+                '--output-format',
+                'stream-json',
+                '--verbose',
+                '--no-session-persistence',
+                '--dangerously-skip-permissions',
+                '--json-schema',
+                JSON.stringify(outputSchema),
+                ...preparedSkills.value.cliArguments,
+              ],
         cwd: request.repositoryPath,
         workspaceAccess: 'read_only',
         env: {
-          CODEX_HOME: isolatedCodexHome,
+          ...(profile.provider === 'codex'
+            ? { CODEX_HOME: providerConfigurationRoot }
+            : { HOME: providerConfigurationRoot }),
           ...workspaceHarnessEnvironment(request.repositoryPath, preparedSkills.value.skillsRoot),
           TASKER_HARNESS_ENV_FILE: '/dev/null',
         },
         mounts: [{ source: directory, target: directory, readOnly: false }],
         unsetEnv: request.mediatedCredentialEnvironment,
         stdin: prompt,
-        timeoutMs:
-          request.strategy === 'ralplan'
-            ? (this.options.ralplanTimeoutMs ?? 30 * 60_000)
-            : (this.options.fastTimeoutMs ?? 10 * 60_000),
+        timeoutMs: profile.timeoutMs,
       });
 
       if (execution.status === 'spawn_failed') {
@@ -250,16 +266,11 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
         });
       }
 
-      const stream = parseCodexStream(execution.stdout);
+      const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) return stream;
-      let providerOutputInput: unknown;
-      try {
-        providerOutputInput = JSON.parse(stream.value.finalMessage) as unknown;
-      } catch {
-        return invalidOutput(['Final agent message was not JSON']);
-      }
-      const providerOutput =
-        ImplementationPlannerProviderOutputSchema.safeParse(providerOutputInput);
+      const providerOutput = ImplementationPlannerProviderOutputSchema.safeParse(
+        stream.value.finalMessage,
+      );
       if (!providerOutput.success) {
         return invalidOutput(
           providerOutput.error.issues.map(
@@ -294,22 +305,25 @@ export class CodexCliImplementationPlanner implements ImplementationPlanner {
 
       const receipt = ImplementationPlannerReceiptSchema.parse({
         status: 'completed',
-        provider: 'codex_cli',
-        plannerVersion: 'implementation-planner@1',
+        provider: profile.provider === 'codex' ? 'codex_cli' : 'claude_cli',
+        plannerVersion: 'implementation-planner@2',
+        profile: profile.name,
+        profileSha256: profile.configurationSha256,
         cliVersion: version.stdout.trim(),
-        model,
-        serviceTier,
+        model: profile.model,
+        effort: profile.effort,
+        serviceTier: profile.provider === 'codex' ? profile.serviceTier : null,
         strategy: request.strategy,
         sessionId: stream.value.sessionId,
         promptHash: sha256(prompt),
         durationMs: execution.durationMs,
         usage: {
-          inputTokens: stream.value.usage.input_tokens,
-          cachedInputTokens: stream.value.usage.cached_input_tokens,
-          outputTokens: stream.value.usage.output_tokens,
-          reasoningOutputTokens: stream.value.usage.reasoning_output_tokens ?? 0,
+          inputTokens: stream.value.usage.inputTokens,
+          cachedInputTokens: stream.value.usage.cachedInputTokens,
+          outputTokens: stream.value.usage.outputTokens,
+          reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
         },
-        hypotheticalApiCostUsd: null,
+        hypotheticalApiCostUsd: stream.value.reportedCostUsd,
       });
       if (hasEvidenceRequests) {
         if (providerOutput.data.decisionJson !== null) {
@@ -421,10 +435,13 @@ export class DeterministicImplementationPlanner implements ImplementationPlanner
         receipt: ImplementationPlannerReceiptSchema.parse({
           status: 'completed',
           provider: 'deterministic',
-          plannerVersion: 'implementation-planner@1',
+          plannerVersion: 'implementation-planner@2',
+          profile: 'deterministic',
+          profileSha256: promptHash,
           cliVersion: 'deterministic@1',
           model: 'deterministic',
-          serviceTier: 'fast',
+          effort: 'low',
+          serviceTier: null,
           strategy: request.strategy,
           sessionId: `deterministic:${promptHash.slice(0, 16)}`,
           promptHash,

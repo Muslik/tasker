@@ -5,8 +5,6 @@ import {
   WorkflowNotFoundError,
   type WorkflowHandle,
 } from '@temporalio/client';
-import { z } from 'zod';
-
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   BootstrapWorkflowInputSchema,
@@ -31,13 +29,7 @@ import {
 } from './execution-kernel/messages.js';
 import { bootstrapWorkflowV2 } from './workflows/bootstrap-workflow-v2.js';
 import type { executionWorkflowV2 } from './workflows/execution-workflow-v2.js';
-
-export const TaskRunPublicStateSchema = z.discriminatedUnion('runtime', [
-  BootstrapWorkflowPublicStateSchema,
-  ExecutionWorkflowPublicStateSchema,
-]);
-
-export type TaskRunPublicState = z.infer<typeof TaskRunPublicStateSchema>;
+import type { TaskRunPublicState } from './public-state.js';
 export type TaskRunError =
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
   | { readonly kind: 'run_input_conflict'; readonly taskReference: string }

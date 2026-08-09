@@ -13,7 +13,7 @@ import {
 } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { ImplementationPlannerReceiptSchema } from '../../providers/contracts.js';
-import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/index.js';
+import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/schema.js';
 import { DockerWorkspaceRuntimeReceiptSchema } from '../../workspaces/docker-runtime-contracts.js';
 import {
   WorkspaceBootstrapReceiptSchema,

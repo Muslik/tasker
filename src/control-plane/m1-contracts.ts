@@ -4,7 +4,7 @@ import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
 import { TaskFixtureSchema } from '../planning/fixtures.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
-import { TaskRunPublicStateSchema } from '../temporal/client.js';
+import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
 import { TaskRunSettingsSchema } from '../temporal/bootstrap-kernel/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 

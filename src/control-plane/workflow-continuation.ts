@@ -815,6 +815,7 @@ export class WorkflowContinuationCoordinator {
     const analyzed = await this.analyzer.analyze({
       ...analyzerContext,
       repositoryPath,
+      repositoryReference: fixture.repository,
       evidenceBundle: evidence.value.bundle,
     });
     return analyzed.ok
@@ -823,7 +824,7 @@ export class WorkflowContinuationCoordinator {
           analyzed.value.output,
           analyzed.value.receipt,
         )
-      : err({ kind: 'provider_failure', provider: 'codex_cli', failure: analyzed.error });
+      : err({ kind: 'provider_failure', provider: 'subscription_cli', failure: analyzed.error });
   }
 
   private validateCandidate(

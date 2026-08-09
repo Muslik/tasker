@@ -17,11 +17,12 @@ import {
   PullRequestReviewEvidenceStore,
 } from '../integrations/index.js';
 import {
-  CodexCliImplementationPlanner,
-  CodexCliWorkflowAnalyzer,
+  SubscriptionCliImplementationPlanner,
+  SubscriptionCliWorkflowAnalyzer,
   DeterministicImplementationPlanner,
   nodeCommandRunner,
 } from '../providers/index.js';
+import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
 import {
   BitbucketRepositoryClient,
   createManagedRepositoryStore,
@@ -85,6 +86,7 @@ export const startM1Server = async (): Promise<void> => {
     repositoryCatalog,
   });
   const deterministicProviders = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
+  const harnessPack = loadHarnessPack();
   const dockerConfiguration = loadDockerWorkspaceConfiguration();
   const dockerCommands = new DockerWorkspaceCommandRunner(
     dockerConfiguration,
@@ -93,7 +95,15 @@ export const startM1Server = async (): Promise<void> => {
   );
   const continuationAnalyzer = deterministicProviders
     ? undefined
-    : new CodexCliWorkflowAnalyzer(dockerCommands);
+    : new SubscriptionCliWorkflowAnalyzer(dockerCommands, (repositoryReference) => {
+        const project = harnessPack.projects.find(
+          (candidate) => candidate.repository === repositoryReference,
+        );
+        return resolveWorkflowAnalyzerProfile(
+          harnessPack.company,
+          project?.executionProfileOverrides ?? null,
+        );
+      });
   const subjects = new WorkflowGenerationSubjectSource(
     resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
     jiraIssueService,
@@ -114,7 +124,8 @@ export const startM1Server = async (): Promise<void> => {
     evidenceReaders,
     planner: deterministicProviders
       ? new DeterministicImplementationPlanner()
-      : new CodexCliImplementationPlanner(dockerCommands),
+      : new SubscriptionCliImplementationPlanner(dockerCommands),
+    harnessPack,
   });
   const workflowContinuation = createWorkflowContinuationCoordinator({
     ledger: ledger.repository,

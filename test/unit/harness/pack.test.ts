@@ -109,6 +109,30 @@ describe('file-backed harness pack', () => {
     expect(() => loadHarnessPack(root)).toThrow();
   });
 
+  it('rejects obsolete company manifests instead of inferring execution profiles', async () => {
+    const root = await createTemporaryPack();
+    const manifestPath = join(root, 'company.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      schemaVersion: number;
+    };
+    manifest.schemaVersion = 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+    expect(() => loadHarnessPack(root)).toThrow();
+  });
+
+  it('rejects a missing execution profile instead of selecting a fallback provider', async () => {
+    const root = await createTemporaryPack();
+    const manifestPath = join(root, 'company.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      executionProfileRouting: { workflowAnalyzer: string };
+    };
+    manifest.executionProfileRouting.workflowAnalyzer = 'missing-profile';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+    expect(() => loadHarnessPack(root)).toThrow('Unknown execution profile missing-profile');
+  });
+
   it('loads company policy blocks and path obligations from files', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
 

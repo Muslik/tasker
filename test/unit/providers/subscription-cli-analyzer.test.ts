@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 import { findTaskFixture, planTaskWorkflow } from '../../../src/planning/index.js';
 import {
-  CodexCliWorkflowAnalyzer,
+  SubscriptionCliWorkflowAnalyzer,
   type CommandRequest,
   type CommandResult,
   type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
+import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 
 const fixture = () => {
   const value = findTaskFixture('avia-13236-short-bug');
@@ -49,6 +50,23 @@ const codexJsonl = (finalMessage: string): string =>
     }),
   ].join('\n');
 
+const claudeJsonl = (finalMessage: unknown): string =>
+  JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: '',
+    structured_output: finalMessage,
+    session_id: 'claude-analyzer-1',
+    usage: {
+      input_tokens: 900,
+      cache_creation_input_tokens: 100,
+      cache_read_input_tokens: 200,
+      output_tokens: 180,
+    },
+    total_cost_usd: 0.31,
+  });
+
 const providerMessage = (output: ReturnType<typeof validAnalyzerOutput>): string =>
   JSON.stringify({
     assemblyDecisions: output.assemblyDecisions,
@@ -88,14 +106,42 @@ class RecordingRunner implements WorkspaceCommandRunner {
   }
 }
 
-describe('Codex CLI workflow analyzer', () => {
+class ClaudeRecordingRunner implements WorkspaceCommandRunner {
+  public readonly executionEnvironment = 'docker_workspace' as const;
+  public readonly requests: CommandRequest[] = [];
+
+  public constructor(private readonly finalMessage: unknown) {}
+
+  public run(request: CommandRequest): Promise<CommandResult> {
+    this.requests.push(request);
+    if (request.args[0] === '--version') {
+      return Promise.resolve({
+        status: 'exited',
+        exitCode: 0,
+        stdout: '2.1.224 (Claude Code)\n',
+        stderr: '',
+        durationMs: 5,
+      });
+    }
+    return Promise.resolve({
+      status: 'exited',
+      exitCode: 0,
+      stdout: claudeJsonl(this.finalMessage),
+      stderr: '',
+      durationMs: 1100,
+    });
+  }
+}
+
+describe('subscription CLI workflow analyzer', () => {
   it('runs subscription CLI analysis in a read-only Docker workspace with structured output', async () => {
     const output = validAnalyzerOutput();
     const runner = new RecordingRunner(providerMessage(output));
-    const analyzer = new CodexCliWorkflowAnalyzer(runner);
+    const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CODEX_PROFILE);
 
     const result = await analyzer.analyze({
       repositoryPath: '/tmp/repository',
+      repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },
       evidenceBundle: makeEvidenceBundle('avia-13236-short-bug'),
@@ -107,9 +153,12 @@ describe('Codex CLI workflow analyzer', () => {
         output,
         receipt: {
           provider: 'codex_cli',
-          analyzerVersion: 'codex-cli@1',
+          analyzerVersion: 'workflow-analyzer@2',
+          profile: 'test-codex',
+          profileSha256: 'e'.repeat(64),
           cliVersion: 'codex-cli 0.120.0',
-          model: 'gpt-5.4',
+          model: 'gpt-5.6-terra',
+          effort: 'medium',
           serviceTier: 'fast',
           sessionId: 'thread-analyzer-1',
           durationMs: 1250,
@@ -125,8 +174,10 @@ describe('Codex CLI workflow analyzer', () => {
     });
     const executionRequest = runner.requests[1];
     expect(executionRequest?.command).toBe('codex');
-    expect(executionRequest?.cwd).toMatch(/tasker-codex-analyzer-.+\/workspace$/u);
-    expect(executionRequest?.env?.CODEX_HOME).toMatch(/tasker-codex-analyzer-.+\/codex-home$/u);
+    expect(executionRequest?.cwd).toMatch(/tasker-workflow-analyzer-.+\/workspace$/u);
+    expect(executionRequest?.env?.CODEX_HOME).toMatch(
+      /tasker-workflow-analyzer-.+\/provider-home$/u,
+    );
     expect(executionRequest?.stdin).toContain('Do not claim facts that require later execution');
     expect(executionRequest?.stdin).toContain('MUST have exactly these top-level keys');
     expect(executionRequest?.stdin).toContain(
@@ -141,11 +192,11 @@ describe('Codex CLI workflow analyzer', () => {
       expect.arrayContaining([
         'exec',
         '--model',
-        'gpt-5.4',
+        'gpt-5.6-terra',
         '-c',
         'service_tier="fast"',
         '-c',
-        'model_reasoning_effort="low"',
+        'model_reasoning_effort="medium"',
         '--ephemeral',
         '--skip-git-repo-check',
         '--dangerously-bypass-approvals-and-sandbox',
@@ -157,12 +208,48 @@ describe('Codex CLI workflow analyzer', () => {
     expect(runner.schema).toContain('sourceJson');
   });
 
-  it('rejects a final message that violates the analyzer output contract', async () => {
-    const runner = new RecordingRunner(JSON.stringify({ source: 'not-a-workflow' }));
-    const analyzer = new CodexCliWorkflowAnalyzer(runner);
+  it('runs the analyzer through a selected Claude subscription profile', async () => {
+    const output = validAnalyzerOutput();
+    const runner = new ClaudeRecordingRunner(JSON.parse(providerMessage(output)) as unknown);
+    const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CLAUDE_PROFILE);
 
     const result = await analyzer.analyze({
       repositoryPath: '/tmp/repository',
+      repositoryReference: fixture().repository,
+      taskSnapshot: fixture(),
+      plannerContext: { contracts: [] },
+      evidenceBundle: makeEvidenceBundle('avia-13236-short-bug'),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        output,
+        receipt: {
+          provider: 'claude_cli',
+          profile: 'test-claude',
+          model: 'sonnet',
+          effort: 'high',
+          sessionId: 'claude-analyzer-1',
+          usage: { inputTokens: 900, cachedInputTokens: 300, outputTokens: 180 },
+          hypotheticalApiCostUsd: 0.31,
+        },
+      },
+    });
+    expect(runner.requests[1]?.args).toEqual(
+      expect.arrayContaining(['--print', '--model', 'sonnet', '--effort', 'high', '--json-schema']),
+    );
+    expect(runner.requests[1]?.env?.HOME).toMatch(/tasker-workflow-analyzer-.+\/provider-home$/u);
+    expect(runner.requests[1]?.env?.CODEX_HOME).toBeUndefined();
+  });
+
+  it('rejects a final message that violates the analyzer output contract', async () => {
+    const runner = new RecordingRunner(JSON.stringify({ source: 'not-a-workflow' }));
+    const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CODEX_PROFILE);
+
+    const result = await analyzer.analyze({
+      repositoryPath: '/tmp/repository',
+      repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },
       evidenceBundle: makeEvidenceBundle('avia-13236-short-bug'),

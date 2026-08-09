@@ -249,20 +249,22 @@ disabled.
 
 ## 10. Provider execution
 
-Provider bindings remain interchangeable:
-
-- Codex CLI first;
-- Claude Code CLI where a block/provider policy selects it;
-- Antigravity only where a stable non-interactive surface is available.
+Provider selection is configuration, not workflow structure. Named company profiles
+contain the subscription CLI, model, effort, timeout, and provider-specific options;
+company routes and project redirects select among them. Codex and Claude implement the
+same structured Activity contract. Unknown profiles fail pack loading, and the resolved
+profile is frozen into the run snapshot. Antigravity requires its own adapter and a
+registered profile before it can be selected.
 
 A logical skill in graph data maps to provider-specific instructions in the Activity
 adapter. Provider sessions and resumption tokens are optimization hints, not durability
 authority. If resumption fails, a new attempt receives persisted bounded context and
 artifacts.
 
-Shadow API cost is computed from measured tokens when available and a versioned price
-table. Subscription use still records elapsed time, model/provider, attempts, and
-hypothetical API cost; it does not claim subscription spend per call.
+Receipts record profile/hash, provider, CLI version, model, effort, session, duration,
+prompt hash, and normalized token usage. Shadow API cost is computed from measured
+tokens when a versioned price table is available; provider-reported API equivalent is
+retained when supplied. Subscription use does not claim that amount was charged.
 
 ## 11. UI and observability
 

@@ -3,8 +3,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { openSqliteLedger } from '../ledger/index.js';
+import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
 import { createWorkflowAnalyzerContext, findTaskFixture } from '../planning/index.js';
-import { CodexCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
+import { SubscriptionCliWorkflowAnalyzer, nodeCommandRunner } from '../providers/index.js';
 import { systemClock } from '../shared/clock.js';
 import {
   DockerWorkspaceCommandRunner,
@@ -92,14 +93,26 @@ export const runAnalyzerCli = async (
       return renderResponse(existing.value, write);
     }
 
-    write(`Analyzing ${fixture.taskId} in ${repositoryPath} with Codex read-only mode…`);
+    write(
+      `Analyzing ${fixture.taskId} in ${repositoryPath} with the configured read-only profile…`,
+    );
     const dockerConfiguration = loadDockerWorkspaceConfiguration();
-    const analyzer = new CodexCliWorkflowAnalyzer(
+    const harnessPack = loadHarnessPack();
+    const analyzer = new SubscriptionCliWorkflowAnalyzer(
       new DockerWorkspaceCommandRunner(
         dockerConfiguration,
         nodeCommandRunner,
         new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
       ),
+      (repositoryReference) => {
+        const project = harnessPack.projects.find(
+          (candidate) => candidate.repository === repositoryReference,
+        );
+        return resolveWorkflowAnalyzerProfile(
+          harnessPack.company,
+          project?.executionProfileOverrides ?? null,
+        );
+      },
     );
     const analyzerContext = createWorkflowAnalyzerContext(fixture);
     const evidence = await new ContextDiscoveryService(
@@ -119,6 +132,7 @@ export const runAnalyzerCli = async (
     const analyzed = await analyzer.analyze({
       ...analyzerContext,
       repositoryPath,
+      repositoryReference: fixture.repository,
       evidenceBundle: evidence.value.bundle,
     });
     if (!analyzed.ok) {

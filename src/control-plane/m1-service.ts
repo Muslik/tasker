@@ -14,7 +14,7 @@ import {
   type WorkflowProposalArtifact,
   type WorkflowAnalyzerOutput,
 } from '../planning/index.js';
-import type { CodexWorkflowAnalyzerFailure, WorkflowAnalyzerReceipt } from '../providers/index.js';
+import type { WorkflowAnalyzerFailure, WorkflowAnalyzerReceipt } from '../providers/index.js';
 import { JsonValueSchema, type JsonValue, type ValidationReport } from '../workflow/index.js';
 import {
   FixtureListResponseSchema,
@@ -64,8 +64,8 @@ export type M1ServiceError =
     }
   | {
       readonly kind: 'provider_failure';
-      readonly provider: 'codex_cli';
-      readonly failure: CodexWorkflowAnalyzerFailure;
+      readonly provider: 'subscription_cli';
+      readonly failure: WorkflowAnalyzerFailure;
     }
   | {
       readonly kind: 'generation_runtime_unavailable';
@@ -411,7 +411,7 @@ export class M1WorkflowService {
 
     const entries = this.store.listEvents(fixtureId).map((event) => {
       const source =
-        event.actor === 'codex_cli_analyzer'
+        event.actor === 'subscription_cli_analyzer'
           ? ('agent' as const)
           : event.actor === 'm1_deterministic_planner' || event.actor === 'm1_planner'
             ? ('planner' as const)

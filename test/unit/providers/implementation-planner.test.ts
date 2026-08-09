@@ -4,12 +4,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  CodexCliImplementationPlanner,
+  SubscriptionCliImplementationPlanner,
   type CommandRequest,
   type CommandResult,
   type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
+import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 
 const readyDecision = {
   status: 'ready',
@@ -50,6 +51,23 @@ const codexJsonl = (finalMessage: string): string =>
       },
     }),
   ].join('\n');
+
+const claudeJsonl = (finalMessage: unknown): string =>
+  JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: '',
+    structured_output: finalMessage,
+    session_id: 'claude-planner-1',
+    usage: {
+      input_tokens: 1200,
+      cache_creation_input_tokens: 100,
+      cache_read_input_tokens: 400,
+      output_tokens: 250,
+    },
+    total_cost_usd: 0.42,
+  });
 
 class RecordingRunner implements WorkspaceCommandRunner {
   public readonly executionEnvironment = 'docker_workspace' as const;
@@ -93,10 +111,43 @@ class RecordingRunner implements WorkspaceCommandRunner {
   }
 }
 
+class ClaudeRecordingRunner implements WorkspaceCommandRunner {
+  public readonly executionEnvironment = 'docker_workspace' as const;
+  public readonly requests: CommandRequest[] = [];
+
+  public run(request: CommandRequest): Promise<CommandResult> {
+    this.requests.push(request);
+    if (request.args[0] === '--version') {
+      return Promise.resolve({
+        status: 'exited',
+        exitCode: 0,
+        stdout: '2.1.224 (Claude Code)\n',
+        stderr: '',
+        durationMs: 4,
+      });
+    }
+    return Promise.resolve({
+      status: 'exited',
+      exitCode: 0,
+      stdout: claudeJsonl({
+        decisionJson: JSON.stringify(readyDecision),
+        evidenceRequestsJson: '[]',
+      }),
+      stderr: '',
+      durationMs: 1400,
+    });
+  }
+}
+
 const request = (strategy: 'fast' | 'ralplan') => ({
   operationId: 'tasker:test:planning:1',
   repositoryPath: process.cwd(),
   strategy,
+  profile: {
+    ...TEST_CODEX_PROFILE,
+    name: strategy === 'ralplan' ? 'test-ralplan' : 'test-fast',
+    effort: strategy === 'ralplan' ? ('high' as const) : ('low' as const),
+  },
   skills: [],
   mediatedSkills: [],
   mediatedCredentialEnvironment: [],
@@ -115,7 +166,7 @@ describe('Codex CLI implementation planner', () => {
     const runner = new RecordingRunner(
       JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
     );
-    const planner = new CodexCliImplementationPlanner(runner);
+    const planner = new SubscriptionCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('fast'));
 
@@ -168,7 +219,7 @@ describe('Codex CLI implementation planner', () => {
     const runner = new RecordingRunner(
       JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
     );
-    const planner = new CodexCliImplementationPlanner(runner);
+    const planner = new SubscriptionCliImplementationPlanner(runner);
 
     try {
       const result = await planner.plan({
@@ -215,7 +266,7 @@ describe('Codex CLI implementation planner', () => {
         evidenceRequestsJson: JSON.stringify(evidenceRequests),
       }),
     );
-    const planner = new CodexCliImplementationPlanner(runner);
+    const planner = new SubscriptionCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('fast'));
 
@@ -229,7 +280,7 @@ describe('Codex CLI implementation planner', () => {
     const runner = new RecordingRunner(
       JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
     );
-    const planner = new CodexCliImplementationPlanner(runner);
+    const planner = new SubscriptionCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('ralplan'));
 
@@ -241,6 +292,48 @@ describe('Codex CLI implementation planner', () => {
     expect(runner.requests[1]?.stdin).toContain('Planner -> Architect -> Critic');
   });
 
+  it('runs the same planning contract through a selected Claude subscription profile', async () => {
+    const runner = new ClaudeRecordingRunner();
+    const planner = new SubscriptionCliImplementationPlanner(runner);
+
+    const result = await planner.plan({
+      ...request('ralplan'),
+      profile: TEST_CLAUDE_PROFILE,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        decision: readyDecision,
+        receipt: {
+          provider: 'claude_cli',
+          profile: 'test-claude',
+          model: 'sonnet',
+          effort: 'high',
+          strategy: 'ralplan',
+          sessionId: 'claude-planner-1',
+          usage: { inputTokens: 1200, cachedInputTokens: 500, outputTokens: 250 },
+          hypotheticalApiCostUsd: 0.42,
+        },
+      },
+    });
+    expect(runner.requests[1]?.args).toEqual(
+      expect.arrayContaining([
+        '--print',
+        '--model',
+        'sonnet',
+        '--effort',
+        'high',
+        '--output-format',
+        'stream-json',
+        '--json-schema',
+      ]),
+    );
+    expect(runner.requests[1]?.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(runner.requests[1]?.env?.HOME).toMatch(/provider-home$/u);
+    expect(runner.requests[1]?.env?.CODEX_HOME).toBeUndefined();
+  });
+
   it('rejects a decision outside the typed planner contract', async () => {
     const runner = new RecordingRunner(
       JSON.stringify({
@@ -248,7 +341,7 @@ describe('Codex CLI implementation planner', () => {
         evidenceRequestsJson: '[]',
       }),
     );
-    const planner = new CodexCliImplementationPlanner(runner);
+    const planner = new SubscriptionCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('fast'));
 
@@ -269,7 +362,7 @@ describe('Codex CLI implementation planner', () => {
     const runner = new RecordingRunner(
       JSON.stringify({ decisionJson: JSON.stringify(decision), evidenceRequestsJson: '[]' }),
     );
-    const planner = new CodexCliImplementationPlanner(runner);
+    const planner = new SubscriptionCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('fast'));
 

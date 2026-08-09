@@ -265,6 +265,31 @@ retains only the control plane: Temporal/API/UI/product storage, managed Git wor
 ownership, Docker daemon control, and typed external-system adapters. There is no host
 execution fallback. See [`docker-execution.md`](docker-execution.md).
 
+### 7.1 Execution profiles
+
+Provider bindings are selected only through named execution profiles. A company pack
+registers complete Codex and Claude subscription-CLI definitions and routing for
+workflow analysis plus `fast`/`ralplan` planning. A project may redirect those routes
+and map a logical agent profile such as `implementation` or `review` to another
+registered profile. An explicit run override, where policy exposes one, has highest
+precedence:
+
+```text
+explicit run override -> project redirect -> company route/logical profile
+```
+
+Every name must resolve. An unknown profile rejects harness loading or run preparation;
+Tasker never silently selects a provider, model, or cheaper planning strategy. The
+resolved provider, command, model, effort, timeout, service tier, and canonical
+configuration hash are copied into the planning snapshot before freeze. Later config
+edits therefore affect only later runs.
+
+Codex and Claude implement the same analyzer, planner, and agent-block contracts. Their
+adapters own authentication projection, CLI arguments, structured output, skill
+materialization, transcript capture, normalized usage, timeout, cancellation, and
+receipt metadata. Adding another provider must add an adapter and registered profile;
+it must not add provider branches to the graph or interpreter.
+
 Temporal delivery does not make a Jira comment, git push, package publish, or PR update
 exactly once. External mutations use a Tasker idempotency key and this protocol:
 

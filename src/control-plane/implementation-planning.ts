@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { harnessPolicyAppliesToTask, loadHarnessPack } from '../harness/index.js';
+import {
+  harnessPolicyAppliesToTask,
+  loadHarnessPack,
+  resolveAgentExecutionProfile,
+  resolveImplementationPlannerProfile,
+} from '../harness/index.js';
 import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
@@ -749,6 +754,7 @@ const snapshotHarness = (
   const implementationPlannerSkills = pack.company.systemPrompts.implementationPlannerSkills;
   const graph = CompiledWorkflowSchema.parse(workflowGraph);
   const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
+  const profileOverrides = project?.executionProfileOverrides ?? null;
   const referencedSteps = new Set(graph.metadata.references.stepTypes);
   const steps = pack.steps
     .filter((step) => referencedSteps.has(step.reference))
@@ -758,6 +764,14 @@ const snapshotHarness = (
       resolvedCommand:
         step.block.executor.kind === 'process'
           ? resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project)
+          : null,
+      executionProfile:
+        step.block.executor.kind === 'agent'
+          ? resolveAgentExecutionProfile(
+              pack.company,
+              profileOverrides,
+              step.block.executor.profile,
+            )
           : null,
     }));
   const snapshottedProject = (() => {
@@ -775,6 +789,10 @@ const snapshotHarness = (
     implementationPlanner: {
       prompt: snapshotPrompt(pack.prompts.implementationPlanner),
       skills: implementationPlannerSkills,
+      profiles: {
+        fast: resolveImplementationPlannerProfile(pack.company, profileOverrides, 'fast'),
+        ralplan: resolveImplementationPlannerProfile(pack.company, profileOverrides, 'ralplan'),
+      },
     },
     policies: pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task)),
     steps,
@@ -865,7 +883,7 @@ export class ImplementationPlanningCoordinator {
     if (evidenceBundle.value === null)
       return err({ kind: 'evidence_bundle_missing', taskReference });
     const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 6,
+      schemaVersion: 7,
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,
@@ -1277,6 +1295,7 @@ export class ImplementationPlanningCoordinator {
           evidenceBundle: evidenceBundle.value,
           promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
           plannerSkills: loaded.value.harness.implementationPlanner.skills,
+          plannerProfiles: loaded.value.harness.implementationPlanner.profiles,
         });
       }
 
@@ -1305,12 +1324,28 @@ export class ImplementationPlanningCoordinator {
       if (evidenceBundle.value === null) {
         return err({ kind: 'evidence_bundle_missing' as const, taskReference });
       }
+      const pack = this.harnessPackSource();
+      const project = pack.projects.find(
+        (candidate) => candidate.repository === subject.value.task.repository,
+      );
       return ok({
         subject: subject.value,
         workflowJson: JsonValueSchema.parse(workflow.value.view.workflow),
         evidenceBundle: evidenceBundle.value,
-        promptTemplate: this.harnessPackSource().prompts.implementationPlanner.content,
-        plannerSkills: this.harnessPackSource().company.systemPrompts.implementationPlannerSkills,
+        promptTemplate: pack.prompts.implementationPlanner.content,
+        plannerSkills: pack.company.systemPrompts.implementationPlannerSkills,
+        plannerProfiles: {
+          fast: resolveImplementationPlannerProfile(
+            pack.company,
+            project?.executionProfileOverrides ?? null,
+            'fast',
+          ),
+          ralplan: resolveImplementationPlannerProfile(
+            pack.company,
+            project?.executionProfileOverrides ?? null,
+            'ralplan',
+          ),
+        },
       });
     })();
     if (!planningInput.ok) return planningInput;
@@ -1383,6 +1418,7 @@ export class ImplementationPlanningCoordinator {
         operationId: commandId,
         repositoryPath: planningInput.value.subject.repositoryPath,
         strategy: selection.strategy,
+        profile: planningInput.value.plannerProfiles[selection.strategy],
         skills: planningInput.value.plannerSkills,
         mediatedSkills,
         mediatedCredentialEnvironment,

@@ -14,7 +14,7 @@ import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-gener
 import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
-import { loadHarnessPack } from '../harness/index.js';
+import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
 import {
   AiAssistanceInitializeAdapter,
   AiAssistanceRecordPlanAdapter,
@@ -46,8 +46,8 @@ import {
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
 import {
-  CodexCliWorkflowAnalyzer,
-  CodexCliImplementationPlanner,
+  SubscriptionCliWorkflowAnalyzer,
+  SubscriptionCliImplementationPlanner,
   DeterministicImplementationPlanner,
   nodeCommandRunner,
 } from '../providers/index.js';
@@ -81,7 +81,7 @@ import {
   createTemporalActivityCommandRunner,
 } from './activities/planning-activity.js';
 import {
-  CodexCliTaskStepAgentRunner,
+  SubscriptionCliTaskStepAgentRunner,
   createCurrentStepRegistry,
   createTaskExecutionActivity,
   LedgerTaskRunEvidenceSource,
@@ -213,7 +213,15 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   const workflowAnalyzer = deterministicProvider
     ? undefined
-    : new CodexCliWorkflowAnalyzer(temporalCommandRunner);
+    : new SubscriptionCliWorkflowAnalyzer(temporalCommandRunner, (repositoryReference) => {
+        const project = harnessPack.projects.find(
+          (candidate) => candidate.repository === repositoryReference,
+        );
+        return resolveWorkflowAnalyzerProfile(
+          harnessPack.company,
+          project?.executionProfileOverrides ?? null,
+        );
+      });
   const contextDiscovery = new ContextDiscoveryService(evidenceBundles, systemClock);
   const workflowDraftRevisions = new WorkflowDraftRevisionCoordinator(
     workflowService,
@@ -232,7 +240,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     harnessPack,
     planner: deterministicProvider
       ? new DeterministicImplementationPlanner()
-      : new CodexCliImplementationPlanner(temporalCommandRunner),
+      : new SubscriptionCliImplementationPlanner(temporalCommandRunner),
   });
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
   const reviewEvidence = new PullRequestReviewEvidenceStore(ledger.repository, systemClock);
@@ -292,7 +300,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         traces: executionTraces,
         mutationRecovery,
         receipts: new BlockReceiptStore(ledger.repository, systemClock),
-        agentRunner: new CodexCliTaskStepAgentRunner(dockerCommands),
+        agentRunner: new SubscriptionCliTaskStepAgentRunner(dockerCommands),
         commands: dockerCommands,
         integrations: integrationAdapters,
         evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),

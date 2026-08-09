@@ -359,7 +359,36 @@ admission and not a required reproduction block. Tasker's private before evidenc
 remains in its artifact store. Keep any remote-media policy off until a selected pilot
 task and its transition requirements have been inspected.
 
-## 9. Add another agent provider
+## 9. Configure provider and model selection
+
+Execution profiles live in `harness/company.json`. A profile is a complete executable
+choice, not a loose model alias. Codex profiles declare `provider`, `command`, `model`,
+`effort`, `timeoutMs`, and `serviceTier`; Claude profiles declare the same fields except
+the Codex-specific service tier. `executionProfileRouting` selects profiles for workflow
+analysis and both implementation-planning strategies.
+
+Agent step manifests reference logical profiles such as `investigation`,
+`implementation`, `verification`, `documentation`, or `review`. To use Claude for deep
+planning without changing a prompt, block, or Temporal module, register a Claude profile
+and point `executionProfileRouting.implementationPlanner.ralplan` at it. To change only
+one repository, set `executionProfileOverrides` in that project's manifest:
+
+```json
+{
+  "executionProfileOverrides": {
+    "implementationPlanner": { "ralplan": "claude-ralplan" },
+    "agents": { "review": "claude-review" }
+  }
+}
+```
+
+Resolution order is explicit run override, project redirect, then company route or the
+logical profile named by a step. Every referenced profile is validated when the harness
+pack loads. Removing or misspelling one is a configuration error; there is no default
+model and no compatibility mapping. A run records the resolved profile rather than
+re-reading configuration during retry or resume.
+
+## 10. Add another agent provider
 
 Implement the provider Activity binding:
 
@@ -375,11 +404,11 @@ Provider session resumption is an optimization. Temporal Activity/workflow state
 Tasker artifacts are the durable recovery source. A provider that cannot resume starts
 a new attempt with bounded persisted context.
 
-Codex is the currently selected worker runner. Claude is already a first-class provider
-layout for every workspace skill package; wiring its stream parser, usage receipt, and
-tool policy is a provider-Activity addition, not a skill migration or workflow change.
+Codex and Claude are current first-class subscription-CLI adapters for analysis,
+planning, and agent steps. Adding another provider means implementing this same adapter
+contract and registering profiles. It is not a skill migration or workflow change.
 
-## 10. Late discoveries
+## 11. Late discoveries
 
 Reproduction or implementation may discover a shared component, translation process,
 or additional verification requirement. The Activity returns
@@ -393,7 +422,7 @@ publication lifecycle, but does not change this control-flow rule.
 During the pilot every revision is reviewable. Later known low-risk classes may be
 auto-accepted by policy, but deterministic validation never becomes optional.
 
-## 11. When interpreter changes are justified
+## 12. When interpreter changes are justified
 
 Change the generic interpreter only for a new domain-independent control-flow semantic,
 for example a formally specified parallel join mode that cannot be represented by
@@ -412,7 +441,7 @@ Do not change it to add:
 
 Those are blocks, policies, adapters, or obligations.
 
-## 12. Extension checklist
+## 13. Extension checklist
 
 Before accepting customization:
 

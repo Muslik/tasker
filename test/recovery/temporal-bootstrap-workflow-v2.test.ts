@@ -5,7 +5,8 @@ import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { BootstrapWorkflowInput } from '../../src/temporal/bootstrap-kernel/contracts.js';
-import { TemporalTaskRunService, type TaskRunPublicState } from '../../src/temporal/client.js';
+import { TemporalTaskRunService } from '../../src/temporal/client.js';
+import type { TaskRunPublicState } from '../../src/temporal/public-state.js';
 import { testTemporalV2Activities } from '../helpers/temporal-v2-activities.js';
 
 const workflowsPath = fileURLToPath(

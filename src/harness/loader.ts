@@ -17,6 +17,7 @@ import {
 } from './contracts.js';
 import { stepDefinitionFromManifest, TWIKET_HARNESS_STEPS } from './step-definitions.js';
 import { toContractReference } from '../workflow/index.js';
+import { validateExecutionProfileConfiguration } from './execution-profiles.js';
 
 const DEFAULT_HARNESS_ROOT = fileURLToPath(new URL('../../harness/', import.meta.url));
 
@@ -203,6 +204,14 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       prompt,
     });
   });
+
+  validateExecutionProfileConfiguration(
+    company,
+    projects,
+    steps.flatMap((step) =>
+      step.block.executor.kind === 'agent' ? [step.block.executor.profile] : [],
+    ),
+  );
 
   for (const policy of policies) {
     for (const obligation of policy.obligations) {

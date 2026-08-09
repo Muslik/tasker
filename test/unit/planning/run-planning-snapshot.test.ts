@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadHarnessPack } from '../../../src/harness/index.js';
+import {
+  loadHarnessPack,
+  resolveImplementationPlannerProfile,
+} from '../../../src/harness/index.js';
 import { RunPlanningSnapshotSchema } from '../../../src/planning/run-planning-snapshot.js';
 
 const snapshot = () => {
   const pack = loadHarnessPack();
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskReference: 'jira:AVIA-12045',
     workflowHash: 'a'.repeat(64),
     task: {
@@ -41,6 +44,10 @@ const snapshot = () => {
       implementationPlanner: {
         prompt: pack.prompts.implementationPlanner,
         skills: ['jira'],
+        profiles: {
+          fast: resolveImplementationPlannerProfile(pack.company, null, 'fast'),
+          ralplan: resolveImplementationPlannerProfile(pack.company, null, 'ralplan'),
+        },
       },
       policies: [],
       steps: [],
@@ -68,7 +75,7 @@ describe('run planning snapshot', () => {
     expect(
       RunPlanningSnapshotSchema.safeParse({
         ...snapshot(),
-        schemaVersion: 5,
+        schemaVersion: 6,
       }).success,
     ).toBe(false);
   });

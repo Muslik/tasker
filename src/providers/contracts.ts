@@ -5,11 +5,14 @@ import { PlanningStrategySchema } from '../planning/implementation-plan.js';
 export const WorkflowAnalyzerReceiptSchema = z
   .object({
     status: z.literal('completed'),
-    provider: z.literal('codex_cli'),
-    analyzerVersion: z.literal('codex-cli@1'),
+    provider: z.enum(['codex_cli', 'claude_cli']),
+    analyzerVersion: z.literal('workflow-analyzer@2'),
+    profile: z.string().min(1),
+    profileSha256: z.string().regex(/^[a-f0-9]{64}$/u),
     cliVersion: z.string().min(1),
     model: z.string().min(1),
-    serviceTier: z.enum(['fast', 'flex']),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    serviceTier: z.enum(['fast', 'flex']).nullable(),
     sessionId: z.string().min(1),
     promptHash: z.string().regex(/^[a-f0-9]{64}$/u),
     durationMs: z.number().nonnegative(),
@@ -21,7 +24,7 @@ export const WorkflowAnalyzerReceiptSchema = z
         reasoningOutputTokens: z.number().int().nonnegative(),
       })
       .strict(),
-    hypotheticalApiCostUsd: z.null(),
+    hypotheticalApiCostUsd: z.number().nonnegative().nullable(),
   })
   .strict();
 
@@ -30,11 +33,14 @@ export type WorkflowAnalyzerReceipt = z.infer<typeof WorkflowAnalyzerReceiptSche
 export const ImplementationPlannerReceiptSchema = z
   .object({
     status: z.literal('completed'),
-    provider: z.enum(['codex_cli', 'deterministic']),
-    plannerVersion: z.literal('implementation-planner@1'),
+    provider: z.enum(['codex_cli', 'claude_cli', 'deterministic']),
+    plannerVersion: z.literal('implementation-planner@2'),
+    profile: z.string().min(1),
+    profileSha256: z.string().regex(/^[a-f0-9]{64}$/u),
     cliVersion: z.string().min(1),
     model: z.string().min(1),
-    serviceTier: z.enum(['fast', 'flex']),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    serviceTier: z.enum(['fast', 'flex']).nullable(),
     strategy: PlanningStrategySchema,
     sessionId: z.string().min(1),
     promptHash: z.string().regex(/^[a-f0-9]{64}$/u),

@@ -39,5 +39,6 @@ history is the audit trail; they are not inputs to new work.
 - Run snapshots accept only the current schema and current Docker runtime policy.
 - Block Contract v2 receipts are the only authority that may advance the execution
   graph. Obsolete manifest and planning-snapshot schemas are rejected, not migrated.
-- The next architectural phase adds versioned execution profiles for configurable
-  provider, model, reasoning, and planning strategy selection.
+- Company/project execution profiles select Codex or Claude, model, reasoning effort,
+  service tier, and timeout. The resolved profile and hash are frozen with the run;
+  unknown profiles reject pack loading instead of falling back to another provider.

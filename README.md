@@ -52,8 +52,8 @@ evidence and is not attached to Jira automatically.
 
 Block Contract v2 is authoritative: an agent may return a candidate claim, but only
 independently collected process, artifact, workspace, or reconciled-effect evidence can
-produce the immutable receipt that advances the graph. The next delivery phase makes
-provider/model selection a versioned execution-profile decision. See
+produce the immutable receipt that advances the graph. Provider/model selection is a
+strict versioned execution-profile decision resolved before freeze. See
 [`docs/codex/implementation-plan.md`](docs/codex/implementation-plan.md).
 
 ```bash

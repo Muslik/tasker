@@ -1,6 +1,6 @@
 # Tasker v4 delivery plan
 
-Status: canonical execution plan, 2026-08-09
+Status: canonical execution plan, 2026-08-10
 
 The detailed implementation-ready plan is
 [`../../.omx/plans/implementation-plan-task-adaptive-agent-harness-v4.md`](../../.omx/plans/implementation-plan-task-adaptive-agent-harness-v4.md).
@@ -82,10 +82,19 @@ and persist an idempotent Block Receipt. Only an accepted receipt returns `compl
 to the Temporal interpreter. Obsolete step-manifest and planning-snapshot schemas fail
 closed and have no compatibility reader.
 
-The next active boundary is execution profiles: provider, model, reasoning effort,
-service tier, planner strategy, and budget policy must be selected through a registered
-logical profile, snapshotted for the run, and visible to the operator. Block manifests
-name a profile; they do not hard-code Codex or Claude model identifiers.
+Execution profiles are now the only provider-selection boundary. Company configuration
+registers Codex and Claude subscription-CLI profiles; company routing selects analyzer
+and fast/ralplan planner profiles; a project may redirect those routes and logical agent
+profiles. Resolution fails closed, and the immutable planning snapshot records the
+resolved provider, command, model, effort, timeout, service tier, and configuration
+hash. Receipts expose the actual CLI version, session, token usage, duration, prompt
+hash, and reported API-equivalent cost where available. There is no legacy model field,
+hard-coded `gpt-5.4` path, or silent provider fallback.
+
+The next active boundary is honest bootstrap: replace fixture-shaped early analysis
+with task/repository context discovery, bounded investigation, mandatory planning,
+draft recompilation, validation, optional operator review, and freeze of the resulting
+task-specific graph.
 
 ## Phase 0 exit gate
 
@@ -118,6 +127,19 @@ name a profile; they do not hard-code Codex or Claude model identifiers.
 - question, infrastructure, provider, workflow-change, and permanent failure outcomes
   are different public states;
 - response loss after receipt persistence returns the same outcome.
+
+## Phase 3 exit gate
+
+- analyzer, fast planner, ralplan planner, and agent steps resolve registered logical
+  profiles rather than model identifiers embedded in code;
+- Codex and Claude implement the same structured analyzer/planner/step contracts through
+  subscription CLIs;
+- company routing, project overrides, and explicit operator overrides have deterministic
+  precedence and reject an unknown profile;
+- the current run snapshot accepts only schema v7 and contains the complete resolved
+  profile for every agent block and both planner strategies;
+- the operator session banner shows the actual profile, provider, model, effort, time,
+  measured tokens, and API-equivalent cost status.
 
 ## Core release gate
 

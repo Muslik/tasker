@@ -154,7 +154,12 @@ const formatProviderSession = (activity: ActivityLoadState): string => {
 
   const seconds = Math.max(0.1, session.durationMs / 1000).toFixed(1);
   const measuredTokens = session.usage.inputTokens + session.usage.outputTokens;
-  return `${session.model} · read-only · ${seconds}s · ${measuredTokens.toLocaleString()} tok · API cost unrated`;
+  const provider = session.provider === 'codex_cli' ? 'Codex' : 'Claude';
+  const cost =
+    session.hypotheticalApiCostUsd === null
+      ? 'API cost unrated'
+      : `$${session.hypotheticalApiCostUsd.toFixed(2)} API equivalent`;
+  return `${session.profile} · ${provider} · ${session.model}/${session.effort} · ${seconds}s · ${measuredTokens.toLocaleString()} tok · ${cost}`;
 };
 
 const readStoredSelection = (): string | null => {

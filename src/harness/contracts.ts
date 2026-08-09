@@ -5,10 +5,16 @@ import {
   CompletionEvaluatorSchema,
   type BlockDefinition,
   type CompletionEvaluator,
-} from '../blocks/index.js';
+} from '../blocks/contracts.js';
 import type { StepTypeContract } from '../workflow/contracts.js';
 import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
 import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
+import {
+  ExecutionProfileNameSchema,
+  ExecutionProfileRoutingSchema,
+  ExecutionProfileSchema,
+  ProjectExecutionProfileOverridesSchema,
+} from './execution-profile-contracts.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const PolicyIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
@@ -238,7 +244,7 @@ export const WorkspaceRuntimeSchema = z
 
 export const HarnessProjectManifestSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     version: z.string().min(1),
     repository: z.string().min(1),
     repositoryKind: z.enum(['frontend', 'generic']),
@@ -247,6 +253,7 @@ export const HarnessProjectManifestSchema = z
     processCommands: ProcessCommandsSchema,
     workspaceRuntime: WorkspaceRuntimeSchema.partial().optional(),
     workflowGuidance: RelativePathSchema.optional(),
+    executionProfileOverrides: ProjectExecutionProfileOverridesSchema.optional(),
   })
   .strict();
 
@@ -266,7 +273,7 @@ export const GlobalPackageRuleManifestSchema = z
 
 export const HarnessCompanyManifestSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     id: z.string().min(1),
     version: z.string().min(1),
     availableCapabilities: z.array(z.string().min(1)).min(1),
@@ -280,6 +287,12 @@ export const HarnessCompanyManifestSchema = z
       })
       .strict(),
     globalPackageRules: z.array(GlobalPackageRuleManifestSchema),
+    executionProfiles: z
+      .record(ExecutionProfileNameSchema, ExecutionProfileSchema)
+      .refine((profiles) => Object.keys(profiles).length > 0, {
+        message: 'At least one execution profile is required',
+      }),
+    executionProfileRouting: ExecutionProfileRoutingSchema,
   })
   .strict();
 
