@@ -1,15 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reference": "jira.start-work@1",
   "policy": "jira-lifecycle",
   "description": "Assign and transition an eligible Jira issue into active work using reconciled effects.",
-  "retryBudget": 3,
+  "stage": { "id": "preparation", "label": "Prepare" },
   "inputContract": "task_input",
   "outputContract": "integration_output",
-  "execution": {
+  "executor": {
     "kind": "integration",
     "adapter": "jira.start-work@1"
   },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
   "activityDelivery": "remote_reconciled",
   "allowedEffects": ["tracker.assign", "tracker.transition"],
   "requiredCapabilities": ["tracker.write"],

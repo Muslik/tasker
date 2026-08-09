@@ -23,9 +23,7 @@ run only in Docker-backed Temporal Activities; typed remote APIs remain Activity
 adapters; review, clarification, translation, publication, CI, and
 infrastructure pauses use durable Temporal messages and conditions.
 
-Read the canonical design in [`docs/codex`](docs/codex/README.md), the migration and
-deletion plan in
-[`docs/codex/temporal-migration.md`](docs/codex/temporal-migration.md), and the extension
+Read the canonical design in [`docs/codex`](docs/codex/README.md) and the extension
 contract in
 [`docs/codex/customization-guide.md`](docs/codex/customization-guide.md).
 Docker-only execution and project bootstrap are documented in
@@ -52,10 +50,11 @@ dedicated recovery tests have been deleted. Current development data is disposab
 only the current run-snapshot schema is accepted. Reproduction evidence is private run
 evidence and is not attached to Jira automatically.
 
-The next delivery phase makes Block Contract v2 authoritative: an agent may return a
-candidate claim, but only independently collected process, artifact, workspace, or
-reconciled-effect evidence can produce the immutable receipt that advances the graph.
-See [`docs/codex/implementation-plan.md`](docs/codex/implementation-plan.md).
+Block Contract v2 is authoritative: an agent may return a candidate claim, but only
+independently collected process, artifact, workspace, or reconciled-effect evidence can
+produce the immutable receipt that advances the graph. The next delivery phase makes
+provider/model selection a versioned execution-profile decision. See
+[`docs/codex/implementation-plan.md`](docs/codex/implementation-plan.md).
 
 ```bash
 fnm exec --using=24.16.0 /usr/local/bin/pnpm verify

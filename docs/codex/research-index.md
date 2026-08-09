@@ -7,8 +7,7 @@ Date: 2026-08-03
 > that queueing, leases, cursors, timers, waits, and recovery are non-differentiating
 > infrastructure. Temporal is now the selected execution kernel. The old conclusion is
 > retained below only as research provenance; canonical decisions are in
-> [`architecture.md`](architecture.md) and
-> [`temporal-migration.md`](temporal-migration.md).
+> [`architecture.md`](architecture.md).
 
 This index is the evidence map behind:
 

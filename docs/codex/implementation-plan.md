@@ -35,9 +35,10 @@ and operator projections.
 
 ## Sequencing rule
 
-Do not add more production effects until Block Contract v2 makes completion evidence
-authoritative. The execution kernel is now small; the remaining risk is allowing the
-Activity runner to advance it from an agent's schema-valid prose claim.
+Block Contract v2 now makes completion evidence authoritative. Do not add more
+production effects until the current receipt boundary remains green under repository-
+wide recovery tests. The execution kernel advances only from immutable receipts, never
+from an agent's schema-valid prose claim.
 
 Each phase follows this order:
 
@@ -74,11 +75,17 @@ planning, review, validation, and freeze; Execution owns deterministic traversal
 frozen graph. The old Workflow type, compatibility parser, registry, state adapter,
 tests, and Jira before-evidence policy are deleted.
 
-The next active boundary is `src/temporal/activities/block-execution.ts`: it still
-accepts a schema-valid agent completion without proving declared workspace/artifact
-obligations. Preserve its worktree, artifact, transcript, effect journal, response-loss
-reconciliation, durable wait, and independent-task guarantees while replacing only
-completion authority with Block Contract v2 receipts.
+Block Contract v2 is the active execution boundary. The immutable planning snapshot
+contains the full block definition; Activities persist the agent/process/effect
+candidate, collect completion evidence independently, evaluate the declared contract,
+and persist an idempotent Block Receipt. Only an accepted receipt returns `completed`
+to the Temporal interpreter. Obsolete step-manifest and planning-snapshot schemas fail
+closed and have no compatibility reader.
+
+The next active boundary is execution profiles: provider, model, reasoning effort,
+service tier, planner strategy, and budget policy must be selected through a registered
+logical profile, snapshotted for the run, and visible to the operator. Block manifests
+name a profile; they do not hard-code Codex or Claude model identifiers.
 
 ## Phase 0 exit gate
 

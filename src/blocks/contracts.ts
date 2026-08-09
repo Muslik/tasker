@@ -35,6 +35,7 @@ export const CompletionEvaluatorSchema: z.ZodType<CompletionEvaluator> = z.lazy(
     z
       .object({
         kind: z.literal('structured_evidence'),
+        source: z.enum(['task_output', 'workspace_files']),
         requiredArtifactKinds: z.array(z.string().min(1)).min(1),
       })
       .strict()
@@ -196,6 +197,8 @@ export const BlockReceiptSchema = z
     blockReference: VersionedReferenceSchema,
     blockDefinitionHash: z.string().min(1),
     taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
     workflowHash: z.string().min(1),
     nodeId: z.string().min(1),
     blockRun: z.number().int().positive(),
@@ -212,6 +215,7 @@ export const BlockReceiptSchema = z
 export type CompletionEvaluator =
   | {
       readonly kind: 'structured_evidence';
+      readonly source: 'task_output' | 'workspace_files';
       readonly requiredArtifactKinds: readonly string[];
     }
   | { readonly kind: 'process_receipt'; readonly expectedExitCode: number }

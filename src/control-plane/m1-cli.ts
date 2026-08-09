@@ -20,9 +20,8 @@ export const renderWorkflowTree = (root: WorkflowTreeNode): string => {
   const lines: string[] = [];
 
   const visit = (node: WorkflowTreeNode, prefix: string, connector: string): void => {
-    const retry = node.retryBudget === null ? '' : ` · retry≤${String(node.retryBudget)}`;
     const wait = node.waitKind === undefined ? '' : ` · wait=${node.waitKind}`;
-    lines.push(`${prefix}${connector}${node.kind}: ${node.label}${retry}${wait}`);
+    lines.push(`${prefix}${connector}${node.kind}: ${node.label}${wait}`);
 
     node.children.forEach((child, index) => {
       const last = index === node.children.length - 1;

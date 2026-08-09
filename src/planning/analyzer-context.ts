@@ -29,16 +29,19 @@ const stepHarnessMetadata = (reference: string) => {
   if (source === undefined) return {};
 
   return {
-    description: source.description,
-    execution:
-      source.execution.kind === 'agent'
+    description: source.block.description,
+    stage: source.block.stage,
+    completion: source.block.completion,
+    executor:
+      source.block.executor.kind === 'agent'
         ? {
-            kind: source.execution.kind,
+            kind: source.block.executor.kind,
+            profile: source.block.executor.profile,
             prompt: source.prompt?.relativePath,
             promptSha256: source.prompt?.contentSha256,
-            skills: source.execution.skills,
+            skills: source.block.executor.skills,
           }
-        : source.execution,
+        : source.block.executor,
   };
 };
 

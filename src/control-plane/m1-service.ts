@@ -167,19 +167,11 @@ const toTree = (presentation: WorkflowPresentationTree): WorkflowTreeNode => {
     }
 
     const nextAncestors = new Set(ancestors).add(nodeId);
-    const retryBudget =
-      node.kind === 'step'
-        ? node.retryBudget
-        : node.kind === 'bounded_loop'
-          ? node.maxAttempts
-          : null;
-
     return WorkflowTreeNodeSchema.parse({
       id: node.id,
       kind: node.kind,
       label: nodeLabel(node),
       status: node.status,
-      retryBudget,
       ...(node.kind === 'wait' ? { waitKind: node.waitKind } : {}),
       children: childrenFor(node).map((childId) => visit(childId, nextAncestors)),
     });
@@ -201,9 +193,6 @@ const verificationProfile = (
       return 'visual_compare';
   }
 };
-
-const retryBudgetRecord = (proposal: WorkflowProposalArtifact): Record<string, number> =>
-  Object.fromEntries(proposal.retryBudgets.map((budget) => [budget.nodeId, budget.maxAttempts]));
 
 const baseWorkflowView = (
   fixture: TaskFixture,
@@ -229,7 +218,6 @@ const baseWorkflowView = (
     proposalId: `proposal:${fixture.fixtureId}`,
     assemblyDecisions: proposal.assemblyDecisions,
     capabilities: proposal.capabilities,
-    retryBudgets: retryBudgetRecord(proposal),
     waits: proposal.waits.map((wait) => ({
       nodeId: wait.nodeId,
       waitKind: wait.waitKind,

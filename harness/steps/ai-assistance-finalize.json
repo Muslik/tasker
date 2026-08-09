@@ -1,16 +1,19 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reference": "ai.assistance.finalize@1",
   "policy": "ai-assistance",
   "description": "Harvest result, contribution, and verification evidence into the branch artifacts.",
-  "retryBudget": 2,
+  "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",
   "outputContract": "agent_output",
-  "execution": {
+  "executor": {
     "kind": "agent",
+    "profile": "documentation",
     "prompt": "prompts/steps/ai-assistance-finalize.md",
     "skills": ["ai-assistance"]
   },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": { "kind": "workspace_mutation" },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["policy_artifact.write"],
   "requiredCapabilities": ["repository.read", "workspace.write"],

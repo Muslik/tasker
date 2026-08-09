@@ -1,15 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reference": "ai.assistance.validate@1",
   "policy": "ai-assistance",
   "description": "Deterministically validate AI-assistance artifacts and the pull-request section.",
-  "retryBudget": 1,
+  "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "pull_request_input",
   "outputContract": "integration_output",
-  "execution": {
+  "executor": {
     "kind": "integration",
     "adapter": "ai-assistance.validate@1"
   },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
   "activityDelivery": "single_attempt",
   "allowedEffects": [],
   "requiredCapabilities": ["repository.read"],

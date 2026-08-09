@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { BlockDefinitionSchema } from '../blocks/index.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
@@ -28,28 +29,11 @@ const SnapshottedPromptSchema = z
   })
   .strict();
 
-const SnapshottedExecutionSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('agent'),
-      skills: z.array(z.string().min(1)),
-      prompt: SnapshottedPromptSchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('process'),
-      executor: z.string().min(1),
-      command: z.string().min(1),
-    })
-    .strict(),
-  z.object({ kind: z.literal('integration'), adapter: z.string().min(1) }).strict(),
-]);
-
 const SnapshottedStepSchema = z
   .object({
     reference: z.string().min(1),
-    execution: SnapshottedExecutionSchema,
+    block: BlockDefinitionSchema,
+    resolvedCommand: z.string().min(1).nullable(),
   })
   .strict();
 
@@ -76,7 +60,7 @@ const SnapshottedHarnessSchema = z
 
 export const RunPlanningSnapshotSchema = z
   .object({
-    schemaVersion: z.literal(5),
+    schemaVersion: z.literal(6),
     taskReference: z.string().min(1),
     workflowHash: ContentHashSchema,
     task: TaskFixtureSchema,

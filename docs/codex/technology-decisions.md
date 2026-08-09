@@ -25,8 +25,9 @@ invariants live in [`architecture.md`](architecture.md); sequencing lives in
 The runtime pins `@temporalio/client`, `@temporalio/worker`,
 `@temporalio/workflow`, and `@temporalio/testing` at `1.21.1`. The local acceptance
 demo was verified with Temporal CLI `1.8.2`, embedded Temporal Server `1.31.2`, and UI
-`2.50.1`. Upgrades require Workflow replay/recovery tests before changing the worker
-version used for existing histories.
+`2.50.1`. During pre-pilot development an upgrade may delete obsolete local histories
+and data. Replay/recovery gates for existing histories become mandatory only when a
+production durability milestone explicitly freezes that policy.
 
 ## 2. Temporal topology
 

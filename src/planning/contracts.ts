@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-import {
-  getHarnessPack,
-  type HarnessStepDefinition,
-  type LoadedHarnessStep,
-} from '../harness/index.js';
+import { getHarnessPack, type LoadedHarnessStep } from '../harness/index.js';
 import {
   createPredicateRegistry,
   createStepTypeRegistry,
@@ -95,7 +91,7 @@ const waitContracts = [
 ] satisfies readonly WaitContract[];
 
 export const createHarnessWorkflowContracts = (
-  definitions: readonly HarnessStepDefinition[],
+  definitions: readonly Pick<LoadedHarnessStep, 'reference' | 'contract'>[],
 ): WorkflowCompilerContracts => {
   for (const definition of definitions) {
     if (definition.reference !== toContractReference(definition.contract)) {
@@ -115,13 +111,6 @@ export const createHarnessWorkflowContracts = (
 const defaultPack = getHarnessPack();
 
 export const M1_WORKFLOW_CONTRACTS = createHarnessWorkflowContracts(defaultPack.steps);
-
-const retryBudgets = new Map(
-  defaultPack.steps.map((definition) => [definition.reference, definition.retryBudget]),
-);
-
-export const getStepRetryBudget = (reference: string): number | undefined =>
-  retryBudgets.get(reference);
 
 const stepSources = new Map(
   defaultPack.steps.map((definition) => [definition.reference, definition]),

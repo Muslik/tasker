@@ -34,7 +34,6 @@ export const StepTypeContractSchema = z.object({
   requiredCapabilities: z.array(CapabilitySchema).default([]),
   resumeBoundary: ResumeBoundarySchema.default('none'),
   idempotency: IdempotencySchema.default('none'),
-  retryPolicy: z.string().min(1).optional(),
   activityDelivery: StepActivityDeliverySchema.default({ kind: 'single_attempt' }),
   waitKinds: z.array(WaitReferenceSchema).default([]),
   artifactContracts: z.array(ArtifactKindSchema).default([]),

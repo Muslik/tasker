@@ -416,8 +416,11 @@ tested worker deployment strategy.
 ## 14. Versioning and security
 
 The compiled graph has an IR ABI version; each block and prompt has its own version/hash.
-Temporal Workflow changes use Worker Versioning and replay-compatibility tests. An old
-run remains executable by a compatible worker build until it reaches a safe boundary.
+During pre-pilot development, Tasker supports only the current manifest, snapshot, and
+Workflow contracts. A breaking cutover deletes obsolete local runs/product data and
+their readers. It does not add upcasters or dual execution paths. Worker Versioning and
+replay-compatible deployments become a release requirement only after Tasker declares
+production histories durable.
 
 Secrets exist only in worker process configuration and Activity adapters. They are
 redacted before Tasker persistence and never passed in Workflow arguments, results,
@@ -465,5 +468,5 @@ Rejected:
 - adopt Effect/LangGraph as another control-flow runtime: they do not replace Temporal
   durability and are unnecessary for the current block/IR boundary.
 
-Migration and deletion gates are defined in
-[`temporal-migration.md`](temporal-migration.md).
+The completed custom-runtime-to-Temporal migration remains available in Git history;
+it is not a live compatibility surface or an input to future implementation.

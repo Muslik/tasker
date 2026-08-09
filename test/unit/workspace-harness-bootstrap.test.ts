@@ -68,7 +68,7 @@ describe('workspace harness bootstrap', () => {
     const workflowPack = loadHarnessPack();
     const workspacePack = loadWorkspaceHarnessPack(resolve('harness/workspace'));
     const requiredSkills = workflowPack.steps.flatMap((step) =>
-      step.execution.kind === 'agent' ? [...step.execution.skills] : [],
+      step.block.executor.kind === 'agent' ? [...step.block.executor.skills] : [],
     );
 
     expect(workspacePack.manifest.engines).toEqual(expect.arrayContaining(['codex', 'claude']));

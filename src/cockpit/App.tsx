@@ -2033,8 +2033,6 @@ const WorkflowSidebar = ({
   }
 
   const view = workflow.response.view;
-  const retryCount = Object.keys(view.workflow.retryBudgets).length;
-
   return (
     <aside
       className="flex min-h-0 flex-col"
@@ -2079,7 +2077,6 @@ const WorkflowSidebar = ({
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           <span>{view.workflow.verificationPlan.profile.replaceAll('_', ' ')}</span>
           <span>{view.workflow.waits.length} waits</span>
-          <span>{retryCount} retries</span>
           <span>{view.workflow.capabilities.required.length} capabilities</span>
         </div>
       </div>

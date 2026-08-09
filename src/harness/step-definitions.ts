@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-import type { HarnessStepDefinition, HarnessStepManifest } from './contracts.js';
+import type { CompletionEvaluator } from '../blocks/index.js';
+import type { HarnessStepManifest, HarnessStepSource } from './contracts.js';
 import type { StepTypeContract } from '../workflow/index.js';
 
 export const taskInputSchema = z
@@ -176,6 +177,7 @@ const contractSchemas = {
   pull_request_input: pullRequestInputSchema,
   pull_request_output: pullRequestOutputSchema,
   reproduction_input: reproductionInputSchema,
+  reproduction_output: reproductionOutputSchema,
   task_input: taskInputSchema,
   verification_input: verificationInputSchema,
 } as const satisfies Readonly<Record<HarnessStepManifest['inputContract'], z.ZodType>>;
@@ -190,19 +192,20 @@ const versionedIdentity = (
   return { id: reference.slice(0, separator), version: reference.slice(separator + 1) };
 };
 
-export const stepDefinitionFromManifest = (
-  manifest: HarnessStepManifest,
-): HarnessStepDefinition => {
+export const stepDefinitionFromManifest = (manifest: HarnessStepManifest): HarnessStepSource => {
   const identity = versionedIdentity(manifest.reference);
   return {
     reference: manifest.reference,
     ...(manifest.policy === undefined ? {} : { policy: manifest.policy }),
     description: manifest.description,
-    retryBudget: manifest.retryBudget,
-    execution: manifest.execution,
+    stage: manifest.stage,
+    inputContract: manifest.inputContract,
+    outputContract: manifest.outputContract,
+    executor: manifest.executor,
+    outcomes: manifest.outcomes,
+    completion: manifest.completion,
     contract: {
       ...identity,
-      retryPolicy: `bounded:${String(manifest.retryBudget)}`,
       inputSchema: contractSchemas[manifest.inputContract],
       outputSchema: contractSchemas[manifest.outputContract],
       activityDelivery: { kind: manifest.activityDelivery },
@@ -221,13 +224,10 @@ export const stepDefinitionFromManifest = (
 
 const contract = (
   id: string,
-  options: Omit<StepTypeContract, 'id' | 'version' | 'retryPolicy'> & {
-    readonly retryBudget: number;
-  },
+  options: Omit<StepTypeContract, 'id' | 'version'>,
 ): StepTypeContract => ({
   id,
   version: '1',
-  retryPolicy: `bounded:${String(options.retryBudget)}`,
   activityDelivery: options.activityDelivery,
   inputSchema: options.inputSchema,
   outputSchema: options.outputSchema,
@@ -246,24 +246,36 @@ const agentStep = (
   id: string,
   options: {
     readonly description: string;
+    readonly stage: { readonly id: string; readonly label: string };
+    readonly profile: string;
+    readonly completion: CompletionEvaluator;
     readonly inputSchema?: z.ZodType;
     readonly outputSchema?: z.ZodType;
+    readonly inputContract?: HarnessStepManifest['inputContract'];
+    readonly outputContract?: HarnessStepManifest['outputContract'];
     readonly prompt: string;
     readonly skills: readonly string[];
-    readonly retryBudget: number;
     readonly artifactContracts: readonly string[];
     readonly requiredArtifactContracts?: readonly string[];
     readonly allowedEffects?: readonly string[];
     readonly requiredCapabilities?: readonly string[];
     readonly workflowChanges?: StepTypeContract['workflowChanges'];
   },
-): HarnessStepDefinition => ({
+): HarnessStepSource => ({
   reference: `${id}@1`,
   description: options.description,
-  retryBudget: options.retryBudget,
-  execution: { kind: 'agent', prompt: options.prompt, skills: options.skills },
+  stage: options.stage,
+  inputContract: options.inputContract ?? 'task_input',
+  outputContract: options.outputContract ?? 'agent_output',
+  executor: {
+    kind: 'agent',
+    profile: options.profile,
+    prompt: options.prompt,
+    skills: options.skills,
+  },
+  outcomes: ['completed', 'needs_input', 'continuation_required', 'blocked', 'failed'],
+  completion: options.completion,
   contract: contract(id, {
-    retryBudget: options.retryBudget,
     inputSchema: options.inputSchema ?? taskInputSchema,
     outputSchema: options.outputSchema ?? agentOutputSchema,
     allowedEffects: [...(options.allowedEffects ?? [])],
@@ -283,8 +295,8 @@ const processStep = (
   id: string,
   options: {
     readonly description: string;
+    readonly stage: { readonly id: string; readonly label: string };
     readonly executor: string;
-    readonly retryBudget: number;
     readonly allowedEffects: readonly string[];
     readonly requiredCapabilities: readonly string[];
     readonly waitKinds?: readonly string[];
@@ -292,13 +304,16 @@ const processStep = (
     readonly requiredArtifactContracts?: readonly string[];
     readonly workflowChanges?: StepTypeContract['workflowChanges'];
   },
-): HarnessStepDefinition => ({
+): HarnessStepSource => ({
   reference: `${id}@1`,
   description: options.description,
-  retryBudget: options.retryBudget,
-  execution: { kind: 'process', executor: options.executor },
+  stage: options.stage,
+  inputContract: 'process_input',
+  outputContract: 'process_output',
+  executor: { kind: 'process', executor: options.executor },
+  outcomes: ['completed', 'needs_input', 'blocked', 'failed'],
+  completion: { kind: 'process_receipt', expectedExitCode: 0 },
   contract: contract(id, {
-    retryBudget: options.retryBudget,
     inputSchema: processInputSchema,
     outputSchema: processOutputSchema,
     allowedEffects: [...options.allowedEffects],
@@ -319,7 +334,7 @@ const integrationStep = (
   options: {
     readonly adapter: string;
     readonly description: string;
-    readonly retryBudget: number;
+    readonly stage: { readonly id: string; readonly label: string };
     readonly allowedEffects: readonly string[];
     readonly requiredCapabilities: readonly string[];
     readonly waitKinds?: readonly string[];
@@ -328,14 +343,19 @@ const integrationStep = (
     readonly activityDelivery?: StepTypeContract['activityDelivery'];
     readonly inputSchema?: z.ZodType;
     readonly outputSchema?: z.ZodType;
+    readonly inputContract?: HarnessStepManifest['inputContract'];
+    readonly outputContract?: HarnessStepManifest['outputContract'];
   },
-): HarnessStepDefinition => ({
+): HarnessStepSource => ({
   reference: `${id}@1`,
   description: options.description,
-  retryBudget: options.retryBudget,
-  execution: { kind: 'integration', adapter: options.adapter },
+  stage: options.stage,
+  inputContract: options.inputContract ?? 'task_input',
+  outputContract: options.outputContract ?? 'integration_output',
+  executor: { kind: 'integration', adapter: options.adapter },
+  outcomes: ['completed', 'needs_input', 'blocked', 'failed'],
+  completion: { kind: 'reconciled_effect' },
   contract: contract(id, {
-    retryBudget: options.retryBudget,
     inputSchema: options.inputSchema ?? taskInputSchema,
     outputSchema: options.outputSchema ?? integrationOutputSchema,
     allowedEffects: [...options.allowedEffects],
@@ -351,14 +371,29 @@ const integrationStep = (
   }),
 });
 
+const stages = {
+  investigation: { id: 'investigation', label: 'Investigate' },
+  implementation: { id: 'implementation', label: 'Implement' },
+  verification: { id: 'verification', label: 'Verify' },
+  delivery: { id: 'delivery', label: 'Deliver' },
+} as const;
+
 export const TWIKET_HARNESS_STEPS = [
   agentStep('bug.reproduce', {
     description: 'Reproduce a bug before or after implementation and preserve evidence.',
+    stage: stages.investigation,
+    profile: 'investigation',
+    completion: {
+      kind: 'structured_evidence',
+      source: 'workspace_files',
+      requiredArtifactKinds: ['reproduction-media'],
+    },
     inputSchema: reproductionInputSchema,
     outputSchema: reproductionOutputSchema,
+    inputContract: 'reproduction_input',
+    outputContract: 'reproduction_output',
     prompt: 'prompts/steps/bug-reproduce.md',
     skills: ['playwright-demo', 'jenkins'],
-    retryBudget: 2,
     artifactContracts: ['reproduction-report', 'reproduction-media'],
     allowedEffects: ['command.run'],
     requiredCapabilities: ['command.run', 'repository.read'],
@@ -370,9 +405,11 @@ export const TWIKET_HARNESS_STEPS = [
   }),
   agentStep('code.implement', {
     description: 'Implement a bounded change in a managed worktree.',
+    stage: stages.implementation,
+    profile: 'implementation',
+    completion: { kind: 'workspace_mutation' },
     prompt: 'prompts/steps/code-implement.md',
     skills: ['typescript-design', 'test-design'],
-    retryBudget: 3,
     artifactContracts: ['source-diff'],
     allowedEffects: ['workspace.write'],
     requiredCapabilities: ['repository.read', 'workspace.write'],
@@ -386,13 +423,20 @@ export const TWIKET_HARNESS_STEPS = [
   ...(['targeted', 'full', 'visual'] as const).map((profile) =>
     agentStep(`verify.${profile}`, {
       description: `Run ${profile} verification selected for this task.`,
+      stage: stages.verification,
+      profile: 'verification',
+      completion: {
+        kind: 'structured_evidence',
+        source: 'workspace_files',
+        requiredArtifactKinds: [`verification-${profile}`],
+      },
       inputSchema: verificationInputSchema,
+      inputContract: 'verification_input',
       prompt: 'prompts/steps/verify.md',
       skills:
         profile === 'visual'
           ? ['playwright-demo', 'jenkins', 'test-design']
           : ['jenkins', 'test-design'],
-      retryBudget: 2,
       artifactContracts: [`verification-${profile}`],
       allowedEffects: ['command.run'],
       requiredCapabilities: ['command.run'],
@@ -401,15 +445,21 @@ export const TWIKET_HARNESS_STEPS = [
   ),
   agentStep('fill-test-ops-plan', {
     description: 'Prepare a test-operations plan when company policy requires one.',
+    stage: stages.verification,
+    profile: 'verification',
+    completion: {
+      kind: 'structured_evidence',
+      source: 'task_output',
+      requiredArtifactKinds: ['test-operations-plan'],
+    },
     prompt: 'prompts/steps/fill-test-ops-plan.md',
     skills: ['test-ops-planning'],
-    retryBudget: 1,
     artifactContracts: ['test-operations-plan'],
   }),
   processStep('translations.extract', {
     description: 'Extract translation keys with the project-defined command.',
+    stage: stages.implementation,
     executor: 'translations.extract@1',
-    retryBudget: 2,
     allowedEffects: ['command.run'],
     requiredCapabilities: ['command.run'],
     waitKinds: ['translation_complete@1'],
@@ -418,16 +468,16 @@ export const TWIKET_HARNESS_STEPS = [
   }),
   processStep('translations.pull', {
     description: 'Pull completed translations with the project-defined command.',
+    stage: stages.implementation,
     executor: 'translations.pull@1',
-    retryBudget: 2,
     allowedEffects: ['command.run'],
     requiredCapabilities: ['command.run'],
     artifactContracts: ['translated-resources'],
   }),
   processStep('component.dev_publish', {
     description: 'Publish a development build of a shared component.',
+    stage: stages.delivery,
     executor: 'component.dev-publish@1',
-    retryBudget: 2,
     allowedEffects: ['package.publish'],
     requiredCapabilities: ['command.run', 'package.publish'],
     waitKinds: ['final_publish@1'],
@@ -436,9 +486,11 @@ export const TWIKET_HARNESS_STEPS = [
   }),
   agentStep('component.consume_published', {
     description: 'Consume an exact published component version in the target repository.',
+    stage: stages.implementation,
+    profile: 'implementation',
+    completion: { kind: 'workspace_mutation' },
     prompt: 'prompts/steps/component-consume.md',
     skills: ['typescript-design'],
-    retryBudget: 2,
     artifactContracts: ['consumer-version-diff'],
     allowedEffects: ['workspace.write'],
     requiredCapabilities: ['repository.read', 'workspace.write'],
@@ -447,7 +499,7 @@ export const TWIKET_HARNESS_STEPS = [
   integrationStep('pr.prepare', {
     adapter: 'bitbucket.pull-request@1',
     description: 'Prepare and reconcile a Bitbucket pull request.',
-    retryBudget: 2,
+    stage: stages.delivery,
     allowedEffects: ['git.write'],
     requiredCapabilities: ['git.write'],
     waitKinds: ['code_review@1'],
@@ -455,15 +507,20 @@ export const TWIKET_HARNESS_STEPS = [
     requiredArtifactContracts: ['pull-request-draft'],
     inputSchema: pullRequestInputSchema,
     outputSchema: pullRequestOutputSchema,
+    inputContract: 'pull_request_input',
+    outputContract: 'pull_request_output',
     activityDelivery: { kind: 'remote_reconciled' },
   }),
   {
     reference: 'unsafe.effect@1',
     description: 'Invalid fixture used to prove effect validation.',
-    retryBudget: 0,
-    execution: { kind: 'integration', adapter: 'invalid.remote-write@1' },
+    stage: stages.delivery,
+    inputContract: 'task_input',
+    outputContract: 'integration_output',
+    executor: { kind: 'integration', adapter: 'invalid.remote-write@1' },
+    outcomes: ['completed', 'blocked', 'failed'],
+    completion: { kind: 'reconciled_effect' },
     contract: contract('unsafe.effect', {
-      retryBudget: 0,
       inputSchema: taskInputSchema,
       outputSchema: integrationOutputSchema,
       allowedEffects: ['remote.write'],
@@ -477,4 +534,4 @@ export const TWIKET_HARNESS_STEPS = [
       activityDelivery: { kind: 'single_attempt' },
     }),
   },
-] satisfies readonly HarnessStepDefinition[];
+] satisfies readonly HarnessStepSource[];

@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { z } from 'zod';
 
+import { BlockDefinitionSchema } from '../blocks/index.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
@@ -161,15 +162,45 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       throw new Error(`Duplicate harness step definition for ${step.reference}`);
     }
     seenSteps.add(step.reference);
-    if (step.execution.kind === 'process') {
-      parseVersionedReference(step.execution.executor);
+    if (step.executor.kind === 'process') {
+      parseVersionedReference(step.executor.executor);
     }
-    if (step.execution.kind === 'integration') {
-      parseVersionedReference(step.execution.adapter);
+    if (step.executor.kind === 'integration') {
+      parseVersionedReference(step.executor.adapter);
     }
+    const prompt =
+      step.executor.kind === 'agent' ? loadPrompt(rootPath, step.executor.prompt) : null;
+    const executor =
+      step.executor.kind === 'agent'
+        ? {
+            kind: 'agent' as const,
+            profile: step.executor.profile,
+            prompt: prompt?.content ?? '',
+            skills: [...step.executor.skills],
+          }
+        : step.executor.kind === 'process'
+          ? { kind: 'process' as const, executor: step.executor.executor }
+          : { kind: 'effect' as const, adapter: step.executor.adapter };
     return Object.freeze({
-      ...step,
-      prompt: step.execution.kind === 'agent' ? loadPrompt(rootPath, step.execution.prompt) : null,
+      reference: step.reference,
+      ...(step.policy === undefined ? {} : { policy: step.policy }),
+      contract: step.contract,
+      block: BlockDefinitionSchema.parse({
+        schemaVersion: 2,
+        reference: step.reference,
+        description: step.description,
+        stage: step.stage,
+        inputContract: step.inputContract,
+        outputContract: step.outputContract,
+        executor,
+        allowedCapabilities: step.contract.requiredCapabilities,
+        allowedEffects: step.contract.allowedEffects,
+        outcomes: step.outcomes,
+        completion: step.completion,
+        requiredArtifacts: step.contract.requiredArtifactContracts,
+        producedArtifacts: step.contract.artifactContracts,
+      }),
+      prompt,
     });
   });
 

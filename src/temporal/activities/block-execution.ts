@@ -5,6 +5,16 @@ import { join } from 'node:path';
 import { Context } from '@temporalio/activity';
 import { z } from 'zod';
 
+import {
+  AgentClaimSchema,
+  CompletionVerdictSchema,
+  blockReceiptId,
+  evaluateBlockCompletion,
+  type AgentClaim,
+  type BlockReceipt,
+  type BlockReceiptStore,
+  type CompletionVerdict,
+} from '../../blocks/index.js';
 import type { LoadedHarnessPack, LoadedHarnessStep } from '../../harness/index.js';
 import {
   emptyIntegrationStepAdapterRegistry,
@@ -41,7 +51,7 @@ import type {
 import type { RunPlanningSnapshot } from '../../planning/run-planning-snapshot.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
-import { JsonValueSchema } from '../../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import {
   WorkflowChangeRequestSchema,
   parseDeclaredWorkflowChangeRequest,
@@ -57,12 +67,13 @@ import type {
   RunExecutionBlockInput,
 } from '../execution-kernel/contracts.js';
 import type { WorkspaceStore } from '../../workspaces/store.js';
-import { TaskStepOutputArtifactSchema } from '../task-step-output.js';
+import { TaskStepOutputArtifactSchema, type TaskStepOutputArtifact } from '../task-step-output.js';
 import {
   TaskStepRecoveryContextSchema,
   type TaskStepRecoveryContext,
   type WorkspaceMutationRecoveryStore,
 } from './workspace-mutation-recovery.js';
+import { collectBlockCompletionEvidence } from './block-completion-evidence.js';
 
 const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
   z
@@ -506,10 +517,10 @@ export class TemporalTaskStepTraceStore {
     return `task-step-transcript:${operationId}`;
   }
 
-  public readOutputResult(
+  public readOutputArtifact(
     operationId: string,
   ): Outcome<
-    ExecuteTaskStepResult | null,
+    TaskStepOutputArtifact | null,
     Extract<TemporalTaskStepTraceStoreError, { readonly kind: 'output_corrupt' }>
   > {
     const artifactId = `task-step-output:${operationId}:artifact`;
@@ -517,7 +528,7 @@ export class TemporalTaskStepTraceStore {
     if (artifact === null) return ok(null);
     const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
     return parsed.success
-      ? ok(parsed.data.result)
+      ? ok(parsed.data)
       : err({
           kind: 'output_corrupt',
           artifactId,
@@ -525,6 +536,16 @@ export class TemporalTaskStepTraceStore {
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
+  }
+
+  public readOutputResult(
+    operationId: string,
+  ): Outcome<
+    ExecuteTaskStepResult | null,
+    Extract<TemporalTaskStepTraceStoreError, { readonly kind: 'output_corrupt' }>
+  > {
+    const output = this.readOutputArtifact(operationId);
+    return output.ok ? ok(output.value?.result ?? null) : output;
   }
 
   public readRunStepEvidence(
@@ -998,7 +1019,7 @@ const persistAgentBlockedResult = (
   return persisted.value.result;
 };
 
-export interface TaskExecutionActivityDependencies {
+export interface RegisteredTaskStepDependencies {
   readonly snapshots: Pick<ImplementationPlanningStore, 'readRunSnapshot'>;
   readonly currentSteps: ReadonlyMap<string, LoadedHarnessStep>;
   readonly traces: TemporalTaskStepTraceStore;
@@ -1008,6 +1029,14 @@ export interface TaskExecutionActivityDependencies {
   readonly integrations?: IntegrationStepAdapterRegistry;
   readonly evidence?: TaskRunEvidenceSource;
   readonly workspaces: Pick<WorkspaceStore, 'read'>;
+}
+
+export interface TaskExecutionActivityDependencies extends Omit<
+  RegisteredTaskStepDependencies,
+  'mutationRecovery'
+> {
+  readonly mutationRecovery: Pick<WorkspaceMutationRecoveryStore, 'prepare' | 'inspectCompletion'>;
+  readonly receipts: BlockReceiptStore;
 }
 
 export interface TaskRunEvidenceSource {
@@ -1057,7 +1086,7 @@ export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
 
 export const executeRegisteredTaskStep = async (
   inputValue: ExecuteTaskStepInput,
-  dependencies: TaskExecutionActivityDependencies,
+  dependencies: RegisteredTaskStepDependencies,
   runtime: TaskStepActivityContext,
 ): Promise<ExecuteTaskStepResult> => {
   const input = ExecuteTaskStepInputSchema.parse(inputValue);
@@ -1096,7 +1125,10 @@ export const executeRegisteredTaskStep = async (
     );
   }
   const current = dependencies.currentSteps.get(input.uses);
-  if (current === undefined || current.execution.kind !== snapshottedStep.execution.kind) {
+  if (
+    current === undefined ||
+    current.block.executor.kind !== snapshottedStep.block.executor.kind
+  ) {
     return block(
       `Current harness registration for ${input.uses} no longer matches the snapshotted execution boundary`,
       blockingWaitKindFor(input.uses),
@@ -1123,14 +1155,14 @@ export const executeRegisteredTaskStep = async (
     );
   }
 
-  if (snapshottedStep.execution.kind === 'integration') {
+  if (snapshottedStep.block.executor.kind === 'effect') {
     if (
-      current.execution.kind !== 'integration' ||
-      current.execution.adapter !== snapshottedStep.execution.adapter
+      current.block.executor.kind !== 'effect' ||
+      current.block.executor.adapter !== snapshottedStep.block.executor.adapter
     ) {
       const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
         kind: 'integration_binding_changed',
-        snapshottedAdapter: snapshottedStep.execution.adapter,
+        snapshottedAdapter: snapshottedStep.block.executor.adapter,
       });
       return block(
         `Integration binding for ${input.uses} changed after planning`,
@@ -1139,22 +1171,22 @@ export const executeRegisteredTaskStep = async (
       );
     }
     const adapter = (dependencies.integrations ?? emptyIntegrationStepAdapterRegistry).get(
-      snapshottedStep.execution.adapter,
+      snapshottedStep.block.executor.adapter,
     );
     if (adapter === undefined) {
       const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
         kind: 'integration_adapter_unavailable',
-        adapter: snapshottedStep.execution.adapter,
+        adapter: snapshottedStep.block.executor.adapter,
       });
       return block(
-        `Integration adapter ${snapshottedStep.execution.adapter} is not configured`,
+        `Integration adapter ${snapshottedStep.block.executor.adapter} is not configured`,
         blockingWaitKindFor(input.uses),
         artifactIds,
       );
     }
     runtime.heartbeat({
       phase: 'integration',
-      adapter: snapshottedStep.execution.adapter,
+      adapter: snapshottedStep.block.executor.adapter,
       nodeId: input.nodeId,
     });
     const execution = await adapter.execute({
@@ -1246,7 +1278,7 @@ export const executeRegisteredTaskStep = async (
     return persisted.value.result;
   }
 
-  if (snapshottedStep.execution.kind === 'agent') {
+  if (snapshottedStep.block.executor.kind === 'agent') {
     const repository = readRepositoryFromInput(validatedInput.data);
     if (repository !== null && repository !== snapshot.repository.reference) {
       const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
@@ -1284,7 +1316,7 @@ export const executeRegisteredTaskStep = async (
       recovery = prepared.value;
     }
     const prompt = promptForAgentStep({
-      snapshottedPrompt: snapshottedStep.execution.prompt.content,
+      snapshottedPrompt: snapshottedStep.block.executor.prompt,
       taskReference: input.taskReference,
       nodeId: input.nodeId,
       stepAttempt: input.stepAttempt,
@@ -1297,7 +1329,7 @@ export const executeRegisteredTaskStep = async (
       workflowChanges: current.contract.workflowChanges,
       stepOutputContract: z.toJSONSchema(current.contract.outputSchema),
       workflowChangeRequestContract: z.toJSONSchema(WorkflowChangeRequestSchema),
-      skills: snapshottedStep.execution.skills,
+      skills: snapshottedStep.block.executor.skills,
       recovery,
       operatorGuidance: input.operatorGuidance,
       evidence: evidence.value,
@@ -1305,7 +1337,7 @@ export const executeRegisteredTaskStep = async (
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),
       prompt,
-      skills: snapshottedStep.execution.skills,
+      skills: snapshottedStep.block.executor.skills,
       recovery,
       outputSchema: AgentStepProviderOutcomeSchema,
       cwd: input.workspace.path,
@@ -1478,7 +1510,17 @@ export const executeRegisteredTaskStep = async (
       artifactIds,
     );
   }
-  const invocation = commandLineToInvocation(snapshottedStep.execution.command);
+  if (snapshottedStep.resolvedCommand === null) {
+    const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
+      kind: 'process_command_missing',
+    });
+    return block(
+      `Process command for ${input.uses} is absent from the immutable planning snapshot`,
+      blockingWaitKindFor(input.uses),
+      artifactIds,
+    );
+  }
+  const invocation = commandLineToInvocation(snapshottedStep.resolvedCommand);
   if (!invocation.ok) {
     const artifactIds = persistBlockedArtifact(
       dependencies.traces,
@@ -1605,8 +1647,110 @@ const temporalRuntime = (): TaskStepActivityContext => {
   };
 };
 
+const persistedOutput = (artifact: TaskStepOutputArtifact): JsonValue => {
+  const details = artifact.details;
+  return details !== null && !Array.isArray(details) && typeof details === 'object'
+    ? JsonValueSchema.parse(details.output ?? {})
+    : {};
+};
+
+const blockedCategory = (
+  summary: string,
+): 'infrastructure' | 'authorization' | 'task_ambiguity' => {
+  const normalized = summary.toLowerCase();
+  if (/auth|credential|permission|forbidden|401|403/u.test(normalized)) return 'authorization';
+  if (/ambigu|unclear|question|expected behavior|expected behaviour/u.test(normalized)) {
+    return 'task_ambiguity';
+  }
+  return 'infrastructure';
+};
+
+const claimFromResult = (
+  result: ExecuteTaskStepResult,
+  outputArtifact: TaskStepOutputArtifact,
+): AgentClaim => {
+  const outputReference = `task-step-output:${outputArtifact.operationId}:artifact`;
+  switch (result.status) {
+    case 'completed':
+      return AgentClaimSchema.parse({
+        status: 'candidate_complete',
+        summary: result.summary,
+        output: persistedOutput(outputArtifact),
+        evidenceReferences: [...new Set([outputReference, ...result.artifactIds])],
+      });
+    case 'blocked':
+      return AgentClaimSchema.parse({
+        status: 'blocked',
+        summary: result.summary,
+        category: blockedCategory(result.summary),
+        retryable: true,
+      });
+    case 'workflow_change_required':
+      return AgentClaimSchema.parse({
+        status: 'continuation_required',
+        summary: result.summary,
+        requestReference: outputReference,
+      });
+  }
+};
+
+const appendEvidenceIssues = (
+  verdict: CompletionVerdict,
+  issues: readonly string[],
+): CompletionVerdict =>
+  issues.length === 0
+    ? verdict
+    : CompletionVerdictSchema.parse({
+        status: 'rejected',
+        reasons: [...(verdict.status === 'rejected' ? verdict.reasons : []), ...issues],
+      });
+
+const executionResultFromReceipt = (receipt: BlockReceipt) => {
+  switch (receipt.claim.status) {
+    case 'candidate_complete':
+      return receipt.verdict.status === 'accepted'
+        ? {
+            status: 'completed' as const,
+            summary: receipt.claim.summary,
+            predicateFacts: { 'attempt.succeeded@1': true },
+            receiptReference: receipt.receiptId,
+          }
+        : {
+            status: 'needs_input' as const,
+            summary: `Completion evidence for ${receipt.blockReference} was rejected: ${receipt.verdict.reasons.join('; ')}`,
+            waitKind: `${receipt.blockReference}.completion-evidence-required@1`,
+          };
+    case 'needs_input':
+      return {
+        status: 'needs_input' as const,
+        summary: receipt.claim.summary,
+        waitKind: `${receipt.blockReference}.input-required@1`,
+      };
+    case 'blocked':
+      return {
+        status: 'needs_input' as const,
+        summary: receipt.claim.summary,
+        waitKind: `${receipt.blockReference}.${receipt.claim.category}@1`,
+      };
+    case 'failed':
+      return {
+        status: 'needs_input' as const,
+        summary: receipt.claim.summary,
+        waitKind: `${receipt.blockReference}.failed@1`,
+      };
+    case 'continuation_required':
+      return {
+        status: 'continuation_required' as const,
+        summary: receipt.claim.summary,
+        waitKind: `${receipt.blockReference}.continuation-required@1`,
+        requestReference: receipt.claim.requestReference,
+      };
+  }
+};
+
 export const createTaskExecutionActivity = (
   dependencies: TaskExecutionActivityDependencies,
+  runtimeFactory: () => TaskStepActivityContext = temporalRuntime,
 ): ExecutionWorkflowActivities => ({
   runExecutionBlock: async (input: RunExecutionBlockInput) => {
     const workspaceReference = input.contextReferences.find(({ kind }) => kind === 'workspace');
@@ -1628,6 +1772,42 @@ export const createTaskExecutionActivity = (
         waitKind: `${input.uses}.workspace-required@1`,
       };
     }
+    const snapshotReference = {
+      artifactId: planningReference.reference,
+      checksum: planningReference.hash,
+    };
+    const loadedSnapshot = dependencies.snapshots.readRunSnapshot(snapshotReference);
+    if (!loadedSnapshot.ok) {
+      return {
+        status: 'needs_input',
+        summary: `Execution snapshot for ${input.uses} is unavailable: ${loadedSnapshot.error.kind}`,
+        waitKind: `${input.uses}.snapshot-required@1`,
+      };
+    }
+    const snapshottedStep = snapshottedStepFrom(loadedSnapshot.value, input.uses);
+    if (snapshottedStep === null) {
+      return {
+        status: 'needs_input',
+        summary: `Block ${input.uses} is absent from the immutable execution snapshot`,
+        waitKind: `${input.uses}.definition-required@1`,
+      };
+    }
+    const receiptId = blockReceiptId({
+      workflowId: input.workflowId,
+      workflowRunId: input.workflowRunId,
+      nodeId: input.nodeId,
+      blockRun: input.blockRun,
+    });
+    const existingReceipt = dependencies.receipts.read(receiptId);
+    if (!existingReceipt.ok) {
+      return {
+        status: 'needs_input',
+        summary: `Block receipt ${receiptId} is unavailable: ${existingReceipt.error.kind}`,
+        waitKind: `${input.uses}.receipt-recovery-required@1`,
+      };
+    }
+    if (existingReceipt.value !== null) return executionResultFromReceipt(existingReceipt.value);
+
     const result = await executeRegisteredTaskStep(
       {
         taskReference: input.taskReference,
@@ -1639,38 +1819,60 @@ export const createTaskExecutionActivity = (
         uses: input.uses,
         activityDelivery: input.activityDelivery,
         workspace: workspace.value,
-        planningSnapshot: {
-          artifactId: planningReference.reference,
-          checksum: planningReference.hash,
-        },
+        planningSnapshot: snapshotReference,
         operatorGuidance: input.operatorGuidance,
         input: input.input,
       },
       dependencies,
-      temporalRuntime(),
+      runtimeFactory(),
     );
-    switch (result.status) {
-      case 'completed':
-        return {
-          status: 'completed',
-          summary: result.summary,
-          predicateFacts: result.predicateResults,
-          receiptReference:
-            result.artifactIds[0] ??
-            `task-step-output:${input.workflowId}:${input.nodeId}:attempt-${String(input.blockRun)}`,
-        };
-      case 'blocked':
-        return { status: 'needs_input', summary: result.summary, waitKind: result.waitKind };
-      case 'workflow_change_required':
-        return {
-          status: 'continuation_required',
-          summary: result.summary,
-          waitKind: 'workflow_change.review@1',
-          requestReference:
-            result.artifactIds[0] ??
-            `task-step-output:${input.workflowId}:${input.nodeId}:attempt-${String(input.blockRun)}`,
-        };
+    const operationId = `${input.workflowId}:${input.nodeId}:attempt-${String(input.blockRun)}`;
+    const outputArtifact = dependencies.traces.readOutputArtifact(operationId);
+    if (!outputArtifact.ok || outputArtifact.value === null) {
+      return {
+        status: 'needs_input',
+        summary: `Candidate output for ${input.uses} was not durably persisted`,
+        waitKind: `${input.uses}.receipt-persistence-required@1`,
+      };
     }
+    const claim = claimFromResult(result, outputArtifact.value);
+    const collection =
+      claim.status === 'candidate_complete'
+        ? await collectBlockCompletionEvidence(
+            {
+              operationId,
+              block: snapshottedStep.block,
+              workspace: workspace.value,
+              outputArtifact: outputArtifact.value,
+            },
+            dependencies,
+          )
+        : { evidence: [], issues: [] };
+    const verdict = appendEvidenceIssues(
+      evaluateBlockCompletion(snapshottedStep.block.completion, claim, collection.evidence),
+      collection.issues,
+    );
+    const recorded = dependencies.receipts.record({
+      block: snapshottedStep.block,
+      taskReference: input.taskReference,
+      workflowId: input.workflowId,
+      workflowRunId: input.workflowRunId,
+      workflowHash: input.workflowHash,
+      nodeId: input.nodeId,
+      blockRun: input.blockRun,
+      claim,
+      verdict,
+      evidence: collection.evidence,
+      transcriptReference: result.transcriptId,
+      usageReference: null,
+    });
+    return recorded.ok
+      ? executionResultFromReceipt(recorded.value)
+      : {
+          status: 'needs_input',
+          summary: `Block receipt for ${input.uses} could not be persisted: ${recorded.error.kind}`,
+          waitKind: `${input.uses}.receipt-persistence-required@1`,
+        };
   },
   evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
 });

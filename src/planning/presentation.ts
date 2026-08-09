@@ -24,7 +24,6 @@ const StepPresentationNodeSchema = z
     ...BasePresentationShape,
     expectedArtifacts: z.array(z.string().min(1)),
     kind: z.literal('step'),
-    retryBudget: z.number().int().nonnegative(),
     uses: z.string().min(1),
   })
   .strict();
@@ -103,7 +102,6 @@ export const createWorkflowPresentation = (
   proposal: WorkflowProposalArtifact,
 ): WorkflowPresentationTree => {
   const nodes: Record<string, PresentationNode> = {};
-  const retryByNode = new Map(proposal.retryBudgets.map((budget) => [budget.nodeId, budget]));
   const artifactsByNode = new Map<string, string[]>();
 
   for (const artifact of proposal.expectedArtifacts) {
@@ -133,7 +131,6 @@ export const createWorkflowPresentation = (
           id: node.id,
           kind: 'step',
           label: node.id,
-          retryBudget: retryByNode.get(node.id)?.maxAttempts ?? 0,
           status: 'planned',
           uses: node.uses,
         };

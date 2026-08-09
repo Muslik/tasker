@@ -6,6 +6,7 @@ import {
   createImplementationPlanningCoordinator,
   ImplementationPlanningStore,
 } from '../control-plane/implementation-planning.js';
+import { BlockReceiptStore } from '../blocks/index.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
@@ -250,7 +251,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   assertWorkspaceHarnessProvidesSkills(
     loadWorkspaceHarnessPack(bootstrapConfiguration.harnessPackPath),
     harnessPack.steps.flatMap((step) =>
-      step.execution.kind === 'agent' ? [...step.execution.skills] : [],
+      step.block.executor.kind === 'agent' ? [...step.block.executor.skills] : [],
     ),
   );
   const bootstrapAdapter = new HarnessProfileWorkspaceBootstrapAdapter(
@@ -290,6 +291,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         currentSteps: createCurrentStepRegistry(harnessPack),
         traces: executionTraces,
         mutationRecovery,
+        receipts: new BlockReceiptStore(ledger.repository, systemClock),
         agentRunner: new CodexCliTaskStepAgentRunner(dockerCommands),
         commands: dockerCommands,
         integrations: integrationAdapters,

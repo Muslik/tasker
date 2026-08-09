@@ -1,6 +1,6 @@
 # Customizing Tasker
 
-Status: canonical extension guide, Temporal revision, 2026-08-05
+Status: canonical extension guide, Block Contract v2 revision, 2026-08-09
 
 Tasker has no reusable workflow templates. Every initial workflow is assembled from an
 empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
@@ -77,14 +77,17 @@ kind:
 
 - `agent`: invokes a provider with a versioned prompt and logical skills;
 - `process`: invokes a registered policy-owned command/process adapter;
-- `integration`: invokes a typed adapter with external-effect reconciliation.
+- `integration` in the file manifest, materialized as an `effect` executor in the
+  immutable Block Definition: invokes a typed adapter with external-effect
+  reconciliation.
 
 Waits and gates are graph nodes/messages, not fake executors.
 
 To add `fill-test-ops-plan`:
 
-1. add a versioned `harness/steps/*.json` manifest (use code only when introducing a
-   genuinely new runtime input/output contract);
+1. add a `schemaVersion: 2` manifest under `harness/steps/*.json` with a stable
+   reference, macro stage, allowed outcomes, completion evaluator, and executor profile
+   or adapter (use code only when introducing a genuinely new input/output contract);
 2. define Zod input/output schemas;
 3. declare capabilities, effects, artifacts, timeout, heartbeat, retry, cancellation,
    idempotency/reconciliation, and allowed outcomes;
@@ -111,14 +114,15 @@ An agent block returns a typed claim:
 - `candidate_complete` with small structured output and evidence references;
 - `needs_input` with the exact human decision needed;
 - `blocked` with a resumable external/infrastructure condition;
-- `workflow_change_required` with discovery evidence and proposed intent;
+- `continuation_required` with discovery evidence and a proposed continuation request;
 - `failed` with a non-retryable diagnostic reference.
 
-The block runner, not the agent, decides completion. It resolves evidence, executes the
-registered completion evaluator, reconciles external effects, and persists an immutable
-Block Receipt before returning a `BlockOutcome` to Temporal. Process and integration
-blocks use the same receipt boundary without pretending that an agent performed their
-deterministic checks or writes.
+The block runner, not the agent, decides completion. It resolves evidence independently,
+executes the registered completion evaluator, reconciles external effects, and persists
+an immutable Block Receipt before returning a `BlockOutcome` to Temporal. An identical
+Activity redelivery restores the exact receipt; a conflicting redelivery fails closed.
+Process and integration blocks use the same receipt boundary without pretending that an
+agent performed their deterministic checks or writes.
 
 Arbitrary natural-language text cannot secretly alter the graph or grant effects.
 

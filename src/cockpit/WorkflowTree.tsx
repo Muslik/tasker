@@ -11,7 +11,6 @@ import {
 import type { ComponentType } from 'react';
 
 import type { WorkflowTreeNode } from '../control-plane/m1-contracts.js';
-import { Badge } from './components/ui/badge.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from './components/ui/tooltip.js';
 
 const nodeIcons: Readonly<Record<string, ComponentType<{ className?: string }>>> = {
@@ -44,11 +43,6 @@ const Node = ({ node }: { readonly node: WorkflowTreeNode }) => {
             <Icon className="size-3.5" />
           </span>
           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{node.label}</span>
-          {node.retryBudget === null ? null : (
-            <Badge variant="ghost" className="h-4 px-1 text-[10px] text-muted-foreground">
-              ×{node.retryBudget}
-            </Badge>
-          )}
           {node.waitKind === undefined ? null : (
             <Pause className="size-3 shrink-0 text-amber-400" aria-label="durable wait" />
           )}

@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+import {
+  BlockStageSchema,
+  CompletionEvaluatorSchema,
+  type BlockDefinition,
+  type CompletionEvaluator,
+} from '../blocks/index.js';
 import type { StepTypeContract } from '../workflow/contracts.js';
 import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
 import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
@@ -23,14 +29,16 @@ export const HarnessContractNameSchema = z.enum([
   'pull_request_input',
   'pull_request_output',
   'reproduction_input',
+  'reproduction_output',
   'task_input',
   'verification_input',
 ]);
 
-const HarnessStepExecutionManifestSchema = z.discriminatedUnion('kind', [
+const HarnessBlockExecutorManifestSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('agent'),
+      profile: z.string().min(1),
       prompt: RelativePathSchema,
       skills: z.array(z.string().min(1)),
     })
@@ -51,14 +59,18 @@ const HarnessStepExecutionManifestSchema = z.discriminatedUnion('kind', [
 
 export const HarnessStepManifestSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     reference: VersionedReferenceSchema,
     policy: PolicyIdSchema.optional(),
     description: z.string().min(1),
-    retryBudget: z.number().int().nonnegative(),
+    stage: BlockStageSchema,
     inputContract: HarnessContractNameSchema,
     outputContract: HarnessContractNameSchema,
-    execution: HarnessStepExecutionManifestSchema,
+    executor: HarnessBlockExecutorManifestSchema,
+    outcomes: z
+      .array(z.enum(['completed', 'needs_input', 'continuation_required', 'blocked', 'failed']))
+      .min(1),
+    completion: CompletionEvaluatorSchema,
     activityDelivery: z.enum([
       'single_attempt',
       'read_only',
@@ -138,9 +150,10 @@ export const HarnessPolicyManifestSchema = z
   })
   .strict();
 
-export type HarnessExecutionBinding =
+export type HarnessBlockExecutorSource =
   | {
       readonly kind: 'agent';
+      readonly profile: string;
       readonly prompt: string;
       readonly skills: readonly string[];
     }
@@ -153,13 +166,17 @@ export type HarnessExecutionBinding =
       readonly adapter: string;
     };
 
-export interface HarnessStepDefinition {
+export interface HarnessStepSource {
   readonly reference: string;
   readonly policy?: string;
   readonly description: string;
-  readonly retryBudget: number;
+  readonly stage: z.infer<typeof BlockStageSchema>;
+  readonly inputContract: z.infer<typeof HarnessContractNameSchema>;
+  readonly outputContract: z.infer<typeof HarnessContractNameSchema>;
   readonly contract: StepTypeContract;
-  readonly execution: HarnessExecutionBinding;
+  readonly executor: HarnessBlockExecutorSource;
+  readonly outcomes: BlockDefinition['outcomes'];
+  readonly completion: CompletionEvaluator;
 }
 
 const TranslationPolicySchema = z.discriminatedUnion('kind', [
@@ -308,7 +325,11 @@ export interface LoadedPrompt {
   readonly relativePath: string;
 }
 
-export interface LoadedHarnessStep extends HarnessStepDefinition {
+export interface LoadedHarnessStep {
+  readonly reference: string;
+  readonly policy?: string;
+  readonly contract: StepTypeContract;
+  readonly block: BlockDefinition;
   readonly prompt: LoadedPrompt | null;
 }
 

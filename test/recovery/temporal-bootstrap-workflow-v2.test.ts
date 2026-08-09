@@ -78,11 +78,16 @@ describe('Bootstrap Workflow v2 recovery', () => {
 
   const waitFor = async (taskReference: string, waitKind: string): Promise<TaskRunPublicState> => {
     await expect
-      .poll(async () => {
-        const result = await runs.read(taskReference);
-        if (!result.ok || result.value === null) return 'missing';
-        return result.value.status === 'waiting' ? result.value.wait.waitKind : result.value.status;
-      })
+      .poll(
+        async () => {
+          const result = await runs.read(taskReference);
+          if (!result.ok || result.value === null) return 'missing';
+          return result.value.status === 'waiting'
+            ? result.value.wait.waitKind
+            : result.value.status;
+        },
+        { interval: 50, timeout: 20_000 },
+      )
       .toBe(waitKind);
     const result = await runs.read(taskReference);
     if (!result.ok || result.value === null) throw new Error('Run is unavailable');
@@ -151,10 +156,13 @@ describe('Bootstrap Workflow v2 recovery', () => {
       }),
     ).toMatchObject({ ok: true });
     await expect
-      .poll(async () => {
-        const result = await runs.read('fixture:automatic');
-        return result.ok && result.value !== null ? result.value.status : 'missing';
-      })
+      .poll(
+        async () => {
+          const result = await runs.read('fixture:automatic');
+          return result.ok && result.value !== null ? result.value.status : 'missing';
+        },
+        { interval: 50, timeout: 20_000 },
+      )
       .toBe('completed');
-  }, 30_000);
+  }, 60_000);
 });

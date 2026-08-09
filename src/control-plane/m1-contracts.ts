@@ -8,7 +8,7 @@ import { TaskRunPublicStateSchema } from '../temporal/client.js';
 import { TaskRunSettingsSchema } from '../temporal/bootstrap-kernel/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
-export const M1_VIEW_SCHEMA_VERSION = 3;
+export const M1_VIEW_SCHEMA_VERSION = 4;
 
 export const WorkflowGenerationSubjectSchema = z
   .object({
@@ -61,7 +61,6 @@ export const WorkflowTreeNodeSchema: z.ZodType<{
   readonly kind: string;
   readonly label: string;
   readonly status: 'planned' | 'running' | 'waiting' | 'succeeded' | 'skipped' | 'failed';
-  readonly retryBudget: number | null;
   readonly waitKind?: string | undefined;
   readonly children: readonly z.infer<typeof WorkflowTreeNodeSchema>[];
 }> = z.lazy(() =>
@@ -71,7 +70,6 @@ export const WorkflowTreeNodeSchema: z.ZodType<{
       kind: z.string().min(1),
       label: z.string().min(1),
       status: z.enum(['planned', 'running', 'waiting', 'succeeded', 'skipped', 'failed']),
-      retryBudget: z.number().int().nonnegative().nullable(),
       waitKind: z.string().min(1).optional(),
       children: z.array(WorkflowTreeNodeSchema),
     })
@@ -120,7 +118,6 @@ export const WorkflowViewSchema = z
             required: z.array(z.string().min(1)),
           })
           .strict(),
-        retryBudgets: z.record(z.string(), z.number().int().nonnegative()),
         waits: z.array(
           z
             .object({

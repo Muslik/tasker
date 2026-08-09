@@ -89,11 +89,12 @@ disappear; Resume rebuilds/restarts them without replacing the run, worktree, bo
 receipt, or planning snapshot.
 
 Planning snapshots are independently versioned immutable artifacts. Runtime-policy
-changes do not rewrite an accepted snapshot. A worker deployment must continue reading
-the historical snapshot schema referenced by an active Temporal run; new required
-snapshot fields require a new schema version. Runtime-only recovery attaches the Docker
-receipt to the existing execution context without rebuilding planning from a dirty
-worktree.
+changes do not rewrite an accepted snapshot. During pre-pilot development, workers read
+only the current snapshot schema; a breaking schema change deletes obsolete local runs
+and Tasker development data instead of introducing an upcaster. Runtime-only recovery
+within the current schema attaches the Docker receipt to the existing execution context
+without rebuilding planning from a dirty worktree. Production deployment versioning is
+a later release gate, not a compatibility parser in the application domain.
 
 Failures are classified before they become the operator wait: unavailable image or
 daemon, runtime identity conflict, receipt-store failure, failed bootstrap command, and

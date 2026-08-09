@@ -1,14 +1,16 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reference": "ci.observe@1",
   "description": "Observe the exact Jenkins branch build and classify its terminal result.",
-  "retryBudget": 3,
+  "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",
   "outputContract": "ci_observation_output",
-  "execution": {
+  "executor": {
     "kind": "integration",
     "adapter": "jenkins.build@1"
   },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
   "activityDelivery": "read_only",
   "allowedEffects": [],
   "requiredCapabilities": ["ci.read"],

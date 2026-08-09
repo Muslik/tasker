@@ -9,7 +9,7 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
-import { getStepRetryBudget, M1_WORKFLOW_CONTRACTS } from './contracts.js';
+import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import {
   FixtureInputFailureSchema,
   parseTaskFixture,
@@ -35,14 +35,6 @@ export const VerificationPlanSchema = z
     checks: z.array(z.string().min(1)).min(1),
     profile: VerificationProfileSchema,
     rationale: z.string().min(1),
-  })
-  .strict();
-
-export const RetryBudgetSchema = z
-  .object({
-    maxAttempts: z.number().int().nonnegative(),
-    nodeId: z.string().min(1),
-    scope: z.enum(['loop', 'step']),
   })
   .strict();
 
@@ -95,8 +87,7 @@ export const WorkflowProposalArtifactSchema = z
     capabilities: CapabilityMetadataSchema,
     expectedArtifacts: z.array(ExpectedArtifactSchema),
     fixture: TaskFixtureSchema,
-    proposalSchemaVersion: z.literal(1),
-    retryBudgets: z.array(RetryBudgetSchema),
+    proposalSchemaVersion: z.literal(2),
     source: z.unknown(),
     verificationPlan: VerificationPlanSchema,
     waits: z.array(WaitMetadataSchema),
@@ -105,7 +96,6 @@ export const WorkflowProposalArtifactSchema = z
 
 export type WorkflowProposalArtifact = z.infer<typeof WorkflowProposalArtifactSchema>;
 export type WorkflowAnalyzerOutput = z.infer<typeof WorkflowAnalyzerOutputSchema>;
-export type RetryBudget = z.infer<typeof RetryBudgetSchema>;
 export type ExpectedArtifact = z.infer<typeof ExpectedArtifactSchema>;
 export type WaitMetadata = z.infer<typeof WaitMetadataSchema>;
 export type WorkflowAssemblyDecision = z.infer<typeof WorkflowAssemblyDecisionSchema>;
@@ -137,14 +127,12 @@ const sortedUnique = (values: readonly string[]): string[] =>
 interface ProposalMetadata {
   readonly expectedArtifacts: readonly ExpectedArtifact[];
   readonly requiredCapabilities: readonly string[];
-  readonly retryBudgets: readonly RetryBudget[];
   readonly waits: readonly WaitMetadata[];
 }
 
 const collectProposalMetadata = (source: WorkflowSource): ProposalMetadata => {
   const expectedArtifacts: ExpectedArtifact[] = [];
   const requiredCapabilities: string[] = [];
-  const retryBudgets: RetryBudget[] = [];
   const waits: WaitMetadata[] = [];
 
   const visit = (node: WorkflowNodeSource): void => {
@@ -159,31 +147,17 @@ const collectProposalMetadata = (source: WorkflowSource): ProposalMetadata => {
         return;
 
       case 'bounded_loop':
-        retryBudgets.push({
-          maxAttempts: node.maxAttempts,
-          nodeId: node.id,
-          scope: 'loop',
-        });
         visit(node.body);
         return;
 
       case 'step': {
         const contract = M1_WORKFLOW_CONTRACTS.stepTypes.get(node.uses);
-        const retryBudget = getStepRetryBudget(node.uses);
 
         if (contract !== undefined) {
           requiredCapabilities.push(...contract.requiredCapabilities);
           expectedArtifacts.push(
             ...contract.artifactContracts.map((kind) => ({ kind, nodeId: node.id })),
           );
-        }
-
-        if (retryBudget !== undefined) {
-          retryBudgets.push({
-            maxAttempts: retryBudget,
-            nodeId: node.id,
-            scope: 'step',
-          });
         }
 
         return;
@@ -217,10 +191,6 @@ const collectProposalMetadata = (source: WorkflowSource): ProposalMetadata => {
   return {
     expectedArtifacts: expectedArtifacts.sort(byNodeAndKind),
     requiredCapabilities: sortedUnique(requiredCapabilities),
-    retryBudgets: retryBudgets.sort((left, right) => {
-      const nodeOrder = left.nodeId.localeCompare(right.nodeId);
-      return nodeOrder === 0 ? left.scope.localeCompare(right.scope) : nodeOrder;
-    }),
     waits: waits.sort((left, right) => left.nodeId.localeCompare(right.nodeId)),
   };
 };
@@ -524,7 +494,6 @@ const proposalCandidateFromParts = (
     : {
         expectedArtifacts: [],
         requiredCapabilities: [],
-        retryBudgets: [],
         waits: [],
       };
   const available =
@@ -541,8 +510,7 @@ const proposalCandidateFromParts = (
     },
     expectedArtifacts: metadata.expectedArtifacts,
     fixture,
-    proposalSchemaVersion: 1,
-    retryBudgets: metadata.retryBudgets,
+    proposalSchemaVersion: 2,
     source: parts.source,
     verificationPlan: parts.verificationPlan,
     waits: metadata.waits,

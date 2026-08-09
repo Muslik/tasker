@@ -1,15 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reference": "ai.assistance.record_plan@1",
   "policy": "ai-assistance",
   "description": "Record the accepted implementation plan without reconstructing it from a later diff.",
-  "retryBudget": 2,
+  "stage": { "id": "preparation", "label": "Prepare" },
   "inputContract": "task_input",
   "outputContract": "integration_output",
-  "execution": {
+  "executor": {
     "kind": "integration",
     "adapter": "ai-assistance.record-plan@1"
   },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["policy_artifact.write"],
   "requiredCapabilities": ["workspace.write"],

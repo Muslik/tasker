@@ -22,7 +22,11 @@ describe('block completion', () => {
       kind: 'all' as const,
       evaluators: [
         { kind: 'workspace_mutation' as const },
-        { kind: 'structured_evidence' as const, requiredArtifactKinds: ['source-diff'] },
+        {
+          kind: 'structured_evidence' as const,
+          source: 'workspace_files' as const,
+          requiredArtifactKinds: ['source-diff'],
+        },
       ],
     };
     const mutation = {

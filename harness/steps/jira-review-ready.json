@@ -1,15 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reference": "jira.review-ready@1",
   "policy": "jira-lifecycle",
   "description": "Move an admitted Jira issue to code review and publish one compact pull-request link.",
-  "retryBudget": 3,
+  "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",
   "outputContract": "integration_output",
-  "execution": {
+  "executor": {
     "kind": "integration",
     "adapter": "jira.review-ready@1"
   },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
   "activityDelivery": "remote_reconciled",
   "allowedEffects": ["tracker.transition", "tracker.comment"],
   "requiredCapabilities": ["tracker.write"],

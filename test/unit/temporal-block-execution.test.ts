@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { BlockReceiptStore } from '../../src/blocks/index.js';
 import { loadHarnessPack } from '../../src/harness/index.js';
 import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
@@ -12,12 +11,11 @@ import { err, ok } from '../../src/shared/outcome.js';
 import { systemClock } from '../../src/shared/clock.js';
 import {
   createCurrentStepRegistry,
+  createTaskExecutionActivity,
   executeRegisteredTaskStep,
   TemporalTaskStepTraceStore,
   type TaskStepAgentRunner,
 } from '../../src/temporal/activities/block-execution.js';
-
-const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 const workspaceCommands = (run: CommandRunner['run'] = vi.fn()): WorkspaceCommandRunner => ({
   executionEnvironment: 'docker_workspace',
@@ -71,6 +69,19 @@ const mutationRecovery = {
         },
       }),
     ),
+  inspectCompletion: () =>
+    Promise.resolve(
+      ok({
+        intentArtifactId: 'task-step-mutation-intent:test',
+        changed: false,
+        current: {
+          fingerprint: '1'.repeat(64),
+          trackedDiffSha256: '2'.repeat(64),
+          changedPaths: [],
+          changedPathsTruncated: false,
+        },
+      }),
+    ),
 };
 
 const makeSnapshot = (
@@ -97,41 +108,25 @@ const makeSnapshot = (
     throw new Error(`Missing harness project for ${repositoryReference}`);
   }
   const { guidance, ...projectManifest } = snapshotProject;
-  const step =
-    current.execution.kind === 'agent'
+  const block =
+    current.block.executor.kind === 'agent'
       ? {
-          reference: current.reference,
-          execution: {
-            kind: 'agent' as const,
-            skills: current.execution.skills,
-            prompt: {
-              relativePath: current.prompt?.relativePath ?? 'prompt.md',
-              content: promptContent,
-              contentSha256: sha256(promptContent),
-            },
-          },
+          ...current.block,
+          executor: { ...current.block.executor, prompt: promptContent },
         }
-      : current.execution.kind === 'process'
-        ? {
-            reference: current.reference,
-            execution: {
-              kind: 'process' as const,
-              executor: current.execution.executor,
-              command:
-                snapshotProject.processCommands[current.execution.executor] ??
-                pack.company.processCommands[current.execution.executor] ??
-                'unconfigured process executor',
-            },
-          }
-        : {
-            reference: current.reference,
-            execution: {
-              kind: 'integration' as const,
-              adapter: current.execution.adapter,
-            },
-          };
+      : current.block;
+  const step = {
+    reference: current.reference,
+    block,
+    resolvedCommand:
+      current.block.executor.kind === 'process'
+        ? (snapshotProject.processCommands[current.block.executor.executor] ??
+          pack.company.processCommands[current.block.executor.executor] ??
+          'unconfigured process executor')
+        : null,
+  };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 5,
+    schemaVersion: 6,
     taskReference: 'task-ref',
     workflowHash: 'a'.repeat(64),
     task,
@@ -701,5 +696,150 @@ describe('temporal block execution activity', () => {
       ],
     });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('advances the execution graph only after an accepted BlockReceipt', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        ok({
+          stdout: '',
+          stderr: '',
+          finalMessage: {
+            status: 'completed',
+            outputJson: JSON.stringify({ summary: 'Test operations plan ready', artifacts: [] }),
+            requestJson: null,
+            blockingReason: null,
+          },
+        }),
+      ),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('fill-test-ops-plan@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        agentRunner: { provider: 'codex', run },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+    const input = {
+      schemaVersion: 2 as const,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: stubWorkspace.workflowHash,
+      nodeId: 'test-operations-plan',
+      blockRun: 1,
+      uses: 'fill-test-ops-plan@1',
+      activityDelivery: { kind: 'workspace_reconciled' as const },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: {
+        objective: 'Prepare the test plan',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+
+    const first = await activity.runExecutionBlock(input);
+    const redelivered = await activity.runExecutionBlock(input);
+
+    expect(first).toMatchObject({
+      status: 'completed',
+      receiptReference: 'block-receipt:tasker:task-ref:run-1:test-operations-plan:run-1',
+    });
+    expect(redelivered).toEqual(first);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a durable wait when an agent claims completion without proving a mutation', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('code.implement@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        agentRunner: {
+          provider: 'codex',
+          run: () =>
+            Promise.resolve(
+              ok({
+                stdout: '',
+                stderr: '',
+                finalMessage: {
+                  status: 'completed',
+                  outputJson: JSON.stringify({
+                    summary: 'Implementation claimed complete',
+                    artifacts: [],
+                  }),
+                  requestJson: null,
+                  blockingReason: null,
+                },
+              }),
+            ),
+        },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+
+    const result = await activity.runExecutionBlock({
+      schemaVersion: 2,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: stubWorkspace.workflowHash,
+      nodeId: 'implement-feature',
+      blockRun: 1,
+      uses: 'code.implement@1',
+      activityDelivery: { kind: 'workspace_reconciled' },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: {
+        objective: 'Implement the change',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'needs_input',
+      waitKind: 'code.implement@1.completion-evidence-required@1',
+    });
+    expect(result.summary).toContain('No workspace mutation was proven');
   });
 });

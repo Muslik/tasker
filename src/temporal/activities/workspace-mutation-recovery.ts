@@ -43,12 +43,22 @@ export const TaskStepRecoveryContextSchema = z.discriminatedUnion('kind', [
 ]);
 
 export type TaskStepRecoveryContext = z.infer<typeof TaskStepRecoveryContextSchema>;
+export type WorkspaceMutationRecoveryContext = Exclude<
+  TaskStepRecoveryContext,
+  { readonly kind: 'single_attempt' }
+>;
 
 export type WorkspaceMutationRecoveryFailure =
   | WorkspaceMutationInspectionFailure
   | { readonly kind: 'mutation_intent_corrupt'; readonly artifactId: string }
   | { readonly kind: 'mutation_intent_conflict'; readonly artifactId: string }
   | { readonly kind: 'ledger_conflict' };
+
+export interface WorkspaceMutationCompletion {
+  readonly intentArtifactId: string;
+  readonly changed: boolean;
+  readonly current: z.infer<typeof WorkspaceMutationStateSchema>;
+}
 
 const asJson = (value: unknown) => JsonValueSchema.parse(value);
 
@@ -64,7 +74,7 @@ export class WorkspaceMutationRecoveryStore {
     readonly workspaceId: string;
     readonly workspacePath: string;
     readonly stepReference: string;
-  }): Promise<Outcome<TaskStepRecoveryContext, WorkspaceMutationRecoveryFailure>> {
+  }): Promise<Outcome<WorkspaceMutationRecoveryContext, WorkspaceMutationRecoveryFailure>> {
     const current = await this.inspector.inspect(input.workspacePath);
     if (!current.ok) return current;
     const artifactId = `task-step-mutation-intent:${input.operationId}`;
@@ -119,6 +129,27 @@ export class WorkspaceMutationRecoveryStore {
     return this.recoveryContext(artifactId, input, current.value);
   }
 
+  public async inspectCompletion(input: {
+    readonly operationId: string;
+    readonly workspaceId: string;
+    readonly workspacePath: string;
+    readonly stepReference: string;
+  }): Promise<Outcome<WorkspaceMutationCompletion, WorkspaceMutationRecoveryFailure>> {
+    const prepared = await this.prepare(input);
+    if (!prepared.ok) return prepared;
+    return prepared.value.kind === 'recovery_delivery'
+      ? ok({
+          intentArtifactId: prepared.value.intentArtifactId,
+          changed: prepared.value.changedSinceInitialDelivery,
+          current: prepared.value.current,
+        })
+      : ok({
+          intentArtifactId: prepared.value.intentArtifactId,
+          changed: false,
+          current: prepared.value.baseline,
+        });
+  }
+
   private recoveryContext(
     artifactId: string,
     input: {
@@ -128,7 +159,7 @@ export class WorkspaceMutationRecoveryStore {
       readonly stepReference: string;
     },
     current: z.infer<typeof WorkspaceMutationStateSchema>,
-  ): Outcome<TaskStepRecoveryContext, WorkspaceMutationRecoveryFailure> {
+  ): Outcome<WorkspaceMutationRecoveryContext, WorkspaceMutationRecoveryFailure> {
     const artifact = this.ledger.readArtifact(artifactId);
     const parsed = MutationIntentSchema.safeParse(artifact?.payload);
     if (!parsed.success) return err({ kind: 'mutation_intent_corrupt', artifactId });

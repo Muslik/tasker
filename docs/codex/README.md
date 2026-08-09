@@ -23,11 +23,9 @@ Read these in order:
    policies, providers, trackers, repositories, and company packs.
 6. [`docker-execution.md`](docker-execution.md) — Docker-only agent/process execution,
    task-scoped services, caches, and project bootstrap.
-7. [`temporal-migration.md`](temporal-migration.md) — the v2 cutover boundary and
-   preserved product guarantees.
-8. [`technology-decisions.md`](technology-decisions.md) — concrete implementation
+7. [`technology-decisions.md`](technology-decisions.md) — concrete implementation
    choices that remain below the architecture boundary.
-9. [`research-index.md`](research-index.md) — external evidence and decision trail.
+8. [`research-index.md`](research-index.md) — external evidence and decision trail.
 
 The deleted M0–M2 and T1–T4 documents described superseded implementations. Git
 history is the audit trail; they are not inputs to new work.
@@ -39,5 +37,7 @@ history is the audit trail; they are not inputs to new work.
 - Jira before-reproduction attachment policy is removed; reproduction evidence stays
   private to execution unless an explicit final-demo policy publishes it later.
 - Run snapshots accept only the current schema and current Docker runtime policy.
-- The next architectural phase makes Block Contract v2 receipts the only authority
-  that may advance the execution graph.
+- Block Contract v2 receipts are the only authority that may advance the execution
+  graph. Obsolete manifest and planning-snapshot schemas are rejected, not migrated.
+- The next architectural phase adds versioned execution profiles for configurable
+  provider, model, reasoning, and planning strategy selection.

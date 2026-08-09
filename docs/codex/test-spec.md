@@ -13,8 +13,9 @@ Use four layers:
    schemas, and cost calculations;
 2. Temporal time-skipping integration tests with mocked Activities for Workflow state,
    messages, timers, retries, graph revisions, and child coordination;
-3. real local Temporal service tests for client/worker/API restart, task routing, and
-   replay/deployment compatibility;
+3. real local Temporal service tests for client/worker/API restart and task routing;
+   production replay/deployment compatibility joins this layer only after histories
+   are declared durable;
 4. adapter/process/Playwright tests for worktrees, providers, Jira/Bitbucket/Jenkins,
    artifacts, and the operator journey.
 
@@ -162,11 +163,12 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 
 ### 4.5 Replay and versioning
 
-- capture representative histories for sequence, wait/update, Activity retry, graph
-  revision, and child workflow;
-- replay them against the candidate worker build before release;
-- verify old IR/block versions are either supported by the worker or fail deployment
-  compatibility before new work is routed there.
+- pre-pilot development accepts only current manifest, proposal, snapshot, Block, and
+  Workflow schemas; obsolete schemas are rejected and their local data is deleted;
+- no application upcaster, dual reader, or legacy worker path is permitted;
+- before production histories are declared durable, add release-only representative
+  history capture, replay against candidate workers, and Temporal Worker Versioning as
+  a deployment gate rather than a domain compatibility layer.
 
 ## 5. Real Temporal service recovery tests
 

@@ -752,32 +752,14 @@ const snapshotHarness = (
   const referencedSteps = new Set(graph.metadata.references.stepTypes);
   const steps = pack.steps
     .filter((step) => referencedSteps.has(step.reference))
-    .map((step) => {
-      if (step.execution.kind === 'agent') {
-        if (step.prompt === null) {
-          throw new Error(`Agent block ${step.reference} has no loaded prompt`);
-        }
-        return {
-          reference: step.reference,
-          execution: {
-            kind: 'agent' as const,
-            skills: step.execution.skills,
-            prompt: snapshotPrompt(step.prompt),
-          },
-        };
-      }
-      return {
-        reference: step.reference,
-        execution:
-          step.execution.kind === 'process'
-            ? {
-                kind: 'process' as const,
-                executor: step.execution.executor,
-                command: resolveSnapshottedProcessCommand(step.execution.executor, pack, project),
-              }
-            : { kind: 'integration' as const, adapter: step.execution.adapter },
-      };
-    });
+    .map((step) => ({
+      reference: step.reference,
+      block: step.block,
+      resolvedCommand:
+        step.block.executor.kind === 'process'
+          ? resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project)
+          : null,
+    }));
   const snapshottedProject = (() => {
     if (project === undefined) return null;
     const { guidance, ...manifest } = project;
@@ -883,7 +865,7 @@ export class ImplementationPlanningCoordinator {
     if (evidenceBundle.value === null)
       return err({ kind: 'evidence_bundle_missing', taskReference });
     const snapshot = RunPlanningSnapshotSchema.parse({
-      schemaVersion: 5,
+      schemaVersion: 6,
       taskReference,
       workflowHash: expectedWorkflowHash,
       task: subject.value.task,

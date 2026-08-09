@@ -330,7 +330,7 @@ describe('M1 task workflow planning', () => {
       'code_review@1',
       'translation_complete@1',
     ]);
-    expect(result.value.proposal.retryBudgets.some((budget) => budget.scope === 'loop')).toBe(true);
+    expect(JSON.stringify(result.value.proposal)).not.toContain('retryBudgets');
     expect(result.value.proposal.expectedArtifacts.length).toBeGreaterThan(0);
     expect(result.value.proposal.verificationPlan.rationale).toContain('translation');
     expect(result.value.proposal.assemblyDecisions.map((decision) => decision.id)).toEqual([

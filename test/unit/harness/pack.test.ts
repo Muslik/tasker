@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadHarnessPack, type HarnessStepDefinition } from '../../../src/harness/index.js';
+import { loadHarnessPack } from '../../../src/harness/index.js';
 import {
   createHarnessWorkflowContracts,
   getHarnessStepDefinition,
@@ -15,6 +15,7 @@ import {
   finalize,
   sequence,
   step,
+  type StepTypeContract,
 } from '../../../src/workflow/index.js';
 
 const temporaryDirectories: string[] = [];
@@ -37,15 +38,8 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const baseStep = getHarnessStepDefinition('code.implement@1');
     if (baseStep === undefined) throw new Error('Expected implementation definition');
-    const customStep: HarnessStepDefinition = {
+    const customStep: { readonly reference: string; readonly contract: StepTypeContract } = {
       reference: 'company.custom@1',
-      description: 'Produce a company-specific read-only report.',
-      retryBudget: 1,
-      execution: {
-        kind: 'agent',
-        prompt: 'prompts/steps/fill-test-ops-plan.md',
-        skills: ['company-custom@1'],
-      },
       contract: {
         id: 'company.custom',
         version: '1',
@@ -55,7 +49,6 @@ describe('file-backed harness pack', () => {
         requiredCapabilities: ['repository.read'],
         resumeBoundary: 'attempt',
         idempotency: 'none',
-        retryPolicy: 'bounded:1',
         activityDelivery: { kind: 'single_attempt' },
         waitKinds: [],
         artifactContracts: ['custom-report'],
@@ -95,11 +88,25 @@ describe('file-backed harness pack', () => {
     );
 
     expect(stepDefinition).toMatchObject({
-      execution: { kind: 'agent', skills: ['test-ops-planning'] },
+      block: {
+        executor: { kind: 'agent', profile: 'verification', skills: ['test-ops-planning'] },
+      },
       prompt: { relativePath: 'prompts/steps/fill-test-ops-plan.md' },
     });
     expect(stepDefinition?.prompt?.content).toContain('test-operations plan');
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it('rejects obsolete step manifests instead of upcasting them', async () => {
+    const root = await createTemporaryPack();
+    const manifestPath = join(root, 'steps/ci-observe.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      schemaVersion: number;
+    };
+    manifest.schemaVersion = 1;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+    expect(() => loadHarnessPack(root)).toThrow();
   });
 
   it('loads company policy blocks and path obligations from files', () => {
@@ -177,7 +184,11 @@ describe('file-backed harness pack', () => {
     expect(prepare?.contract.requiredArtifactContracts).toEqual(['pull-request-draft']);
     expect(prepare?.contract.requiredArtifactContracts).not.toContain('ai-assistance-compliance');
     expect(describe?.contract.requiredArtifactContracts).toEqual([]);
-    expect(describe?.execution).toMatchObject({ kind: 'agent', skills: [] });
+    expect(describe?.block.executor).toMatchObject({
+      kind: 'agent',
+      profile: 'documentation',
+      skills: [],
+    });
   });
 
   it('removes policy-owned blocks from future packs when the policy is disabled', async () => {
@@ -230,8 +241,10 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const skillsFor = (reference: string): readonly string[] => {
       const definition = pack.steps.find((candidate) => candidate.reference === reference);
-      if (definition?.execution.kind !== 'agent') throw new Error(`Expected agent ${reference}`);
-      return definition.execution.skills;
+      if (definition?.block.executor.kind !== 'agent') {
+        throw new Error(`Expected agent ${reference}`);
+      }
+      return definition.block.executor.skills;
     };
 
     expect(skillsFor('bug.reproduce@1')).toContain('playwright-demo');

@@ -6,7 +6,7 @@ import { RunPlanningSnapshotSchema } from '../../../src/planning/run-planning-sn
 const snapshot = () => {
   const pack = loadHarnessPack();
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     taskReference: 'jira:AVIA-12045',
     workflowHash: 'a'.repeat(64),
     task: {
@@ -68,7 +68,7 @@ describe('run planning snapshot', () => {
     expect(
       RunPlanningSnapshotSchema.safeParse({
         ...snapshot(),
-        schemaVersion: 4,
+        schemaVersion: 5,
       }).success,
     ).toBe(false);
   });
