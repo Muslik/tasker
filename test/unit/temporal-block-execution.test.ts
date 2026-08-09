@@ -53,6 +53,10 @@ const stubWorkspace = {
   preparedAt: '2026-08-03T00:00:00.000Z',
 };
 
+const stubWorkspaceStore = {
+  read: () => ok(stubWorkspace),
+};
+
 const mutationRecovery = {
   prepare: () =>
     Promise.resolve(
@@ -225,6 +229,7 @@ describe('temporal block execution activity', () => {
         mutationRecovery,
         agentRunner,
         commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
       },
       {
         attempt: 1,
@@ -292,6 +297,7 @@ describe('temporal block execution activity', () => {
       mutationRecovery,
       agentRunner: { provider: 'codex' as const, run },
       commands: workspaceCommands(),
+      workspaces: stubWorkspaceStore,
     };
     const runtime = {
       attempt: 1,
@@ -364,6 +370,7 @@ describe('temporal block execution activity', () => {
             ),
         },
         commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
       },
       {
         attempt: 1,
@@ -423,6 +430,7 @@ describe('temporal block execution activity', () => {
       mutationRecovery,
       agentRunner: { provider: 'codex' as const, run },
       commands: workspaceCommands(),
+      workspaces: stubWorkspaceStore,
     };
     const runtime = {
       attempt: 1,
@@ -515,6 +523,7 @@ describe('temporal block execution activity', () => {
           run: vi.fn(),
         },
         commands: workspaceCommands(commands),
+        workspaces: stubWorkspaceStore,
       },
       {
         attempt: 1,
@@ -598,6 +607,7 @@ describe('temporal block execution activity', () => {
           run: vi.fn(),
         },
         commands: workspaceCommands(commands),
+        workspaces: stubWorkspaceStore,
       },
       {
         attempt: 1,
@@ -664,6 +674,7 @@ describe('temporal block execution activity', () => {
       mutationRecovery,
       agentRunner: { provider: 'codex' as const, run: vi.fn() },
       commands: workspaceCommands(),
+      workspaces: stubWorkspaceStore,
       integrations: new IntegrationStepAdapterRegistry([
         { id: 'bitbucket.pull-request@1', execute },
       ]),

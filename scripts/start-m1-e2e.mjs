@@ -267,19 +267,14 @@ const workflowContinuation = control.createWorkflowContinuationCoordinator({
 
 const taskQueue = `tasker-e2e-${String(process.pid)}`;
 const temporalEnvironment = await TestWorkflowEnvironment.createTimeSkipping();
-const runRegistry = new temporal.LedgerTemporalRunRegistry(ledger.repository);
-const temporalRunService = new temporal.TemporalTaskRunService(
-  temporalEnvironment.client,
-  {
-    address: 'e2e-test-server',
-    namespace: 'default',
-    taskQueue,
-    queryTimeoutMs: 5_000,
-    updateTimeoutMs: 5_000,
-  },
-  runRegistry,
-);
-const workflowsPath = resolve('dist/temporal/workflows/task-workflow.js');
+const temporalRunService = new temporal.TemporalTaskRunService(temporalEnvironment.client, {
+  address: 'e2e-test-server',
+  namespace: 'default',
+  taskQueue,
+  queryTimeoutMs: 5_000,
+  updateTimeoutMs: 5_000,
+});
+const workflowsPath = resolve('dist/temporal/workflows/index.js');
 const planningActivity = temporal.createPlanningActivity(implementationPlanning);
 
 const workspaceIdFor = (taskReference) =>
@@ -311,14 +306,6 @@ const dockerRuntimeFor = (workspace) => ({
   status: 'ready',
   preparedAt: '2026-08-03T00:00:00.000Z',
   updatedAt: '2026-08-03T00:00:00.000Z',
-});
-
-const completeStep = async (input) => ({
-  status: 'completed',
-  summary: `${input.uses} completed`,
-  predicateResults: { 'attempt.succeeded@1': true },
-  artifactIds: [],
-  transcriptId: null,
 });
 
 const workflowActivities = {
@@ -377,22 +364,13 @@ const workflowActivities = {
       planningSnapshot: planningSnapshot.value,
     };
   },
-  prepareTaskDockerRuntime: ({ workspace }) => Promise.resolve(dockerRuntimeFor(workspace)),
-  executeStep: completeStep,
-  executeReadOnlyStep: completeStep,
-  executeWorkspaceReconciledStep: completeStep,
-  executeRemoteReconciledStep: completeStep,
-  evaluatePredicate: async (input) => input.facts[input.reference] ?? true,
-  linkWorkflowContinuation: async (input) => {
-    const linked = workflowContinuation.linkExecution(input.parentTaskReference, {
-      taskReference: input.childTaskReference,
-      runId: input.childRunId,
-    });
-    if (!linked.ok) {
-      throw new Error(`continuation link failed: ${linked.error.kind}`);
-    }
-    return { linked: true };
-  },
+  runExecutionBlock: async (input) => ({
+    status: 'completed',
+    summary: `${input.uses} completed`,
+    predicateFacts: { 'attempt.succeeded@1': true },
+    receiptReference: `e2e:block:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
+  }),
+  evaluateExecutionPredicate: async (input) => input.facts[input.reference] ?? true,
 };
 const worker = await Worker.create({
   connection: temporalEnvironment.nativeConnection,

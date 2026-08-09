@@ -69,20 +69,11 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
       'jira.review-ready@1',
     );
-    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
-      'jira.attach-reproduction@1',
-    );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain(
       'jira-admission-before-workspace-write',
     );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain(
       'jira-review-ready-before-code-review',
-    );
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
-      'jira-before-reproduction-media',
-    );
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
-      'jira-repair-requires-published-reproduction',
     );
   });
 
@@ -102,12 +93,6 @@ describe('workflow analyzer context', () => {
       .loose()
       .parse(context.plannerContext);
 
-    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toContain(
-      'jira.attach-reproduction@1',
-    );
-    expect(plannerContext.obligations.map(({ id }) => id)).not.toContain(
-      'jira-before-reproduction-media',
-    );
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
       'jira.start-work@1',
     );

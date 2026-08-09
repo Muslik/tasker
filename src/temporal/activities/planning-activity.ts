@@ -10,10 +10,10 @@ import type { CommandRequest, WorkspaceCommandRunner } from '../../providers/com
 import type { Outcome } from '../../shared/outcome.js';
 import {
   PlanTaskImplementationInputSchema,
-  PlanTaskImplementationResultSchema,
+  BootstrapPlanningStateSchema,
   type PlanTaskImplementationInput,
-  type TaskWorkflowActivities,
-} from '../contracts.js';
+  type BootstrapWorkflowActivities,
+} from '../bootstrap-kernel/contracts.js';
 
 type PlanningOutcome = Outcome<ImplementationPlanningRecord, { readonly kind: string }>;
 
@@ -72,14 +72,14 @@ const planningResult = (record: ImplementationPlanningRecord, commandId: string)
 
   switch (record.status) {
     case 'ready':
-      return PlanTaskImplementationResultSchema.parse(common);
+      return BootstrapPlanningStateSchema.parse(common);
     case 'needs_clarification':
-      return PlanTaskImplementationResultSchema.parse({
+      return BootstrapPlanningStateSchema.parse({
         ...common,
         questions: record.decision.questions,
       });
     case 'workflow_change_required':
-      return PlanTaskImplementationResultSchema.parse({
+      return BootstrapPlanningStateSchema.parse({
         ...common,
         request: record.decision.request,
       });
@@ -88,7 +88,7 @@ const planningResult = (record: ImplementationPlanningRecord, commandId: string)
 
 export const createPlanningActivity = (
   coordinator: TemporalImplementationPlanningCoordinator,
-): Pick<TaskWorkflowActivities, 'planTaskImplementation'> => ({
+): Pick<BootstrapWorkflowActivities, 'planTaskImplementation'> => ({
   planTaskImplementation: async (inputValue: PlanTaskImplementationInput) => {
     const input = PlanTaskImplementationInputSchema.parse(inputValue);
     const context = Context.current();

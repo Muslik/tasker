@@ -352,19 +352,6 @@ const integrationStep = (
 });
 
 export const TWIKET_HARNESS_STEPS = [
-  agentStep('task.analyze', {
-    description: 'Analyze task and repository evidence before execution.',
-    prompt: 'prompts/steps/task-analyze.md',
-    skills: ['jira', 'confluence', 'loop'],
-    retryBudget: 1,
-    artifactContracts: ['analysis-report'],
-    workflowChanges: [
-      'cross_repository_dependency',
-      'external_process_required',
-      'task_scope_changed',
-      'verification_scope_changed',
-    ],
-  }),
   agentStep('bug.reproduce', {
     description: 'Reproduce a bug before or after implementation and preserve evidence.',
     inputSchema: reproductionInputSchema,

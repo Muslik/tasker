@@ -17,12 +17,6 @@ import type {
 
 export const WORKFLOW_OBLIGATIONS = [
   {
-    id: 'planning-boundary',
-    trigger: 'every task',
-    requires: ['task.analyze@1 immediately followed by the plan.approved@1 gate'],
-    reason: 'Planning is mandatory even when human approval is disabled for the run.',
-  },
-  {
     id: 'write-requires-verification',
     trigger: 'a path contains a workspace.write step',
     requires: ['a verify.* step later on the same path'],

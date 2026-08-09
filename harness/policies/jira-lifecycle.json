@@ -26,10 +26,7 @@
       "kind": "path_sequence",
       "direction": "before",
       "trigger": { "kind": "effect", "reference": "workspace.write" },
-      "ordered": [
-        { "kind": "gate", "reference": "plan.approved@1" },
-        { "kind": "step", "reference": "jira.start-work@1" }
-      ],
+      "ordered": [{ "kind": "step", "reference": "jira.start-work@1" }],
       "reason": "A Jira task must cross its accepted plan boundary and be admitted before repository mutation."
     },
     {
@@ -37,10 +34,7 @@
       "kind": "path_sequence",
       "direction": "before",
       "trigger": { "kind": "effect", "reference": "command.run" },
-      "ordered": [
-        { "kind": "gate", "reference": "plan.approved@1" },
-        { "kind": "step", "reference": "jira.start-work@1" }
-      ],
+      "ordered": [{ "kind": "step", "reference": "jira.start-work@1" }],
       "reason": "A Jira task must be admitted before reproduction, verification, or another project command runs."
     },
     {

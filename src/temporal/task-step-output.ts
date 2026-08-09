@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { JsonValueSchema } from '../workflow/schema.js';
-import { ExecuteTaskStepResultSchema } from './contracts.js';
+import { ExecuteTaskStepResultSchema } from './activities/block-execution-contracts.js';
 
 export const TaskStepOutputArtifactSchema = z
   .object({

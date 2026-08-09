@@ -544,14 +544,13 @@ describe('implementation planning recovery', () => {
       const changedContent = `${originalPack.prompts.implementationPlanner.content}\nchanged later`;
       const changedPack: LoadedHarnessPack = {
         ...originalPack,
-        steps: originalPack.steps.map((step) =>
-          step.reference === 'task.analyze@1' && step.execution.kind === 'agent'
-            ? {
-                ...step,
-                execution: { ...step.execution, skills: ['test-design'] },
-              }
-            : step,
-        ),
+        company: {
+          ...originalPack.company,
+          systemPrompts: {
+            ...originalPack.company.systemPrompts,
+            implementationPlannerSkills: ['test-design'],
+          },
+        },
         prompts: {
           ...originalPack.prompts,
           implementationPlanner: {

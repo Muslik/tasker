@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { loadHarnessPack } from '../../../src/harness/index.js';
 import { RunPlanningSnapshotSchema } from '../../../src/planning/run-planning-snapshot.js';
 
-const snapshot = (schemaVersion: 4 | 5) => {
+const snapshot = () => {
   const pack = loadHarnessPack();
   return {
-    schemaVersion,
+    schemaVersion: 5,
     taskReference: 'jira:AVIA-12045',
     workflowHash: 'a'.repeat(64),
     task: {
@@ -49,23 +49,9 @@ const snapshot = (schemaVersion: 4 | 5) => {
   };
 };
 
-describe('run planning snapshot compatibility', () => {
-  it('reads a version 4 snapshot captured before Docker runtime policy existed', () => {
-    const historical = snapshot(4);
-    const company = Object.fromEntries(
-      Object.entries(historical.harness.company).filter(([key]) => key !== 'workspaceRuntime'),
-    );
-
-    expect(
-      RunPlanningSnapshotSchema.parse({
-        ...historical,
-        harness: { ...historical.harness, company },
-      }).schemaVersion,
-    ).toBe(4);
-  });
-
-  it('requires Docker runtime policy in a version 5 snapshot', () => {
-    const current = snapshot(5);
+describe('run planning snapshot', () => {
+  it('requires the current Docker runtime policy', () => {
+    const current = snapshot();
     const company = Object.fromEntries(
       Object.entries(current.harness.company).filter(([key]) => key !== 'workspaceRuntime'),
     );
@@ -74,6 +60,15 @@ describe('run planning snapshot compatibility', () => {
       RunPlanningSnapshotSchema.safeParse({
         ...current,
         harness: { ...current.harness, company },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects snapshots from deleted runtime versions', () => {
+    expect(
+      RunPlanningSnapshotSchema.safeParse({
+        ...snapshot(),
+        schemaVersion: 4,
       }).success,
     ).toBe(false);
   });

@@ -5,9 +5,10 @@ import {
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
   type TemporalClientConfiguration,
 } from './client.js';
-import type { TaskBootstrapActivities, TaskWorkflowActivities } from './contracts.js';
+import type { BootstrapWorkflowActivities } from './bootstrap-kernel/contracts.js';
+import type { ExecutionWorkflowActivities } from './execution-kernel/contracts.js';
 
-type TaskerTemporalActivities = TaskWorkflowActivities & TaskBootstrapActivities;
+type TaskerTemporalActivities = BootstrapWorkflowActivities & ExecutionWorkflowActivities;
 
 export interface TaskerTemporalWorkerOptions {
   readonly connection: NativeConnection;
@@ -26,8 +27,7 @@ export const createTaskerTemporalWorker = async (
     namespace: options.namespace ?? DEFAULT_TEMPORAL_CLIENT_CONFIGURATION.namespace,
     taskQueue: options.taskQueue ?? DEFAULT_TEMPORAL_CLIENT_CONFIGURATION.taskQueue,
     workflowsPath:
-      options.workflowsPath ??
-      fileURLToPath(new URL('./workflows/task-workflow.js', import.meta.url)),
+      options.workflowsPath ?? fileURLToPath(new URL('./workflows/index.js', import.meta.url)),
     activities: options.activities,
   });
 

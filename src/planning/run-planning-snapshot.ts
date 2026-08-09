@@ -4,7 +4,6 @@ import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
   HarnessProjectManifestSchema,
-  WorkspaceRuntimeSchema,
 } from '../harness/contracts.js';
 import { TaskFixtureSchema } from './fixtures.js';
 import type { Outcome } from '../shared/outcome.js';
@@ -54,67 +53,47 @@ const SnapshottedStepSchema = z
   })
   .strict();
 
-const HistoricalHarnessCompanyManifestSchema = HarnessCompanyManifestSchema.extend({
-  workspaceRuntime: WorkspaceRuntimeSchema.optional(),
-});
-
-const snapshottedHarnessSchema = (
-  company: typeof HarnessCompanyManifestSchema | typeof HistoricalHarnessCompanyManifestSchema,
-) =>
-  z
-    .object({
-      company,
-      project: z
-        .object({
-          manifest: HarnessProjectManifestSchema,
-          guidance: SnapshottedPromptSchema.nullable(),
-        })
-        .strict()
-        .nullable(),
-      implementationPlanner: z
-        .object({
-          prompt: SnapshottedPromptSchema,
-          skills: z.array(z.string().min(1)),
-        })
-        .strict(),
-      policies: z.array(HarnessPolicyManifestSchema),
-      steps: z.array(SnapshottedStepSchema),
-    })
-    .strict();
-
-const runPlanningSnapshotSchema = <Version extends 4 | 5>(
-  schemaVersion: Version,
-  company: typeof HarnessCompanyManifestSchema | typeof HistoricalHarnessCompanyManifestSchema,
-) =>
-  z
-    .object({
-      schemaVersion: z.literal(schemaVersion),
-      taskReference: z.string().min(1),
-      workflowHash: ContentHashSchema,
-      task: TaskFixtureSchema,
-      taskSnapshot: JsonValueSchema,
-      workflow: JsonValueSchema,
-      evidenceBundle: EvidenceBundleReferenceSchema,
-      repository: z
-        .object({
-          workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
-          reference: z.string().min(1),
-          path: z.string().min(1),
-        })
-        .strict(),
-      harness: snapshottedHarnessSchema(company),
-      createdAt: z.iso.datetime(),
-    })
-    .strict();
-
-const RunPlanningSnapshotV4Schema = runPlanningSnapshotSchema(
-  4,
-  HistoricalHarnessCompanyManifestSchema,
-);
-const RunPlanningSnapshotV5Schema = runPlanningSnapshotSchema(5, HarnessCompanyManifestSchema);
+const SnapshottedHarnessSchema = z
+  .object({
+    company: HarnessCompanyManifestSchema,
+    project: z
+      .object({
+        manifest: HarnessProjectManifestSchema,
+        guidance: SnapshottedPromptSchema.nullable(),
+      })
+      .strict()
+      .nullable(),
+    implementationPlanner: z
+      .object({
+        prompt: SnapshottedPromptSchema,
+        skills: z.array(z.string().min(1)),
+      })
+      .strict(),
+    policies: z.array(HarnessPolicyManifestSchema),
+    steps: z.array(SnapshottedStepSchema),
+  })
+  .strict();
 
 export const RunPlanningSnapshotSchema = z
-  .discriminatedUnion('schemaVersion', [RunPlanningSnapshotV4Schema, RunPlanningSnapshotV5Schema])
+  .object({
+    schemaVersion: z.literal(5),
+    taskReference: z.string().min(1),
+    workflowHash: ContentHashSchema,
+    task: TaskFixtureSchema,
+    taskSnapshot: JsonValueSchema,
+    workflow: JsonValueSchema,
+    evidenceBundle: EvidenceBundleReferenceSchema,
+    repository: z
+      .object({
+        workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
+        reference: z.string().min(1),
+        path: z.string().min(1),
+      })
+      .strict(),
+    harness: SnapshottedHarnessSchema,
+    createdAt: z.iso.datetime(),
+  })
+  .strict()
   .readonly();
 
 export type PlanningSnapshotReference = z.infer<typeof PlanningSnapshotReferenceSchema>;

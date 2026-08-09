@@ -1,6 +1,6 @@
 # Tasker architecture
 
-Status: canonical target architecture, Temporal revision, 2026-08-03
+Status: canonical target architecture, v4 Temporal revision, 2026-08-09
 
 ## 1. Product boundary
 
@@ -65,8 +65,10 @@ flowchart LR
   API --> TC["Temporal Client"]
   TC --> TS["Temporal Service"]
   TS --> TW["Tasker Temporal Worker"]
-  TW --> WF["Generic graph-interpreter Workflow"]
-  WF --> ACT["Typed Activities"]
+  TW --> BW["Bootstrap Workflow"]
+  BW --> FW["Frozen task workflow"]
+  FW --> WF["Execution Workflow kernel"]
+  WF --> ACT["Block runner + effect Activities"]
   ACT --> AG["Codex / Claude / Antigravity adapters"]
   ACT --> WT["Managed worktrees + Docker task runtimes"]
   ACT --> EXT["Jira / Bitbucket / Jenkins / Confluence"]
@@ -130,22 +132,18 @@ be false.
 
 Examples of deterministic obligations:
 
-- bug paths contain before and after reproduction evidence;
 - a write path verifies after implementation;
 - a PR path observes CI and reaches human code review;
-- every loop and retry budget is bounded;
+- every semantic loop is explicit and bounded;
 - every effect has the required capability and reconciliation policy;
 - terminal paths end in an allowed final state or explicit durable wait.
 
 Policy applicability is task-origin data, not a vendor branch in the compiler. A
-Jira-origin policy can expose `jira.start-work@1` and require it before any step that
-declares a product effect such as `workspace.write` or `command.run`; a fixture or
-future GitLab-origin task does not see that block. Effect selectors protect future
-blocks without enumerating their names in the policy. The same policy can require a
-provider-neutral `jira.review-ready@1` integration after PR/CI and before human review;
-an independent Jira evidence policy can select only `bug.reproduce@1` markers whose
-input contains `phase=before` and require `jira.attach-reproduction@1` after them.
-These obligations add no Jira branches to the compiler or Temporal Workflow.
+tracker policy may expose admission and review-ready blocks only to tasks from that
+tracker. Effect selectors protect future blocks without enumerating their names. Jira
+does not receive Tasker's private before-reproduction evidence automatically; final
+demo evidence may be published during delivery when the task policy requests it.
+These obligations add no vendor branches to the compiler or Temporal Workflow.
 
 The first compiled draft is not yet executable or immutable. A planner
 `workflow_change_required` result is a proposal: Tasker applies it to the draft through
@@ -162,14 +160,33 @@ snapshots, transcripts, videos, and screenshots stay
 in the Tasker artifact store; history contains stable IDs, hashes, metadata, and bounded
 summaries. Secrets never enter Workflow input or Event History.
 
+### 5.1 Runtime vocabulary
+
+- **Stage** is an operator projection such as Investigate, Plan, Implement, Validate,
+  Delivery, CI, or Human review. It groups work but is not schedulable.
+- **Block** is a reusable versioned work contract selected into one task graph. It owns
+  inputs, outcomes, completion rules, recovery, prompt/skills/profile where relevant,
+  and produced evidence.
+- **Effect** is one atomic filesystem, Git, tracker, SCM, CI, or other external
+  operation with durable intent and receipt. It may be an expandable child of a block
+  rather than an operator stage.
+- **Agent Episode** is one provider-neutral reasoning session for an agent block. It
+  may propose content, request allowed mediated effects, ask a question, or return a
+  candidate result; it cannot declare authoritative completion.
+
 ## 6. Generic Temporal graph interpreter
 
 Tasker does not generate and deploy TypeScript Workflow code per Jira task. One stable,
 versioned Temporal Workflow interprets the compiled graph:
 
 ```text
-TaskWorkflow(compiledGraph, runPolicy, artifactReferences)
+ExecutionWorkflow(frozenGraph, runSettings, contextReferences)
 ```
+
+The Bootstrap Workflow owns workspace/context preparation, investigation admission,
+mandatory planning, optional plan review, deterministic draft validation, and the
+immutable freeze receipt. The Execution Workflow receives only the accepted frozen
+graph and opaque references. It never discovers planning nodes by name.
 
 The interpreter is deterministic. It may inspect only its input, prior Activity
 results, messages, and Workflow state. It must not read the filesystem, call an LLM,
@@ -227,8 +244,15 @@ Each block declares:
 - timeout, heartbeat, cancellation, and retry policy;
 - idempotency/reconciliation behavior;
 - produced artifact kinds;
-- permitted outcomes, including `question`, `workflow_change_required`, `blocked`, and
-  `completed`.
+- permitted typed claims, including `candidate_complete`, `needs_input`,
+  `workflow_change_required`, `blocked`, and `failed`;
+- an authoritative completion evaluator and required evidence/artifact contracts.
+
+Agent output is a claim, never execution authority. The block runner validates the
+claim schema, resolves actual evidence, runs the block-specific completion evaluator,
+reconciles effects, and only then persists an immutable Block Receipt and returns a
+terminal block outcome to Temporal. A prose summary or schema-valid result without the
+declared evidence cannot complete a block.
 
 Activities may be non-deterministic. They must be independently retryable at their
 declared boundary and persist useful evidence before returning. Long CLI calls

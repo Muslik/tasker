@@ -13,7 +13,6 @@ import {
   compileWorkflow,
   defineWorkflow,
   finalize,
-  gate,
   sequence,
   step,
 } from '../../../src/workflow/index.js';
@@ -36,8 +35,8 @@ afterEach(async () => {
 describe('file-backed harness pack', () => {
   it('registers a typed company step without changing the workflow compiler', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-    const analyzerStep = getHarnessStepDefinition('task.analyze@1');
-    if (analyzerStep === undefined) throw new Error('Expected task analyzer definition');
+    const baseStep = getHarnessStepDefinition('code.implement@1');
+    if (baseStep === undefined) throw new Error('Expected implementation definition');
     const customStep: HarnessStepDefinition = {
       reference: 'company.custom@1',
       description: 'Produce a company-specific read-only report.',
@@ -50,8 +49,8 @@ describe('file-backed harness pack', () => {
       contract: {
         id: 'company.custom',
         version: '1',
-        inputSchema: analyzerStep.contract.inputSchema,
-        outputSchema: analyzerStep.contract.outputSchema,
+        inputSchema: baseStep.contract.inputSchema,
+        outputSchema: baseStep.contract.outputSchema,
         allowedEffects: [],
         requiredCapabilities: ['repository.read'],
         resumeBoundary: 'attempt',
@@ -71,15 +70,6 @@ describe('file-backed harness pack', () => {
         id: 'custom-step-workflow',
         version: 1,
         root: sequence('delivery', [
-          step('analyze', {
-            uses: 'task.analyze@1',
-            with: { objective: 'Analyze', repository: 'company/repo', taskId: 'TASK-1' },
-          }),
-          gate('plan', {
-            reason: 'Use the configured plan boundary.',
-            resumeWhen: 'plan.approved@1',
-            with: { taskId: 'TASK-1' },
-          }),
           step('custom', {
             uses: 'company.custom@1',
             with: { objective: 'Produce report', repository: 'company/repo', taskId: 'TASK-1' },
@@ -93,7 +83,7 @@ describe('file-backed harness pack', () => {
     expect(result).toMatchObject({
       ok: true,
       value: {
-        graph: { metadata: { references: { stepTypes: ['company.custom@1', 'task.analyze@1'] } } },
+        graph: { metadata: { references: { stepTypes: ['company.custom@1'] } } },
       },
     });
   });
@@ -173,7 +163,6 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.start-work@1')).toEqual({ kind: 'remote_reconciled' });
-    expect(deliveryFor('jira.attach-reproduction@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.review-ready@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
       kind: 'workspace_reconciled',
@@ -201,11 +190,7 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(root);
     const references = pack.steps.map(({ reference }) => reference);
 
-    expect(pack.policies.map(({ id }) => id)).toEqual([
-      'jira-lifecycle',
-      'jira-reproduction-evidence',
-      'review-feedback',
-    ]);
+    expect(pack.policies.map(({ id }) => id)).toEqual(['jira-lifecycle', 'review-feedback']);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
     expect(references).toContain('pr.describe@1');
@@ -239,22 +224,6 @@ describe('file-backed harness pack', () => {
     expect(pack.policies.map(({ id }) => id)).not.toContain('jira-lifecycle');
     expect(references).not.toContain('jira.start-work@1');
     expect(references).not.toContain('jira.review-ready@1');
-  });
-
-  it('removes Jira reproduction publishing without changing Jira lifecycle blocks', async () => {
-    const root = await createTemporaryPack();
-    const policyPath = join(root, 'policies/jira-reproduction-evidence.json');
-    const policy = JSON.parse(await readFile(policyPath, 'utf8')) as { enabled: boolean };
-    policy.enabled = false;
-    await writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
-
-    const pack = loadHarnessPack(root);
-    const references = pack.steps.map(({ reference }) => reference);
-
-    expect(pack.policies.map(({ id }) => id)).not.toContain('jira-reproduction-evidence');
-    expect(references).not.toContain('jira.attach-reproduction@1');
-    expect(references).toContain('jira.start-work@1');
-    expect(references).toContain('jira.review-ready@1');
   });
 
   it('binds visual evidence guidance only to reproduction and visual verification', () => {

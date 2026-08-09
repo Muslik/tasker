@@ -51,8 +51,12 @@ import {
   ExecuteTaskStepResultSchema,
   type ExecuteTaskStepInput,
   type ExecuteTaskStepResult,
-  type TaskWorkflowActivities,
-} from '../contracts.js';
+} from './block-execution-contracts.js';
+import type {
+  ExecutionWorkflowActivities,
+  RunExecutionBlockInput,
+} from '../execution-kernel/contracts.js';
+import type { WorkspaceStore } from '../../workspaces/store.js';
 import { TaskStepOutputArtifactSchema } from '../task-step-output.js';
 import {
   TaskStepRecoveryContextSchema,
@@ -1003,6 +1007,7 @@ export interface TaskExecutionActivityDependencies {
   readonly commands: WorkspaceCommandRunner;
   readonly integrations?: IntegrationStepAdapterRegistry;
   readonly evidence?: TaskRunEvidenceSource;
+  readonly workspaces: Pick<WorkspaceStore, 'read'>;
 }
 
 export interface TaskRunEvidenceSource {
@@ -1602,22 +1607,72 @@ const temporalRuntime = (): TaskStepActivityContext => {
 
 export const createTaskExecutionActivity = (
   dependencies: TaskExecutionActivityDependencies,
-): Pick<
-  TaskWorkflowActivities,
-  | 'evaluatePredicate'
-  | 'executeStep'
-  | 'executeReadOnlyStep'
-  | 'executeWorkspaceReconciledStep'
-  | 'executeRemoteReconciledStep'
-> => ({
-  executeStep: async (input) => executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
-  executeReadOnlyStep: async (input) =>
-    executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
-  executeWorkspaceReconciledStep: async (input) =>
-    executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
-  executeRemoteReconciledStep: async (input) =>
-    executeRegisteredTaskStep(input, dependencies, temporalRuntime()),
-  evaluatePredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
+): ExecutionWorkflowActivities => ({
+  runExecutionBlock: async (input: RunExecutionBlockInput) => {
+    const workspaceReference = input.contextReferences.find(({ kind }) => kind === 'workspace');
+    const planningReference = input.contextReferences.find(
+      ({ kind }) => kind === 'planning_snapshot',
+    );
+    if (workspaceReference === undefined || planningReference?.hash === undefined) {
+      return {
+        status: 'needs_input',
+        summary: `Execution context for ${input.uses} is incomplete`,
+        waitKind: `${input.uses}.context-required@1`,
+      };
+    }
+    const workspace = dependencies.workspaces.read(workspaceReference.reference);
+    if (!workspace.ok || workspace.value === null) {
+      return {
+        status: 'needs_input',
+        summary: `Prepared workspace for ${input.uses} is unavailable`,
+        waitKind: `${input.uses}.workspace-required@1`,
+      };
+    }
+    const result = await executeRegisteredTaskStep(
+      {
+        taskReference: input.taskReference,
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        workflowHash: input.workflowHash,
+        nodeId: input.nodeId,
+        stepAttempt: input.blockRun,
+        uses: input.uses,
+        activityDelivery: input.activityDelivery,
+        workspace: workspace.value,
+        planningSnapshot: {
+          artifactId: planningReference.reference,
+          checksum: planningReference.hash,
+        },
+        operatorGuidance: input.operatorGuidance,
+        input: input.input,
+      },
+      dependencies,
+      temporalRuntime(),
+    );
+    switch (result.status) {
+      case 'completed':
+        return {
+          status: 'completed',
+          summary: result.summary,
+          predicateFacts: result.predicateResults,
+          receiptReference:
+            result.artifactIds[0] ??
+            `task-step-output:${input.workflowId}:${input.nodeId}:attempt-${String(input.blockRun)}`,
+        };
+      case 'blocked':
+        return { status: 'needs_input', summary: result.summary, waitKind: result.waitKind };
+      case 'workflow_change_required':
+        return {
+          status: 'continuation_required',
+          summary: result.summary,
+          waitKind: 'workflow_change.review@1',
+          requestReference:
+            result.artifactIds[0] ??
+            `task-step-output:${input.workflowId}:${input.nodeId}:attempt-${String(input.blockRun)}`,
+        };
+    }
+  },
+  evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
 });
 
 export const createCurrentStepRegistry = (

@@ -19,8 +19,6 @@
       "trigger": { "kind": "step", "reference": "pr.prepare@1" },
       "ordered": [
         { "kind": "step", "reference": "ai.assistance.initialize@1" },
-        { "kind": "step", "reference": "task.analyze@1" },
-        { "kind": "gate", "reference": "plan.approved@1" },
         { "kind": "step", "reference": "ai.assistance.record_plan@1" },
         { "kind": "step", "reference": "ai.assistance.finalize@1" },
         { "kind": "step", "reference": "pr.describe@1" },

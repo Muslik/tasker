@@ -258,6 +258,7 @@ export const HarnessCompanyManifestSchema = z
     systemPrompts: z
       .object({
         implementationPlanner: RelativePathSchema,
+        implementationPlannerSkills: z.array(z.string().min(1)),
         workflowAnalyzer: RelativePathSchema,
       })
       .strict(),

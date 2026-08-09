@@ -2492,7 +2492,7 @@ export const App = () => {
     setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
     void startWorkflow(taskReference, {
       settings: {
-        planApproval: requirePlanApproval ? 'required' : 'automatic',
+        planReview: requirePlanApproval ? 'required' : 'automatic',
         planningStrategy,
       },
     })

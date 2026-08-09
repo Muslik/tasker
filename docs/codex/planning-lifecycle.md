@@ -1,6 +1,6 @@
 # Context, planning, and workflow freeze lifecycle
 
-Status: **canonical target architecture**, 2026-08-05.
+Status: **canonical target architecture**, 2026-08-09.
 
 This document defines the boundary between context collection, task planning, graph
 assembly, and execution. It supersedes any older statement that the first compiled
@@ -142,9 +142,9 @@ Initial planning revisions and execution-time continuations are deliberately dif
 - planning revises a draft before product effects begin;
 - continuation preserves an already accepted graph and completed execution prefix.
 
-## Current implementation
+## Migration status
 
-As of 2026-08-05, Tasker persists a typed, append-only Evidence Bundle with provenance,
+As of 2026-08-09, Tasker persists a typed, append-only Evidence Bundle with provenance,
 deduplicated immutable revisions, and restart-safe references. A dedicated Temporal
 bootstrap Workflow now invokes context discovery and initial draft assembly through one
 heartbeat-enabled Activity. The HTTP Generate action waits for that durable result;
@@ -158,11 +158,10 @@ snapshots carry only the immutable initial bundle reference. The planner also re
 the block's snapshotted read-only skills and may inspect the read-only worktree; external
 system reads must use the mediated request protocol and append a newer bundle revision.
 
-Planning is now a first-class Temporal lifecycle before generic graph traversal. The
-lifecycle locates the validator-required planning step and review gate, prepares the
-workspace, runs the mandatory planner, and admits no product-effect block until the
-plan fits and optional review completes. The generic node interpreter no longer calls
-the planner or gives `task.analyze@1` name-based execution behavior.
+The v4 kernel cutover removed planning lifecycle discovery together with the old
+`taskWorkflow`. Bootstrap returns a typed frozen-workflow handoff; Execution accepts
+that handoff directly and contains no planning-step or plan-gate names. Pre-v4 Workflow
+histories are deleted development data, not a compatibility surface.
 
 A planning `workflow_change_required` result invokes a heartbeat-enabled draft
 revision Activity. That Activity resolves newly discovered repositories, appends
@@ -195,5 +194,6 @@ may start a Child Workflow, preserving the original prefix.
 
 The evidence boundary now mediates Jira, Confluence, and Loop reads through
 provenance-producing Tasker adapters, persists pending requests before I/O, attributes
-each planner round's usage, and externalizes large bodies. The next product gate is an
+each planner round's usage, and externalizes large bodies. The next gates are the small
+Execution Workflow kernel and authoritative block completion, followed by an
 allowlisted real pilot through planning, frozen execution, PR/CI, and human review.

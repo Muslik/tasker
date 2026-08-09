@@ -104,16 +104,21 @@ For a `process` block, add its executor key and command to the relevant versione
 block; execution uses the command captured in that run's immutable snapshot. Do not add
 step-name branching to an Activity.
 
-### Block outcome contract
+### Block completion contract
 
-Every executing block returns one typed result:
+An agent block returns a typed claim:
 
-- `completed` with small structured output and artifact references;
-- `retryable` with a classified reason/evidence;
-- `question` with the exact human decision needed;
+- `candidate_complete` with small structured output and evidence references;
+- `needs_input` with the exact human decision needed;
 - `blocked` with a resumable external/infrastructure condition;
 - `workflow_change_required` with discovery evidence and proposed intent;
 - `failed` with a non-retryable diagnostic reference.
+
+The block runner, not the agent, decides completion. It resolves evidence, executes the
+registered completion evaluator, reconciles external effects, and persists an immutable
+Block Receipt before returning a `BlockOutcome` to Temporal. Process and integration
+blocks use the same receipt boundary without pretending that an agent performed their
+deterministic checks or writes.
 
 Arbitrary natural-language text cannot secretly alter the graph or grant effects.
 
@@ -128,12 +133,11 @@ Logical skill names are provider-neutral. An adapter maps the same portable pack
 Codex, Claude, or another subscription CLI discovery surface. The graph must not
 contain provider-specific command syntax.
 
-The mandatory planner has its own pinned read-only skill selection. In the current
-bridge this selection is snapshotted from `task.analyze@1`; the target bootstrap
-lifecycle will snapshot it as first-class planner configuration. Removing a skill from
-an execution block must not accidentally remove the planner's ability to verify the
-draft. External planner reads must pass through the evidence boundary and append
-provenance rather than existing only in provider output.
+The mandatory planner has its own pinned read-only skill selection, snapshotted as
+first-class Bootstrap Workflow configuration. Removing a skill from an execution block
+must not accidentally remove the planner's ability to verify the draft. External
+planner reads must pass through the evidence boundary and append provenance rather than
+existing only in provider output.
 
 The built-in workspace pack stores one portable Agent Skills package per logical name.
 Bootstrap creates an effective pinned catalog under `.tasker/harness/skills`; it does
@@ -174,8 +178,9 @@ reconcile separately. Conversely, `playwright-demo` is a valid reusable skill bu
 not itself make visual verification part of every graph.
 
 Use prompts for judgment and implementation guidance. Use deterministic obligations
-for requirements that must always hold, such as CI before PR review or before/after
-reproduction for a bug.
+for requirements that must always hold, such as validation after a write or CI before
+human PR review. Whether a bug needs visual, automated, or manual reproduction is
+selected from task/project evidence rather than a universal before/after recipe.
 
 Policy `path_sequence` obligations accept `direction: "before"` and
 `direction: "after"`. Use `before` for prerequisites such as evidence required before
@@ -183,17 +188,15 @@ PR publication. Use `after` for continuations such as revision -> PR update -> C
 thread acknowledgement -> review. This validates a dynamically assembled graph without
 turning the sequence into a Temporal branch.
 
-A policy may declare `appliesTo.taskOrigins` and optional `taskFamilies`, so Jira-only
+A policy may declare `appliesTo.taskOrigins` and task-evidence selectors, so Jira-only
 blocks are absent from local fixtures or a future GitLab Issue analyzer context, while
-bug-only evidence blocks are also absent from Jira feature tasks. A marker with `kind: "effect"`
+bug investigation blocks are absent when task evidence does not require them. A marker with `kind: "effect"`
 matches any registered step declaring that effect. The Jira admission policy therefore
 protects new `workspace.write` and `command.run` blocks without listing every step name.
 Use a step marker when exact ordering matters; use an effect marker for a capability
 boundary that future blocks must not bypass. A step marker may include a partial
-`with` object when the same block has distinct semantic phases. For example,
-`{"kind":"step","reference":"bug.reproduce@1","with":{"phase":"before"}}`
-matches before-reproduction but not after-fix verification. The deterministic validator
-uses the same selector as fixture assembly, so a policy cannot claim a requirement the
+`with` object when one block has distinct semantic modes. The deterministic validator
+uses the same selector as assembly, so a policy cannot claim a requirement the
 generated graph interprets differently.
 
 ## 5. Project policy
@@ -248,7 +251,7 @@ route, or Bitbucket adapter changes when this policy is removed.
 The current file-backed manifest vocabulary deliberately reuses named runtime schemas
 (`task_input`, `pull_request_input`, `agent_output`, and so on). Add a schema name in
 TypeScript only when the data shape is new; adding another prompt, skill selection,
-adapter binding, effect declaration, retry budget, or artifact dependency is JSON-only.
+adapter binding, effect declaration, semantic loop policy, or artifact dependency is JSON-only.
 
 ## 7. Worktree harness bootstrap
 
@@ -347,10 +350,10 @@ The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`.
 account, eligible issue types, excluded labels, admission/review status paths, and
 compact review comment prefix live in
 `harness/policies/jira-lifecycle.json`; changing those rules does not change adapter or
-Temporal code. Optional media upload is deliberately separate in
-`harness/policies/jira-reproduction-evidence.json`; disabling it removes its owned
-`jira.attach-reproduction@1` block without changing Jira lifecycle. Keep the flag off
-until a selected pilot task and its transition requirements have been inspected.
+Temporal code. Optional final-demo upload is a delivery policy, not part of Jira
+admission and not a required reproduction block. Tasker's private before evidence
+remains in its artifact store. Keep any remote-media policy off until a selected pilot
+task and its transition requirements have been inspected.
 
 ## 9. Add another agent provider
 

@@ -33,17 +33,15 @@ import { systemClock } from '../shared/clock.js';
 import {
   connectTemporalTaskRunService,
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
-  LedgerTemporalRunRegistry,
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
 import { buildM1Api } from './m1-api.js';
-import { EvidenceBundleStore } from './evidence-bundle.js';
+import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { createM1WorkflowService } from './m1-service.js';
-import { TemporalWorkflowGenerator } from './temporal-workflow-generator.js';
-import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
+import { CodexWorkflowGenerator, WorkflowGenerationSubjectSource } from './workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
@@ -126,14 +124,12 @@ export const startM1Server = async (): Promise<void> => {
     ...(continuationAnalyzer === undefined ? {} : { analyzer: continuationAnalyzer }),
     repositories: repositoryCatalog,
   });
-  const temporalRuntime = await connectTemporalTaskRunService(
-    temporalConfiguration,
-    new LedgerTemporalRunRegistry(ledger.repository),
-  );
-  const workflowGenerator = new TemporalWorkflowGenerator(
-    temporalRuntime.client,
-    temporalConfiguration,
+  const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
+  const workflowGenerator = new CodexWorkflowGenerator(
     service,
+    subjects,
+    continuationAnalyzer,
+    new ContextDiscoveryService(evidenceBundles, systemClock),
   );
   const bitbucketReview =
     bitbucketConfiguration === null

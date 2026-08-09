@@ -6,11 +6,11 @@ import {
   WorkflowFreezeReceiptSchema,
   type FreezeTaskWorkflowInput,
 } from '../freeze-contracts.js';
-import type { TaskWorkflowActivities } from '../contracts.js';
+import type { BootstrapWorkflowActivities } from '../bootstrap-kernel/contracts.js';
 
 export const createWorkflowFreezeActivity = (
   freezes: Pick<WorkflowFreezeStore, 'record'>,
-): Pick<TaskWorkflowActivities, 'freezeTaskWorkflow'> => ({
+): Pick<BootstrapWorkflowActivities, 'freezeTaskWorkflow'> => ({
   freezeTaskWorkflow: (inputValue: FreezeTaskWorkflowInput) => {
     const input = FreezeTaskWorkflowInputSchema.parse(inputValue);
     Context.current().heartbeat({ phase: 'freeze_workflow', workflowHash: input.workflowHash });

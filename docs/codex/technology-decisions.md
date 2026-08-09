@@ -22,7 +22,7 @@ invariants live in [`architecture.md`](architecture.md); sequencing lives in
 | Tests | Vitest, fast-check where useful, Playwright | Unit/property/integration/operator acceptance |
 | Logs | Pino with redaction | Operational diagnostics separate from task activity |
 
-The T1 slice pins `@temporalio/client`, `@temporalio/worker`,
+The runtime pins `@temporalio/client`, `@temporalio/worker`,
 `@temporalio/workflow`, and `@temporalio/testing` at `1.21.1`. The local acceptance
 demo was verified with Temporal CLI `1.8.2`, embedded Temporal Server `1.31.2`, and UI
 `2.50.1`. Upgrades require Workflow replay/recovery tests before changing the worker
@@ -56,14 +56,19 @@ Do not create one queue per task or repository.
 
 ## 3. Workflow contracts
 
-Register one stable Workflow entry point. A validated continuation starts the same
-entry point as a Child Workflow with a new immutable input:
+Register two stable Workflow entry points with separate responsibilities:
 
 ```ts
-TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkflowResult>
+BootstrapWorkflowV2(input: BootstrapWorkflowInput): Promise<BootstrapWorkflowResult>
+ExecutionWorkflowV2(input: ExecutionWorkflowInput): Promise<ExecutionWorkflowResult>
 ```
 
-`TaskWorkflowInput` contains only bounded, immutable, non-secret data:
+Bootstrap owns workspace/context preparation, mandatory planning, optional plan review,
+draft validation, and freeze. Execution receives the frozen graph and opaque context
+references only. A validated continuation starts a new Bootstrap or Execution Workflow
+according to whether it needs planning or is already frozen.
+
+Workflow input contains only bounded, immutable, non-secret data:
 
 - task/run IDs;
 - compiled graph and IR ABI version;
@@ -76,9 +81,10 @@ Workflow code may use Temporal Workflow APIs, pure helpers, and deterministic Ta
 logic. It may not import filesystem, database, network, provider, Jira, Bitbucket, or
 process modules.
 
-Use Worker Versioning for Workflow-code rollout and replay tests for histories created
-by released builds. Use IR/block versions for data compatibility. These solve different
-problems and neither substitutes for the other.
+Development histories created before Workflow v2 are unsupported and disposable. Once
+real pilot runs exist, use Worker Versioning and replay tests for histories created by
+released v2+ builds. IR/block versions protect frozen run data; they do not reintroduce
+parsers for deleted development schemas.
 
 ## 4. Messages
 

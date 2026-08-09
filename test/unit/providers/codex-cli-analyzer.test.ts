@@ -136,10 +136,7 @@ describe('Codex CLI workflow analyzer', () => {
     expect(executionRequest?.stdin).toContain('Construct the complete graph from an empty root');
     expect(executionRequest?.stdin).toContain('NEVER return top-level keys such as schemaVersion');
     expect(executionRequest?.stdin).not.toContain('copying plannerContext.baseTemplate');
-    expect(executionRequest?.stdin).toContain(
-      'exactly one task.analyze@1 immediately followed by a',
-    );
-    expect(executionRequest?.stdin).toContain('Policy prelude blocks may precede that pair');
+    expect(executionRequest?.stdin).toContain('Do not emit bootstrap-only analysis steps');
     expect(runner.requests[1]?.args).toEqual(
       expect.arrayContaining([
         'exec',

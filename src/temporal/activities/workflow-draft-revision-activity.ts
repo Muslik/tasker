@@ -6,13 +6,13 @@ import {
   ReviseTaskWorkflowDraftInputSchema,
   ReviseTaskWorkflowDraftResultSchema,
   type ReviseTaskWorkflowDraftInput,
-  type TaskWorkflowActivities,
-} from '../contracts.js';
+  type BootstrapWorkflowActivities,
+} from '../bootstrap-kernel/contracts.js';
 
 export const createWorkflowDraftRevisionActivity = (
   revisions: Pick<WorkflowDraftRevisionCoordinator, 'revise'>,
   snapshots: PlanningSnapshotSource,
-): Pick<TaskWorkflowActivities, 'reviseTaskWorkflowDraft'> => ({
+): Pick<BootstrapWorkflowActivities, 'reviseTaskWorkflowDraft'> => ({
   reviseTaskWorkflowDraft: async (inputValue: ReviseTaskWorkflowDraftInput) => {
     const input = ReviseTaskWorkflowDraftInputSchema.parse(inputValue);
     const context = Context.current();

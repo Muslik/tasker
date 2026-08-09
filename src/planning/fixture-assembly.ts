@@ -8,7 +8,6 @@ import {
   bounded_loop,
   defineWorkflow,
   finalize,
-  gate,
   sequence,
   step,
   wait,
@@ -78,13 +77,6 @@ const verificationInput = (task: TaskContext, profile: string) => ({
   taskId: task.taskId,
 });
 
-const planBoundary = (task: TaskContext): WorkflowNodeSource =>
-  gate('review-plan', {
-    reason: 'Every task produces a plan; immutable run settings decide whether a human reviews it.',
-    resumeWhen: 'plan.approved@1',
-    with: { taskId: task.taskId },
-  });
-
 const aiAssistanceEnabled = (): boolean =>
   getHarnessPack().policies.some((policy) => policy.id === 'ai-assistance');
 
@@ -108,7 +100,7 @@ const acceptedPlanRecord = (task: TaskContext): readonly WorkflowNodeSource[] =>
       ]
     : [];
 
-const postPlanPolicySteps = (
+const preExecutionPolicySteps = (
   task: TaskContext & PolicyTaskContext,
 ): readonly WorkflowNodeSource[] => {
   const pack = getHarnessPack();
@@ -117,12 +109,7 @@ const postPlanPolicySteps = (
     .flatMap((policy) =>
       policy.obligations.flatMap((obligation) => {
         if (obligation.direction !== 'before' || obligation.trigger.kind !== 'effect') return [];
-        const planIndex = obligation.ordered.findIndex(
-          (marker) => marker.kind === 'gate' && marker.reference === 'plan.approved@1',
-        );
-        if (planIndex < 0) return [];
         return obligation.ordered
-          .slice(planIndex + 1)
           .filter(
             (marker) =>
               marker.kind === 'step' &&
@@ -308,12 +295,7 @@ const pullRequestReadiness = (
 const shortBugfixRoot = (task: TaskContext & PolicyTaskContext): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
     ...aiAssistancePrelude(task),
-    step('analyze-task', {
-      uses: 'task.analyze@1',
-      with: taskInput(task, task.description),
-    }),
-    planBoundary(task),
-    ...postPlanPolicySteps(task),
+    ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
     step('reproduce-before', {
       uses: 'bug.reproduce@1',
@@ -369,12 +351,7 @@ const featureWithReviewRoot = (
 ): WorkflowNodeSource =>
   sequence('feature-delivery', [
     ...aiAssistancePrelude(task),
-    step('analyze-task', {
-      uses: 'task.analyze@1',
-      with: taskInput(task, task.description),
-    }),
-    planBoundary(task),
-    ...postPlanPolicySteps(task),
+    ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
     bounded_loop('implementation-loop', {
       maxAttempts: 3,
@@ -435,12 +412,7 @@ const sharedComponentRoot = (
 
   return sequence('shared-component-delivery', [
     ...aiAssistancePrelude(task),
-    step('analyze-task', {
-      uses: 'task.analyze@1',
-      with: taskInput(task, task.description),
-    }),
-    planBoundary(task),
-    ...postPlanPolicySteps(task),
+    ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
     bounded_loop('component-implementation-loop', {
       maxAttempts: 3,

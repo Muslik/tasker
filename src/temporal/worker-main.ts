@@ -9,11 +9,7 @@ import {
 import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createM1WorkflowService } from '../control-plane/m1-service.js';
-import {
-  CodexWorkflowGenerator,
-  WorkflowGenerationSubjectSource,
-} from '../control-plane/workflow-generator.js';
-import { createWorkflowContinuationCoordinator } from '../control-plane/workflow-continuation.js';
+import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
 import { WorkflowDraftRevisionCoordinator } from '../control-plane/workflow-draft-revision.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
@@ -37,7 +33,6 @@ import {
   JiraLifecycleClient,
   JiraPlanningEvidenceReader,
   JiraReviewReadyAdapter,
-  JiraReproductionEvidenceAdapter,
   JiraServerClient,
   JiraStartWorkAdapter,
   LoopPlanningEvidenceReader,
@@ -92,7 +87,6 @@ import {
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
-import { createWorkflowAssemblyActivity } from './activities/workflow-assembly-activity.js';
 import { createWorkflowDraftRevisionActivity } from './activities/workflow-draft-revision-activity.js';
 import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
@@ -184,9 +178,6 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       : [
           authorizeExternalEffect(new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects)),
           authorizeExternalEffect(new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects)),
-          authorizeExternalEffect(
-            new JiraReproductionEvidenceAdapter(jiraLifecycleClient, externalEffects),
-          ),
         ]),
   ]);
   const repositoryCatalog = createManagedRepositoryStore(
@@ -223,12 +214,6 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     ? undefined
     : new CodexCliWorkflowAnalyzer(temporalCommandRunner);
   const contextDiscovery = new ContextDiscoveryService(evidenceBundles, systemClock);
-  const workflowGenerator = new CodexWorkflowGenerator(
-    workflowService,
-    subjects,
-    workflowAnalyzer,
-    contextDiscovery,
-  );
   const workflowDraftRevisions = new WorkflowDraftRevisionCoordinator(
     workflowService,
     subjects,
@@ -248,13 +233,6 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ? new DeterministicImplementationPlanner()
       : new CodexCliImplementationPlanner(temporalCommandRunner),
   });
-  const workflowContinuation = createWorkflowContinuationCoordinator({
-    ledger: ledger.repository,
-    clock: systemClock,
-    workflows: workflowService,
-    subjects,
-    repositories: repositoryCatalog,
-  });
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
   const reviewEvidence = new PullRequestReviewEvidenceStore(ledger.repository, systemClock);
   const mutationRecovery = new WorkspaceMutationRecoveryStore(
@@ -262,9 +240,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     systemClock,
     new GitWorkspaceMutationInspector(dockerCommands),
   );
+  const workspaceStore = new WorkspaceStore(ledger.repository, systemClock);
   const workspaces = new ManagedWorkspaceManager(
     loadWorkspaceConfiguration(),
-    new WorkspaceStore(ledger.repository, systemClock),
+    workspaceStore,
     nodeCommandRunner,
   );
   const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
@@ -288,7 +267,6 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   try {
     const runtime = await connectTaskerTemporalWorker(configuration, {
-      ...createWorkflowAssemblyActivity(workflowGenerator),
       ...createWorkspaceActivity(
         subjects,
         workspaces,
@@ -307,16 +285,6 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ...createPlanningActivity(planning),
       ...createWorkflowDraftRevisionActivity(workflowDraftRevisions, planning),
       ...createWorkflowFreezeActivity(workflowFreezes),
-      linkWorkflowContinuation: (input) => {
-        const linked = workflowContinuation.linkExecution(input.parentTaskReference, {
-          taskReference: input.childTaskReference,
-          runId: input.childRunId,
-        });
-        if (!linked.ok) {
-          throw new Error(`Workflow continuation link failed: ${linked.error.kind}`);
-        }
-        return Promise.resolve({ linked: true });
-      },
       ...createTaskExecutionActivity({
         snapshots: planningStore,
         currentSteps: createCurrentStepRegistry(harnessPack),
@@ -326,6 +294,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         commands: dockerCommands,
         integrations: integrationAdapters,
         evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),
+        workspaces: workspaceStore,
       }),
     });
     try {

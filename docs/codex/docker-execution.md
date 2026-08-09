@@ -1,6 +1,6 @@
 # Docker-only workspace execution
 
-Status: canonical execution boundary, implemented in T3.1, 2026-08-05
+Status: canonical execution boundary, 2026-08-09
 
 ## What runs where
 

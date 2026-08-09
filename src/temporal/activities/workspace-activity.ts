@@ -11,13 +11,11 @@ import type {
   ResolvedWorkspaceRuntimePolicy,
 } from '../../workspaces/index.js';
 import {
-  PrepareTaskDockerRuntimeInputSchema,
-  PrepareTaskDockerRuntimeResultSchema,
   PrepareTaskWorkspaceInputSchema,
   PrepareTaskWorkspaceResultSchema,
   type PrepareTaskWorkspaceInput,
-  type TaskWorkflowActivities,
-} from '../contracts.js';
+  type BootstrapWorkflowActivities,
+} from '../bootstrap-kernel/contracts.js';
 
 interface WorkspaceSubject {
   readonly repositoryPath: string;
@@ -63,7 +61,7 @@ export const createWorkspaceActivity = (
   runtimes: DockerWorkspaceRuntimePreparer,
   runtimePolicies: TemporalWorkspaceRuntimePolicySource,
   snapshots: PlanningSnapshotSource,
-): Pick<TaskWorkflowActivities, 'prepareTaskWorkspace' | 'prepareTaskDockerRuntime'> => {
+): Pick<BootstrapWorkflowActivities, 'prepareTaskWorkspace'> => {
   const prepareDockerRuntime = async (workspace: WorkspaceLocator) => {
     const context = Context.current();
     context.cancellationSignal.throwIfAborted();
@@ -142,12 +140,6 @@ export const createWorkspaceActivity = (
         runtime,
         planningSnapshot: planningSnapshot.value,
       });
-    },
-    prepareTaskDockerRuntime: async (inputValue) => {
-      const input = PrepareTaskDockerRuntimeInputSchema.parse(inputValue);
-      return PrepareTaskDockerRuntimeResultSchema.parse(
-        await prepareDockerRuntime(input.workspace),
-      );
     },
   };
 };

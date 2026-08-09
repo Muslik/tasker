@@ -1,6 +1,6 @@
 # Tasker Temporal test specification
 
-Status: canonical acceptance and recovery specification, 2026-08-05
+Status: canonical acceptance and recovery specification, 2026-08-09
 
 ## 1. Test strategy
 
@@ -38,6 +38,10 @@ Every accepted implementation must prove:
 - every initial graph is assembled for its task, not selected from a base template;
 - Temporal is the only authority for execution position, waits, timers, and retries;
 - Workflow code is deterministic and imports no I/O/provider/database/process modules;
+- the Execution Workflow contains no named planning, Docker, provider, tracker, SCM,
+  CI, or repository knowledge;
+- an agent candidate result cannot become a completed block without its declared
+  completion evidence and evaluator verdict;
 - worker/API/process restart never restarts task intake or completed nodes;
 - human waits consume no Activity worker slot;
 - duplicate messages and Activity delivery do not duplicate remote effects;
@@ -62,8 +66,8 @@ Required scenarios:
 - `terminal_path_without_terminal_or_wait_is_rejected`
 - `step_without_required_capability_is_rejected`
 - `effect_without_reconciliation_contract_is_rejected`
-- `bug_without_before_reproduction_is_rejected`
-- `bug_without_after_reproduction_is_rejected`
+- `bug_investigation_requirement_is_selected_from_task_evidence`
+- `bug_fix_without_declared_validation_is_rejected`
 - `write_path_without_verification_is_rejected`
 - `pr_path_without_ci_and_code_review_is_rejected`
 - `compiler_does_not_silently_insert_missing_obligation`
@@ -80,6 +84,7 @@ Required scenarios:
 - `question_opens_in_reviewed_and_unreviewed_plan_modes`
 - `graph_revision_preserves_completed_node_set`
 - `terminal_state_cannot_return_to_runnable`
+- `agent_completion_claim_without_required_evidence_remains_incomplete`
 
 Property tests generate bounded valid/invalid graphs and check stable canonicalization,
 terminal-path safety, monotonic completion, and no step selection outside the graph.
@@ -234,7 +239,8 @@ For a representative run, inspect Event History and Search Attributes:
 - code-review transition/comment requires durable PR evidence and follows CI;
 - Jira review-ready 403 resumes only that node without repeating code or PR preparation;
 - repeated comment/attachment Activity reconciles existing remote result;
-- before-reproduction media attaches only when explicit policy permits it;
+- private before-reproduction evidence is not automatically attached to Jira;
+- final demo evidence attaches only when explicit delivery policy permits it;
 - attachment paths cannot escape the managed worktree, and exact file bytes determine
   the remote identity;
 - Jira attachment 403/lost response resumes only the attachment node without repeating
@@ -294,65 +300,54 @@ Playwright acceptance scenarios:
 11. raw Temporal diagnostics are available on demand, not mixed with task activity;
 12. minimal layout remains usable at the supported desktop viewport.
 
-## 8. Milestone gates
+## 8. Delivery gates
 
-### T1 gate
+### Kernel v2 gate
 
-- two dynamic fixture graphs run independently;
-- worker and API restart pass;
+- Bootstrap and Execution v2 are the only API/worker path;
+- two frozen fixture graphs run independently and survive worker replacement;
 - separate durable waits resume only their own runs;
-- Workflow code dependency isolation passes;
-- no payload/secret violation.
+- Workflow modules remain free of provider, filesystem, database, tracker, SCM, CI,
+  Docker, and repository imports;
+- deleted Workflow and run-snapshot schemas are rejected instead of adapted.
 
-### T2 gate
+### Block contract gate
 
-- real subscription planning Activity passes plan approval/revision/question flows;
-- attempts, time, tokens, and shadow cost are visible;
-- provider interruption resumes from the planning boundary.
+- an agent candidate with no required evidence cannot advance the graph;
+- process, workspace mutation, structured artifact, and reconciled effect evaluators
+  produce immutable Block Receipts;
+- redelivery after receipt persistence returns the same receipt;
+- question, infrastructure, continuation, contract, and permanent failure remain
+  distinct public outcomes.
 
-### T3 gate
+### Bootstrap and local-delivery gate
 
-- disposable repository change/build survives worker kill without duplicate mutation;
-- worktree/bootstrap paths and recovery rules pass;
-- no remote mutation capability is enabled.
+- context discovery, mandatory planning, optional plan review, validation, and freeze
+  survive worker/API replacement without repeating completed boundaries;
+- disposable repository changes and selected validation survive response loss without
+  duplicate mutation;
+- an independent reviewer can reject the implementation before publication;
+- no remote mutation capability is needed to prove the local path.
 
-Evidence on 2026-08-04: `temporal-local-mutation-recovery.test.ts` stops the first
-Worker after a TypeScript source mutation and before Activity completion, starts a
-replacement Worker on the same Task Queue, verifies `recovery_delivery` against the
-same built-in-profile worktree, runs the task test and build, and reaches
-`code_review@1`. Mutation intent and exact Activity output receipts are both asserted.
+### Remote delivery and CI gate
 
-### T4 gate
+- an allowlisted Jira task reaches the human code-review wait;
+- Jira/Bitbucket effects reconcile response loss and 400/403 without repeating local
+  work;
+- CI distinguishes passed, caused-by-change, flaky, infrastructure, and unknown;
+- review revisions rerun the selected validation/reviewer/CI suffix on the same PR and
+  worktree;
+- before-reproduction evidence remains private; only an explicit final-demo policy may
+  publish run media.
 
-- allowed Jira task reaches PR code review;
-- Jira admission rejects ineligible ownership/status before code, classifies 400/403,
-  reconciles lost responses, and resumes in the same worktree;
-- Jira review readiness transitions and publishes one PR link before the review wait,
-  reconciling 403 and lost responses without duplicate comments;
-- enabled Jira evidence policy publishes available before-reproduction media and
-  reconciles 403/lost upload responses without repeating completed product nodes;
-- 403 during push resumes only push/reconciliation;
-- CI classifications and PR revise loop pass;
-- external-effect crash matrix is green for enabled mutations.
+### Continuation and retrospective gate
 
-### T5 gate
-
-- translation and cross-repository continuation demos pass;
-- completed parent work never restarts;
-- invalid/stale graph and publish messages cannot resume work.
-
-### T6 deletion gate
-
-- Temporal parity is green for every public behavior previously owned by the legacy
-  runtime;
-- incomplete product milestones such as future Bitbucket/Jenkins mutations do not
-  block deletion when no equivalent legacy mutation path remains;
-- representative legacy behavior has an equivalent public Temporal test;
-- no new run can select legacy runtime;
-- code search finds no runtime dependency on legacy ready-set/lease/fence/cursor/wait
-  tables;
-- current legacy fixtures are exported or deliberately discarded with documented scope;
-- lint, typecheck, unit, integration, replay, e2e, and dead-code checks pass.
+- translation, publication, and cross-repository continuations preserve the completed
+  parent prefix;
+- invalid or stale human/external messages cannot resume another wait;
+- time, measured usage, shadow cost, retries, waits, questions, guidance, and review
+  interventions are attributable to blocks and stages;
+- retrospective suggestions are reviewable and never self-apply harness changes.
 
 ### Pilot gate
 

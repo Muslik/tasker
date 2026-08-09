@@ -41,54 +41,21 @@ The versioned multi-project agent configuration copied into managed worktrees li
 
 ## Current implementation state
 
-Temporal is the only runtime. The custom queue, scheduler, cursor, lease/fence, wait
-table, and stub runner have been deleted. The generic Workflow interprets an immutable
-task graph; typed Activities execute snapshotted agent and process blocks; Updates
-handle plan review, clarification, code review, and operator guidance; late discoveries
-start validated Child Workflows without rewriting the accepted parent graph.
+Temporal is the only runtime. A Bootstrap Workflow owns workspace preparation, context,
+mandatory planning, optional plan review, deterministic validation, and freeze. A
+separate Execution Workflow receives only the frozen task graph and bounded context
+references. Planning nodes, Jira-specific behavior, Docker setup, and provider code do
+not live in the execution interpreter.
 
-The current vertical slice covers dynamic graph generation, managed workspace setup,
-implementation planning/revision, durable waits, recovery/replay, parallel task runs,
-and the three-pane operator console. Initial task, harness, and bounded repository
-context is persisted as an append-only Evidence Bundle with provenance. The Generate
-action reaches that collector and the initial graph assembler through a retryable,
-heartbeat-enabled Temporal bootstrap Activity; a failed bootstrap can be retried after
-infrastructure recovery without deleting its persisted evidence. Workflow analysis and
-implementation planning consume the same immutable bundle revision, while Temporal
-planning snapshots carry only its reference. Planning now runs before generic graph
-traversal. A planning-time workflow change creates a complete, deterministically
-validated and operation-idempotent draft revision; the planner checks it again, and
-product execution begins only after the plan fits and optional review completes.
-That boundary is recorded as an immutable freeze receipt binding the exact graph, plan,
-evidence snapshot, approval mode, and Temporal run; a persistence failure pauses the
-same run without discarding its managed worktree.
-Post-freeze discoveries still use validated Child Workflow continuation. Planning-time
-Jira/Confluence/Loop reads now use Tasker-owned mediated adapters: each request and
-provider receipt is persisted before I/O, results append provenance, 403/VPN recovery
-resumes the pending read, and large bodies remain content-addressed artifacts. The company
-`ai-assistance` policy now contributes
-ordinary file-backed blocks and path obligations; accepted plans and actual run evidence
-flow into same-branch artifacts and a validated provider-neutral PR draft. The gated
-Bitbucket branch/PR adapter consumes that draft through its generic effect boundary and
-passes its local crash matrix. The file-backed Jenkins block observes the exact task
-commit, classifies pipeline/Allure evidence, and resumes at CI after Worker/VPN failure.
-Real Bitbucket mutation remains disabled by default. Review comments now run through a
-reconciled revision/reply loop. Jira-origin workflows require the file-backed
-`jira.start-work@1` admission block after plan acceptance and before product effects;
-its assignment/status effects reconcile lost responses and pause on 400/403 without
-starting code. After PR publication and CI, `jira.review-ready@1` reconciles the Jira
-Code Review transition and one compact PR-link comment before the human review wait.
-For Jira bugs, the independent `jira-reproduction-evidence` policy inserts
-`jira.attach-reproduction@1` only after a successful before-reproduction step. The
-adapter uploads selected video/images from the managed worktree with content-addressed
-names and reconciles 403, lost responses, and partial multi-file progress without
-repeating reproduction or implementation.
-Jira and Bitbucket mutations remain separately disabled by default. Enabling either family also
-requires an exact comma-separated task allowlist in `TASKER_EXTERNAL_EFFECT_TASKS`; unlisted tasks
-stop before the remote adapter. Optional thread resolution and the allowed real pilot are the
-remaining T4 work. See
-[`docs/codex/t1-temporal-walking-skeleton.md`](docs/codex/t1-temporal-walking-skeleton.md)
-for the runtime boundary and recovery evidence.
+The old Workflow type, registry, public-state adapter, compatibility parser, and
+dedicated recovery tests have been deleted. Current development data is disposable;
+only the current run-snapshot schema is accepted. Reproduction evidence is private run
+evidence and is not attached to Jira automatically.
+
+The next delivery phase makes Block Contract v2 authoritative: an agent may return a
+candidate claim, but only independently collected process, artifact, workspace, or
+reconciled-effect evidence can produce the immutable receipt that advances the graph.
+See [`docs/codex/implementation-plan.md`](docs/codex/implementation-plan.md).
 
 ```bash
 fnm exec --using=24.16.0 /usr/local/bin/pnpm verify
@@ -103,5 +70,5 @@ Temporal CLI first. The operator console is available at `http://127.0.0.1:4311`
 Temporal debugging UI is at `http://127.0.0.1:8233`.
 
 The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:cockpit` commands remain
-available for diagnosing one process in isolation. `demo:m1` is a compatibility alias
-for the complete `pnpm dev` stack, not a second runtime.
+available for diagnosing one process in isolation. `demo:m1` starts the same complete
+`pnpm dev` stack; it is not a second runtime.

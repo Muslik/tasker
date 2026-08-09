@@ -339,9 +339,9 @@ test('a planning-time workflow change revises the draft before freeze', async ({
   expect(parentAfter.view.workflow.graphHash).not.toBe(parentBefore.view.workflow.graphHash);
   expect(JSON.stringify(parentAfter.view.workflow.graph)).toContain('twiket/ui-kit');
   const run = await loadRun(page, fixtureId);
-  expect(run.lifecycle).toMatchObject({
-    phase: 'frozen',
-    receipt: { workflowHash: parentAfter.view.workflow.graphHash },
+  expect(run).toMatchObject({
+    runtime: 'execution',
+    workflowHash: parentAfter.view.workflow.graphHash,
   });
   const activity = await loadActivity(page, fixtureId);
   expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
@@ -467,7 +467,9 @@ test('an invalid workflow is rejected and surfaces validation issues instead of 
   ).toHaveCount(2);
 });
 
-test('reloading restores the selected task before subscribing to live updates', async ({ page }) => {
+test('reloading restores the selected task before subscribing to live updates', async ({
+  page,
+}) => {
   const tasks = await loadTasks(page);
   const backlog = requireTask(
     tasks.tasks.find((task) => task.id === 'avia-12536-feature-review'),

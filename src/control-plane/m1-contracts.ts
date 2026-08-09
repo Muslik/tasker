@@ -4,10 +4,8 @@ import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
 import { TaskFixtureSchema } from '../planning/fixtures.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
-import {
-  TaskWorkflowPublicStateSchema,
-  TaskWorkflowSettingsSchema,
-} from '../temporal/public-state.js';
+import { TaskRunPublicStateSchema } from '../temporal/client.js';
+import { TaskRunSettingsSchema } from '../temporal/bootstrap-kernel/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
 export const M1_VIEW_SCHEMA_VERSION = 3;
@@ -163,17 +161,17 @@ export const ApiErrorResponseSchema = z
   })
   .strict();
 
-export const ExecutionRunViewSchema = TaskWorkflowPublicStateSchema;
+export const ExecutionRunViewSchema = TaskRunPublicStateSchema;
 
 export const RunStartCommandSchema = z
   .object({
-    settings: TaskWorkflowSettingsSchema,
+    settings: TaskRunSettingsSchema,
   })
   .strict();
 
 export const DEFAULT_RUN_START_COMMAND = {
   settings: {
-    planApproval: 'required',
+    planReview: 'required',
     planningStrategy: 'auto',
   },
 } as const satisfies z.input<typeof RunStartCommandSchema>;
@@ -199,7 +197,7 @@ export const CodeReviewSyncResponseSchema = z
     status: z.enum(['pending', 'approved', 'changes_requested']),
     reviewId: z.string().min(1).nullable(),
     pullRequestUrl: z.url().nullable(),
-    run: TaskWorkflowPublicStateSchema,
+    run: TaskRunPublicStateSchema,
   })
   .strict();
 

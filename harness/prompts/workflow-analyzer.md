@@ -29,10 +29,9 @@ no base workflow, template, family skeleton, or implicit compiler insertion. Eve
 justified by task evidence, repository evidence, company/project policy, or a mandatory obligation.
 Do not invent an envelope. In particular, NEVER return top-level keys such as schemaVersion, task,
 repository, workflow, steps, or edges inside sourceJson.
-Every task workflow must contain exactly one task.analyze@1 immediately followed by a
-plan.approved@1 gate. Policy prelude blocks may precede that pair. Tasker run settings decide
-whether the gate pauses for a human; they never remove the mandatory planning step or its
-deterministic validation boundary.
+Context discovery, implementation planning, optional plan review, and workflow validation happen
+in the durable bootstrap before this graph is frozen. Do not emit bootstrap-only analysis steps or
+plan-review gates into the execution graph.
 
 Use only node kinds and versioned contracts present in plannerContext.buildingBlocks. Satisfy every
 applicable plannerContext.obligations rule; Tasker will reject the proposal rather than silently add

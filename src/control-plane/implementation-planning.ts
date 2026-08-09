@@ -734,21 +734,6 @@ const countWorkflowNodes = (value: JsonValue): number => {
   );
 };
 
-const implementationPlannerSkillsFrom = (
-  steps: readonly {
-    readonly reference: string;
-    readonly execution:
-      | { readonly kind: 'agent'; readonly skills: readonly string[] }
-      | { readonly kind: 'process' | 'integration' };
-  }[],
-): readonly string[] => {
-  const planningStep = steps.find(({ reference }) => reference === 'task.analyze@1');
-  if (planningStep?.execution.kind !== 'agent') {
-    throw new Error('The mandatory implementation planner has no agent configuration');
-  }
-  return planningStep.execution.skills;
-};
-
 const snapshotPrompt = (prompt: LoadedPrompt) => ({
   relativePath: prompt.relativePath,
   content: prompt.content,
@@ -761,7 +746,7 @@ const snapshotHarness = (
   workflowGraph: JsonValue,
   task: WorkflowGenerationSubject['task'],
 ) => {
-  const implementationPlannerSkills = implementationPlannerSkillsFrom(pack.steps);
+  const implementationPlannerSkills = pack.company.systemPrompts.implementationPlannerSkills;
   const graph = CompiledWorkflowSchema.parse(workflowGraph);
   const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
   const referencedSteps = new Set(graph.metadata.references.stepTypes);
@@ -1343,7 +1328,7 @@ export class ImplementationPlanningCoordinator {
         workflowJson: JsonValueSchema.parse(workflow.value.view.workflow),
         evidenceBundle: evidenceBundle.value,
         promptTemplate: this.harnessPackSource().prompts.implementationPlanner.content,
-        plannerSkills: implementationPlannerSkillsFrom(this.harnessPackSource().steps),
+        plannerSkills: this.harnessPackSource().company.systemPrompts.implementationPlannerSkills,
       });
     })();
     if (!planningInput.ok) return planningInput;

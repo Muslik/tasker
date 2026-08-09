@@ -42,6 +42,7 @@
   },
   "systemPrompts": {
     "implementationPlanner": "prompts/implementation-planner.md",
+    "implementationPlannerSkills": ["jira", "confluence", "loop"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
   },
   "globalPackageRules": [

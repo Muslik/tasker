@@ -5,8 +5,6 @@ import {
   compileWorkflow,
   CompiledWorkflowArtifactSchema,
   ValidationReportSchema,
-  type CompiledWorkflow,
-  type ValidationReport,
 } from '../workflow/index.js';
 import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import { FixtureInputFailureSchema } from './fixtures.js';
@@ -84,57 +82,6 @@ const requiredCapabilitiesFromCompiledGraph = (
   );
 };
 
-const validateRequiredPlanningBoundary = (graph: CompiledWorkflow): ValidationReport => {
-  const children = graph.root.kind === 'sequence' ? graph.root.children : [];
-  const analyzerIndexes = children.flatMap((node, index) =>
-    node.kind === 'step' && node.uses === 'task.analyze@1' ? [index] : [],
-  );
-  const analyzerIndex = analyzerIndexes[0];
-  const next = analyzerIndex === undefined ? undefined : children[analyzerIndex + 1];
-  const gateIndex = analyzerIndex === undefined ? -1 : analyzerIndex + 1;
-  const containsProductWrite = (node: CompiledWorkflow['root']): boolean => {
-    switch (node.kind) {
-      case 'step':
-        return (
-          M1_WORKFLOW_CONTRACTS.stepTypes
-            .get(node.uses)
-            ?.allowedEffects.includes('workspace.write') === true
-        );
-      case 'sequence':
-        return node.children.some(containsProductWrite);
-      case 'branch':
-        return containsProductWrite(node.then) || containsProductWrite(node.otherwise);
-      case 'bounded_loop':
-        return containsProductWrite(node.body);
-      case 'finalize':
-      case 'gate':
-      case 'wait':
-        return false;
-    }
-  };
-  const productWriteBeforePlan =
-    gateIndex >= 0 && children.slice(0, gateIndex).some(containsProductWrite);
-  const valid =
-    analyzerIndexes.length === 1 &&
-    next?.kind === 'gate' &&
-    next.resumeWhen === 'plan.approved@1' &&
-    !productWriteBeforePlan;
-
-  return {
-    workflowId: graph.metadata.workflowId,
-    issues: valid
-      ? []
-      : [
-          {
-            code: 'required_planning_boundary_missing',
-            message:
-              'Task workflows must contain exactly one task.analyze@1 immediately followed by the plan.approved@1 gate',
-            path: ['root'],
-          },
-        ],
-  };
-};
-
 export const planTaskWorkflow = (
   fixtureInput: unknown,
 ): Outcome<PlannedWorkflow, PlanningFailure> => {
@@ -166,12 +113,11 @@ const planParsedWorkflowProposal = (
     });
   }
 
-  const planningBoundaryReport = validateRequiredPlanningBoundary(compiledResult.value.graph);
   const obligationReport = validateWorkflowObligations(
     compiledResult.value.graph,
     proposal.fixture,
   );
-  const policyIssues = [...planningBoundaryReport.issues, ...obligationReport.issues];
+  const policyIssues = [...obligationReport.issues];
   if (policyIssues.length > 0) {
     return err({
       code: 'workflow_rejected',
