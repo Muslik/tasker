@@ -88,6 +88,43 @@ const readyDecision = {
   },
 } as const;
 
+const providerWorkflowNode = (node: WorkflowNodeSource): unknown => {
+  switch (node.kind) {
+    case 'sequence':
+      return { ...node, children: node.children.map(providerWorkflowNode) };
+    case 'branch':
+      return {
+        ...node,
+        then: providerWorkflowNode(node.then),
+        otherwise: providerWorkflowNode(node.otherwise),
+      };
+    case 'bounded_loop':
+      return {
+        ...node,
+        exhaustedWait: node.exhaustedWait ?? null,
+        body: providerWorkflowNode(node.body),
+      };
+    case 'wait':
+      return { ...node, resumeAt: node.resumeAt ?? null };
+    case 'gate':
+      return { ...node, with: node.with ?? null };
+    case 'step':
+    case 'finalize':
+      return node;
+  }
+};
+
+const providerReadyDecision = {
+  ...readyDecision,
+  workflow: {
+    ...readyDecision.workflow,
+    source: {
+      ...readyDecision.workflow.source,
+      root: providerWorkflowNode(readyDecision.workflow.source.root),
+    },
+  },
+};
+
 const codexJsonl = (finalMessage: string): string =>
   [
     JSON.stringify({ type: 'thread.started', thread_id: 'thread-planner-1' }),
@@ -122,6 +159,31 @@ const claudeJsonl = (finalMessage: unknown): string =>
     },
     total_cost_usd: 0.42,
   });
+
+const missingRequiredProviderFields = (value: unknown, path = '$'): readonly string[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) =>
+      missingRequiredProviderFields(entry, `${path}[${String(index)}]`),
+    );
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  const record = value as Readonly<Record<string, unknown>>;
+  const properties =
+    typeof record.properties === 'object' && record.properties !== null
+      ? Object.keys(record.properties)
+      : [];
+  const required = Array.isArray(record.required)
+    ? record.required.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  return [
+    ...properties
+      .filter((property) => !required.includes(property))
+      .map((property) => `${path}.${property}`),
+    ...Object.entries(record).flatMap(([key, entry]) =>
+      missingRequiredProviderFields(entry, `${path}.${key}`),
+    ),
+  ];
+};
 
 class RecordingRunner implements WorkspaceCommandRunner {
   public readonly executionEnvironment = 'docker_workspace' as const;
@@ -184,8 +246,8 @@ class ClaudeRecordingRunner implements WorkspaceCommandRunner {
       status: 'exited',
       exitCode: 0,
       stdout: claudeJsonl({
-        decisionJson: JSON.stringify(readyDecision),
-        evidenceRequestsJson: '[]',
+        decision: providerReadyDecision,
+        evidenceRequests: [],
       }),
       stderr: '',
       durationMs: 1400,
@@ -221,7 +283,7 @@ const request = (strategy: 'fast' | 'ralplan') => ({
 describe('Codex CLI implementation planner', () => {
   it('uses a bounded low-reasoning subscription pass for fast planning', async () => {
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
+      JSON.stringify({ decision: providerReadyDecision, evidenceRequests: [] }),
     );
     const planner = new SubscriptionCliImplementationPlanner(runner);
 
@@ -250,10 +312,11 @@ describe('Codex CLI implementation planner', () => {
     expect(runner.requests[1]?.workspaceAccess).toBe('read_only');
     expect(runner.requests[1]?.stdin).toContain('Use one bounded planning pass');
     expect(runner.requests[1]?.stdin).not.toContain('Invoke $ralplan');
-    expect(runner.schema).toContain('decisionJson');
+    expect(runner.schema).toContain('decision');
     expect(JSON.parse(runner.schema ?? '{}')).toMatchObject({
-      required: ['decisionJson', 'evidenceRequestsJson'],
+      required: ['decision', 'evidenceRequests'],
     });
+    expect(missingRequiredProviderFields(JSON.parse(runner.schema ?? '{}'))).toEqual([]);
   });
 
   it('projects the planning block skills into the read-only provider session', async () => {
@@ -274,7 +337,7 @@ describe('Codex CLI implementation planner', () => {
       'utf8',
     );
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
+      JSON.stringify({ decision: providerReadyDecision, evidenceRequests: [] }),
     );
     const planner = new SubscriptionCliImplementationPlanner(runner);
 
@@ -319,8 +382,8 @@ describe('Codex CLI implementation planner', () => {
     ];
     const runner = new RecordingRunner(
       JSON.stringify({
-        decisionJson: null,
-        evidenceRequestsJson: JSON.stringify(evidenceRequests),
+        decision: null,
+        evidenceRequests,
       }),
     );
     const planner = new SubscriptionCliImplementationPlanner(runner);
@@ -335,7 +398,7 @@ describe('Codex CLI implementation planner', () => {
 
   it('routes an explicit ralplan request through the consensus prompt with high reasoning', async () => {
     const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(readyDecision), evidenceRequestsJson: '[]' }),
+      JSON.stringify({ decision: providerReadyDecision, evidenceRequests: [] }),
     );
     const planner = new SubscriptionCliImplementationPlanner(runner);
 
@@ -394,7 +457,21 @@ describe('Codex CLI implementation planner', () => {
   it('rejects a decision outside the typed planner contract', async () => {
     const runner = new RecordingRunner(
       JSON.stringify({
-        decisionJson: JSON.stringify({ status: 'ready', plan: {} }),
+        decision: { status: 'ready', plan: {} },
+        evidenceRequests: [],
+      }),
+    );
+    const planner = new SubscriptionCliImplementationPlanner(runner);
+
+    const result = await planner.plan(request('fast'));
+
+    expect(result).toMatchObject({ ok: false, error: { kind: 'invalid_planner_output' } });
+  });
+
+  it('rejects the removed double-encoded planner transport', async () => {
+    const runner = new RecordingRunner(
+      JSON.stringify({
+        decisionJson: JSON.stringify(readyDecision),
         evidenceRequestsJson: '[]',
       }),
     );
@@ -416,9 +493,7 @@ describe('Codex CLI implementation planner', () => {
         },
       ],
     } as const;
-    const runner = new RecordingRunner(
-      JSON.stringify({ decisionJson: JSON.stringify(decision), evidenceRequestsJson: '[]' }),
-    );
+    const runner = new RecordingRunner(JSON.stringify({ decision, evidenceRequests: [] }));
     const planner = new SubscriptionCliImplementationPlanner(runner);
 
     const result = await planner.plan(request('fast'));

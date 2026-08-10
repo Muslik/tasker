@@ -8,17 +8,18 @@ registered block catalog in plannerContext. Read-only tools and declared skills 
 material uncertainty. Do not edit files, install dependencies, create branches, call undeclared
 systems, or implement the task.
 
-Return exactly one object with `decisionJson` and `evidenceRequestsJson`.
+Return exactly one object with `decision` and `evidenceRequests`. These are typed JSON values, not
+JSON serialized inside strings.
 
 If a declared mediated skill must read Jira, Confluence, Loop, Jenkins, or another external system,
-set `decisionJson` to null and serialize requests in `evidenceRequestsJson`:
+set `decision` to null and return requests in `evidenceRequests`:
 
 {"requestId":"kebab-case","skill":"selected-mediated-skill","locator":"source locator","purpose":"question this evidence resolves"}
 
 Tasker appends the result with provenance and invokes you again. Do not repeat evidence already in
 the bundle.
 
-Otherwise set `evidenceRequestsJson` to `"[]"` and return exactly one decision.
+Otherwise set `evidenceRequests` to `[]` and return exactly one decision object in `decision`.
 
 1. Investigation required. Use this only when an observable pre-plan fact is necessary before an
    honest plan and workflow can be produced. Select only blocks whose `availableDuring` contains
@@ -57,19 +58,21 @@ regression test. Visual, configuration, documentation, and integration work do n
 artificial new test when process, runtime evidence, or inspection is the honest proof.
 
 The workflow source has exactly the top-level keys `id`, `version`, and `root`. Every node must use
-one of these exact shapes. Fields shown are required unless marked optional:
+one of these exact shapes. Every field shown is required at the provider boundary; use `null` only
+for the three explicitly nullable fields. Tasker removes those null transport values before
+compiling the workflow:
 
 - sequence: {"kind":"sequence","id":"...","children":[node,...]} with at least one child
 - step: {"kind":"step","id":"...","uses":"registered.step@version","with":{}}
 - branch: {"kind":"branch","id":"...","when":"registered.predicate@version","then":node,"otherwise":node}
-- bounded_loop: {"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":"registered.wait@version","body":node}; exhaustedWait is optional
-- wait: {"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":"node-id"}; resumeAt is optional
-- gate: {"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":{}}; with is optional
+- bounded_loop: {"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":null,"body":node}; replace null with a registered wait reference when exhaustion suspends
+- wait: {"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":null}; replace null with a node id when an explicit resume target is required
+- gate: {"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":null}; replace null with an input object when the gate consumes input
 - finalize: {"kind":"finalize","id":"...","outcome":"accepted"}
 
 Do not omit node ids, sequence children, step with, loop bounds, predicates, or terminal outcomes.
 Do not add fields outside the selected node shape. A branch always has exactly one `when` predicate
-and two node arms. A loop expresses exhaustion only through its optional registered wait reference.
+and two node arms. A loop expresses exhaustion only through its nullable registered wait reference.
 The graph must terminate on every path; use a finalize node for a completed outcome and registered
 wait or gate nodes only for durable suspension boundaries exposed in plannerContext.
 

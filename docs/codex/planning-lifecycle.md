@@ -99,6 +99,13 @@ one of three typed decisions:
    observable expectation and typed verification linked to the exact workflow step
    nodes that will prove it. A missing step reference rejects the whole decision.
 
+The provider boundary carries `decision` and `evidenceRequests` as direct structured
+values. They are never JSON serialized inside string fields. Provider-only output
+schemas may make optional workflow-node fields required and nullable when a subscription
+CLI requires every declared property in `required`; the adapter removes those nulls
+before validating the stricter domain decision. The domain plan and workflow contracts
+do not inherit this transport concession.
+
 Planning chooses whether verification reuses an existing automated test, creates a new
 test during implementation, runs a registered project process, records runtime evidence,
 or performs bounded inspection. No verification kind is mandatory for every task, and

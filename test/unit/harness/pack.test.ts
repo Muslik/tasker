@@ -129,18 +129,21 @@ describe('file-backed harness pack', () => {
       '{"kind":"branch","id":"...","when":"registered.predicate@version","then":node,"otherwise":node}',
     );
     expect(prompt.content).toContain(
-      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":"registered.wait@version","body":node}',
+      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":null,"body":node}',
     );
     expect(prompt.content).toContain(
-      '{"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":"node-id"}',
+      '{"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":null}',
     );
     expect(prompt.content).toContain(
-      '{"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":{}}',
+      '{"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":null}',
     );
     expect(prompt.content).toContain('{"kind":"finalize","id":"...","outcome":"accepted"}');
     expect(prompt.content).toContain('Every acceptance criterion must have a unique kebab-case');
     expect(prompt.content).toContain('"workflowStepIds":["..."]');
     expect(prompt.content).toContain('do not add a generic test-materialization step');
+    expect(prompt.content).toContain('typed JSON values, not');
+    expect(prompt.content).not.toContain('decisionJson');
+    expect(prompt.content).not.toContain('evidenceRequestsJson');
     expect(prompt.content).not.toContain('"maxIterations"');
     expect(prompt.content).not.toContain('"onExhausted"');
     expect(prompt.content).not.toContain('"cases"');

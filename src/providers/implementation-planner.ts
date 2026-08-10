@@ -6,14 +6,34 @@ import { z } from 'zod';
 
 import { renderPromptTemplate, type ResolvedExecutionProfile } from '../harness/index.js';
 import {
+  ImplementationPlanFollowUpSchema,
+  ImplementationPlanSchema,
   ImplementationPlannerContextSchema,
   ImplementationPlanningDecisionSchema,
+  PlanningQuestionSchema,
+  PrePlanInvestigationRequestSchema,
   type ImplementationPlannerContext,
   type ImplementationPlanningDecision,
   type PlanningStrategy,
 } from '../planning/implementation-plan.js';
 import { analyzeTaskFixture } from '../planning/proposal.js';
-import { WorkflowSourceSchema, type WorkflowNodeSource } from '../workflow/index.js';
+import {
+  VerificationPlanSchema,
+  WorkflowAssemblyDecisionSchema,
+} from '../planning/workflow-proposal-contracts.js';
+import {
+  BranchNodeSourceSchema,
+  FinalizeNodeSourceSchema,
+  GateNodeSourceSchema,
+  JsonValueSchema,
+  NodeIdSchema,
+  PredicateReferenceSchema,
+  SequenceNodeSourceSchema,
+  StepNodeSourceSchema,
+  WaitReferenceSchema,
+  WorkflowSourceSchema,
+  type WorkflowNodeSource,
+} from '../workflow/index.js';
 import {
   PlanningEvidenceRequestSchema,
   type PlanningEvidenceRequest,
@@ -38,12 +58,183 @@ import {
   type ImplementationPlannerReceipt,
 } from './contracts.js';
 
-const ImplementationPlannerProviderOutputSchema = z
+type ProviderWorkflowNodeSource =
+  | {
+      readonly kind: 'sequence';
+      readonly id: string;
+      readonly children: readonly ProviderWorkflowNodeSource[];
+    }
+  | {
+      readonly kind: 'step';
+      readonly id: string;
+      readonly uses: string;
+      readonly with: z.infer<typeof JsonValueSchema>;
+    }
+  | {
+      readonly kind: 'branch';
+      readonly id: string;
+      readonly when: string;
+      readonly then: ProviderWorkflowNodeSource;
+      readonly otherwise: ProviderWorkflowNodeSource;
+    }
+  | {
+      readonly kind: 'bounded_loop';
+      readonly id: string;
+      readonly maxAttempts: number;
+      readonly until: string;
+      readonly checkBefore: boolean;
+      readonly exhaustedWait: string | null;
+      readonly body: ProviderWorkflowNodeSource;
+    }
+  | {
+      readonly kind: 'wait';
+      readonly id: string;
+      readonly for: string;
+      readonly resumeAt: string | null;
+    }
+  | {
+      readonly kind: 'gate';
+      readonly id: string;
+      readonly reason: string;
+      readonly resumeWhen: string;
+      readonly with: z.infer<typeof JsonValueSchema>;
+    }
+  | z.infer<typeof FinalizeNodeSourceSchema>;
+
+const ProviderWorkflowNodeSourceSchema: z.ZodType<ProviderWorkflowNodeSource> = z.lazy(() =>
+  z.union([
+    SequenceNodeSourceSchema.extend({
+      children: z.array(ProviderWorkflowNodeSourceSchema).min(1),
+    }),
+    StepNodeSourceSchema,
+    BranchNodeSourceSchema.extend({
+      then: ProviderWorkflowNodeSourceSchema,
+      otherwise: ProviderWorkflowNodeSourceSchema,
+    }),
+    z
+      .object({
+        kind: z.literal('bounded_loop'),
+        id: NodeIdSchema,
+        maxAttempts: z.number(),
+        until: PredicateReferenceSchema,
+        checkBefore: z.boolean(),
+        exhaustedWait: WaitReferenceSchema.nullable(),
+        body: ProviderWorkflowNodeSourceSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('wait'),
+        id: NodeIdSchema,
+        for: WaitReferenceSchema,
+        resumeAt: z.string().min(1).nullable(),
+      })
+      .strict(),
+    GateNodeSourceSchema.extend({ with: JsonValueSchema }),
+    FinalizeNodeSourceSchema,
+  ]),
+);
+
+const ProviderWorkflowAnalyzerOutputSchema = z
   .object({
-    decisionJson: z.string().min(1).nullable(),
-    evidenceRequestsJson: z.string().min(2),
+    assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
+    source: z
+      .object({
+        id: z.string().min(1),
+        version: z.number().int().positive(),
+        root: ProviderWorkflowNodeSourceSchema,
+      })
+      .strict(),
+    verificationPlan: VerificationPlanSchema,
   })
   .strict();
+
+const ProviderImplementationPlanningDecisionSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('ready'),
+      plan: ImplementationPlanSchema,
+      followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
+      workflow: ProviderWorkflowAnalyzerOutputSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('needs_clarification'),
+      questions: z.array(PlanningQuestionSchema).min(1).max(10),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('investigation_required'),
+      request: PrePlanInvestigationRequestSchema,
+    })
+    .strict(),
+]);
+
+const ImplementationPlannerProviderOutputSchema = z
+  .object({
+    decision: ProviderImplementationPlanningDecisionSchema.nullable(),
+    evidenceRequests: z.array(PlanningEvidenceRequestSchema).max(10),
+  })
+  .strict();
+
+const normalizeProviderWorkflowNode = (node: ProviderWorkflowNodeSource): WorkflowNodeSource => {
+  switch (node.kind) {
+    case 'sequence':
+      return { ...node, children: node.children.map(normalizeProviderWorkflowNode) };
+    case 'branch':
+      return {
+        ...node,
+        then: normalizeProviderWorkflowNode(node.then),
+        otherwise: normalizeProviderWorkflowNode(node.otherwise),
+      };
+    case 'bounded_loop':
+      return {
+        kind: node.kind,
+        id: node.id,
+        maxAttempts: node.maxAttempts,
+        until: node.until,
+        checkBefore: node.checkBefore,
+        ...(node.exhaustedWait === null ? {} : { exhaustedWait: node.exhaustedWait }),
+        body: normalizeProviderWorkflowNode(node.body),
+      };
+    case 'wait':
+      return {
+        kind: node.kind,
+        id: node.id,
+        for: node.for,
+        ...(node.resumeAt === null ? {} : { resumeAt: node.resumeAt }),
+      };
+    case 'gate':
+      return {
+        kind: node.kind,
+        id: node.id,
+        reason: node.reason,
+        resumeWhen: node.resumeWhen,
+        ...(node.with === null ? {} : { with: node.with }),
+      };
+    case 'step':
+    case 'finalize':
+      return node;
+  }
+};
+
+const normalizeProviderDecision = (
+  decision: z.infer<typeof ProviderImplementationPlanningDecisionSchema>,
+): unknown =>
+  decision.status === 'ready'
+    ? {
+        ...decision,
+        workflow: {
+          ...decision.workflow,
+          source: {
+            ...decision.workflow.source,
+            root: normalizeProviderWorkflowNode(decision.workflow.source.root),
+          },
+        },
+      }
+    : decision;
 
 export interface ImplementationPlannerRequest {
   readonly operationId: string | null;
@@ -285,29 +476,8 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         );
       }
 
-      let evidenceRequestsInput: unknown = [];
-      try {
-        evidenceRequestsInput = JSON.parse(providerOutput.data.evidenceRequestsJson) as unknown;
-      } catch {
-        return invalidOutput(['evidenceRequestsJson: expected serialized request array JSON']);
-      }
-      const evidenceRequests = z
-        .array(PlanningEvidenceRequestSchema)
-        .min(1)
-        .max(10)
-        .safeParse(evidenceRequestsInput);
-      const hasEvidenceRequests =
-        Array.isArray(evidenceRequestsInput) && evidenceRequestsInput.length > 0;
-      if (hasEvidenceRequests && !evidenceRequests.success) {
-        return invalidOutput(
-          evidenceRequests.error.issues.map(
-            (issue) => `evidenceRequestsJson.${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        );
-      }
-      if (!hasEvidenceRequests && !Array.isArray(evidenceRequestsInput)) {
-        return invalidOutput(['evidenceRequestsJson: expected an array']);
-      }
+      const evidenceRequests = providerOutput.data.evidenceRequests;
+      const hasEvidenceRequests = evidenceRequests.length > 0;
 
       const receipt = ImplementationPlannerReceiptSchema.parse({
         status: 'completed',
@@ -332,30 +502,23 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         hypotheticalApiCostUsd: stream.value.reportedCostUsd,
       });
       if (hasEvidenceRequests) {
-        if (providerOutput.data.decisionJson !== null) {
-          return invalidOutput(['decisionJson must be null while evidence requests are pending']);
-        }
-        if (!evidenceRequests.success) {
-          throw new Error('Validated evidence request state is inconsistent');
+        if (providerOutput.data.decision !== null) {
+          return invalidOutput(['decision must be null while evidence requests are pending']);
         }
         return ok({
           decision: null,
-          evidenceRequests: evidenceRequests.data,
+          evidenceRequests,
           stderr: execution.stderr,
           receipt,
         });
       }
-      if (providerOutput.data.decisionJson === null) {
-        return invalidOutput(['decisionJson is required when no evidence request is pending']);
+      if (providerOutput.data.decision === null) {
+        return invalidOutput(['decision is required when no evidence request is pending']);
       }
 
-      let decisionInput: unknown;
-      try {
-        decisionInput = JSON.parse(providerOutput.data.decisionJson) as unknown;
-      } catch {
-        return invalidOutput(['decisionJson: expected serialized decision JSON']);
-      }
-      const decision = ImplementationPlanningDecisionSchema.safeParse(decisionInput);
+      const decision = ImplementationPlanningDecisionSchema.safeParse(
+        normalizeProviderDecision(providerOutput.data.decision),
+      );
       if (!decision.success) {
         return invalidOutput(
           decision.error.issues.map(

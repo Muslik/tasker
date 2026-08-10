@@ -118,18 +118,22 @@ const recordCommand = (attempt: MutableAttempt, item: Readonly<Record<string, un
 const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'message' }> => {
   try {
     const value: unknown = JSON.parse(text);
-    if (isRecord(value) && typeof value.decisionJson === 'string') {
-      let detail: string | null = null;
-      try {
-        const decision: unknown = JSON.parse(value.decisionJson);
-        if (isRecord(decision)) detail = stringField(decision, 'status');
-      } catch {
-        detail = null;
-      }
+    if (isRecord(value) && isRecord(value.decision)) {
       return {
         kind: 'message',
         title: 'Implementation plan returned',
-        detail: detail?.replaceAll('_', ' ') ?? null,
+        detail: stringField(value.decision, 'status')?.replaceAll('_', ' ') ?? null,
+      };
+    }
+    if (
+      isRecord(value) &&
+      Array.isArray(value.evidenceRequests) &&
+      value.evidenceRequests.length > 0
+    ) {
+      return {
+        kind: 'message',
+        title: 'Evidence requested',
+        detail: `${String(value.evidenceRequests.length)} request(s)`,
       };
     }
   } catch {

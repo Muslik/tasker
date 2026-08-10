@@ -120,7 +120,7 @@ test('the task rail can be hidden, restored, and keeps its preference', async ({
 });
 
 test('the planning agent log presents attempts instead of raw provider JSONL', async ({ page }) => {
-  const errorMessage = "Invalid response schema. Missing 'evidenceRequestsJson'.";
+  const errorMessage = "Invalid response schema. Missing 'evidenceRequests'.";
   const output = [
     JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
     JSON.stringify({

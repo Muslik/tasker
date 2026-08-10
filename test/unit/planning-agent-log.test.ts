@@ -28,7 +28,7 @@ describe('planning agent log', () => {
         type: 'error',
         error: {
           code: 'invalid_json_schema',
-          message: "Invalid response schema. Missing 'evidenceRequestsJson'.",
+          message: "Invalid response schema. Missing 'evidenceRequests'.",
         },
         status: 400,
       }),
@@ -37,7 +37,7 @@ describe('planning agent log', () => {
       type: 'turn.failed',
       error: {
         message: JSON.stringify({
-          error: { message: "Invalid response schema. Missing 'evidenceRequestsJson'." },
+          error: { message: "Invalid response schema. Missing 'evidenceRequests'." },
         }),
       },
     });
@@ -58,8 +58,8 @@ describe('planning agent log', () => {
         id: 'message-1',
         type: 'agent_message',
         text: JSON.stringify({
-          decisionJson: JSON.stringify({ status: 'plan_ready' }),
-          evidenceRequestsJson: '[]',
+          decision: { status: 'ready' },
+          evidenceRequests: [],
         }),
       },
     });
@@ -96,7 +96,7 @@ describe('planning agent log', () => {
     expect(log.attempts[0]?.events).toEqual([
       {
         kind: 'error',
-        message: "Invalid response schema. Missing 'evidenceRequestsJson'.",
+        message: "Invalid response schema. Missing 'evidenceRequests'.",
       },
       { kind: 'warning', message: 'provider retry scheduled' },
     ]);
@@ -115,7 +115,7 @@ describe('planning agent log', () => {
         exitCode: 0,
         status: 'completed',
       },
-      { kind: 'message', title: 'Implementation plan returned', detail: 'plan ready' },
+      { kind: 'message', title: 'Implementation plan returned', detail: 'ready' },
     ]);
     expect(log.raw).toContain('thread.started');
   });
