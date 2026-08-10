@@ -4,11 +4,47 @@ import type { BlockReceiptStore } from '../../blocks/index.js';
 import type { EvidenceBundleStore } from '../../control-plane/evidence-bundle.js';
 import type { ImplementationPlanningStore } from '../../control-plane/implementation-planning.js';
 import type { ExecutionWorkflowActivities } from '../execution-kernel/contracts.js';
+import type { ExecutionBlockResult } from '../execution-kernel/contracts.js';
 import {
   RunBootstrapInvestigationInputSchema,
   RunBootstrapInvestigationResultSchema,
+  type RunBootstrapInvestigationResult,
   type BootstrapWorkflowActivities,
 } from '../bootstrap-kernel/contracts.js';
+import type { EvidenceBundleReference } from '../../planning/index.js';
+
+export const toBootstrapInvestigationResult = (
+  result: ExecutionBlockResult,
+  evidenceBundle: EvidenceBundleReference | null,
+): RunBootstrapInvestigationResult => {
+  switch (result.status) {
+    case 'needs_input':
+      return RunBootstrapInvestigationResultSchema.parse({
+        status: result.status,
+        summary: result.summary,
+        waitKind: result.waitKind,
+      });
+    case 'completed':
+      if (evidenceBundle === null)
+        throw new Error('Completed investigation has no evidence bundle');
+      return RunBootstrapInvestigationResultSchema.parse({
+        status: result.status,
+        summary: result.summary,
+        evidenceBundle,
+      });
+    case 'continuation_required':
+      if (evidenceBundle === null) {
+        throw new Error('Investigation continuation has no evidence bundle');
+      }
+      return RunBootstrapInvestigationResultSchema.parse({
+        status: result.status,
+        summary: result.summary,
+        waitKind: result.waitKind,
+        requestReference: result.requestReference,
+        evidenceBundle,
+      });
+  }
+};
 
 export const createBootstrapInvestigationActivity = (
   execution: ExecutionWorkflowActivities,
@@ -66,7 +102,7 @@ export const createBootstrapInvestigationActivity = (
       input: input.step.with,
     });
     if (result.status === 'needs_input') {
-      return RunBootstrapInvestigationResultSchema.parse(result);
+      return toBootstrapInvestigationResult(result, null);
     }
 
     const receiptReference = result.receiptReference;
@@ -83,9 +119,6 @@ export const createBootstrapInvestigationActivity = (
       throw new Error(`Investigation evidence could not be appended: ${appended.error.kind}`);
     }
 
-    return RunBootstrapInvestigationResultSchema.parse({
-      ...result,
-      evidenceBundle: appended.value.reference,
-    });
+    return toBootstrapInvestigationResult(result, appended.value.reference);
   },
 });

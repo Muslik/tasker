@@ -38,7 +38,24 @@ Otherwise set `evidenceRequestsJson` to `"[]"` and return exactly one decision.
    will reject unknown blocks, unsafe effects, missing terminals, unbounded loops, or unmet task
    obligations and will invoke you again with exact validationFeedback.
 
-{"status":"ready","plan":{"schemaVersion":1,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":["observable outcome"]},"followUps":[{"id":"kebab-case","title":"...","reason":"..."}],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"id":"...","version":1,"root":{"kind":"sequence","id":"delivery","children":[]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
+{"status":"ready","plan":{"schemaVersion":1,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":["observable outcome"]},"followUps":[{"id":"kebab-case","title":"...","reason":"..."}],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence","id":"delivery","children":[{"kind":"finalize","id":"finished","outcome":"accepted"}]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
+
+The workflow source has exactly the top-level keys `id`, `version`, and `root`. Every node must use
+one of these exact shapes. Fields shown are required unless marked optional:
+
+- sequence: {"kind":"sequence","id":"...","children":[node,...]} with at least one child
+- step: {"kind":"step","id":"...","uses":"registered.step@version","with":{}}
+- branch: {"kind":"branch","id":"...","when":"registered.predicate@version","then":node,"otherwise":node}
+- bounded_loop: {"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":"registered.wait@version","body":node}; exhaustedWait is optional
+- wait: {"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":"node-id"}; resumeAt is optional
+- gate: {"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":{}}; with is optional
+- finalize: {"kind":"finalize","id":"...","outcome":"accepted"}
+
+Do not omit node ids, sequence children, step with, loop bounds, predicates, or terminal outcomes.
+Do not add fields outside the selected node shape. A branch always has exactly one `when` predicate
+and two node arms. A loop expresses exhaustion only through its optional registered wait reference.
+The graph must terminate on every path; use a finalize node for a completed outcome and registered
+wait or gate nodes only for durable suspension boundaries exposed in plannerContext.
 
 Do not claim a bug is reproduced unless investigation evidence says so. Do not repeat bootstrap
 investigation inside execution. For a reproduced bug, execution normally implements the fix,

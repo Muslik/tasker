@@ -122,6 +122,28 @@ describe('file-backed harness pack', () => {
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it('teaches the implementation planner the authoritative workflow source grammar', () => {
+    const prompt = loadHarnessPack(join(process.cwd(), 'harness')).prompts.implementationPlanner;
+
+    expect(prompt.content).toContain(
+      '{"kind":"branch","id":"...","when":"registered.predicate@version","then":node,"otherwise":node}',
+    );
+    expect(prompt.content).toContain(
+      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":"registered.wait@version","body":node}',
+    );
+    expect(prompt.content).toContain(
+      '{"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":"node-id"}',
+    );
+    expect(prompt.content).toContain(
+      '{"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":{}}',
+    );
+    expect(prompt.content).toContain('{"kind":"finalize","id":"...","outcome":"accepted"}');
+    expect(prompt.content).not.toContain('"maxIterations"');
+    expect(prompt.content).not.toContain('"onExhausted"');
+    expect(prompt.content).not.toContain('"cases"');
+    expect(prompt.content).not.toContain('"predicate"');
+  });
+
   it('rejects obsolete step manifests instead of upcasting them', async () => {
     const root = await createTemporaryPack();
     const manifestPath = join(root, 'steps/ci-observe.json');

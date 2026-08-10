@@ -304,9 +304,9 @@ export async function bootstrapWorkflowV3(
       markRunning('investigation', 'investigation');
       for (const step of result.request.steps) {
         let operatorGuidance: string | null = null;
+        const attemptKey = `investigation:${step.id}`;
+        attempts[attemptKey] = (attempts[attemptKey] ?? 0) + 1;
         for (;;) {
-          const attemptKey = `investigation:${step.id}`;
-          attempts[attemptKey] = (attempts[attemptKey] ?? 0) + 1;
           let investigated;
           try {
             investigated = await activities.runBootstrapInvestigation({
@@ -345,6 +345,7 @@ export async function bootstrapWorkflowV3(
             investigated.summary,
           );
           operatorGuidance = retryGuidanceFrom(resolution);
+          attempts[attemptKey] = (attempts[attemptKey] ?? 0) + 1;
           markRunning('investigation', 'investigation');
         }
       }
