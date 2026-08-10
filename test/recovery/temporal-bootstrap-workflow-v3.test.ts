@@ -8,8 +8,14 @@ import type {
   BootstrapWorkflowActivities,
   BootstrapWorkflowInput,
 } from '../../src/temporal/bootstrap-kernel/contracts.js';
+import { ImplementationPlanningRecordSchema } from '../../src/control-plane/implementation-planning-contracts.js';
+import {
+  createPlanningActivity,
+  type TemporalImplementationPlanningCoordinator,
+} from '../../src/temporal/activities/planning-activity.js';
 import { TemporalTaskRunService } from '../../src/temporal/client.js';
 import type { TaskRunPublicState } from '../../src/temporal/public-state.js';
+import { err, ok } from '../../src/shared/outcome.js';
 import { testTemporalActivities } from '../helpers/temporal-activities.js';
 
 const workflowsPath = fileURLToPath(
@@ -262,6 +268,99 @@ describe('Bootstrap investigation recovery', () => {
         ok: true,
         value: { attempts: { 'investigation:reproduce-payment-spacing': 1 } },
       });
+    } finally {
+      worker.shutdown();
+      await workerRun;
+      await environment.teardown();
+    }
+  }, 60_000);
+});
+
+describe('Bootstrap planning failure recovery', () => {
+  it('opens one durable wait without retrying a non-retryable planner output', async () => {
+    const environment = await TestWorkflowEnvironment.createTimeSkipping();
+    const taskQueue = `tasker-bootstrap-planning-failure-${String(process.pid)}`;
+    const runs = new TemporalTaskRunService(environment.client, {
+      address: 'test-server',
+      namespace: 'default',
+      taskQueue,
+      queryTimeoutMs: 5_000,
+      updateTimeoutMs: 5_000,
+    });
+    let planningCalls = 0;
+    const coordinator: TemporalImplementationPlanningCoordinator = {
+      prepare: (taskReference, requestedStrategy, commandId, planningSnapshot, evidenceBundle) => {
+        planningCalls += 1;
+        return Promise.resolve(
+          ok(
+            ImplementationPlanningRecordSchema.parse({
+              schemaVersion: 1,
+              taskReference,
+              commandId,
+              transcriptId: `planning-transcript:${commandId}`,
+              planningSnapshot,
+              evidenceBundle,
+              evidenceRounds: [],
+              attempt: 1,
+              requestedStrategy,
+              selectedStrategy: requestedStrategy === 'ralplan' ? 'ralplan' : 'fast',
+              selectionReason: 'Temporal recovery test.',
+              startedAt: '2026-08-09T00:00:00.000Z',
+              operatorGuidance: null,
+              validationFeedback: ['Workflow has an execution path without a finalize node'],
+              validationRevision: 3,
+              previousDecision: null,
+              status: 'failed',
+              completedAt: '2026-08-09T00:00:01.000Z',
+              failure: {
+                kind: 'invalid_planner_output',
+                message: 'Workflow has an execution path without a finalize node',
+                retryable: false,
+              },
+              receipt: null,
+            }),
+          ),
+        );
+      },
+      answer: () => Promise.resolve(err({ kind: 'unexpected_answer' })),
+      draftFor: () => err({ kind: 'unexpected_draft' }),
+    };
+    const activities: BootstrapWorkflowActivities = {
+      ...testTemporalActivities,
+      ...createPlanningActivity(coordinator),
+    };
+    const worker = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue,
+      workflowsPath,
+      activities,
+      maxCachedWorkflows: 0,
+    });
+    const workerRun = worker.run();
+
+    try {
+      expect(
+        await runs.start({
+          ...inputFor('fixture:invalid-planner-output', 'automatic'),
+          settings: {
+            planReview: 'automatic',
+            planningStrategy: 'fast',
+            executionStart: 'manual',
+          },
+        }),
+      ).toMatchObject({ ok: true });
+      await expect
+        .poll(
+          async () => {
+            const result = await runs.read('fixture:invalid-planner-output');
+            return result.ok && result.value?.status === 'waiting'
+              ? result.value.wait.waitKind
+              : 'running';
+          },
+          { interval: 50, timeout: 20_000 },
+        )
+        .toBe('planning.retry@1');
+      expect(planningCalls).toBe(1);
     } finally {
       worker.shutdown();
       await workerRun;

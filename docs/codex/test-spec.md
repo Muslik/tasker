@@ -130,6 +130,7 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `planning_workflow_delta_is_reassembled_recompiled_and_revalidated`
 - `redelivered_planning_delta_returns_exact_persisted_revision`
 - `rejected_planning_delta_preserves_previous_draft_and_evidence`
+- `invalid_planner_output_opens_one_durable_wait_without_activity_retries`
 - `draft_revision_infrastructure_failure_waits_without_losing_workspace`
 - `execution_starts_only_with_frozen_workflow_hash`
 - `redelivered_freeze_returns_exact_immutable_receipt`

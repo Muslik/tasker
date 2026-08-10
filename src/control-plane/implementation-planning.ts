@@ -760,7 +760,7 @@ const planningFailureView = (
     case 'invalid_event_stream':
       return { kind: failure.kind, message: failure.message, retryable: true };
     case 'invalid_planner_output':
-      return { kind: failure.kind, message: failure.issues.join('; '), retryable: true };
+      return { kind: failure.kind, message: failure.issues.join('; '), retryable: false };
   }
 };
 

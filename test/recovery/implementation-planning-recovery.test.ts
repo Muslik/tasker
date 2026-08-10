@@ -201,7 +201,10 @@ describe('implementation planning recovery', () => {
       );
       expect(failed).toMatchObject({
         ok: true,
-        value: { status: 'failed', failure: { kind: 'invalid_planner_output' } },
+        value: {
+          status: 'failed',
+          failure: { kind: 'invalid_planner_output', retryable: false },
+        },
       });
       expect(createM1WorkflowService(ledger.repository, clock).read(TASK_REFERENCE)).toEqual(
         ok(null),

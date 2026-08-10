@@ -1,4 +1,4 @@
-import { Context } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 
 import type { ImplementationPlanningRecord } from '../../control-plane/implementation-planning-contracts.js';
 import type {
@@ -67,7 +67,11 @@ const planningResult = (
     throw new Error('Implementation planning returned before the provider attempt completed');
   }
   if (record.status === 'failed') {
-    throw new Error(record.failure.message);
+    throw ApplicationFailure.create({
+      message: record.failure.message,
+      type: `implementation_planning.${record.failure.kind}`,
+      nonRetryable: !record.failure.retryable,
+    });
   }
   if (record.transcriptId === null) {
     throw new Error('Temporal planning result has no transcript reference');
