@@ -144,6 +144,12 @@ export interface WaitResolutionMapping {
   readonly cases: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
 }
 
+export interface OutputPredicateMapping {
+  readonly discriminator: string;
+  readonly cases: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
+  readonly defaultFacts?: Readonly<Record<string, boolean>> | undefined;
+}
+
 export interface CompiledWaitNode {
   readonly kind: 'wait';
   readonly id: string;
@@ -379,6 +385,56 @@ export const WaitResolutionMappingSchema = z
     ),
   })
   .strict();
+
+export const OutputPredicateMappingSchema = z
+  .object({
+    discriminator: z.string().min(1),
+    cases: z
+      .record(
+        z.string(),
+        z
+          .record(PredicateReferenceSchema, z.boolean())
+          .refine(
+            (facts) => Object.keys(facts).length > 0,
+            'An output predicate case must set at least one predicate fact',
+          ),
+      )
+      .refine(
+        (cases) => Object.keys(cases).length > 0,
+        'An output predicate mapping must declare at least one case',
+      ),
+    defaultFacts: z
+      .record(PredicateReferenceSchema, z.boolean())
+      .refine(
+        (facts) => Object.keys(facts).length > 0,
+        'Default output predicate facts must not be empty',
+      )
+      .optional(),
+  })
+  .strict();
+
+export const resolveOutputPredicateFacts = (
+  mapping: OutputPredicateMapping | undefined,
+  output: JsonValue,
+): Readonly<Record<string, boolean>> => {
+  if (
+    mapping === undefined ||
+    output === null ||
+    Array.isArray(output) ||
+    typeof output !== 'object'
+  ) {
+    return {};
+  }
+  const discriminator = output[mapping.discriminator];
+  if (
+    typeof discriminator === 'boolean' ||
+    typeof discriminator === 'number' ||
+    typeof discriminator === 'string'
+  ) {
+    return mapping.cases[String(discriminator)] ?? mapping.defaultFacts ?? {};
+  }
+  return mapping.defaultFacts ?? {};
+};
 
 const CompiledWaitNodeSchema = z.object({
   kind: z.literal('wait'),

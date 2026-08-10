@@ -43,6 +43,8 @@ Every accepted implementation must prove:
   CI, or repository knowledge;
 - an agent candidate result cannot become a completed block without its declared
   completion evidence and evaluator verdict;
+- an agent cannot emit arbitrary predicate facts; only the accepted block's declared typed output
+  mapping is persisted in its receipt;
 - worker/API/process restart never restarts task intake or completed nodes;
 - human waits consume no Activity worker slot;
 - duplicate messages and Activity delivery do not duplicate remote effects;
@@ -86,6 +88,11 @@ Required scenarios:
 - `graph_revision_preserves_completed_node_set`
 - `terminal_state_cannot_return_to_runnable`
 - `agent_completion_claim_without_required_evidence_remains_incomplete`
+- `nonzero_declared_validation_is_completed_diagnostic_evidence_not_activity_failure`
+- `validation_output_maps_to_registered_passed_or_failed_predicates`
+- `agent_review_output_maps_to_registered_review_predicates`
+- `receipt_redelivery_restores_identical_predicate_facts_without_reinvoking_provider`
+- `unknown_output_predicate_reference_is_rejected_when_harness_loads`
 
 Property tests generate bounded valid/invalid graphs and check stable canonicalization,
 terminal-path safety, monotonic completion, and no step selection outside the graph.

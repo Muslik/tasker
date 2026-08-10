@@ -28,6 +28,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${String(apiPort)}/api/health`,
       reuseExistingServer: false,
       timeout: 30_000,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
     },
     {
       command: `TASKER_API_ORIGIN=http://127.0.0.1:${String(apiPort)} pnpm exec vite --port ${String(cockpitPort)}`,

@@ -308,13 +308,20 @@ const workflowActivities = {
       runtime: dockerRuntimeFor(workspace),
     };
   },
-  runExecutionBlock: async (input) => ({
-    status: 'completed',
-    summary: `${input.uses} completed`,
-    predicateFacts: { 'attempt.succeeded@1': true },
-    receiptReference: `e2e:block:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
-  }),
-  evaluateExecutionPredicate: async (input) => input.facts[input.reference] ?? true,
+  runExecutionBlock: async (input) => {
+    const predicateFacts = input.uses.startsWith('validate.')
+      ? { 'validation.passed@1': true, 'validation.failed@1': false }
+      : input.uses === 'review.agent@1'
+        ? { 'agent_review.accepted@1': true, 'agent_review.changes_requested@1': false }
+        : {};
+    return {
+      status: 'completed',
+      summary: `${input.uses} completed`,
+      predicateFacts,
+      receiptReference: `e2e:block:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
+    };
+  },
+  evaluateExecutionPredicate: async (input) => input.facts[input.reference] ?? false,
 };
 const worker = await Worker.create({
   connection: temporalEnvironment.nativeConnection,
@@ -334,14 +341,27 @@ const api = control.buildM1Api({
   blockReceipts: new blocks.BlockReceiptStore(ledger.repository, shared.systemClock),
 });
 
-const close = async () => {
-  worker.shutdown();
-  await workerRun;
-  await temporalEnvironment.teardown();
-  await api.close();
-  ledger.close();
+let closing = null;
+const close = () => {
+  closing ??= (async () => {
+    await api.close();
+    worker.shutdown();
+    await workerRun;
+    await temporalEnvironment.teardown();
+    ledger.close();
+  })();
+  return closing;
 };
-process.once('SIGINT', () => void close());
-process.once('SIGTERM', () => void close());
+const shutdown = () => {
+  void close().then(
+    () => process.exit(0),
+    (error) => {
+      process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+      process.exit(1);
+    },
+  );
+};
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
 
 await api.listen({ host: '127.0.0.1', port: apiPort });

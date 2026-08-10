@@ -24,6 +24,7 @@ export interface RecordBlockReceiptInput {
   readonly blockRun: number;
   readonly claim: AgentClaim;
   readonly verdict: CompletionVerdict;
+  readonly predicateFacts: Readonly<Record<string, boolean>>;
   readonly evidence: readonly CompletionEvidence[];
   readonly transcriptReference: string | null;
   readonly usageReference: string | null;
@@ -67,6 +68,7 @@ const comparableReceipt = (receipt: BlockReceipt) => ({
   blockRun: receipt.blockRun,
   claim: receipt.claim,
   verdict: receipt.verdict,
+  predicateFacts: receipt.predicateFacts,
   evidence: receipt.evidence,
   transcriptReference: receipt.transcriptReference,
   usageReference: receipt.usageReference,
@@ -83,6 +85,7 @@ const comparableInput = (input: RecordBlockReceiptInput) => ({
   blockRun: input.blockRun,
   claim: input.claim,
   verdict: input.verdict,
+  predicateFacts: input.predicateFacts,
   evidence: input.evidence,
   transcriptReference: input.transcriptReference,
   usageReference: input.usageReference,
@@ -117,7 +120,7 @@ export class BlockReceiptStore {
 
     const completedAt = this.clock.now();
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 2,
+      schemaVersion: 3,
       receiptId,
       ...comparableInput(input),
       completedAt,

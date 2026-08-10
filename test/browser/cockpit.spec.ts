@@ -212,10 +212,7 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
     'Workflow compiled and persisted',
   );
   await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
-    'reproduce-after',
-  );
-  await expect(page.getByRole('complementary', { name: 'Current workflow' })).not.toContainText(
-    'reproduce-before',
+    'validate-bug-fix · bug.validate_fix@1',
   );
 });
 
@@ -242,15 +239,18 @@ test('generating a backlog task materializes the workflow, timeline, and operato
 
   await expect(page.getByTestId('workflow-sidebar')).toContainText(backlog.title);
   await expect(page.getByTestId('workflow-stages')).toBeVisible();
-  await expect(page.getByTestId('workflow-stages').locator(':scope > details')).toHaveCount(8);
+  await expect(page.getByTestId('workflow-stages').locator(':scope > details')).toHaveCount(12);
   await expect(
     page
       .getByTestId('workflow-stage-bootstrap:preparation:1')
       .getByText('Prepare', { exact: true }),
   ).toBeVisible();
-  const implementationStage = page.getByTestId('workflow-stage-execution:implementation:2');
-  await implementationStage.locator('summary').click();
-  await expect(implementationStage).toContainText('implementation-loop');
+  const validationStage = page.getByTestId('workflow-stage-execution:verification:3');
+  await validationStage.locator('summary').click();
+  await expect(validationStage).toContainText('validate-targeted · validate.targeted@1');
+  const reviewStage = page.getByTestId('workflow-stage-execution:agent_review:6');
+  await reviewStage.locator('summary').click();
+  await expect(reviewStage).toContainText('agent-review · review.agent@1');
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
   await expect(page.getByTestId('validation-panel')).toContainText('Workflow graph valid');
@@ -324,7 +324,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await expect(page.getByTestId('plan-review-controls')).toBeVisible();
   const planGuidance = page.getByRole('textbox', { name: 'Plan review guidance' });
   await expect(planGuidance).toHaveValue('', { timeout: 20_000 });
-  await expect(page.getByTestId('implementation-plan')).toContainText(/attempt \d+/u);
+  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   const activity = await loadActivity(page, fixtureId);
   expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
@@ -370,10 +370,8 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   if (candidate.status === 'backlog') {
     await page.getByRole('button', { name: 'Generate workflow' }).click();
   }
-  const current = await loadRun(page, candidate.id);
-  if (current.status === 'waiting' && current.wait.waitKind === 'plan.approved@1') {
-    await page.getByRole('button', { name: 'Approve plan' }).click();
-  }
+  await waitForRunWait(page, candidate.id, 'plan.approved@1');
+  await page.getByRole('button', { name: 'Approve plan' }).click();
   await waitForRunWait(page, candidate.id, 'execution.start@1');
   await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
 

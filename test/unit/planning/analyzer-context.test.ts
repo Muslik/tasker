@@ -32,7 +32,9 @@ describe('workflow analyzer context', () => {
     );
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toEqual(
       expect.arrayContaining([
-        'bug.reproduce@1',
+        'bug.validate_fix@1',
+        'validate.targeted@1',
+        'review.agent@1',
         'ci.observe@1',
         'ai.assistance.initialize@1',
         'ai.assistance.validate@1',
@@ -42,6 +44,7 @@ describe('workflow analyzer context', () => {
       'jira.start-work@1',
     );
     expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ci-and-review');
+    expect(plannerContext.obligations.map(({ id }) => id)).toContain('write-requires-agent-review');
     expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ai-assistance');
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');
     expect(JSON.stringify(context.plannerContext)).not.toContain('workflowTemplates');

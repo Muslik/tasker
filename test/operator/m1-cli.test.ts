@@ -36,7 +36,9 @@ describe('M1 CLI fallback', () => {
     expect(showExit).toBe(0);
     expect(restored).toEqual(generated);
     expect(generated.join('\n')).toContain('"kind": "bounded_loop"');
-    expect(generated.join('\n')).toContain('"id": "implementation-loop"');
+    expect(generated.join('\n')).toContain('"id": "validation-repair-loop"');
+    expect(generated.join('\n')).toContain('"uses": "validate.targeted@1"');
+    expect(generated.join('\n')).toContain('"uses": "review.agent@1"');
     expect(generated.join('\n')).toContain('"for": "code_review@1"');
   });
 });

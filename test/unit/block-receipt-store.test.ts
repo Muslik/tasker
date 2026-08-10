@@ -28,6 +28,7 @@ const input = {
     status: 'accepted' as const,
     evidenceReferences: ['task-output:1'],
   },
+  predicateFacts: {},
   evidence: [
     {
       kind: 'artifact' as const,
@@ -61,7 +62,7 @@ describe('BlockReceiptStore', () => {
     expect(first).toMatchObject({
       ok: true,
       value: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         blockReference: 'fill-test-ops-plan@1',
         verdict: { status: 'accepted' },
       },

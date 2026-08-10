@@ -35,7 +35,6 @@ const ExecuteTaskStepResultBaseSchema = z.object({
 export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
   ExecuteTaskStepResultBaseSchema.extend({
     status: z.literal('completed'),
-    predicateResults: z.record(z.string(), z.boolean()),
   })
     .strict()
     .readonly(),
@@ -48,7 +47,6 @@ export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
   ExecuteTaskStepResultBaseSchema.extend({
     status: z.literal('workflow_change_required'),
     request: WorkflowChangeRequestSchema,
-    predicateResults: z.record(z.string(), z.boolean()).default({}),
   })
     .strict()
     .readonly(),

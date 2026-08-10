@@ -161,7 +161,7 @@ task. One existing Temporal Run kept its original Workflow Run ID, managed workt
 branch, frozen planning snapshot, task network, cache volumes, and bootstrap progress
 while the operator fixed Docker image/bootstrap/service issues. Seven completed
 bootstrap receipts were reused. The `front-avia` service reached its HTTPS readiness
-probe and the next `bug.reproduce@1` attempt ran Codex plus Playwright inside Docker
+probe and the next bug investigation attempt ran Codex plus Playwright inside Docker
 against that service.
 
 The pilot also exposed and fixed three cutover defects rather than hiding them with a

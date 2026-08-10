@@ -2140,6 +2140,7 @@ export const App = () => {
     new Map(),
   );
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
+  const [runtimeWatchTaskId, setRuntimeWatchTaskId] = useState<string | null>(null);
   const [pendingOperations, setPendingOperations] = useState<ReadonlyMap<string, TaskOperation>>(
     new Map(),
   );
@@ -2163,6 +2164,7 @@ export const App = () => {
   >(new Map());
   const streamCursorRef = useRef(0);
   const tasksRefreshSequenceRef = useRef(0);
+  const selectionRefreshSequenceRef = useRef(0);
 
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedId) ?? null,
@@ -2182,7 +2184,7 @@ export const App = () => {
     tasksRefreshSequenceRef.current = sequence;
     try {
       const response = await listOperatorTasks();
-      if (sequence !== tasksRefreshSequenceRef.current) return selectedIdRef.current || null;
+      if (sequence !== tasksRefreshSequenceRef.current) return null;
       const nextTasks = response.tasks;
       streamCursorRef.current = response.streamCursor;
       setTasks(nextTasks);
@@ -2201,23 +2203,28 @@ export const App = () => {
 
       return nextSelectedId;
     } catch (error) {
-      if (sequence !== tasksRefreshSequenceRef.current) return selectedIdRef.current || null;
+      if (sequence !== tasksRefreshSequenceRef.current) return null;
       setTasksStatus('failed');
       setTasksMessage(error instanceof Error ? error.message : 'Unexpected task queue failure');
       return null;
     }
   };
 
-  const refreshSelectedWorkflow = async (fixtureId: string): Promise<void> => {
+  const refreshSelectedWorkflow = async (
+    fixtureId: string,
+    refreshSequence: number,
+  ): Promise<void> => {
     setWorkflowState({ status: 'loading' });
     try {
       const response = await loadWorkflow(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setWorkflowState(
         response.status === 'found'
           ? { status: 'ready', response: response.response }
           : { status: 'missing' },
       );
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setWorkflowState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected workflow failure',
@@ -2225,12 +2232,17 @@ export const App = () => {
     }
   };
 
-  const refreshSelectedActivity = async (fixtureId: string): Promise<void> => {
+  const refreshSelectedActivity = async (
+    fixtureId: string,
+    refreshSequence: number,
+  ): Promise<void> => {
     setActivityState({ status: 'loading' });
     try {
       const response = await loadOperatorActivity(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setActivityState({ status: 'ready', response });
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setActivityState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected activity failure',
@@ -2238,12 +2250,17 @@ export const App = () => {
     }
   };
 
-  const refreshSelectedOperatorProjection = async (fixtureId: string): Promise<void> => {
+  const refreshSelectedOperatorProjection = async (
+    fixtureId: string,
+    refreshSequence: number,
+  ): Promise<void> => {
     setOperatorProjectionState({ status: 'loading' });
     try {
       const projection = await loadOperatorWorkflowProjection(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setOperatorProjectionState({ status: 'ready', projection });
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setOperatorProjectionState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected workflow projection failure',
@@ -2251,16 +2268,21 @@ export const App = () => {
     }
   };
 
-  const refreshSelectedImplementationPlan = async (fixtureId: string): Promise<void> => {
+  const refreshSelectedImplementationPlan = async (
+    fixtureId: string,
+    refreshSequence: number,
+  ): Promise<void> => {
     setImplementationPlanState({ status: 'loading' });
     try {
       const response = await loadImplementationPlan(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setImplementationPlanState(
         response.status === 'found'
           ? { status: 'ready', record: response.record }
           : { status: 'missing' },
       );
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setImplementationPlanState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected planning failure',
@@ -2270,17 +2292,20 @@ export const App = () => {
 
   const refreshSelectedPlanningTranscript = async (
     fixtureId: string,
+    refreshSequence: number,
     showLoading = true,
   ): Promise<void> => {
     if (showLoading) setPlanningTranscriptState({ status: 'loading' });
     try {
       const response = await loadPlanningTranscript(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setPlanningTranscriptState(
         response.status === 'found'
           ? { status: 'ready', transcript: response.transcript }
           : { status: 'missing' },
       );
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setPlanningTranscriptState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected transcript failure',
@@ -2288,12 +2313,16 @@ export const App = () => {
     }
   };
 
-  const refreshSelectedWorkflowContinuation = async (fixtureId: string): Promise<void> => {
+  const refreshSelectedWorkflowContinuation = async (
+    fixtureId: string,
+    refreshSequence: number,
+  ): Promise<void> => {
     setWorkflowContinuationState({ status: 'loading' });
     setContinuationWorkflowState({ status: 'missing' });
     setContinuationActivityState(null);
     try {
       const response = await loadWorkflowContinuation(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       if (response.status === 'missing') {
         setWorkflowContinuationState({ status: 'missing' });
         return;
@@ -2310,6 +2339,7 @@ export const App = () => {
             message: error instanceof Error ? error.message : 'Candidate activity is unavailable',
           })),
       ]);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setContinuationWorkflowState(
         candidate.status === 'found'
           ? { status: 'ready', response: candidate.response }
@@ -2317,6 +2347,7 @@ export const App = () => {
       );
       setContinuationActivityState(activity);
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setWorkflowContinuationState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected continuation failure',
@@ -2324,16 +2355,22 @@ export const App = () => {
     }
   };
 
-  const refreshSelectedJiraIssue = async (taskReference: string): Promise<void> => {
+  const refreshSelectedJiraIssue = async (
+    taskReference: string,
+    refreshSequence: number,
+  ): Promise<void> => {
     if (!taskReference.startsWith('jira:')) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setJiraIssueState({ status: 'not_applicable' });
       return;
     }
     setJiraIssueState({ status: 'loading' });
     try {
       const state = await loadJiraIssue(taskReference.slice('jira:'.length));
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setJiraIssueState({ status: 'ready', state });
     } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setJiraIssueState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected Jira snapshot failure',
@@ -2342,14 +2379,16 @@ export const App = () => {
   };
 
   const refreshSelection = async (fixtureId: string): Promise<void> => {
+    const refreshSequence = selectionRefreshSequenceRef.current + 1;
+    selectionRefreshSequenceRef.current = refreshSequence;
     await Promise.all([
-      refreshSelectedWorkflow(fixtureId),
-      refreshSelectedOperatorProjection(fixtureId),
-      refreshSelectedActivity(fixtureId),
-      refreshSelectedImplementationPlan(fixtureId),
-      refreshSelectedPlanningTranscript(fixtureId),
-      refreshSelectedWorkflowContinuation(fixtureId),
-      refreshSelectedJiraIssue(fixtureId),
+      refreshSelectedWorkflow(fixtureId, refreshSequence),
+      refreshSelectedOperatorProjection(fixtureId, refreshSequence),
+      refreshSelectedActivity(fixtureId, refreshSequence),
+      refreshSelectedImplementationPlan(fixtureId, refreshSequence),
+      refreshSelectedPlanningTranscript(fixtureId, refreshSequence),
+      refreshSelectedWorkflowContinuation(fixtureId, refreshSequence),
+      refreshSelectedJiraIssue(fixtureId, refreshSequence),
     ]);
   };
 
@@ -2384,7 +2423,11 @@ export const App = () => {
   useEffect(() => {
     if (selectedId.length === 0 || !planningInProgress) return;
     const poll = window.setInterval(() => {
-      void refreshSelectedPlanningTranscript(selectedId, false);
+      void refreshSelectedPlanningTranscript(
+        selectedId,
+        selectionRefreshSequenceRef.current,
+        false,
+      );
     }, 750);
     return () => {
       window.clearInterval(poll);
@@ -2392,7 +2435,9 @@ export const App = () => {
   }, [planningInProgress, selectedId]);
 
   useEffect(() => {
-    if (selectedId.length === 0 || selectedTask?.status !== 'running') return;
+    const awaitingRuntimeProjection =
+      selectedTask?.status === 'running' || runtimeWatchTaskId === selectedId;
+    if (selectedId.length === 0 || !awaitingRuntimeProjection) return;
     const lifecycle = { active: true };
     let inFlight = false;
 
@@ -2402,10 +2447,12 @@ export const App = () => {
       try {
         const run = await loadExecutionRun(selectedId);
         if (!lifecycle.active || run.status === 'running') return;
-        await refreshTasks();
+        const nextSelectedId = await refreshTasks();
+        if (nextSelectedId === null) return;
         if (selectedIdRef.current === selectedId) {
           await refreshSelection(selectedId);
         }
+        setRuntimeWatchTaskId((current) => (current === selectedId ? null : current));
       } catch {
         // The normal task refresh surfaces runtime failures; this poll only closes the
         // observability gap between an accepted Temporal update and its next durable boundary.
@@ -2420,7 +2467,7 @@ export const App = () => {
       lifecycle.active = false;
       window.clearInterval(poll);
     };
-  }, [selectedId, selectedTask?.status]);
+  }, [runtimeWatchTaskId, selectedId, selectedTask?.status]);
 
   useEffect(() => {
     if (bootstrapStatus !== 'ready' || selectedId.length === 0) {
@@ -2429,6 +2476,15 @@ export const App = () => {
 
     const source = connectOperatorStream(streamCursorRef.current, {
       onEvent: (event) => {
+        if (
+          event.fixtureId === selectedIdRef.current &&
+          (event.eventType === 'WorkflowAnalyzed' ||
+            event.eventType === 'WorkflowPlanned' ||
+            event.eventType === 'WorkflowRejected')
+        ) {
+          setRuntimeWatchTaskId(event.fixtureId);
+        }
+
         void (async () => {
           const nextSelectedId = await refreshTasks();
           if (nextSelectedId === null) {
@@ -2495,6 +2551,7 @@ export const App = () => {
     const taskReference = selectedTask.id;
     const requirePlanApproval = planApprovalDrafts.get(taskReference) ?? true;
     const planningStrategy = planningStrategyDrafts.get(taskReference) ?? 'auto';
+    setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
     void generateWorkflow(taskReference, {
       settings: {
@@ -2530,6 +2587,7 @@ export const App = () => {
   const handleStart = (): void => {
     if (selectedTask === null || selectedTask.status !== 'planned') return;
     const taskReference = selectedTask.id;
+    setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
     void startWorkflow(taskReference)
       .then(async () => {
@@ -2537,12 +2595,6 @@ export const App = () => {
         if (selectedIdRef.current === taskReference) {
           await refreshSelection(taskReference);
         }
-        window.setTimeout(() => {
-          void refreshTasks();
-          if (selectedIdRef.current === taskReference) {
-            void refreshSelection(taskReference);
-          }
-        }, 750);
       })
       .catch((error: unknown) => {
         if (selectedIdRef.current === taskReference) {
@@ -2569,6 +2621,7 @@ export const App = () => {
     if (decision === 'request_changes' && guidance.length === 0) return;
     const operation =
       decision === 'approve' ? ('approving_plan' as const) : ('requesting_plan_changes' as const);
+    setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, operation));
     void reviewPlan(taskReference, decision === 'approve' ? { decision } : { decision, guidance })
       .then(async () => {
@@ -2660,6 +2713,7 @@ export const App = () => {
     }));
     if (answers.some((answer) => answer.answer.length === 0)) return;
 
+    setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'answering_questions'));
     void answerPlanningClarification(taskReference, { answers })
       .then(async () => {
@@ -2695,6 +2749,7 @@ export const App = () => {
     if (selectedTask === null || selectedTask.status !== 'waiting') return;
     const taskReference = selectedTask.id;
     const guidance = interventionGuidanceDrafts.get(taskReference)?.trim() ?? '';
+    setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'resuming'));
     void resumeWorkflow(taskReference, guidance.length === 0 ? {} : { guidance })
       .then(async () => {

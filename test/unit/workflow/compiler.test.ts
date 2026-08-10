@@ -55,7 +55,7 @@ const baseContracts = () => ({
       artifactContracts: [],
     },
     {
-      id: 'verify.visual',
+      id: 'validate.visual',
       version: '1',
       inputSchema: z.object({}),
       outputSchema: z.object({}),
@@ -67,7 +67,7 @@ const baseContracts = () => ({
       artifactContracts: [],
     },
     {
-      id: 'verify.targeted',
+      id: 'validate.targeted',
       version: '1',
       inputSchema: z.object({}),
       outputSchema: z.object({}),
@@ -146,7 +146,7 @@ describe('workflow compiler', () => {
             },
           }),
           otherwise: step('targeted-check', {
-            uses: 'verify.targeted@1',
+            uses: 'validate.targeted@1',
             with: {
               selection: 'changed-files',
             },
@@ -197,7 +197,7 @@ describe('workflow compiler', () => {
           'review.approved@1',
           'review.guidance_cleared@1',
         ],
-        stepTypes: ['agent.investigate@1', 'ci.run@1', 'verify.targeted@1'],
+        stepTypes: ['agent.investigate@1', 'ci.run@1', 'validate.targeted@1'],
         waits: ['operator_guidance@1', 'review_event@1'],
       },
       workflowId: 'bugfix',
@@ -226,12 +226,12 @@ describe('workflow compiler', () => {
             when: 'change.needs_visual_verification@1',
             then: sequence('visual-path', [
               step('visual-check', {
-                uses: 'verify.visual@1',
+                uses: 'validate.visual@1',
                 with: {},
               }),
             ]),
             otherwise: step('targeted-check', {
-              uses: 'verify.targeted@1',
+              uses: 'validate.targeted@1',
               with: {},
             }),
           }),

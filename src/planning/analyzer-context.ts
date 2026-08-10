@@ -134,6 +134,9 @@ export const createWorkflowAnalyzerContext = (
             requiredArtifactContracts: contract.requiredArtifactContracts,
             requiredCapabilities: contract.requiredCapabilities,
             workflowChanges: contract.workflowChanges,
+            ...(contract.outputPredicates === undefined
+              ? {}
+              : { outputPredicates: contract.outputPredicates }),
             ...stepHarnessMetadata(toContractReference(contract)),
           })),
         waits: M1_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({

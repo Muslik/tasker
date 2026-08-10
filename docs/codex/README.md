@@ -39,8 +39,9 @@ history is the audit trail; they are not inputs to new work.
 - Jira before-reproduction attachment policy is removed; reproduction evidence stays
   private to execution unless an explicit final-demo policy publishes it later.
 - Run snapshots accept only the current schema and current Docker runtime policy.
-- Block Contract v2 receipts are the only authority that may advance the execution
-  graph. Obsolete manifest and planning-snapshot schemas are rejected, not migrated.
+- Block Definition/Receipt v3 is the only authority that may advance the execution
+  graph. It carries deterministic output-to-predicate facts; obsolete schemas are rejected,
+  not migrated.
 - Company/project execution profiles select Codex or Claude, model, reasoning effort,
   service tier, and timeout. The resolved profile and hash are frozen with the run;
   unknown profiles reject pack loading instead of falling back to another provider.

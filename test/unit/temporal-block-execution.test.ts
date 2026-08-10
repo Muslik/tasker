@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BlockReceiptStore } from '../../src/blocks/index.js';
+import { blockReceiptId, BlockReceiptStore } from '../../src/blocks/index.js';
 import {
   loadHarnessPack,
   resolveAgentExecutionProfile,
@@ -208,8 +208,9 @@ describe('temporal block execution activity', () => {
             finalMessage: {
               status: 'completed',
               outputJson: JSON.stringify({
-                summary: 'Verification completed',
-                artifacts: [],
+                decision: 'accepted',
+                summary: 'Independent review accepted',
+                findings: [],
               }),
               requestJson: null,
               blockingReason: null,
@@ -225,10 +226,10 @@ describe('temporal block execution activity', () => {
         workflowId: stubWorkspace.workflowId,
         workflowRunId: stubWorkspace.workflowRunId,
         workflowHash: WORKFLOW_HASH,
-        nodeId: 'verify-targeted',
+        nodeId: 'agent-review',
         stepAttempt: 1,
-        uses: 'verify.targeted@1',
-        activityDelivery: { kind: 'workspace_reconciled' },
+        uses: 'review.agent@1',
+        activityDelivery: { kind: 'read_only' },
         workspace: stubWorkspace,
         planningSnapshot: {
           artifactId: 'planning-snapshot:test',
@@ -236,13 +237,14 @@ describe('temporal block execution activity', () => {
         },
         operatorGuidance: 'VPN is enabled; retry the same verification without restarting.',
         input: {
-          profile: 'targeted',
+          objective: 'Review the implementation',
+          repository: fixture.repository,
           taskId: fixture.taskId,
         },
       },
       {
         snapshots: {
-          readRunSnapshot: () => ok(makeSnapshot('verify.targeted@1')),
+          readRunSnapshot: () => ok(makeSnapshot('review.agent@1')),
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
@@ -260,11 +262,11 @@ describe('temporal block execution activity', () => {
 
     expect(result).toMatchObject({
       status: 'completed',
-      summary: 'Verification completed',
+      summary: 'Independent review accepted',
     });
     expect(prompts[0]).toContain('SNAPSHOT PROMPT');
     expect(prompts[0]).toContain('VPN is enabled; retry the same verification');
-    expect(selectedSkills).toEqual([['jenkins', 'test-design']]);
+    expect(selectedSkills).toEqual([['typescript-design', 'test-design']]);
   });
 
   it('returns the durable result without invoking the agent again after response loss', async () => {
@@ -349,9 +351,9 @@ describe('temporal block execution activity', () => {
         workflowId: stubWorkspace.workflowId,
         workflowRunId: stubWorkspace.workflowRunId,
         workflowHash: WORKFLOW_HASH,
-        nodeId: 'reproduce-after',
+        nodeId: 'validate-bug-fix',
         stepAttempt: 1,
-        uses: 'bug.reproduce@1',
+        uses: 'bug.validate_fix@1',
         activityDelivery: { kind: 'workspace_reconciled' },
         workspace: stubWorkspace,
         planningSnapshot: {
@@ -368,7 +370,7 @@ describe('temporal block execution activity', () => {
       },
       {
         snapshots: {
-          readRunSnapshot: () => ok(makeSnapshot('bug.reproduce@1')),
+          readRunSnapshot: () => ok(makeSnapshot('bug.validate_fix@1')),
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
@@ -400,8 +402,8 @@ describe('temporal block execution activity', () => {
 
     expect(result).toMatchObject({
       status: 'blocked',
-      summary: `Agent execution for bug.reproduce@1 is blocked: ${reason}`,
-      waitKind: 'bug.reproduce.1.blocked@1',
+      summary: `Agent execution for bug.validate_fix@1 is blocked: ${reason}`,
+      waitKind: 'bug.validate_fix.1.blocked@1',
     });
   });
 
@@ -764,7 +766,7 @@ describe('temporal block execution activity', () => {
       nodeId: 'test-operations-plan',
       blockRun: 1,
       uses: 'fill-test-ops-plan@1',
-      activityDelivery: { kind: 'workspace_reconciled' as const },
+      activityDelivery: { kind: 'read_only' as const },
       contextReferences: [
         { kind: 'workspace', reference: stubWorkspace.workspaceId },
         {
@@ -790,6 +792,157 @@ describe('temporal block execution activity', () => {
     });
     expect(redelivered).toEqual(first);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives independent-review predicates from validated output and restores them from the receipt', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        ok({
+          stdout: '',
+          stderr: '',
+          finalMessage: {
+            status: 'completed',
+            outputJson: JSON.stringify({
+              decision: 'changes_requested',
+              summary: 'Repair the fallback before publication',
+              findings: [
+                {
+                  title: 'Fallback removed',
+                  description: 'The changed branch no longer preserves the existing fallback.',
+                  severity: 'blocking',
+                  files: ['src/example.ts'],
+                },
+              ],
+            }),
+            requestJson: null,
+            blockingReason: null,
+          },
+        }),
+      ),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('review.agent@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        agentRunner: { run },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+    const input = {
+      schemaVersion: 2 as const,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'agent-review',
+      blockRun: 1,
+      uses: 'review.agent@1',
+      activityDelivery: { kind: 'read_only' as const },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: {
+        objective: 'Review the implementation',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+
+    const first = await activity.runExecutionBlock(input);
+    const redelivered = await activity.runExecutionBlock(input);
+
+    expect(first).toMatchObject({
+      status: 'completed',
+      predicateFacts: {
+        'agent_review.accepted@1': false,
+        'agent_review.changes_requested@1': true,
+      },
+    });
+    expect(redelivered).toEqual(first);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a failed declared validation as evidence for the repair loop', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const command = vi.fn<CommandRunner['run']>(() =>
+      Promise.resolve({
+        status: 'exited',
+        exitCode: 1,
+        stdout: '',
+        stderr: 'typecheck failed',
+        durationMs: 8,
+      }),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('validate.targeted@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        agentRunner: { run: vi.fn() },
+        commands: workspaceCommands(command),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+
+    const result = await activity.runExecutionBlock({
+      schemaVersion: 2,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'validate-targeted',
+      blockRun: 1,
+      uses: 'validate.targeted@1',
+      activityDelivery: { kind: 'single_attempt' },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: { profile: 'targeted', taskId: fixture.taskId },
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      predicateFacts: {
+        'validation.passed@1': false,
+        'validation.failed@1': true,
+      },
+    });
+    expect(command).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'pnpm', args: ['typecheck'] }),
+    );
   });
 
   it('opens a durable wait when an agent claims completion without proving a mutation', async () => {
@@ -862,5 +1015,14 @@ describe('temporal block execution activity', () => {
       waitKind: 'code.implement@1.completion-evidence-required@1',
     });
     expect(result.summary).toContain('No workspace mutation was proven');
+    const receipt = receipts.read(
+      blockReceiptId({
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        nodeId: 'implement-feature',
+        blockRun: 1,
+      }),
+    );
+    expect(receipt).toMatchObject({ ok: true, value: { predicateFacts: {} } });
   });
 });

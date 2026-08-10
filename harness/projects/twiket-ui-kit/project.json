@@ -15,7 +15,10 @@
   },
   "processCommands": {
     "translations.extract@1": "pnpm translations:extract",
-    "translations.pull@1": "pnpm translations:pull"
+    "translations.pull@1": "pnpm translations:pull",
+    "validation.targeted@1": "pnpm test",
+    "validation.full@1": "pnpm test",
+    "validation.build@1": "pnpm build"
   },
   "workflowGuidance": "projects/twiket-ui-kit/workflow.md"
 }

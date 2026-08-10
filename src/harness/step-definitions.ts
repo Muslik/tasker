@@ -50,6 +50,34 @@ export const agentOutputSchema = z
   })
   .strict();
 
+export const agentReviewOutputSchema = z.discriminatedUnion('decision', [
+  z
+    .object({
+      decision: z.literal('accepted'),
+      summary: z.string().min(1),
+      findings: z.array(z.never()).length(0),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal('changes_requested'),
+      summary: z.string().min(1),
+      findings: z
+        .array(
+          z
+            .object({
+              title: z.string().min(1),
+              description: z.string().min(1),
+              severity: z.enum(['blocking', 'important']),
+              files: z.array(WorkspaceRelativePathSchema).min(1),
+            })
+            .strict(),
+        )
+        .min(1),
+    })
+    .strict(),
+]);
+
 const ReproductionEvidenceSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -171,6 +199,7 @@ export const ciObservationOutputSchema = z
 
 const contractSchemas = {
   agent_output: agentOutputSchema,
+  agent_review_output: agentReviewOutputSchema,
   ci_observation_output: ciObservationOutputSchema,
   integration_output: integrationOutputSchema,
   investigation_input: investigationInputSchema,
@@ -212,6 +241,9 @@ export const stepDefinitionFromManifest = (manifest: HarnessStepManifest): Harne
       ...identity,
       inputSchema: contractSchemas[manifest.inputContract],
       outputSchema: contractSchemas[manifest.outputContract],
+      ...(manifest.outputPredicates === undefined
+        ? {}
+        : { outputPredicates: manifest.outputPredicates }),
       activityDelivery: { kind: manifest.activityDelivery },
       allowedEffects: manifest.allowedEffects,
       requiredCapabilities: manifest.requiredCapabilities,
@@ -235,6 +267,7 @@ const contract = (
   activityDelivery: options.activityDelivery,
   inputSchema: options.inputSchema,
   outputSchema: options.outputSchema,
+  ...(options.outputPredicates === undefined ? {} : { outputPredicates: options.outputPredicates }),
   allowedEffects: options.allowedEffects,
   requiredCapabilities: options.requiredCapabilities,
   resumeBoundary: options.resumeBoundary,
@@ -265,6 +298,8 @@ const agentStep = (
     readonly allowedEffects?: readonly string[];
     readonly requiredCapabilities?: readonly string[];
     readonly workflowChanges?: StepTypeContract['workflowChanges'];
+    readonly outputPredicates?: StepTypeContract['outputPredicates'];
+    readonly activityDelivery?: StepTypeContract['activityDelivery'];
   },
 ): HarnessStepSource => ({
   reference: `${id}@1`,
@@ -284,6 +319,9 @@ const agentStep = (
   contract: contract(id, {
     inputSchema: options.inputSchema ?? taskInputSchema,
     outputSchema: options.outputSchema ?? agentOutputSchema,
+    ...(options.outputPredicates === undefined
+      ? {}
+      : { outputPredicates: options.outputPredicates }),
     allowedEffects: [...(options.allowedEffects ?? [])],
     requiredCapabilities: [...(options.requiredCapabilities ?? ['repository.read'])],
     resumeBoundary: options.allowedEffects?.length ? 'step' : 'attempt',
@@ -292,7 +330,9 @@ const agentStep = (
     artifactContracts: [...options.artifactContracts],
     requiredArtifactContracts: [...(options.requiredArtifactContracts ?? [])],
     workflowChanges: [...(options.workflowChanges ?? [])],
-    activityDelivery: { kind: 'workspace_reconciled' },
+    activityDelivery:
+      options.activityDelivery ??
+      (options.allowedEffects?.length ? { kind: 'workspace_reconciled' } : { kind: 'read_only' }),
     ...(options.allowedEffects?.length ? { reconciliation: { strategy: 'receipt' as const } } : {}),
   }),
 });
@@ -309,20 +349,27 @@ const processStep = (
     readonly artifactContracts: readonly string[];
     readonly requiredArtifactContracts?: readonly string[];
     readonly workflowChanges?: StepTypeContract['workflowChanges'];
+    readonly inputSchema?: z.ZodType;
+    readonly inputContract?: HarnessStepManifest['inputContract'];
+    readonly acceptance?: 'zero' | 'any_exit';
+    readonly outputPredicates?: StepTypeContract['outputPredicates'];
   },
 ): HarnessStepSource => ({
   reference: `${id}@1`,
   description: options.description,
   stage: options.stage,
   availableDuring: ['execution'],
-  inputContract: 'process_input',
+  inputContract: options.inputContract ?? 'process_input',
   outputContract: 'process_output',
   executor: { kind: 'process', executor: options.executor },
   outcomes: ['completed', 'needs_input', 'blocked', 'failed'],
-  completion: { kind: 'process_receipt', expectedExitCode: 0 },
+  completion: { kind: 'process_receipt', acceptance: options.acceptance ?? 'zero' },
   contract: contract(id, {
-    inputSchema: processInputSchema,
+    inputSchema: options.inputSchema ?? processInputSchema,
     outputSchema: processOutputSchema,
+    ...(options.outputPredicates === undefined
+      ? {}
+      : { outputPredicates: options.outputPredicates }),
     allowedEffects: [...options.allowedEffects],
     requiredCapabilities: [...options.requiredCapabilities],
     resumeBoundary: 'step',
@@ -382,7 +429,8 @@ const integrationStep = (
 const stages = {
   investigation: { id: 'investigation', label: 'Investigate' },
   implementation: { id: 'implementation', label: 'Implement' },
-  verification: { id: 'verification', label: 'Verify' },
+  verification: { id: 'verification', label: 'Validate' },
+  agentReview: { id: 'agent_review', label: 'Agent review' },
   delivery: { id: 'delivery', label: 'Deliver' },
 } as const;
 
@@ -413,8 +461,9 @@ export const TWIKET_HARNESS_STEPS = [
       'verification_scope_changed',
     ],
   }),
-  agentStep('bug.reproduce', {
-    description: 'Repeat the investigated scenario after implementation and preserve fix evidence.',
+  agentStep('bug.validate_fix', {
+    description:
+      'Repeat the investigated scenario after implementation and preserve final demo evidence.',
     stage: stages.verification,
     profile: 'investigation',
     completion: {
@@ -426,7 +475,7 @@ export const TWIKET_HARNESS_STEPS = [
     outputSchema: reproductionOutputSchema,
     inputContract: 'reproduction_input',
     outputContract: 'reproduction_output',
-    prompt: 'prompts/steps/bug-reproduce.md',
+    prompt: 'prompts/steps/bug-validate-fix.md',
     skills: ['playwright-demo', 'jenkins'],
     artifactContracts: ['reproduction-report', 'reproduction-media'],
     allowedEffects: ['command.run'],
@@ -454,29 +503,79 @@ export const TWIKET_HARNESS_STEPS = [
       'verification_scope_changed',
     ],
   }),
-  ...(['targeted', 'full', 'visual'] as const).map((profile) =>
-    agentStep(`verify.${profile}`, {
-      description: `Run ${profile} verification selected for this task.`,
+  agentStep('code.repair', {
+    description:
+      'Repair actionable validation or independent-review findings in the same worktree.',
+    stage: stages.implementation,
+    profile: 'implementation',
+    completion: { kind: 'workspace_mutation' },
+    prompt: 'prompts/steps/code-repair.md',
+    skills: ['typescript-design', 'test-design'],
+    artifactContracts: ['source-diff'],
+    allowedEffects: ['workspace.write'],
+    requiredCapabilities: ['repository.read', 'workspace.write'],
+    workflowChanges: [
+      'cross_repository_dependency',
+      'external_process_required',
+      'task_scope_changed',
+      'verification_scope_changed',
+    ],
+  }),
+  ...(['targeted', 'full', 'build', 'visual'] as const).map((profile) =>
+    processStep(`validate.${profile}`, {
+      description: `Run the exact ${profile} validation command declared by project policy.`,
       stage: stages.verification,
-      profile: 'verification',
-      completion: {
-        kind: 'structured_evidence',
-        source: 'workspace_files',
-        requiredArtifactKinds: [`verification-${profile}`],
-      },
-      inputSchema: verificationInputSchema,
-      inputContract: 'verification_input',
-      prompt: 'prompts/steps/verify.md',
-      skills:
-        profile === 'visual'
-          ? ['playwright-demo', 'jenkins', 'test-design']
-          : ['jenkins', 'test-design'],
-      artifactContracts: [`verification-${profile}`],
+      executor: `validation.${profile}@1`,
       allowedEffects: ['command.run'],
       requiredCapabilities: ['command.run'],
-      workflowChanges: ['verification_scope_changed'],
+      artifactContracts: [`validation-${profile}-receipt`],
+      inputSchema: verificationInputSchema.extend({ profile: z.literal(profile) }),
+      inputContract: 'verification_input',
+      acceptance: 'any_exit',
+      outputPredicates: {
+        discriminator: 'exitCode',
+        cases: {
+          '0': {
+            'validation.passed@1': true,
+            'validation.failed@1': false,
+          },
+        },
+        defaultFacts: {
+          'validation.passed@1': false,
+          'validation.failed@1': true,
+        },
+      },
     }),
   ),
+  agentStep('review.agent', {
+    description: 'Independently review the accepted plan, actual diff, and validation evidence.',
+    stage: stages.agentReview,
+    profile: 'review',
+    completion: {
+      kind: 'structured_evidence',
+      source: 'task_output',
+      requiredArtifactKinds: ['agent-review'],
+    },
+    outputSchema: agentReviewOutputSchema,
+    outputContract: 'agent_review_output',
+    outputPredicates: {
+      discriminator: 'decision',
+      cases: {
+        accepted: {
+          'agent_review.accepted@1': true,
+          'agent_review.changes_requested@1': false,
+        },
+        changes_requested: {
+          'agent_review.accepted@1': false,
+          'agent_review.changes_requested@1': true,
+        },
+      },
+    },
+    prompt: 'prompts/steps/agent-review.md',
+    skills: ['typescript-design', 'test-design'],
+    artifactContracts: ['agent-review'],
+    requiredCapabilities: ['repository.read'],
+  }),
   agentStep('fill-test-ops-plan', {
     description: 'Prepare a test-operations plan when company policy requires one.',
     stage: stages.verification,

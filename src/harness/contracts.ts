@@ -8,7 +8,11 @@ import {
 } from '../blocks/contracts.js';
 import type { StepTypeContract } from '../workflow/contracts.js';
 import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
-import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
+import {
+  JsonValueSchema,
+  OutputPredicateMappingSchema,
+  type JsonValue,
+} from '../workflow/schema.js';
 import {
   ExecutionProfileNameSchema,
   ExecutionProfileRoutingSchema,
@@ -28,6 +32,7 @@ const ProcessCommandsSchema = z.record(VersionedReferenceSchema, z.string().trim
 
 export const HarnessContractNameSchema = z.enum([
   'agent_output',
+  'agent_review_output',
   'ci_observation_output',
   'integration_output',
   'investigation_input',
@@ -75,6 +80,7 @@ export const HarnessStepManifestSchema = z
     availableDuring: z.array(z.enum(['bootstrap_investigation', 'execution'])).min(1),
     inputContract: HarnessContractNameSchema,
     outputContract: HarnessContractNameSchema,
+    outputPredicates: OutputPredicateMappingSchema.optional(),
     executor: HarnessBlockExecutorManifestSchema,
     outcomes: z
       .array(z.enum(['completed', 'needs_input', 'continuation_required', 'blocked', 'failed']))

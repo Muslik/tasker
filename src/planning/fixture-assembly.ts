@@ -72,6 +72,73 @@ const verificationInput = (task: TaskContext, profile: string) => ({
   taskId: task.taskId,
 });
 
+const validationBoundary = (
+  task: TaskContext,
+  profile: 'build' | 'full' | 'targeted' | 'visual',
+  prefix: string,
+): readonly WorkflowNodeSource[] => [
+  step(`${prefix}validate-${profile}`, {
+    uses: `validate.${profile}@1`,
+    with: verificationInput(task, profile),
+  }),
+  bounded_loop(`${prefix}validation-repair-loop`, {
+    maxAttempts: 3,
+    until: 'validation.passed@1',
+    checkBefore: true,
+    exhaustedWait: 'operator_guidance@1',
+    body: sequence(`${prefix}validation-repair`, [
+      step(`${prefix}repair-validation`, {
+        uses: 'code.repair@1',
+        with: taskInput(task, 'Repair the latest actionable declared-validation findings.'),
+      }),
+      step(`${prefix}revalidate-${profile}`, {
+        uses: `validate.${profile}@1`,
+        with: verificationInput(task, profile),
+      }),
+    ]),
+  }),
+];
+
+const localReviewBoundary = (
+  task: TaskContext,
+  profile: 'build' | 'full' | 'targeted' | 'visual',
+  prefix: string,
+  repeatBugScenario: boolean,
+): readonly WorkflowNodeSource[] => [
+  step(`${prefix}agent-review`, {
+    uses: 'review.agent@1',
+    with: taskInput(task, 'Independently review the accepted plan, diff, and validation evidence.'),
+  }),
+  bounded_loop(`${prefix}agent-review-repair-loop`, {
+    maxAttempts: 3,
+    until: 'agent_review.accepted@1',
+    checkBefore: true,
+    exhaustedWait: 'operator_guidance@1',
+    body: sequence(`${prefix}agent-review-repair`, [
+      step(`${prefix}repair-agent-review`, {
+        uses: 'code.repair@1',
+        with: taskInput(task, 'Repair the latest actionable independent-review findings.'),
+      }),
+      ...validationBoundary(task, profile, `${prefix}review-`),
+      ...(repeatBugScenario
+        ? [
+            step(`${prefix}review-validate-bug-fix`, {
+              uses: 'bug.validate_fix@1',
+              with: reproductionInput(
+                task,
+                'Repeat the investigated scenario after review repair.',
+              ),
+            }),
+          ]
+        : []),
+      step(`${prefix}repeat-agent-review`, {
+        uses: 'review.agent@1',
+        with: taskInput(task, 'Review the repaired diff and replacement validation evidence.'),
+      }),
+    ]),
+  }),
+];
+
 const aiAssistanceEnabled = (): boolean =>
   getHarnessPack().policies.some((policy) => policy.id === 'ai-assistance');
 
@@ -214,6 +281,8 @@ const pullRequestPublication = (
 
 const pullRequestReadiness = (
   task: TaskContext & PolicyTaskContext,
+  validationProfile: 'build' | 'full' | 'targeted' | 'visual',
+  repeatBugScenario: boolean,
 ): readonly WorkflowNodeSource[] => [
   ...pullRequestPublication(task, ''),
   ...beforeCodeReviewPolicySteps(task, ''),
@@ -228,10 +297,16 @@ const pullRequestReadiness = (
         uses: 'review.revise@1',
         with: taskInput(task, 'Apply every actionable unresolved pull-request review thread.'),
       }),
-      step('verify-review-revision', {
-        uses: 'verify.targeted@1',
-        with: verificationInput(task, 'review_revision'),
-      }),
+      ...validationBoundary(task, validationProfile, 'human-review-'),
+      ...(repeatBugScenario
+        ? [
+            step('human-review-validate-bug-fix', {
+              uses: 'bug.validate_fix@1',
+              with: reproductionInput(task, 'Repeat the bug scenario after human-review repair.'),
+            }),
+          ]
+        : []),
+      ...localReviewBoundary(task, validationProfile, 'human-review-', repeatBugScenario),
       ...pullRequestPublication(task, 'review-'),
       step('acknowledge-review-threads', {
         uses: 'review.acknowledge@1',
@@ -248,25 +323,17 @@ const shortBugfixRoot = (task: TaskContext & PolicyTaskContext): WorkflowNodeSou
     ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
-    bounded_loop('implementation-loop', {
-      maxAttempts: 3,
-      until: 'attempt.succeeded@1',
-      body: sequence('implementation-attempt', [
-        step('implement-fix', {
-          uses: 'code.implement@1',
-          with: taskInput(task, task.title),
-        }),
-        step('verify-targeted', {
-          uses: 'verify.targeted@1',
-          with: verificationInput(task, 'targeted'),
-        }),
-      ]),
+    step('implement-fix', {
+      uses: 'code.implement@1',
+      with: taskInput(task, task.title),
     }),
-    step('reproduce-after', {
-      uses: 'bug.reproduce@1',
+    ...validationBoundary(task, 'targeted', ''),
+    step('validate-bug-fix', {
+      uses: 'bug.validate_fix@1',
       with: reproductionInput(task, 'Repeat the reproduction and preserve after evidence.'),
     }),
-    ...pullRequestReadiness(task),
+    ...localReviewBoundary(task, 'targeted', '', true),
+    ...pullRequestReadiness(task, 'targeted', true),
     finalize('review-complete', { outcome: 'done' }),
   ]);
 
@@ -282,30 +349,15 @@ const featureWithReviewRoot = (
     ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
-    bounded_loop('implementation-loop', {
-      maxAttempts: 3,
-      until: 'attempt.succeeded@1',
-      body: sequence('implementation-attempt', [
-        step('implement-feature', {
-          uses: 'code.implement@1',
-          with: taskInput(task, task.title),
-        }),
-        step('verify-full', {
-          uses: 'verify.full@1',
-          with: verificationInput(task, 'full'),
-        }),
-        ...(options.includeVisualCheck
-          ? [
-              step('verify-visual', {
-                uses: 'verify.visual@1',
-                with: verificationInput(task, 'visual'),
-              }),
-            ]
-          : []),
-      ]),
+    step('implement-feature', {
+      uses: 'code.implement@1',
+      with: taskInput(task, task.title),
     }),
+    ...validationBoundary(task, 'full', ''),
+    ...(options.includeVisualCheck ? validationBoundary(task, 'visual', 'visual-') : []),
+    ...localReviewBoundary(task, 'full', '', false),
     ...translationNodes(task, task.repository, resolveProjectWorkflowProfile(task.repository)),
-    ...pullRequestReadiness(task),
+    ...pullRequestReadiness(task, 'full', false),
     finalize('review-complete', { outcome: 'done' }),
   ]);
 
@@ -314,10 +366,6 @@ const sharedComponentRoot = (
 ): WorkflowNodeSource => {
   const profile = resolveProjectWorkflowProfile(task.componentRepository);
   const publication = resolvePackagePublicationPolicy(task.componentRepository, task.componentPath);
-  const verificationProfile =
-    task.translationIntent === 'copy_change' && profile.translations.kind === 'external'
-      ? 'translation_and_targeted'
-      : 'targeted';
   const publicationNodes: readonly WorkflowNodeSource[] =
     publication.kind === 'human_final'
       ? [
@@ -343,26 +391,18 @@ const sharedComponentRoot = (
     ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
     ...acceptedPlanRecord(task),
-    bounded_loop('component-implementation-loop', {
-      maxAttempts: 3,
-      until: 'attempt.succeeded@1',
-      body: sequence('component-implementation-attempt', [
-        step('implement-component-copy', {
-          uses: 'code.implement@1',
-          with: taskInput(
-            { ...task, repository: task.componentRepository },
-            'Implement copy in the shared component repository.',
-          ),
-        }),
-      ]),
+    step('implement-component-copy', {
+      uses: 'code.implement@1',
+      with: taskInput(
+        { ...task, repository: task.componentRepository },
+        'Implement copy in the shared component repository.',
+      ),
     }),
     ...translationNodes(task, task.componentRepository, profile),
     ...publicationNodes,
-    step('verify-targeted', {
-      uses: 'verify.targeted@1',
-      with: verificationInput(task, verificationProfile),
-    }),
-    ...pullRequestReadiness(task),
+    ...validationBoundary(task, 'targeted', ''),
+    ...localReviewBoundary(task, 'targeted', '', false),
+    ...pullRequestReadiness(task, 'targeted', false),
     finalize('review-complete', { outcome: 'done' }),
   ]);
 };

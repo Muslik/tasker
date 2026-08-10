@@ -73,18 +73,19 @@ Docker-only `workspaceRuntime` policy; there is no host command escape hatch.
 
 There are three independent decisions which must not be collapsed into one:
 
-| Question                                   | Owner                  | Example                                     |
-| ------------------------------------------ | ---------------------- | ------------------------------------------- |
-| Is guidance installed for this repository? | workspace profile      | `localization`, `state-data`, `ui-kit`      |
-| Does this task need an operation?          | analyzer + validator   | add `bug.reproduce@1` or omit it            |
-| Which guidance may that operation use?     | versioned step binding | `bug.reproduce@1` selects `playwright-demo` |
+| Question                                   | Owner                  | Example                                        |
+| ------------------------------------------ | ---------------------- | ---------------------------------------------- |
+| Is guidance installed for this repository? | workspace profile      | `localization`, `state-data`, `ui-kit`         |
+| Does this task need an operation?          | analyzer + validator   | add `bug.validate_fix@1` or omit it            |
+| Which guidance may that operation use?     | versioned step binding | `bug.validate_fix@1` selects `playwright-demo` |
 
 Installing a `SKILL.md` never adds a graph node and never authorizes a remote effect.
 The block catalog does that. In particular:
 
-- `playwright-demo` is reusable execution guidance. It is selected by
-  `bug.reproduce@1` and `verify.visual@1`; an ordinary non-visual feature does not gain a
-  video step merely because the package exists.
+- `playwright-demo` is reusable execution guidance. It is selected by the agent-run
+  `bug.validate_fix@1` block; deterministic `validate.visual@1` runs the exact project command
+  and does not gain agent skills. An ordinary non-visual feature gains neither block merely
+  because the package exists.
 - `pr-finalize` is retained from the old harness as migration/reference material, not as
   Tasker's final PR executor. It combines commit, push, PR creation, Jira mutation, and
   human confirmation in one imperative skill, which conflicts with durable recovery.

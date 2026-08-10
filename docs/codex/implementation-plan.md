@@ -35,7 +35,7 @@ and operator projections.
 
 ## Sequencing rule
 
-Block Contract v2 now makes completion evidence authoritative. Do not add more
+Block Contract v3 makes completion evidence and deterministic predicate facts authoritative. Do not add more
 production effects until the current receipt boundary remains green under repository-
 wide recovery tests. The execution kernel advances only from immutable receipts, never
 from an agent's schema-valid prose claim.
@@ -56,7 +56,7 @@ Each phase follows this order:
 |---|---|---|
 | 0. Canonical reset | docs and tests describe the v4 boundaries | current guarantees inventoried |
 | 1. Temporal kernel v2 | frozen graphs run through a vendor-free interpreter | A: fixture graph survives restart |
-| 2. Block contract v2 | agent claims require completion evidence | B: claim, evaluator, and evidence are inspectable |
+| 2. Block contract v3 | claims require evidence; receipts own predicate facts | B: claim, evaluator, and evidence are inspectable |
 | 3. Execution profiles | Codex/Claude profiles and actual models are configurable | actual profile visible |
 | 4. Honest bootstrap | context, investigation, plan, validation, then freeze | C: real task becomes a task-specific graph |
 | 5. Operator projection | macro stages with expandable blocks/effects | readable parallel live work |
@@ -75,10 +75,10 @@ planning, review, validation, and freeze; Execution owns deterministic traversal
 frozen graph. The old Workflow type, compatibility parser, registry, state adapter,
 tests, and Jira before-evidence policy are deleted.
 
-Block Contract v2 is the active execution boundary. The immutable planning snapshot
+Block Contract v3 is the active execution boundary. The immutable planning snapshot
 contains the full block definition; Activities persist the agent/process/effect
 candidate, collect completion evidence independently, evaluate the declared contract,
-and persist an idempotent Block Receipt. Only an accepted receipt returns `completed`
+derive only block-declared output predicates, and persist an idempotent Block Receipt. Only an accepted receipt returns `completed`
 to the Temporal interpreter. Obsolete step-manifest and planning-snapshot schemas fail
 closed and have no compatibility reader.
 
@@ -109,9 +109,12 @@ explicit attempt counts, accepted/rejected claims, evidence, and reconciled effe
 The raw graph remains a downloadable diagnostic artifact. View schema v5 projections
 are deleted when encountered instead of being interpreted or upcast.
 
-The next active boundary is Phase 6: prove a real feature and bug through local
-implementation, selected validation, and independent agent review without adding
-remote publication authority yet.
+Phase 6 implementation is present: project manifests own exact `validate.*` commands; non-zero
+validation results become typed loop facts; `code.repair`, `bug.validate_fix`, and
+`review.agent` have separate completion contracts; and validation/review repair is bounded by
+durable operator guidance. The remaining checkpoint is empirical: run one real feature and one
+real bug through this suffix and inspect same-run receipts, worktree reuse, final bug evidence,
+and accepted independent review before enabling remote publication authority.
 
 ## Phase 0 exit gate
 

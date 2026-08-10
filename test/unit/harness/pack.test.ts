@@ -81,6 +81,31 @@ describe('file-backed harness pack', () => {
     });
   });
 
+  it('rejects a block output mapping to an unregistered workflow predicate', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const baseStep = getHarnessStepDefinition('review.agent@1');
+    if (baseStep === undefined) throw new Error('Expected review definition');
+
+    expect(() =>
+      createHarnessWorkflowContracts([
+        ...pack.steps,
+        {
+          reference: 'company.invalid-output@1',
+          contract: {
+            ...baseStep.contract,
+            id: 'company.invalid-output',
+            outputPredicates: {
+              discriminator: 'decision',
+              cases: { accepted: { 'company.unknown@1': true } },
+            },
+          },
+        },
+      ]),
+    ).toThrow(
+      'Harness step company.invalid-output@1 maps output to unknown predicate company.unknown@1',
+    );
+  });
+
   it('loads readable prompts with content hashes and exposes fill-test-ops-plan', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const stepDefinition = pack.steps.find(
@@ -188,7 +213,8 @@ describe('file-backed harness pack', () => {
         .activityDelivery;
 
     expect(deliveryFor('code.implement@1')).toEqual({ kind: 'workspace_reconciled' });
-    expect(deliveryFor('verify.full@1')).toEqual({ kind: 'workspace_reconciled' });
+    expect(deliveryFor('validate.full@1')).toEqual({ kind: 'single_attempt' });
+    expect(deliveryFor('review.agent@1')).toEqual({ kind: 'read_only' });
     expect(deliveryFor('translations.extract@1')).toEqual({ kind: 'single_attempt' });
     expect(deliveryFor('ci.observe@1')).toEqual({ kind: 'read_only' });
     expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
@@ -261,7 +287,7 @@ describe('file-backed harness pack', () => {
     expect(references).not.toContain('jira.review-ready@1');
   });
 
-  it('binds visual evidence guidance only to reproduction and visual verification', () => {
+  it('binds visual evidence guidance to final bug validation while commands stay deterministic', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const skillsFor = (reference: string): readonly string[] => {
       const definition = pack.steps.find((candidate) => candidate.reference === reference);
@@ -271,14 +297,14 @@ describe('file-backed harness pack', () => {
       return definition.block.executor.skills;
     };
 
-    expect(skillsFor('bug.reproduce@1')).toContain('playwright-demo');
-    expect(skillsFor('verify.visual@1')).toContain('playwright-demo');
-    expect(skillsFor('verify.targeted@1')).not.toContain('playwright-demo');
-    expect(skillsFor('verify.full@1')).not.toContain('playwright-demo');
+    expect(skillsFor('bug.validate_fix@1')).toContain('playwright-demo');
+    expect(
+      pack.steps.find(({ reference }) => reference === 'validate.visual@1')?.block.executor,
+    ).toEqual({ kind: 'process', executor: 'validation.visual@1' });
   });
 
   it('requires typed post-fix evidence for successful reproduction', () => {
-    const reproduction = getHarnessStepDefinition('bug.reproduce@1');
+    const reproduction = getHarnessStepDefinition('bug.validate_fix@1');
     if (reproduction === undefined) throw new Error('Expected reproduction block');
 
     expect(
@@ -305,6 +331,55 @@ describe('file-backed harness pack', () => {
         evidence: [{ kind: 'video', path: 'evidence/after.png', mimeType: 'image/png' }],
       }).success,
     ).toBe(false);
+  });
+
+  it('registers declared validation commands and typed local review', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const references = pack.steps.map(({ reference }) => reference);
+    const project = pack.projects.find(({ repository }) => repository === 'onetwotrip/front-avia');
+    const review = getHarnessStepDefinition('review.agent@1');
+
+    expect(references).toEqual(
+      expect.arrayContaining([
+        'bug.validate_fix@1',
+        'code.repair@1',
+        'validate.targeted@1',
+        'review.agent@1',
+      ]),
+    );
+    expect(project?.processCommands).toMatchObject({
+      'validation.targeted@1': 'pnpm typecheck',
+      'validation.full@1': 'pnpm test --runInBand',
+      'validation.build@1': 'pnpm build',
+      'validation.visual@1': 'pnpm test:ui',
+    });
+    expect(
+      review?.contract.outputSchema.safeParse({
+        decision: 'changes_requested',
+        summary: 'One blocking issue remains',
+        findings: [
+          {
+            title: 'Incorrect fallback',
+            description: 'The new branch drops the existing fallback.',
+            severity: 'blocking',
+            files: ['src/example.ts'],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(review?.contract.outputPredicates).toEqual({
+      discriminator: 'decision',
+      cases: {
+        accepted: {
+          'agent_review.accepted@1': true,
+          'agent_review.changes_requested@1': false,
+        },
+        changes_requested: {
+          'agent_review.accepted@1': false,
+          'agent_review.changes_requested@1': true,
+        },
+      },
+    });
   });
 
   it('rejects prompt paths that escape through a symlink or parent traversal', async () => {

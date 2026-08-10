@@ -93,7 +93,7 @@ describe('operator workflow projection', () => {
       },
     });
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 2,
+      schemaVersion: 3,
       receiptId: 'block-receipt:execution-workflow:execution-run:initialize-ai-assistance:run-1',
       blockReference: 'ai.assistance.initialize@1',
       blockDefinitionHash: 'block-definition-hash',
@@ -110,6 +110,7 @@ describe('operator workflow projection', () => {
         evidenceReferences: ['effect:ai-assistance'],
       },
       verdict: { status: 'accepted', evidenceReferences: ['effect:ai-assistance'] },
+      predicateFacts: {},
       evidence: [
         {
           kind: 'effect',

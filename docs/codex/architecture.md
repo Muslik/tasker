@@ -1,6 +1,6 @@
 # Tasker architecture
 
-Status: canonical target architecture, v4 Temporal revision, 2026-08-09
+Status: canonical target architecture, v4 Temporal revision, 2026-08-10
 
 ## 1. Product boundary
 
@@ -262,11 +262,34 @@ Each block declares:
   `workflow_change_required`, `blocked`, and `failed`;
 - an authoritative completion evaluator and required evidence/artifact contracts.
 
+Block Definition and Block Receipt use schema v3. A block may declare a typed
+output-to-predicate mapping: one output discriminator, exact cases, and optional default facts.
+After output-schema validation and completion-evidence acceptance, the block runner derives those
+facts itself and persists them in the receipt. Provider output cannot write arbitrary workflow
+facts.
+
 Agent output is a claim, never execution authority. The block runner validates the
 claim schema, resolves actual evidence, runs the block-specific completion evaluator,
 reconciles effects, and only then persists an immutable Block Receipt and returns a
 terminal block outcome to Temporal. A prose summary or schema-valid result without the
 declared evidence cannot complete a block.
+
+The local-ready suffix separates four responsibilities:
+
+```text
+code.implement/code.repair (agent judgment and workspace mutation)
+-> validate.* (exact project-owned process command)
+-> bug.validate_fix when the task is a reproduced bug (agent evidence)
+-> review.agent (independent typed review)
+```
+
+A non-zero `validate.*` command is accepted as diagnostic process evidence and maps to
+`validation.failed@1`; it is neither an Activity failure nor success inferred from agent prose.
+The frozen graph may enter a bounded `code.repair` plus revalidation loop.
+`review.agent` maps its typed decision to `agent_review.accepted@1` or
+`agent_review.changes_requested@1`; requested changes enter a separate bounded
+repair/revalidation/re-review loop. Exhaustion opens `operator_guidance@1` while preserving the
+same worktree and completed prefix.
 
 Activities may be non-deterministic. They must be independently retryable at their
 declared boundary and persist useful evidence before returning. Long CLI calls
@@ -402,7 +425,7 @@ classifies failures:
 - attributable to the change -> revision loop;
 - unknown -> diagnostic Activity, then question or guidance wait after its budget.
 
-Verification scope is task-specific. Project policy and changed-surface evidence may
+Validation scope is task-specific. Project policy and changed-surface evidence may
 select build-only, targeted tests, full validation, Allure inspection, post-fix
 reproduction, or screenshot snapshot updates. When a bug needs grounding, the planner
 selects a bootstrap-only investigation block before producing the graph. Successful

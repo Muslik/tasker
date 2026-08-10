@@ -35,14 +35,30 @@ bootstrap responsibilities for the continuation task, not execution graph nodes.
 Use only node kinds and versioned contracts present in plannerContext.buildingBlocks. Satisfy every
 applicable plannerContext.obligations rule; Tasker will reject the proposal rather than silently add
 missing semantic work. Explain every material assembly choice in assemblyDecisions. Select
-verification from observable task/repository facts and policy. Bug grounding belongs to bootstrap
-investigation; a bug execution graph requires post-fix evidence. A PR path requires CI observation
-and the code-review wait.
+validation only from the registered `validate.*` process blocks available for this project. Those
+blocks execute exact commands frozen from project/company policy; never invent a shell command
+inside a workflow node. Bug grounding belongs to bootstrap investigation; a bug execution graph
+requires `bug.validate_fix@1` post-fix demo evidence. A PR path requires CI observation and the
+code-review wait.
+
+Every workspace-write path must reach a local-ready boundary before remote publication:
+
+1. run the task-selected declared `validate.*` block;
+2. if validation fails, use a bounded `code.repair@1` plus the same validation until
+   `validation.passed@1`, exhausted into `operator_guidance@1`;
+3. for bugs, run `bug.validate_fix@1` after successful declared validation;
+4. run `review.agent@1` over the accepted plan, actual diff, and persisted evidence;
+5. if that review requests changes, use a bounded repair loop containing `code.repair@1`,
+   proportional declared validation, repeated bug-fix evidence when applicable, and another
+   `review.agent@1`, until `agent_review.accepted@1`; exhaust to `operator_guidance@1`.
+
+Agent review is not human pull-request review and must occur before `pr.prepare@1`.
 
 For a PR path, keep human review as a durable wait. If review feedback should be fixed
 autonomously, assemble a bounded loop with `checkBefore: true`: start from the
 `code_review@1` wait, skip the body when `review.approved@1` is true, and otherwise run
-`review.revise@1`, task-selected verification, PR preparation, CI observation, and a
+`review.revise@1`, task-selected declared validation, independent agent review, PR preparation, CI
+observation, and a
 new `code_review@1` wait. Give the loop `operator_guidance@1` as `exhaustedWait` so
 three unsuccessful review cycles pause for a human correction instead of losing work.
 

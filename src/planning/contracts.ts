@@ -13,10 +13,29 @@ import {
 
 const predicateContracts = [
   {
-    id: 'attempt.succeeded',
+    id: 'validation.passed',
     version: '1',
     inputSchema: z.object({}).strict(),
-    description: 'The most recent implementation and verification attempt succeeded.',
+    description: 'The latest declared project validation command exited successfully.',
+  },
+  {
+    id: 'validation.failed',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description:
+      'The latest declared project validation command produced actionable failure evidence.',
+  },
+  {
+    id: 'agent_review.accepted',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest independent local agent review accepted the change and evidence.',
+  },
+  {
+    id: 'agent_review.changes_requested',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest independent local agent review produced actionable findings.',
   },
   {
     id: 'review.approved',
@@ -105,8 +124,24 @@ export const createHarnessWorkflowContracts = (
     }
   }
 
+  const predicates = createPredicateRegistry(predicateContracts);
+  for (const definition of definitions) {
+    const mappings = definition.contract.outputPredicates;
+    if (mappings === undefined) continue;
+    for (const reference of [
+      ...Object.values(mappings.cases).flatMap((facts) => Object.keys(facts)),
+      ...Object.keys(mappings.defaultFacts ?? {}),
+    ]) {
+      if (!predicates.has(reference)) {
+        throw new Error(
+          `Harness step ${definition.reference} maps output to unknown predicate ${reference}`,
+        );
+      }
+    }
+  }
+
   return Object.freeze({
-    predicates: createPredicateRegistry(predicateContracts),
+    predicates,
     stepTypes: createStepTypeRegistry(definitions.map(({ contract }) => contract)),
     waits: createWaitRegistry(waitContracts),
   });

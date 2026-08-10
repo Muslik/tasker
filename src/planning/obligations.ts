@@ -19,8 +19,14 @@ export const WORKFLOW_OBLIGATIONS = [
   {
     id: 'write-requires-verification',
     trigger: 'a path contains a workspace.write step',
-    requires: ['a verify.* step later on the same path'],
+    requires: ['a validate.* step later on the same path'],
     reason: 'A write-capable path cannot become reviewable without task-selected verification.',
+  },
+  {
+    id: 'write-requires-agent-review',
+    trigger: 'a path contains a workspace.write step',
+    requires: ['review.agent@1 later on the same path'],
+    reason: 'A locally changed worktree must pass an independent agent review before publication.',
   },
   {
     id: 'write-requires-pr',
@@ -37,7 +43,7 @@ export const WORKFLOW_OBLIGATIONS = [
   {
     id: 'bug-requires-after-evidence',
     trigger: 'the admitted task is a bug',
-    requires: ['bug.reproduce@1 phase=after'],
+    requires: ['bug.validate_fix@1 phase=after'],
     reason:
       'The frozen execution workflow must prove the bug no longer exists; before evidence belongs to pre-plan investigation.',
   },
@@ -171,13 +177,28 @@ export const validateWorkflowObligations = (
       if (
         contract?.allowedEffects.includes('workspace.write') === true &&
         !beforeNextReview.some(
-          (candidate) => candidate.kind === 'step' && candidate.reference.startsWith('verify.'),
+          (candidate) => candidate.kind === 'step' && candidate.reference.startsWith('validate.'),
         )
       ) {
         issues.push(
           issue(
             'write-requires-verification',
             `Write-capable step ${marker.id} has no later verification step on this execution path`,
+            ['root', 'executionPaths', pathIndex, marker.id],
+          ),
+        );
+      }
+
+      if (
+        contract?.allowedEffects.includes('workspace.write') === true &&
+        !beforeNextReview.some(
+          (candidate) => candidate.kind === 'step' && candidate.reference === 'review.agent@1',
+        )
+      ) {
+        issues.push(
+          issue(
+            'write-requires-agent-review',
+            `Write-capable step ${marker.id} has no later independent review.agent@1 step on this execution path`,
             ['root', 'executionPaths', pathIndex, marker.id],
           ),
         );
@@ -232,13 +253,13 @@ export const validateWorkflowObligations = (
   if (fixture.family === 'short_bugfix') {
     const reproductionPhases = paths
       .flat()
-      .filter((marker) => marker.kind === 'step' && marker.reference === 'bug.reproduce@1')
+      .filter((marker) => marker.kind === 'step' && marker.reference === 'bug.validate_fix@1')
       .map(phaseOf);
     if (!reproductionPhases.includes('after')) {
       issues.push(
         issue(
           'bug-requires-after-evidence',
-          'Bug workflow is missing bug.reproduce@1 with phase=after',
+          'Bug workflow is missing bug.validate_fix@1 with phase=after',
           ['root'],
         ),
       );

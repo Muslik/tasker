@@ -41,9 +41,18 @@ Otherwise set `evidenceRequestsJson` to `"[]"` and return exactly one decision.
 {"status":"ready","plan":{"schemaVersion":1,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":["observable outcome"]},"followUps":[{"id":"kebab-case","title":"...","reason":"..."}],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"id":"...","version":1,"root":{"kind":"sequence","id":"delivery","children":[]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
 
 Do not claim a bug is reproduced unless investigation evidence says so. Do not repeat bootstrap
-investigation inside execution. For a reproduced bug, execution normally implements the fix and
-then proves the bug no longer occurs. Every plan step needs observable verification. Use exact
-paths only when evidence supports them; otherwise use a bounded search target.
+investigation inside execution. For a reproduced bug, execution normally implements the fix,
+runs a project-declared `validate.*` process block, and then uses `bug.validate_fix@1` to prove the
+bug no longer occurs with final demo evidence. Never invent validation commands: select only a
+registered validation block exposed for this project.
+
+Every workspace-write path must reach an independent local-ready boundary before `pr.prepare@1`:
+declared validation, bounded `code.repair@1` retries until `validation.passed@1`, then
+`review.agent@1`, followed when necessary by a bounded repair/revalidation/re-review loop until
+`agent_review.accepted@1`. Exhaust both loops to `operator_guidance@1`. The independent agent
+review is separate from the later human `code_review@1` wait. Every plan step needs observable
+verification. Use exact paths only when evidence supports them; otherwise use a bounded search
+target.
 
 plannerContext:
 {{plannerContext}}

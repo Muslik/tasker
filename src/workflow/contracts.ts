@@ -4,6 +4,7 @@ import {
   AbiIdSchema,
   AbiVersionSchema,
   StepActivityDeliverySchema,
+  OutputPredicateMappingSchema,
   WaitResolutionMappingSchema,
   WaitReferenceSchema,
 } from './schema.js';
@@ -35,6 +36,7 @@ export const StepTypeContractSchema = z.object({
   version: AbiVersionSchema,
   inputSchema: RuntimeSchemaSchema,
   outputSchema: RuntimeSchemaSchema,
+  outputPredicates: OutputPredicateMappingSchema.optional(),
   allowedEffects: z.array(EffectKindSchema).default([]),
   requiredCapabilities: z.array(CapabilitySchema).default([]),
   resumeBoundary: ResumeBoundarySchema.default('none'),

@@ -6,6 +6,7 @@ import { Context } from '@temporalio/activity';
 import { z } from 'zod';
 
 import {
+  acceptsAnyProcessExit,
   AgentClaimSchema,
   CompletionVerdictSchema,
   blockReceiptId,
@@ -60,6 +61,7 @@ import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import {
   WorkflowChangeRequestSchema,
   parseDeclaredWorkflowChangeRequest,
+  resolveOutputPredicateFacts,
 } from '../../workflow/index.js';
 import {
   ExecuteTaskStepInputSchema,
@@ -1264,7 +1266,6 @@ export const executeRegisteredTaskStep = async (
     const result = ExecuteTaskStepResultSchema.parse({
       status: 'completed',
       summary: execution.summary,
-      predicateResults: { 'attempt.succeeded@1': true },
       artifactIds: execution.artifactIds,
       transcriptId: null,
     });
@@ -1437,7 +1438,6 @@ export const executeRegisteredTaskStep = async (
         request: declared.value,
         artifactIds: withRecoveryArtifact(recovery, []),
         transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
-        predicateResults: {},
       });
       const persisted = dependencies.traces.persistOutputArtifact({
         operationId: executionOperationId(input),
@@ -1490,7 +1490,6 @@ export const executeRegisteredTaskStep = async (
         typeof outputRecord.summary === 'string' && outputRecord.summary.trim().length > 0
           ? outputRecord.summary
           : `${input.uses} completed`,
-      predicateResults: { 'attempt.succeeded@1': true },
       artifactIds: withRecoveryArtifact(recovery, []),
       transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
     });
@@ -1585,7 +1584,8 @@ export const executeRegisteredTaskStep = async (
       runtime.heartbeat({ phase: 'process_output', stream });
     },
   });
-  if (processResult.status !== 'exited' || processResult.exitCode !== 0) {
+  const acceptsAnyExit = acceptsAnyProcessExit(snapshottedStep.block.completion);
+  if (processResult.status !== 'exited' || (processResult.exitCode !== 0 && !acceptsAnyExit)) {
     const stdout = processResult.status === 'spawn_failed' ? '' : processResult.stdout;
     const stderr =
       processResult.status === 'spawn_failed' ? processResult.message : processResult.stderr;
@@ -1658,8 +1658,10 @@ export const executeRegisteredTaskStep = async (
   });
   return ExecuteTaskStepResultSchema.parse({
     status: 'completed',
-    summary: `${input.uses} completed`,
-    predicateResults: { 'attempt.succeeded@1': true },
+    summary:
+      processResult.exitCode === 0
+        ? `${input.uses} passed`
+        : `${input.uses} completed with exit code ${String(processResult.exitCode)}`,
     artifactIds: persisted.ok ? [persisted.value.artifactId] : [],
     transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
   });
@@ -1742,7 +1744,7 @@ const executionResultFromReceipt = (receipt: BlockReceipt) => {
         ? {
             status: 'completed' as const,
             summary: receipt.claim.summary,
-            predicateFacts: { 'attempt.succeeded@1': true },
+            predicateFacts: receipt.predicateFacts,
             receiptReference: receipt.receiptId,
           }
         : {
@@ -1883,6 +1885,10 @@ export const createTaskExecutionActivity = (
       evaluateBlockCompletion(snapshottedStep.block.completion, claim, collection.evidence),
       collection.issues,
     );
+    const predicateFacts =
+      claim.status === 'candidate_complete' && verdict.status === 'accepted'
+        ? resolveOutputPredicateFacts(snapshottedStep.block.outputPredicates, claim.output)
+        : {};
     const recorded = dependencies.receipts.record({
       block: snapshottedStep.block,
       taskReference: input.taskReference,
@@ -1893,6 +1899,7 @@ export const createTaskExecutionActivity = (
       blockRun: input.blockRun,
       claim,
       verdict,
+      predicateFacts,
       evidence: collection.evidence,
       transcriptReference: result.transcriptId,
       usageReference: null,

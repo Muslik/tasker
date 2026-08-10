@@ -41,6 +41,23 @@ const removeStep = (node: WorkflowNodeSource, reference: string): WorkflowNodeSo
   }
 };
 
+const findNode = (node: WorkflowNodeSource, id: string): WorkflowNodeSource | undefined => {
+  if (node.id === id) return node;
+  switch (node.kind) {
+    case 'sequence':
+      return node.children.map((child) => findNode(child, id)).find(Boolean);
+    case 'branch':
+      return findNode(node.then, id) ?? findNode(node.otherwise, id);
+    case 'bounded_loop':
+      return findNode(node.body, id);
+    case 'step':
+    case 'gate':
+    case 'wait':
+    case 'finalize':
+      return undefined;
+  }
+};
+
 describe('M1 task workflow planning', () => {
   it('compiles every accepted task analysis into a distinct inspectable graph', () => {
     const results = listTaskFixtures()
@@ -71,6 +88,35 @@ describe('M1 task workflow planning', () => {
     const results = [planTaskWorkflow(input), planTaskWorkflow(input)];
 
     expect(results[0]).toEqual(results[1]);
+  });
+
+  it('assembles declared validation and independent review as separate bounded boundaries', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+
+    expect(findNode(source.root, 'validate-targeted')).toMatchObject({
+      kind: 'step',
+      uses: 'validate.targeted@1',
+    });
+    expect(findNode(source.root, 'validation-repair-loop')).toMatchObject({
+      kind: 'bounded_loop',
+      maxAttempts: 3,
+      until: 'validation.passed@1',
+      checkBefore: true,
+      exhaustedWait: 'operator_guidance@1',
+    });
+    expect(findNode(source.root, 'agent-review')).toMatchObject({
+      kind: 'step',
+      uses: 'review.agent@1',
+    });
+    expect(findNode(source.root, 'agent-review-repair-loop')).toMatchObject({
+      kind: 'bounded_loop',
+      maxAttempts: 3,
+      until: 'agent_review.accepted@1',
+      checkBefore: true,
+      exhaustedWait: 'operator_guidance@1',
+    });
   });
 
   it('rejects a PR workflow when the analyzer omits CI observation', () => {
@@ -251,10 +297,7 @@ describe('M1 task workflow planning', () => {
       ...planned.value.proposal,
       source: {
         ...source,
-        root: {
-          ...source.root,
-          children: source.root.children.filter((child) => child.id !== 'reproduce-after'),
-        },
+        root: removeStep(source.root, 'bug.validate_fix@1'),
       },
     };
 

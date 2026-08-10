@@ -42,7 +42,6 @@ describe('execution activity', () => {
       result: {
         status: 'completed',
         summary: 'Jenkins build #73 passed for abcdef123456',
-        predicateResults: { 'attempt.succeeded@1': true },
         artifactIds: [],
         transcriptId: null,
       },
@@ -66,7 +65,6 @@ describe('execution activity', () => {
       result: {
         status: 'completed',
         summary: 'Implementation completed',
-        predicateResults: { 'attempt.succeeded@1': true },
         artifactIds: [],
         transcriptId: null,
       },

@@ -19,6 +19,11 @@
       }
     ]
   },
-  "processCommands": {},
+  "processCommands": {
+    "validation.targeted@1": "pnpm typecheck",
+    "validation.full@1": "pnpm test --runInBand",
+    "validation.build@1": "pnpm build",
+    "validation.visual@1": "pnpm test:ui"
+  },
   "workflowGuidance": "projects/onetwotrip-front-avia/workflow.md"
 }

@@ -1,6 +1,6 @@
 # Customizing Tasker
 
-Status: canonical extension guide, Block Contract v2 revision, 2026-08-09
+Status: canonical extension guide, Block Contract v3 revision, 2026-08-10
 
 Tasker has no reusable workflow templates. Every initial workflow is assembled from an
 empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
@@ -108,6 +108,12 @@ For a `process` block, add its executor key and command to the relevant versione
 block; execution uses the command captured in that run's immutable snapshot. Do not add
 step-name branching to an Activity.
 
+Project validation is a concrete example. `validate.targeted@1`, `validate.full@1`,
+`validate.build@1`, and `validate.visual@1` are reusable process contracts. Each project binds
+only the supported executor keys to exact commands in its `processCommands` map. The planner
+selects a registered block; it never emits shell. A non-zero command exit remains a completed,
+receipted diagnostic result so the frozen graph can decide whether to run `code.repair@1`.
+
 ### Block completion contract
 
 An agent block returns a typed claim:
@@ -124,6 +130,17 @@ an immutable Block Receipt before returning a `BlockOutcome` to Temporal. An ide
 Activity redelivery restores the exact receipt; a conflicting redelivery fails closed.
 Process and integration blocks use the same receipt boundary without pretending that an
 agent performed their deterministic checks or writes.
+
+When a block result controls a branch or loop, declare `outputPredicates` on the block contract.
+The mapping selects a discriminator from schema-validated output and maps exact cases to
+registered boolean predicate references. Optional `defaultFacts` handles results such as any
+non-zero process exit. Tasker derives and persists these facts only after accepting completion
+evidence. Do not add a generic success predicate and do not accept a predicate map from an agent.
+
+For example, declared validation maps exit code `0` to `validation.passed@1=true` and any other
+exit to `validation.failed@1=true`. Independent review maps its typed `decision` to either
+`agent_review.accepted@1` or `agent_review.changes_requested@1`. Both blocks can therefore drive
+bounded repair loops without teaching the Temporal interpreter their names.
 
 Arbitrary natural-language text cannot secretly alter the graph or grant effects.
 

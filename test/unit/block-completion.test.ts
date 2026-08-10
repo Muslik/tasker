@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateBlockCompletion, type AgentClaim } from '../../src/blocks/index.js';
+import {
+  acceptsAnyProcessExit,
+  evaluateBlockCompletion,
+  type AgentClaim,
+} from '../../src/blocks/index.js';
+import { OutputPredicateMappingSchema } from '../../src/workflow/index.js';
 
 const claim: AgentClaim = {
   status: 'candidate_complete',
@@ -76,5 +81,28 @@ describe('block completion', () => {
       status: 'rejected',
       reasons: ['Agent claim needs_input is not a completion claim'],
     });
+  });
+
+  it('recognizes diagnostic process completion inside a composed evaluator', () => {
+    expect(
+      acceptsAnyProcessExit({
+        kind: 'all',
+        evaluators: [
+          { kind: 'process_receipt', acceptance: 'any_exit' },
+          {
+            kind: 'structured_evidence',
+            source: 'task_output',
+            requiredArtifactKinds: ['validation-report'],
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(acceptsAnyProcessExit({ kind: 'process_receipt', acceptance: 'zero' })).toBe(false);
+  });
+
+  it('rejects an output predicate mapping that cannot produce a fact', () => {
+    expect(
+      OutputPredicateMappingSchema.safeParse({ discriminator: 'decision', cases: {} }).success,
+    ).toBe(false);
   });
 });

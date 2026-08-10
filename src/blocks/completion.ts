@@ -32,10 +32,15 @@ const evaluateRule = (
     }
     case 'process_receipt': {
       const receipt = evidence.find(
-        (item) => item.kind === 'process' && item.exitCode === evaluator.expectedExitCode,
+        (item) =>
+          item.kind === 'process' && (evaluator.acceptance === 'any_exit' || item.exitCode === 0),
       );
       return receipt === undefined
-        ? reject(`Missing process receipt with exit code ${String(evaluator.expectedExitCode)}`)
+        ? reject(
+            evaluator.acceptance === 'zero'
+              ? 'Missing successful process receipt with exit code 0'
+              : 'Missing completed process receipt',
+          )
         : CompletionVerdictSchema.parse({
             status: 'accepted',
             evidenceReferences: [receipt.reference],
@@ -82,3 +87,8 @@ export const evaluateBlockCompletion = (
   claim.status === 'candidate_complete'
     ? evaluateRule(evaluator, evidence)
     : reject(`Agent claim ${claim.status} is not a completion claim`);
+
+export const acceptsAnyProcessExit = (evaluator: CompletionEvaluator): boolean =>
+  evaluator.kind === 'process_receipt'
+    ? evaluator.acceptance === 'any_exit'
+    : evaluator.kind === 'all' && evaluator.evaluators.some(acceptsAnyProcessExit);

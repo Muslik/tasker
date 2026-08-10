@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { WorkflowStageDescriptorSchema } from '../workflow/contracts.js';
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema, OutputPredicateMappingSchema } from '../workflow/schema.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const EvidenceReferenceSchema = z.string().min(1);
@@ -39,7 +39,10 @@ export const CompletionEvaluatorSchema: z.ZodType<CompletionEvaluator> = z.lazy(
       .strict()
       .readonly(),
     z
-      .object({ kind: z.literal('process_receipt'), expectedExitCode: z.number().int() })
+      .object({
+        kind: z.literal('process_receipt'),
+        acceptance: z.enum(['zero', 'any_exit']),
+      })
       .strict()
       .readonly(),
     z
@@ -59,13 +62,14 @@ export const CompletionEvaluatorSchema: z.ZodType<CompletionEvaluator> = z.lazy(
 
 export const BlockDefinitionSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     reference: VersionedReferenceSchema,
     description: z.string().min(1),
     stage: BlockStageSchema,
     availableDuring: z.array(z.enum(['bootstrap_investigation', 'execution'])).min(1),
     inputContract: z.string().min(1),
     outputContract: z.string().min(1),
+    outputPredicates: OutputPredicateMappingSchema.optional(),
     executor: BlockExecutorSchema,
     allowedCapabilities: z.array(z.string().min(1)),
     allowedEffects: z.array(z.string().min(1)),
@@ -191,7 +195,7 @@ export const CompletionVerdictSchema = z.discriminatedUnion('status', [
 
 export const BlockReceiptSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     receiptId: z.string().min(1),
     blockReference: VersionedReferenceSchema,
     blockDefinitionHash: z.string().min(1),
@@ -203,6 +207,7 @@ export const BlockReceiptSchema = z
     blockRun: z.number().int().positive(),
     claim: AgentClaimSchema,
     verdict: CompletionVerdictSchema,
+    predicateFacts: z.record(z.string().min(1), z.boolean()),
     evidence: z.array(CompletionEvidenceSchema),
     transcriptReference: z.string().min(1).nullable(),
     usageReference: z.string().min(1).nullable(),
@@ -217,7 +222,7 @@ export type CompletionEvaluator =
       readonly source: 'task_output' | 'workspace_files';
       readonly requiredArtifactKinds: readonly string[];
     }
-  | { readonly kind: 'process_receipt'; readonly expectedExitCode: number }
+  | { readonly kind: 'process_receipt'; readonly acceptance: 'zero' | 'any_exit' }
   | { readonly kind: 'workspace_mutation' }
   | { readonly kind: 'reconciled_effect' }
   | { readonly kind: 'all'; readonly evaluators: readonly CompletionEvaluator[] };

@@ -187,13 +187,16 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       ...(step.policy === undefined ? {} : { policy: step.policy }),
       contract: step.contract,
       block: BlockDefinitionSchema.parse({
-        schemaVersion: 2,
+        schemaVersion: 3,
         reference: step.reference,
         description: step.description,
         stage: step.stage,
         availableDuring: step.availableDuring,
         inputContract: step.inputContract,
         outputContract: step.outputContract,
+        ...(step.contract.outputPredicates === undefined
+          ? {}
+          : { outputPredicates: step.contract.outputPredicates }),
         executor,
         allowedCapabilities: step.contract.requiredCapabilities,
         allowedEffects: step.contract.allowedEffects,

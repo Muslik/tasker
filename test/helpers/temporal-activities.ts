@@ -182,7 +182,7 @@ export const testTemporalActivities = {
     Promise.resolve({
       status: 'completed' as const,
       summary: `${input.uses} completed`,
-      predicateFacts: { 'attempt.succeeded@1': true },
+      predicateFacts: {},
       receiptReference: `block-receipt:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
     }),
   evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
