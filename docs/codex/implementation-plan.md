@@ -99,16 +99,19 @@ bounded corrections back to planning before optional review and freeze. The form
 pre-planning assembler, draft-revision Activity, schema v7 reader, and `phase=before`
 execution reproduction are deleted with no compatibility path.
 
-Phase 5A is complete: the former raw `workflow.tree` response and Cockpit component are
-deleted. Blocks and durable waits own configurable stage descriptors; the control plane
-projects adjacent graph roots into ordered stage episodes, preserves repeated stages,
-derives live state from Temporal nodes, and keeps technical nodes behind an expander.
-The raw graph remains a downloadable diagnostic artifact. View schema v4 projections
+Phase 5 is complete. The former raw `workflow.tree` response, persisted
+`workflow.stages`, and Cockpit tree component are deleted. Blocks and durable waits own
+configurable stage descriptors. A dedicated operator endpoint joins the complete
+Bootstrap lifecycle, the frozen graph, live Execution node state, and immutable Block
+Receipts into one disposable read model. It shows preparation, investigation, and
+planning before an execution graph exists, then adjacent execution episodes with
+explicit attempt counts, accepted/rejected claims, evidence, and reconciled effects.
+The raw graph remains a downloadable diagnostic artifact. View schema v5 projections
 are deleted when encountered instead of being interpreted or upcast.
 
-The next active boundary is Phase 5B: include bootstrap progress and immutable Block
-Receipt/effect summaries in the same operator projection, while keeping those product
-read models outside the frozen graph and Temporal execution authority.
+The next active boundary is Phase 6: prove a real feature and bug through local
+implementation, selected validation, and independent agent review without adding
+remote publication authority yet.
 
 ## Phase 0 exit gate
 

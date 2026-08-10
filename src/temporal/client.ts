@@ -29,7 +29,11 @@ import {
 } from './execution-kernel/messages.js';
 import { bootstrapWorkflowV3 } from './workflows/bootstrap-workflow-v3.js';
 import type { executionWorkflowV2 } from './workflows/execution-workflow-v2.js';
-import type { TaskRunPublicState } from './public-state.js';
+import {
+  TaskRunLifecycleSchema,
+  type TaskRunLifecycle,
+  type TaskRunPublicState,
+} from './public-state.js';
 export type TaskRunError =
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
   | { readonly kind: 'run_input_conflict'; readonly taskReference: string }
@@ -38,6 +42,7 @@ export type TaskRunError =
 export interface TaskRunService {
   start(input: BootstrapWorkflowInput): Promise<Outcome<TaskRunPublicState, TaskRunError>>;
   read(taskReference: string): Promise<Outcome<TaskRunPublicState | null, TaskRunError>>;
+  readLifecycle(taskReference: string): Promise<Outcome<TaskRunLifecycle | null, TaskRunError>>;
   resolveWait(
     taskReference: string,
     command: ResolveBootstrapWaitCommand,
@@ -145,10 +150,25 @@ export class TemporalTaskRunService implements TaskRunService {
   public async read(
     taskReference: string,
   ): Promise<Outcome<TaskRunPublicState | null, TaskRunError>> {
+    const lifecycle = await this.readLifecycle(taskReference);
+    if (!lifecycle.ok) return err(lifecycle.error);
+    if (lifecycle.value === null) return ok(null);
+    return ok(lifecycle.value.execution ?? lifecycle.value.bootstrap);
+  }
+
+  public async readLifecycle(
+    taskReference: string,
+  ): Promise<Outcome<TaskRunLifecycle | null, TaskRunError>> {
     const bootstrap = await this.readBootstrap(taskReference);
-    if (!bootstrap.ok || bootstrap.value === null) return bootstrap;
-    if (bootstrap.value.executionWorkflowId === null) return ok(bootstrap.value);
-    return this.readExecution(bootstrap.value.executionWorkflowId);
+    if (!bootstrap.ok) return err(bootstrap.error);
+    if (bootstrap.value === null) return ok(null);
+    if (bootstrap.value.executionWorkflowId === null) {
+      return ok(TaskRunLifecycleSchema.parse({ bootstrap: bootstrap.value, execution: null }));
+    }
+    const execution = await this.readExecution(bootstrap.value.executionWorkflowId);
+    return execution.ok
+      ? ok(TaskRunLifecycleSchema.parse({ bootstrap: bootstrap.value, execution: execution.value }))
+      : execution;
   }
 
   public async resolveWait(

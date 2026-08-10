@@ -44,3 +44,7 @@ history is the audit trail; they are not inputs to new work.
 - Company/project execution profiles select Codex or Claude, model, reasoning effort,
   service tier, and timeout. The resolved profile and hash are frozen with the run;
   unknown profiles reject pack loading instead of falling back to another provider.
+- The right-rail workflow is a disposable operator projection over complete Temporal
+  lifecycle state, the frozen graph, and immutable Block Receipts. Runtime stages are
+  not persisted inside `WorkflowView`; obsolete persisted stage/tree schemas are
+  deleted rather than adapted.

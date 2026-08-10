@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { BlockReceiptStore } from '../../src/blocks/index.js';
 import {
   buildM1Api,
   createM1WorkflowService,
@@ -66,6 +67,14 @@ class ContractTaskRunService implements TaskRunService {
     return Promise.resolve(ok(this.current));
   }
 
+  public readLifecycle() {
+    return Promise.resolve(
+      ok(
+        this.current?.runtime === 'bootstrap' ? { bootstrap: this.current, execution: null } : null,
+      ),
+    );
+  }
+
   public resolveWait(taskReference: string, command: ResolveBootstrapWaitCommand) {
     if (this.current === null || this.current.taskReference !== taskReference) {
       return Promise.resolve(err({ kind: 'run_not_found' as const, taskReference }));
@@ -76,17 +85,19 @@ class ContractTaskRunService implements TaskRunService {
 }
 
 const setup = () => {
+  const clock = makeAdjustableClock('2026-08-09T00:00:00.000Z');
   const ledger = openSqliteLedger({
     filename: ':memory:',
-    clock: makeAdjustableClock('2026-08-09T00:00:00.000Z'),
+    clock,
   });
   resources.push(ledger);
-  const service = createM1WorkflowService(
-    ledger.repository,
-    makeAdjustableClock('2026-08-09T00:00:00.000Z'),
-  );
+  const service = createM1WorkflowService(ledger.repository, clock);
   const runs = new ContractTaskRunService();
-  const api = buildM1Api({ service, temporalRunService: runs });
+  const api = buildM1Api({
+    service,
+    temporalRunService: runs,
+    blockReceipts: new BlockReceiptStore(ledger.repository, clock),
+  });
   return { api, runs };
 };
 
@@ -120,6 +131,41 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
         planningStrategy: 'fast',
         executionStart: 'manual',
       },
+    });
+  });
+
+  it('projects bootstrap progress before an execution graph exists', async () => {
+    const { api } = setup();
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+      payload: {
+        settings: {
+          planReview: 'required',
+          planningStrategy: 'fast',
+          executionStart: 'manual',
+        },
+      },
+    });
+
+    const response = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/avia-13236-short-bug/projection',
+    });
+    await api.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      schemaVersion: 1,
+      taskReference: 'avia-13236-short-bug',
+      status: 'waiting',
+      activeRuntime: 'bootstrap',
+      graphHash: null,
+      stages: [
+        { key: 'bootstrap:preparation:1', label: 'Prepare' },
+        { key: 'bootstrap:investigation:2', label: 'Investigate' },
+        { key: 'bootstrap:planning:3', label: 'Plan', status: 'waiting' },
+      ],
     });
   });
 

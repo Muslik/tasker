@@ -8,4 +8,13 @@ export const TaskRunPublicStateSchema = z.discriminatedUnion('runtime', [
   ExecutionWorkflowPublicStateSchema,
 ]);
 
+export const TaskRunLifecycleSchema = z
+  .object({
+    bootstrap: BootstrapWorkflowPublicStateSchema,
+    execution: ExecutionWorkflowPublicStateSchema.nullable(),
+  })
+  .strict()
+  .readonly();
+
 export type TaskRunPublicState = z.infer<typeof TaskRunPublicStateSchema>;
+export type TaskRunLifecycle = z.infer<typeof TaskRunLifecycleSchema>;

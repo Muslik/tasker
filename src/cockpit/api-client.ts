@@ -6,6 +6,7 @@ import {
   ResumeRunCommandSchema,
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
+  OperatorWorkflowProjectionSchema,
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
   FixtureListResponseSchema,
@@ -18,6 +19,7 @@ import type {
   OperatorActivityResponse,
   OperatorStreamEvent,
   OperatorTaskListResponse,
+  OperatorWorkflowProjection,
   FixtureSummary,
   WorkflowResponse,
   ExecutionRunView,
@@ -164,6 +166,19 @@ export const loadOperatorActivity = async (
     throw new Error('Operator activity response does not match the cockpit contract');
   }
 
+  return parsed.data;
+};
+
+export const loadOperatorWorkflowProjection = async (
+  fixtureId: string,
+): Promise<OperatorWorkflowProjection> => {
+  const result = await fetchJson(`/api/operator/tasks/${encodeURIComponent(fixtureId)}/projection`);
+
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = OperatorWorkflowProjectionSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Operator workflow projection does not match the cockpit contract');
+  }
   return parsed.data;
 };
 

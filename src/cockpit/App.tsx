@@ -26,6 +26,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   OperatorActivityResponse,
   OperatorTaskSummary,
+  OperatorWorkflowProjection,
   WorkflowResponse,
   WorkflowView,
 } from '../control-plane/m1-contracts.js';
@@ -50,6 +51,7 @@ import {
   loadWorkflowContinuation,
   loadJiraIssue,
   loadOperatorActivity,
+  loadOperatorWorkflowProjection,
   loadWorkflow,
   reviewPlan,
   reviewWorkflowContinuation,
@@ -87,6 +89,11 @@ type WorkflowLoadState =
 type ActivityLoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly response: OperatorActivityResponse }
+  | { readonly status: 'failed'; readonly message: string };
+
+type OperatorProjectionLoadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly projection: OperatorWorkflowProjection }
   | { readonly status: 'failed'; readonly message: string };
 
 type ImplementationPlanLoadState =
@@ -1912,12 +1919,14 @@ const WorkflowDiagnostics = ({ view }: { readonly view: WorkflowView }) => (
 
 const WorkflowSidebar = ({
   workflow,
+  projection,
   task,
 }: {
   readonly workflow: WorkflowLoadState;
+  readonly projection: OperatorProjectionLoadState;
   readonly task: OperatorTaskSummary | null;
 }) => {
-  if (workflow.status === 'loading') {
+  if (workflow.status === 'loading' || projection.status === 'loading') {
     return (
       <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
         <EmptyState>Loading workflow…</EmptyState>
@@ -1925,7 +1934,18 @@ const WorkflowSidebar = ({
     );
   }
 
-  if (workflow.status === 'missing') {
+  if (projection.status === 'failed') {
+    return (
+      <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold">Workflow</h2>
+        </div>
+        <InlineError>{projection.message}</InlineError>
+      </aside>
+    );
+  }
+
+  if (workflow.status === 'missing' && projection.projection.stages.length === 0) {
     if (task?.origin.kind === 'jira') {
       const binding = task.origin.repositoryBinding;
       const repositoryResolved = binding.status === 'resolved';
@@ -2017,7 +2037,7 @@ const WorkflowSidebar = ({
     );
   }
 
-  if (workflow.status === 'failed') {
+  if (workflow.status === 'failed' && projection.projection.stages.length === 0) {
     return (
       <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
         <div className="border-b border-border px-4 py-3">
@@ -2028,7 +2048,8 @@ const WorkflowSidebar = ({
     );
   }
 
-  const view = workflow.response.view;
+  const view = workflow.status === 'ready' ? workflow.response.view : null;
+  const title = view?.fixture.title ?? task?.title ?? 'Task workflow';
   return (
     <aside
       className="flex min-h-0 flex-col"
@@ -2042,17 +2063,19 @@ const WorkflowSidebar = ({
               <h2 className="text-sm font-semibold">Workflow</h2>
               <StateBadge
                 className={
-                  view.workflow.status === 'valid'
+                  view?.workflow.status === 'valid'
                     ? 'bg-emerald-500/12 text-emerald-300'
-                    : 'bg-destructive/15 text-destructive'
+                    : projection.projection.status === 'waiting'
+                      ? 'bg-amber-500/12 text-amber-300'
+                      : 'bg-cyan-500/12 text-cyan-300'
                 }
               >
-                {view.workflow.status}
+                {view?.workflow.status ?? projection.projection.status.replaceAll('_', ' ')}
               </StateBadge>
             </div>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{view.fixture.title}</p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{title}</p>
           </div>
-          {view.workflow.graphHash === null ? null : (
+          {view?.workflow.graphHash === null || view === null ? null : (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -2070,19 +2093,17 @@ const WorkflowSidebar = ({
             </Tooltip>
           )}
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-          <span>{view.workflow.verificationPlan.profile.replaceAll('_', ' ')}</span>
-          <span>{view.workflow.waits.length} waits</span>
-          <span>{view.workflow.capabilities.required.length} capabilities</span>
-        </div>
+        {view === null ? null : (
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span>{view.workflow.verificationPlan.profile.replaceAll('_', ' ')}</span>
+            <span>{view.workflow.waits.length} waits</span>
+            <span>{view.workflow.capabilities.required.length} capabilities</span>
+          </div>
+        )}
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 py-2">
-        {view.workflow.stages === null ? (
-          <EmptyState>Workflow rejected before graph materialization</EmptyState>
-        ) : (
-          <WorkflowStages stages={view.workflow.stages} />
-        )}
+        <WorkflowStages stages={projection.projection.stages} />
       </ScrollArea>
     </aside>
   );
@@ -2098,6 +2119,8 @@ export const App = () => {
   const [tasksCollapsed, setTasksCollapsed] = useState(readStoredTaskRailCollapsed);
   const [workflowState, setWorkflowState] = useState<WorkflowLoadState>({ status: 'loading' });
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
+  const [operatorProjectionState, setOperatorProjectionState] =
+    useState<OperatorProjectionLoadState>({ status: 'loading' });
   const [implementationPlanState, setImplementationPlanState] =
     useState<ImplementationPlanLoadState>({ status: 'missing' });
   const [planningTranscriptState, setPlanningTranscriptState] =
@@ -2139,6 +2162,7 @@ export const App = () => {
     ReadonlyMap<string, PlanningStrategyRequest>
   >(new Map());
   const streamCursorRef = useRef(0);
+  const tasksRefreshSequenceRef = useRef(0);
 
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedId) ?? null,
@@ -2154,8 +2178,11 @@ export const App = () => {
   }, [selectedId]);
 
   const refreshTasks = async (): Promise<string | null> => {
+    const sequence = tasksRefreshSequenceRef.current + 1;
+    tasksRefreshSequenceRef.current = sequence;
     try {
       const response = await listOperatorTasks();
+      if (sequence !== tasksRefreshSequenceRef.current) return selectedIdRef.current || null;
       const nextTasks = response.tasks;
       streamCursorRef.current = response.streamCursor;
       setTasks(nextTasks);
@@ -2174,6 +2201,7 @@ export const App = () => {
 
       return nextSelectedId;
     } catch (error) {
+      if (sequence !== tasksRefreshSequenceRef.current) return selectedIdRef.current || null;
       setTasksStatus('failed');
       setTasksMessage(error instanceof Error ? error.message : 'Unexpected task queue failure');
       return null;
@@ -2206,6 +2234,19 @@ export const App = () => {
       setActivityState({
         status: 'failed',
         message: error instanceof Error ? error.message : 'Unexpected activity failure',
+      });
+    }
+  };
+
+  const refreshSelectedOperatorProjection = async (fixtureId: string): Promise<void> => {
+    setOperatorProjectionState({ status: 'loading' });
+    try {
+      const projection = await loadOperatorWorkflowProjection(fixtureId);
+      setOperatorProjectionState({ status: 'ready', projection });
+    } catch (error) {
+      setOperatorProjectionState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Unexpected workflow projection failure',
       });
     }
   };
@@ -2303,6 +2344,7 @@ export const App = () => {
   const refreshSelection = async (fixtureId: string): Promise<void> => {
     await Promise.all([
       refreshSelectedWorkflow(fixtureId),
+      refreshSelectedOperatorProjection(fixtureId),
       refreshSelectedActivity(fixtureId),
       refreshSelectedImplementationPlan(fixtureId),
       refreshSelectedPlanningTranscript(fixtureId),
@@ -2991,7 +3033,11 @@ export const App = () => {
             )}
           </main>
 
-          <WorkflowSidebar workflow={displayedWorkflowState} task={selectedTask} />
+          <WorkflowSidebar
+            workflow={workflowState}
+            projection={operatorProjectionState}
+            task={selectedTask}
+          />
         </div>
       </div>
     </TooltipProvider>

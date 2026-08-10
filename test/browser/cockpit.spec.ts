@@ -242,11 +242,13 @@ test('generating a backlog task materializes the workflow, timeline, and operato
 
   await expect(page.getByTestId('workflow-sidebar')).toContainText(backlog.title);
   await expect(page.getByTestId('workflow-stages')).toBeVisible();
-  await expect(page.getByTestId('workflow-stages').locator('details')).toHaveCount(5);
+  await expect(page.getByTestId('workflow-stages').locator(':scope > details')).toHaveCount(8);
   await expect(
-    page.getByTestId('workflow-stages').getByText('Prepare', { exact: true }),
+    page
+      .getByTestId('workflow-stage-bootstrap:preparation:1')
+      .getByText('Prepare', { exact: true }),
   ).toBeVisible();
-  const implementationStage = page.getByTestId('workflow-stage-implementation:2');
+  const implementationStage = page.getByTestId('workflow-stage-execution:implementation:2');
   await implementationStage.locator('summary').click();
   await expect(implementationStage).toContainText('implementation-loop');
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
@@ -454,10 +456,12 @@ test('an invalid planner candidate pauses planning without an executable graph',
 
   expect(workflow.status).toBe('rejected');
   expect(workflow.view.workflow.graphHash).toBeNull();
-  expect(workflow.view.workflow.stages).toBeNull();
+  expect(workflow.view.workflow.graph).toBeNull();
   expect(workflow.view.workflow.validatorReport.issues.length).toBeGreaterThan(0);
   await expect(page.getByTestId('validation-errors')).toBeVisible();
-  await expect(page.getByTestId('workflow-stages')).toHaveCount(0);
+  await expect(page.getByTestId('workflow-stages')).toBeVisible();
+  await expect(page.getByTestId('workflow-stages').locator(':scope > details')).toHaveCount(3);
+  await expect(page.getByTestId('workflow-stages')).toContainText('Plan');
   await expect(page.getByTestId(`task-item-${invalid.id}`)).toContainText('Waiting', {
     timeout: 20_000,
   });
@@ -523,6 +527,7 @@ test('a ledger event from another page refreshes the visible task status', async
   await page.goto('/');
   await clickTask(page, backlog.id);
   await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText('Backlog');
+  await expect(page.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
 
   const ledgerEventPromise = page.evaluate(
     (fixtureId: string) =>
@@ -561,6 +566,7 @@ test('a ledger event from another page refreshes the visible task status', async
 
   const generatedWorkflow = await loadWorkflow(page, backlog.id);
   expect(generatedWorkflow.status).toBe('rejected');
+  await waitForRunWait(page, backlog.id, 'planning.retry@1');
   await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText('Waiting');
   await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('validation-panel')).toBeVisible();

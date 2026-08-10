@@ -31,7 +31,6 @@ import {
   type WorkflowView,
 } from './m1-contracts.js';
 import { M1WorkflowStore, type M1StoreError, type M1WorkflowArtifacts } from './m1-store.js';
-import { createOperatorWorkflowStages } from './operator-workflow-projection.js';
 
 export type M1ServiceError =
   | {
@@ -229,7 +228,6 @@ const buildAcceptedView = (
       status: 'valid',
       graphHash: planned.compiled.hash,
       graph: graph.value,
-      stages: createOperatorWorkflowStages(planned.presentation),
       validatorReport: planned.compiled.validatorReport,
     },
   });
@@ -271,7 +269,6 @@ const buildRejectedView = (
       status: 'rejected',
       graphHash: null,
       graph: null,
-      stages: null,
       validatorReport: validatorReportValue,
     },
   });

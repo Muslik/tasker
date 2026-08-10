@@ -22,15 +22,17 @@ process.env.TASKER_DB_PATH = databasePath;
 process.env.TASKER_PORT = String(apiPort);
 process.env.TASKER_WORKFLOW_PROVIDER = 'deterministic';
 
-const [control, jira, ledgerModule, providers, repositories, shared, temporal] = await Promise.all([
-  import('../dist/control-plane/index.js'),
-  import('../dist/integrations/index.js'),
-  import('../dist/ledger/index.js'),
-  import('../dist/providers/index.js'),
-  import('../dist/repositories/index.js'),
-  import('../dist/shared/index.js'),
-  import('../dist/temporal/index.js'),
-]);
+const [blocks, control, jira, ledgerModule, providers, repositories, shared, temporal] =
+  await Promise.all([
+    import('../dist/blocks/index.js'),
+    import('../dist/control-plane/index.js'),
+    import('../dist/integrations/index.js'),
+    import('../dist/ledger/index.js'),
+    import('../dist/providers/index.js'),
+    import('../dist/repositories/index.js'),
+    import('../dist/shared/index.js'),
+    import('../dist/temporal/index.js'),
+  ]);
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
 const service = control.createM1WorkflowService(ledger.repository, shared.systemClock);
@@ -329,6 +331,7 @@ const api = control.buildM1Api({
   implementationPlanning,
   workflowContinuation,
   temporalRunService,
+  blockReceipts: new blocks.BlockReceiptStore(ledger.repository, shared.systemClock),
 });
 
 const close = async () => {

@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('M1 CLI fallback', () => {
-  it('generates and restores the same semantic workflow tree', () => {
+  it('generates and restores the same compiled workflow graph', () => {
     const filename = databasePath();
     const generated: string[] = [];
     const restored: string[] = [];
@@ -35,7 +35,8 @@ describe('M1 CLI fallback', () => {
     expect(generateExit).toBe(0);
     expect(showExit).toBe(0);
     expect(restored).toEqual(generated);
-    expect(generated.join('\n')).toContain('bounded_loop: implementation-loop');
-    expect(generated.join('\n')).toContain('wait=code_review@1');
+    expect(generated.join('\n')).toContain('"kind": "bounded_loop"');
+    expect(generated.join('\n')).toContain('"id": "implementation-loop"');
+    expect(generated.join('\n')).toContain('"for": "code_review@1"');
   });
 });

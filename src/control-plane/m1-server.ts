@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { openSqliteLedger } from '../ledger/index.js';
+import { BlockReceiptStore } from '../blocks/index.js';
 import {
   BitbucketReviewClient,
   BitbucketReviewCoordinator,
@@ -154,6 +155,7 @@ export const startM1Server = async (): Promise<void> => {
     executionActivity: new LedgerExecutionActivityReader(ledger.repository),
     ...(bitbucketReview === undefined ? {} : { bitbucketReview }),
     temporalRunService: temporalRuntime.service,
+    blockReceipts: new BlockReceiptStore(ledger.repository, systemClock),
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

@@ -1,28 +1,61 @@
+import { blockReceiptId, type BlockReceipt, type BlockReceiptStore } from '../blocks/index.js';
+import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from '../planning/index.js';
+import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../temporal/index.js';
+import type {
+  CompiledWorkflow,
+  CompiledWorkflowNode,
+  WorkflowStageDescriptor,
+} from '../workflow/index.js';
 import {
-  getHarnessStepDefinition,
-  M1_WORKFLOW_CONTRACTS,
-  type PresentationNode,
-  type WorkflowPresentationTree,
-} from '../planning/index.js';
-import type { WorkflowStageDescriptor } from '../workflow/index.js';
-import {
+  BlockReceiptSummarySchema,
+  OperatorWorkflowProjectionSchema,
   OperatorWorkflowStageSchema,
   WorkflowTechnicalNodeSchema,
+  type BlockReceiptSummary,
+  type OperatorWorkflowProjection,
   type OperatorWorkflowStage,
   type WorkflowNodeStatus,
   type WorkflowTechnicalNode,
 } from './m1-contracts.js';
 
+type BlockReceiptReader = Pick<BlockReceiptStore, 'read'>;
+
 const fallbackStage = { id: 'workflow', label: 'Workflow' } as const;
 
-const childrenFor = (node: PresentationNode): readonly string[] => {
+const bootstrapGroups = [
+  {
+    stage: { id: 'preparation', label: 'Prepare' },
+    nodes: [{ id: 'workspace', label: 'Prepare workspace' }],
+  },
+  {
+    stage: { id: 'investigation', label: 'Investigate' },
+    nodes: [
+      { id: 'context', label: 'Collect task context' },
+      { id: 'investigation', label: 'Run pre-plan investigation' },
+    ],
+  },
+  {
+    stage: { id: 'planning', label: 'Plan' },
+    nodes: [
+      { id: 'planning', label: 'Build implementation plan' },
+      { id: 'plan_review', label: 'Review plan' },
+      { id: 'freeze', label: 'Freeze workflow' },
+      { id: 'execution_start', label: 'Start execution' },
+    ],
+  },
+] as const satisfies readonly {
+  readonly stage: WorkflowStageDescriptor;
+  readonly nodes: readonly { readonly id: string; readonly label: string }[];
+}[];
+
+const childrenFor = (node: CompiledWorkflowNode): readonly CompiledWorkflowNode[] => {
   switch (node.kind) {
     case 'sequence':
-      return node.childIds;
+      return node.children;
     case 'branch':
-      return [node.thenId, node.otherwiseId];
+      return [node.then, node.otherwise];
     case 'bounded_loop':
-      return [node.bodyId];
+      return [node.body];
     case 'finalize':
     case 'gate':
     case 'step':
@@ -31,14 +64,14 @@ const childrenFor = (node: PresentationNode): readonly string[] => {
   }
 };
 
-const nodeLabel = (node: PresentationNode): string => {
+const nodeLabel = (node: CompiledWorkflowNode): string => {
   switch (node.kind) {
     case 'step':
       return `${node.id} · ${node.uses}`;
     case 'bounded_loop':
       return `${node.id} · max ${String(node.maxAttempts)}`;
     case 'wait':
-      return `${node.id} · ${node.waitKind}`;
+      return `${node.id} · ${node.for}`;
     case 'gate':
       return `${node.id} · ${node.reason}`;
     case 'finalize':
@@ -50,27 +83,19 @@ const nodeLabel = (node: PresentationNode): string => {
   }
 };
 
-const requireNode = (presentation: WorkflowPresentationTree, nodeId: string): PresentationNode => {
-  const node = presentation.nodes[nodeId];
-  if (node === undefined) {
-    throw new Error(`Presentation references missing node ${nodeId}`);
-  }
-  return node;
-};
-
-const stageForLeaf = (node: PresentationNode): WorkflowStageDescriptor | null => {
+const stageForLeaf = (node: CompiledWorkflowNode): WorkflowStageDescriptor | null => {
   switch (node.kind) {
     case 'step': {
       const definition = getHarnessStepDefinition(node.uses);
       if (definition === undefined) {
-        throw new Error(`Presentation references unregistered harness block ${node.uses}`);
+        throw new Error(`Compiled workflow references unregistered harness block ${node.uses}`);
       }
       return definition.block.stage;
     }
     case 'wait': {
-      const contract = M1_WORKFLOW_CONTRACTS.waits.get(node.waitKind);
+      const contract = M1_WORKFLOW_CONTRACTS.waits.get(node.for);
       if (contract === undefined) {
-        throw new Error(`Presentation references unregistered wait ${node.waitKind}`);
+        throw new Error(`Compiled workflow references unregistered wait ${node.for}`);
       }
       return contract.stage;
     }
@@ -84,45 +109,84 @@ const stageForLeaf = (node: PresentationNode): WorkflowStageDescriptor | null =>
 };
 
 const firstDescendantStage = (
-  presentation: WorkflowPresentationTree,
-  nodeId: string,
+  node: CompiledWorkflowNode,
   ancestors: ReadonlySet<string>,
 ): WorkflowStageDescriptor | null => {
-  if (ancestors.has(nodeId)) {
-    throw new Error(`Presentation contains a cycle at ${nodeId}`);
-  }
-
-  const node = requireNode(presentation, nodeId);
+  if (ancestors.has(node.id)) throw new Error(`Compiled workflow contains a cycle at ${node.id}`);
   const direct = stageForLeaf(node);
   if (direct !== null) return direct;
 
-  const nextAncestors = new Set(ancestors).add(nodeId);
-  for (const childId of childrenFor(node)) {
-    const stage = firstDescendantStage(presentation, childId, nextAncestors);
+  const nextAncestors = new Set(ancestors).add(node.id);
+  for (const child of childrenFor(node)) {
+    const stage = firstDescendantStage(child, nextAncestors);
     if (stage !== null) return stage;
   }
   return null;
 };
 
-const toTechnicalNode = (
-  presentation: WorkflowPresentationTree,
+const receiptSummary = (receipt: BlockReceipt): BlockReceiptSummary =>
+  BlockReceiptSummarySchema.parse({
+    receiptId: receipt.receiptId,
+    blockRun: receipt.blockRun,
+    claimStatus: receipt.claim.status,
+    verdict: receipt.verdict.status,
+    summary: receipt.claim.summary,
+    evidence: receipt.evidence,
+    transcriptReference: receipt.transcriptReference,
+    usageReference: receipt.usageReference,
+    completedAt: receipt.completedAt,
+  });
+
+const receiptsFor = (
   nodeId: string,
+  attempts: number,
+  execution: ExecutionWorkflowPublicState,
+  receipts: BlockReceiptReader,
+): readonly BlockReceiptSummary[] => {
+  const summaries: BlockReceiptSummary[] = [];
+  for (let blockRun = 1; blockRun <= attempts; blockRun += 1) {
+    const receiptId = blockReceiptId({
+      workflowId: execution.workflowId,
+      workflowRunId: execution.runId,
+      nodeId,
+      blockRun,
+    });
+    const stored = receipts.read(receiptId);
+    if (!stored.ok) {
+      throw new Error(`Cannot read block receipt ${receiptId}: ${stored.error.kind}`);
+    }
+    if (stored.value !== null) summaries.push(receiptSummary(stored.value));
+  }
+  return summaries;
+};
+
+const toTechnicalNode = (
+  node: CompiledWorkflowNode,
+  execution: ExecutionWorkflowPublicState | null,
+  receipts: BlockReceiptReader,
   ancestors: ReadonlySet<string>,
 ): WorkflowTechnicalNode => {
-  if (ancestors.has(nodeId)) {
-    throw new Error(`Presentation contains a cycle at ${nodeId}`);
-  }
+  if (ancestors.has(node.id)) throw new Error(`Compiled workflow contains a cycle at ${node.id}`);
+  const nextAncestors = new Set(ancestors).add(node.id);
+  const attempts = node.kind === 'step' ? (execution?.blockRuns[node.id] ?? 0) : 0;
 
-  const node = requireNode(presentation, nodeId);
-  const nextAncestors = new Set(ancestors).add(nodeId);
   return WorkflowTechnicalNodeSchema.parse({
     id: node.id,
     kind: node.kind,
     label: nodeLabel(node),
-    status: node.status,
-    ...(node.kind === 'wait' ? { waitKind: node.waitKind } : {}),
-    children: childrenFor(node).map((childId) =>
-      toTechnicalNode(presentation, childId, nextAncestors),
+    status: execution?.nodeStates[node.id] ?? 'planned',
+    ...(node.kind === 'wait' ? { waitKind: node.for } : {}),
+    details:
+      node.kind === 'step'
+        ? {
+            kind: 'block',
+            blockReference: node.uses,
+            attempts,
+            receipts: execution === null ? [] : receiptsFor(node.id, attempts, execution, receipts),
+          }
+        : { kind: 'none' },
+    children: childrenFor(node).map((child) =>
+      toTechnicalNode(child, execution, receipts, nextAncestors),
     ),
   });
 };
@@ -144,14 +208,42 @@ export const aggregateWorkflowStageStatus = (
   return 'planned';
 };
 
-export const createOperatorWorkflowStages = (
-  presentation: WorkflowPresentationTree,
+const bootstrapAttempts = (lifecycle: TaskRunLifecycle, nodeId: string): number => {
+  if (nodeId !== 'investigation') return lifecycle.bootstrap.attempts[nodeId] ?? 0;
+  return Object.entries(lifecycle.bootstrap.attempts)
+    .filter(([key]) => key.startsWith('investigation:'))
+    .reduce((total, [, attempts]) => total + attempts, 0);
+};
+
+const createBootstrapStages = (lifecycle: TaskRunLifecycle): readonly OperatorWorkflowStage[] =>
+  bootstrapGroups.map(({ stage, nodes }, index) => {
+    const technicalNodes = nodes.map(({ id, label }) =>
+      WorkflowTechnicalNodeSchema.parse({
+        id: `bootstrap:${id}`,
+        kind: 'bootstrap',
+        label,
+        status: lifecycle.bootstrap.nodeStates[id] ?? 'planned',
+        details: { kind: 'bootstrap', attempts: bootstrapAttempts(lifecycle, id) },
+        children: [],
+      }),
+    );
+    return OperatorWorkflowStageSchema.parse({
+      key: `bootstrap:${stage.id}:${String(index + 1)}`,
+      ...stage,
+      status: aggregateWorkflowStageStatus(technicalNodes),
+      nodes: technicalNodes,
+    });
+  });
+
+const createExecutionStages = (
+  graph: CompiledWorkflow,
+  execution: ExecutionWorkflowPublicState | null,
+  receipts: BlockReceiptReader,
 ): readonly OperatorWorkflowStage[] => {
-  const root = requireNode(presentation, presentation.rootId);
-  const roots = root.kind === 'sequence' ? root.childIds : [root.id];
-  const candidates = roots.map((nodeId) => ({
-    node: toTechnicalNode(presentation, nodeId, new Set()),
-    stage: firstDescendantStage(presentation, nodeId, new Set()),
+  const roots = graph.root.kind === 'sequence' ? graph.root.children : [graph.root];
+  const candidates = roots.map((node) => ({
+    node: toTechnicalNode(node, execution, receipts, new Set()),
+    stage: firstDescendantStage(node, new Set()),
   }));
   const stages: OperatorWorkflowStage[] = [];
 
@@ -172,7 +264,7 @@ export const createOperatorWorkflowStages = (
 
     stages.push(
       OperatorWorkflowStageSchema.parse({
-        key: `${descriptor.id}:${String(stages.length + 1)}`,
+        key: `execution:${descriptor.id}:${String(stages.length + 1)}`,
         id: descriptor.id,
         label: descriptor.label,
         status: aggregateWorkflowStageStatus([candidate.node]),
@@ -184,25 +276,34 @@ export const createOperatorWorkflowStages = (
   return stages;
 };
 
-const applyNodeStatuses = (
-  node: WorkflowTechnicalNode,
-  nodeStates: Readonly<Record<string, WorkflowNodeStatus>>,
-): WorkflowTechnicalNode =>
-  WorkflowTechnicalNodeSchema.parse({
-    ...node,
-    status: nodeStates[node.id] ?? node.status,
-    children: node.children.map((child) => applyNodeStatuses(child, nodeStates)),
-  });
-
-export const applyWorkflowNodeStatuses = (
-  stages: readonly OperatorWorkflowStage[],
-  nodeStates: Readonly<Record<string, WorkflowNodeStatus>>,
-): readonly OperatorWorkflowStage[] =>
-  stages.map((stage) => {
-    const nodes = stage.nodes.map((node) => applyNodeStatuses(node, nodeStates));
-    return OperatorWorkflowStageSchema.parse({
-      ...stage,
-      nodes,
-      status: aggregateWorkflowStageStatus(nodes),
+export const createOperatorWorkflowProjection = (
+  taskReference: string,
+  lifecycle: TaskRunLifecycle | null,
+  receipts: BlockReceiptReader,
+): OperatorWorkflowProjection => {
+  if (lifecycle === null) {
+    return OperatorWorkflowProjectionSchema.parse({
+      schemaVersion: 1,
+      taskReference,
+      status: 'not_started',
+      activeRuntime: null,
+      graphHash: null,
+      stages: [],
     });
+  }
+
+  const execution = lifecycle.execution;
+  const active = execution ?? lifecycle.bootstrap;
+  const graph = lifecycle.bootstrap.draft?.graph ?? null;
+  return OperatorWorkflowProjectionSchema.parse({
+    schemaVersion: 1,
+    taskReference,
+    status: active.status,
+    activeRuntime: execution === null ? 'bootstrap' : 'execution',
+    graphHash: lifecycle.bootstrap.workflowHash,
+    stages: [
+      ...createBootstrapStages(lifecycle),
+      ...(graph === null ? [] : createExecutionStages(graph, execution, receipts)),
+    ],
   });
+};

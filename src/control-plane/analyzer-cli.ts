@@ -14,7 +14,6 @@ import {
 } from '../workspaces/index.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import type { WorkflowResponse } from './m1-contracts.js';
-import { renderWorkflowStages } from './m1-cli.js';
 import { createM1WorkflowService } from './m1-service.js';
 
 type WriteLine = (line: string) => void;
@@ -36,14 +35,14 @@ const renderResponse = (response: WorkflowResponse, write: WriteLine): number =>
   write(response.view.fixture.title);
   write(`status=${response.status} hash=${response.view.workflow.graphHash ?? 'none'}`);
 
-  if (response.view.workflow.stages === null) {
+  if (response.status === 'rejected') {
     for (const issue of response.view.workflow.validatorReport.issues) {
       write(`- ${issue.code} ${issue.path.join('.')}: ${issue.message}`);
     }
     return 1;
   }
 
-  write(renderWorkflowStages(response.view.workflow.stages));
+  write(JSON.stringify(response.view.workflow.graph, null, 2));
   return 0;
 };
 

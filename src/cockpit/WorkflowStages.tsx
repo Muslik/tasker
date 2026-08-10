@@ -1,6 +1,7 @@
 import {
   Braces,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleDot,
   GitBranch,
@@ -26,6 +27,7 @@ const nodeIcons: Readonly<Record<string, ComponentType<{ className?: string }>>>
   wait: Pause,
   gate: ShieldCheck,
   finalize: Check,
+  bootstrap: CircleDot,
 };
 
 const statusTone: Readonly<Record<WorkflowNodeStatus, string>> = {
@@ -37,33 +39,101 @@ const statusTone: Readonly<Record<WorkflowNodeStatus, string>> = {
   failed: 'bg-destructive',
 };
 
-const TechnicalNode = ({ node }: { readonly node: WorkflowTechnicalNode }) => {
+const evidenceLabel = (
+  evidence: Extract<
+    WorkflowTechnicalNode['details'],
+    { readonly kind: 'block' }
+  >['receipts'][number]['evidence'][number],
+): string => {
+  switch (evidence.kind) {
+    case 'artifact':
+      return `artifact · ${evidence.artifactKind}`;
+    case 'process':
+      return `process · exit ${String(evidence.exitCode)}`;
+    case 'workspace_mutation':
+      return evidence.changed ? 'workspace · changed' : 'workspace · unchanged';
+    case 'effect':
+      return `effect · ${evidence.remoteIdentity}${evidence.reconciled ? ' · reconciled' : ''}`;
+  }
+};
+
+const NodeRow = ({ node }: { readonly node: WorkflowTechnicalNode }) => {
   const Icon = nodeIcons[node.kind] ?? Braces;
+  const attempts = node.details.kind === 'none' ? 0 : node.details.attempts;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="group flex min-h-7 w-full items-center gap-2 rounded px-1.5 text-left hover:bg-muted/60" />
+        }
+      >
+        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+          <Icon className="size-3" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground group-hover:text-foreground">
+          {node.label}
+        </span>
+        {attempts === 0 ? null : (
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            {attempts} {attempts === 1 ? 'attempt' : 'attempts'}
+          </span>
+        )}
+        {node.waitKind === undefined ? null : (
+          <Pause className="size-3 shrink-0 text-amber-400" aria-label="durable wait" />
+        )}
+        <span
+          className={`size-1.5 shrink-0 rounded-full ${statusTone[node.status]}`}
+          aria-label={node.status}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="left" align="center">
+        <span className="font-mono">{node.id}</span>
+        <span className="text-background/60"> · {node.kind}</span>
+        {node.waitKind === undefined ? null : <span> · {node.waitKind}</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+const TechnicalNode = ({ node }: { readonly node: WorkflowTechnicalNode }) => {
+  const receipts = node.details.kind === 'block' ? node.details.receipts : [];
 
   return (
     <li>
-      <Tooltip>
-        <TooltipTrigger className="group flex min-h-7 w-full items-center gap-2 rounded px-1.5 text-left hover:bg-muted/60">
-          <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-            <Icon className="size-3" />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground group-hover:text-foreground">
-            {node.label}
-          </span>
-          {node.waitKind === undefined ? null : (
-            <Pause className="size-3 shrink-0 text-amber-400" aria-label="durable wait" />
-          )}
-          <span
-            className={`size-1.5 shrink-0 rounded-full ${statusTone[node.status]}`}
-            aria-label={node.status}
-          />
-        </TooltipTrigger>
-        <TooltipContent side="left" align="center">
-          <span className="font-mono">{node.id}</span>
-          <span className="text-background/60"> · {node.kind}</span>
-          {node.waitKind === undefined ? null : <span> · {node.waitKind}</span>}
-        </TooltipContent>
-      </Tooltip>
+      {receipts.length === 0 ? (
+        <NodeRow node={node} />
+      ) : (
+        <details className="group/node">
+          <summary className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0 flex-1">
+              <NodeRow node={node} />
+            </span>
+            <ChevronDown className="mr-1 size-3 shrink-0 text-muted-foreground transition-transform group-open/node:rotate-180" />
+          </summary>
+          <ol className="mb-1 ml-6 space-y-2 border-l border-border/60 py-1 pl-2">
+            {receipts.map((receipt) => (
+              <li className="text-[11px] leading-4 text-muted-foreground" key={receipt.receiptId}>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-foreground">Attempt {receipt.blockRun}</span>
+                  <span>{receipt.verdict}</span>
+                  <span>{receipt.claimStatus.replaceAll('_', ' ')}</span>
+                </div>
+                <p className="mt-0.5">{receipt.summary}</p>
+                {receipt.evidence.length === 0 ? null : (
+                  <ul className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[10px]">
+                    {receipt.evidence.map((evidence) => (
+                      <li key={`${evidence.kind}:${evidence.reference}`}>
+                        {evidenceLabel(evidence)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
       {node.children.length === 0 ? null : (
         <ol className="ml-3 border-l border-border/60 pl-1.5">
           {node.children.map((child) => (

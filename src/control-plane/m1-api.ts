@@ -3,6 +3,7 @@ import { extname, join, relative, resolve } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import type { BlockReceiptStore } from '../blocks/index.js';
 import { type ImplementationPlanningCoordinator } from './implementation-planning.js';
 import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
@@ -24,16 +25,16 @@ import {
   DEFAULT_RUN_START_COMMAND,
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
+  OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
   PlanReviewCommandSchema,
   ResumeRunCommandSchema,
   RunStartCommandSchema,
   WorkflowResponseSchema,
   type OperatorTaskSummary,
-  type WorkflowResponse,
 } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
-import { applyWorkflowNodeStatuses } from './operator-workflow-projection.js';
+import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import {
@@ -64,6 +65,7 @@ export interface BuildM1ApiOptions {
   readonly executionActivity?: ExecutionActivityReader | undefined;
   readonly bitbucketReview?: Pick<BitbucketReviewCoordinator, 'sync'> | undefined;
   readonly temporalRunService: TaskRunService;
+  readonly blockReceipts: Pick<BlockReceiptStore, 'read'>;
 }
 
 const apiError = (error: string, message: string) =>
@@ -201,24 +203,6 @@ const applyTemporalRunToTask = (
         currentStage: `Workflow completed · ${run.outcome}`,
       });
   }
-};
-
-const decorateWorkflowWithTemporalState = (
-  workflow: WorkflowResponse,
-  run: TaskRunPublicState | null,
-): WorkflowResponse => {
-  if (run?.runtime !== 'execution' || workflow.view.workflow.stages === null) return workflow;
-
-  return WorkflowResponseSchema.parse({
-    ...workflow,
-    view: {
-      ...workflow.view,
-      workflow: {
-        ...workflow.view.workflow,
-        stages: applyWorkflowNodeStatuses(workflow.view.workflow.stages, run.nodeStates),
-      },
-    },
-  });
 };
 
 const contentType = (filename: string): string => {
@@ -373,6 +357,25 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     );
   });
 
+  api.get('/api/operator/tasks/:fixtureId/projection', async (request, reply) => {
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+
+    const lifecycle = await temporalRunService.readLifecycle(params.data.fixtureId);
+    if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
+    return reply.send(
+      OperatorWorkflowProjectionSchema.parse(
+        createOperatorWorkflowProjection(
+          params.data.fixtureId,
+          lifecycle.value,
+          options.blockReceipts,
+        ),
+      ),
+    );
+  });
+
   api.get('/api/jira/issues/:issueKey', (request, reply) => {
     if (options.jiraIssueService === undefined) {
       return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
@@ -507,12 +510,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
     }
 
-    const run = await temporalRunService.read(params.data.fixtureId);
-    return reply.send(
-      WorkflowResponseSchema.parse(
-        run.ok ? decorateWorkflowWithTemporalState(result.value, run.value) : result.value,
-      ),
-    );
+    return reply.send(WorkflowResponseSchema.parse(result.value));
   });
 
   api.get('/api/workflows/:fixtureId/run', async (request, reply) => {

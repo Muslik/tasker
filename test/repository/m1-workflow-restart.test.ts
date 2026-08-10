@@ -40,7 +40,7 @@ describe('M1 persisted workflow', () => {
           kind: 'upsert',
           projectionType: 'm1_workflow',
           projectionId: 'obsolete-workflow',
-          payload: { schemaVersion: 4, workflow: { tree: {} } },
+          payload: { schemaVersion: 5, workflow: { stages: [] } },
         },
       ],
     });
@@ -66,15 +66,6 @@ describe('M1 persisted workflow', () => {
 
     const originalHash = generated.value.view.workflow.graphHash;
     expect(originalHash).not.toBeNull();
-    expect(generated.value.view.workflow.stages?.map(({ id }) => id)).toEqual([
-      'preparation',
-      'implementation',
-      'delivery',
-      'implementation',
-      'verification',
-      'delivery',
-      'review',
-    ]);
     firstLedger.close();
 
     clock.advance(60_000);
@@ -98,7 +89,7 @@ describe('M1 persisted workflow', () => {
     restartedLedger.close();
   });
 
-  it('projects a bug graph into operator stages while keeping its technical blocks nested', () => {
+  it('persists the compiled graph without runtime presentation state', () => {
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
     const ledger = openSqliteLedger({ filename: databasePath(), clock });
     const service = createM1WorkflowService(ledger.repository, clock);
@@ -107,16 +98,10 @@ describe('M1 persisted workflow', () => {
 
     expect(generated.ok).toBe(true);
     if (!generated.ok) return;
-    expect(generated.value.view.workflow.stages?.map(({ id, label }) => ({ id, label }))).toEqual([
-      { id: 'preparation', label: 'Prepare' },
-      { id: 'implementation', label: 'Implement' },
-      { id: 'verification', label: 'Verify' },
-      { id: 'delivery', label: 'Deliver' },
-      { id: 'review', label: 'Review' },
-    ]);
-    expect(generated.value.view.workflow.stages?.[2]?.nodes).toMatchObject([
-      { id: 'reproduce-after', kind: 'step', label: 'reproduce-after · bug.reproduce@1' },
-    ]);
+    expect(generated.value.view.workflow.graphHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(generated.value.view.workflow.graph).toMatchObject({
+      root: { kind: 'sequence' },
+    });
 
     ledger.close();
   });
@@ -133,7 +118,6 @@ describe('M1 persisted workflow', () => {
     expect(generated.value.status).toBe('rejected');
     expect(generated.value.view.task.status).toBe('workflow_rejected');
     expect(generated.value.view.workflow.graph).toBeNull();
-    expect(generated.value.view.workflow.stages).toBeNull();
     expect(generated.value.view.workflow.validatorReport.issues).toMatchObject([
       { code: 'unknown_reference' },
     ]);

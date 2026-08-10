@@ -174,8 +174,10 @@ summaries. Secrets never enter Workflow input or Event History.
   Delivery, CI, or Human review. It groups work but is not schedulable. Every block and
   durable wait declares its stage in the harness contract. Tasker groups only adjacent
   graph roots with the same stage, so a task may revisit Implement, Delivery, or Review
-  without those episodes being merged. Stage state is derived from Temporal node state;
-  expanding a stage reveals the exact immutable graph nodes that produced it.
+  without those episodes being merged. Bootstrap stages come from the complete
+  Bootstrap lifecycle; execution stage state comes from Execution node state.
+  Expanding a stage reveals the exact immutable graph nodes and Block Receipts that
+  produced it.
 - **Block** is a reusable versioned work contract selected into one task graph. It owns
   inputs, outcomes, completion rules, recovery, prompt/skills/profile where relevant,
   and produced evidence.
@@ -423,10 +425,15 @@ cached Jira data, graph rationale, transcripts, artifacts, usage, shadow cost,
 retrospective annotations, and UI-friendly indexes.
 
 The primary operator rail renders configured stage episodes, not the raw execution
-tree. The raw graph remains downloadable diagnostic evidence. Changing a block's stage
-or registering a new stage does not require a Cockpit change. Pre-pilot projection
-schema cutovers delete obsolete projections and regenerate them; Tasker does not
-upcast the removed `workflow.tree` shape.
+tree. Its dedicated read model joins three authorities without becoming one itself:
+the Bootstrap/Execution lifecycle supplies live state, the frozen graph supplies
+structure, and immutable Block Receipts supply attempts, claims, evidence, and effects.
+The persisted `WorkflowView` retains planning decisions, validation, and the immutable
+graph only; it does not cache runtime stages. The raw graph remains downloadable
+diagnostic evidence. Changing a block's stage or registering a new stage does not
+require a Cockpit change. Pre-pilot projection schema cutovers delete obsolete
+projections and regenerate them; Tasker does not upcast removed `workflow.tree` or
+`workflow.stages` shapes.
 
 Routine sync successes and failures do not grow the activity timeline. Operational
 logs are redacted, bounded, and separate from agent/task activity. Temporal Event
