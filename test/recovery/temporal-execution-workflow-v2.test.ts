@@ -94,8 +94,15 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
 });
 
 const activities: ExecutionWorkflowActivities = {
-  runExecutionBlock: (input) =>
-    Promise.resolve({
+  runExecutionBlock: (input) => {
+    if (
+      input.taskReference === 'fixture:activity-failure' &&
+      input.nodeId === 'inspect' &&
+      input.blockRun === 1
+    ) {
+      return Promise.reject(new Error('receipt persistence failed'));
+    }
+    return Promise.resolve({
       status: 'completed',
       summary: `${input.uses} completed`,
       predicateFacts:
@@ -103,7 +110,8 @@ const activities: ExecutionWorkflowActivities = {
           ? { 'investigation.ready@1': true }
           : { 'repair.done@1': input.blockRun >= 2 },
       receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
-    }),
+    });
+  },
   evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
 };
 
@@ -130,12 +138,15 @@ describe('Execution Workflow v2 recovery', () => {
     waitKind: string,
   ): Promise<ExecutionWorkflowPublicState> => {
     await expect
-      .poll(async () => {
-        const result = await runs.read(taskReference);
-        if (!result.ok || result.value === null) return 'missing';
-        const state = result.value;
-        return state.status === 'waiting' ? state.wait.waitKind : state.status;
-      })
+      .poll(
+        async () => {
+          const result = await runs.read(taskReference);
+          if (!result.ok || result.value === null) return 'missing';
+          const state = result.value;
+          return state.status === 'waiting' ? state.wait.waitKind : state.status;
+        },
+        { interval: 100, timeout: 10_000 },
+      )
       .toBe(waitKind);
     const result = await runs.read(taskReference);
     if (!result.ok || result.value === null) throw new Error('Execution run is unavailable');
@@ -237,5 +248,32 @@ describe('Execution Workflow v2 recovery', () => {
       },
     });
     await secondAfterRestart.cancel();
+  }, 30_000);
+
+  it('turns an exhausted Activity failure into a resumable operator wait', async () => {
+    const taskReference = 'fixture:activity-failure';
+    expect(await runs.start(workflowInput(taskReference))).toMatchObject({ ok: true });
+
+    expect(await waitFor(taskReference, 'fixture.inspect@1.activity-failed@1')).toMatchObject({
+      status: 'waiting',
+      currentNodeId: 'inspect',
+      blockRuns: { inspect: 1 },
+    });
+
+    expect(
+      await runs.resolveWait(taskReference, {
+        nodeId: 'inspect',
+        waitKind: 'fixture.inspect@1.activity-failed@1',
+        resolution: { decision: 'resume', guidance: 'Retry the preserved execution.' },
+      }),
+    ).toMatchObject({ ok: true });
+
+    expect(await waitFor(taskReference, 'review.accepted@1')).toMatchObject({
+      status: 'waiting',
+      blockRuns: { inspect: 2 },
+    });
+    await environment.client.workflow
+      .getHandle('tasker:execution:v2:fixture:activity-failure')
+      .cancel();
   }, 30_000);
 });

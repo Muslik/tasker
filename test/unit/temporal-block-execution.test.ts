@@ -335,7 +335,7 @@ describe('temporal block execution activity', () => {
 
     expect(replacement).toEqual(first);
     expect(first.artifactIds).toEqual([
-      'task-step-output:tasker:task-ref:implement-feature:attempt-1:artifact',
+      'task-step-output:tasker:task-ref:run-1:implement-feature:attempt-1:artifact',
       'task-step-mutation-intent:test',
     ]);
     expect(run).toHaveBeenCalledTimes(1);
@@ -472,7 +472,7 @@ describe('temporal block execution activity', () => {
         'Agent execution for code.implement@1 is blocked: Provider stopped after reporting a controlled failure',
       waitKind: 'code.implement.1.blocked@1',
       artifactIds: [
-        'task-step-output:tasker:task-ref:implement-feature:attempt-1:artifact',
+        'task-step-output:tasker:task-ref:run-1:implement-feature:attempt-1:artifact',
         'task-step-mutation-intent:test',
       ],
     });
@@ -715,11 +715,29 @@ describe('temporal block execution activity', () => {
       status: 'completed',
       summary: 'Pull request 73 is ready for review',
       artifactIds: [
-        'task-step-output:tasker:task-ref:prepare-pr:attempt-1:artifact',
+        'task-step-output:tasker:task-ref:run-1:prepare-pr:attempt-1:artifact',
         'external-effect:prepare-pr:receipt',
       ],
     });
-    expect(execute).toHaveBeenCalledTimes(1);
+
+    const nextRun = await executeRegisteredTaskStep(
+      {
+        ...input,
+        workflowRunId: 'run-2',
+        workspace: { ...stubWorkspace, workflowRunId: 'run-2' },
+      },
+      dependencies,
+      runtime,
+    );
+
+    expect(nextRun).toMatchObject({
+      status: 'completed',
+      artifactIds: [
+        'task-step-output:tasker:task-ref:run-2:prepare-pr:attempt-1:artifact',
+        'external-effect:prepare-pr:receipt',
+      ],
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it('advances the execution graph only after an accepted BlockReceipt', async () => {

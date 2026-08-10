@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadHarnessPack } from '../../../src/harness/index.js';
+import { JiraLifecyclePolicyConfigurationSchema } from '../../../src/integrations/jira/lifecycle.js';
 import {
   createHarnessWorkflowContracts,
   getHarnessStepDefinition,
@@ -232,6 +233,16 @@ describe('file-backed harness pack', () => {
       id: 'home',
       mountPath: '/tasker/home',
     });
+  });
+
+  it('admits the company Jira issue types used for frontend work', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const policy = pack.policies.find(({ id }) => id === 'jira-lifecycle');
+    const configuration = JiraLifecyclePolicyConfigurationSchema.parse(policy?.configuration);
+
+    expect(configuration.admission.allowedIssueTypes).toEqual(
+      expect.arrayContaining(['Bug', 'Task', 'Story', 'Frontend Story']),
+    );
   });
 
   it('declares Activity redelivery at the step contract boundary', () => {

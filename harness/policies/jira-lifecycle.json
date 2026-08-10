@@ -11,7 +11,7 @@
     "provider": "jira",
     "admission": {
       "accountName": "dzhabrail.markhiev@onetwotrip.com",
-      "allowedIssueTypes": ["Bug", "Task", "Story", "Sub-task"],
+      "allowedIssueTypes": ["Bug", "Task", "Story", "Frontend Story", "Sub-task"],
       "deniedLabels": ["agent-disabled"],
       "statusPath": ["Backlog", "Open", "In Progress"]
     },

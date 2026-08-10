@@ -1,7 +1,9 @@
 import {
+  ActivityFailure,
   ApplicationFailure,
   condition,
   proxyActivities,
+  rootCause,
   setHandler,
   workflowInfo,
 } from '@temporalio/workflow';
@@ -189,20 +191,29 @@ export async function executionWorkflowV2(
       node.activityDelivery.kind === 'single_attempt'
         ? singleDeliveryActivities
         : recoverableDeliveryActivities;
-    return activities.runExecutionBlock({
-      schemaVersion: 2,
-      taskReference: input.taskReference,
-      workflowId: execution.workflowId,
-      workflowRunId: execution.runId,
-      workflowHash: input.workflowHash,
-      nodeId: node.id,
-      blockRun: blockRuns[node.id] ?? 1,
-      uses: node.uses,
-      activityDelivery: node.activityDelivery,
-      contextReferences: input.contextReferences,
-      operatorGuidance,
-      input: node.with,
-    });
+    try {
+      return await activities.runExecutionBlock({
+        schemaVersion: 2,
+        taskReference: input.taskReference,
+        workflowId: execution.workflowId,
+        workflowRunId: execution.runId,
+        workflowHash: input.workflowHash,
+        nodeId: node.id,
+        blockRun: blockRuns[node.id] ?? 1,
+        uses: node.uses,
+        activityDelivery: node.activityDelivery,
+        contextReferences: input.contextReferences,
+        operatorGuidance,
+        input: node.with,
+      });
+    } catch (error) {
+      if (!(error instanceof ActivityFailure)) throw error;
+      return {
+        status: 'needs_input',
+        summary: `Execution activity for ${node.uses} failed after retries: ${rootCause(error) ?? error.message}`,
+        waitKind: `${node.uses}.activity-failed@1`,
+      };
+    }
   };
 
   const executeNode = async (node: CompiledWorkflowNode): Promise<Traversal> => {

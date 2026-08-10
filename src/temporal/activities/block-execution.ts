@@ -993,8 +993,15 @@ const persistBlockedArtifact = (
   return persisted.ok ? [persisted.value.artifactId] : [];
 };
 
+const executionOperationIdFor = (
+  workflowId: string,
+  workflowRunId: string,
+  nodeId: string,
+  attempt: number,
+): string => `${workflowId}:${workflowRunId}:${nodeId}:attempt-${String(attempt)}`;
+
 const executionOperationId = (input: ExecuteTaskStepInput): string =>
-  `${input.workflowId}:${input.nodeId}:attempt-${String(input.stepAttempt)}`;
+  executionOperationIdFor(input.workflowId, input.workflowRunId, input.nodeId, input.stepAttempt);
 
 const persistAgentBlockedResult = (
   traces: TemporalTaskStepTraceStore,
@@ -1859,7 +1866,12 @@ export const createTaskExecutionActivity = (
       dependencies,
       runtimeFactory(),
     );
-    const operationId = `${input.workflowId}:${input.nodeId}:attempt-${String(input.blockRun)}`;
+    const operationId = executionOperationIdFor(
+      input.workflowId,
+      input.workflowRunId,
+      input.nodeId,
+      input.blockRun,
+    );
     const outputArtifact = dependencies.traces.readOutputArtifact(operationId);
     if (!outputArtifact.ok || outputArtifact.value === null) {
       return {
