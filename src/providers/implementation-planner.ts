@@ -13,7 +13,7 @@ import {
   type PlanningStrategy,
 } from '../planning/implementation-plan.js';
 import { analyzeTaskFixture } from '../planning/proposal.js';
-import { WorkflowSourceSchema } from '../workflow/index.js';
+import { WorkflowSourceSchema, type WorkflowNodeSource } from '../workflow/index.js';
 import {
   PlanningEvidenceRequestSchema,
   type PlanningEvidenceRequest,
@@ -312,7 +312,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
       const receipt = ImplementationPlannerReceiptSchema.parse({
         status: 'completed',
         provider: profile.provider === 'codex' ? 'codex_cli' : 'claude_cli',
-        plannerVersion: 'implementation-planner@2',
+        plannerVersion: 'implementation-planner@3',
         profile: profile.name,
         profileSha256: profile.configurationSha256,
         cliVersion: version.stdout.trim(),
@@ -384,10 +384,48 @@ export class DeterministicImplementationPlanner implements ImplementationPlanner
         err({ kind: 'invalid_planner_output', issues: ['Deterministic fixture is invalid.'] }),
       );
     }
+    const workflowSource = WorkflowSourceSchema.parse(analyzed.value.source);
+    const executableStepIds: string[] = [];
+    const validationStepIds: string[] = [];
+    const collectStepIds = (node: WorkflowNodeSource): void => {
+      switch (node.kind) {
+        case 'step':
+          executableStepIds.push(node.id);
+          if (node.uses.startsWith('validate.') || node.uses === 'bug.validate_fix@1') {
+            validationStepIds.push(node.id);
+          }
+          return;
+        case 'sequence':
+          node.children.forEach(collectStepIds);
+          return;
+        case 'branch':
+          collectStepIds(node.then);
+          collectStepIds(node.otherwise);
+          return;
+        case 'bounded_loop':
+          collectStepIds(node.body);
+          return;
+        case 'wait':
+        case 'gate':
+        case 'finalize':
+          return;
+      }
+    };
+    collectStepIds(workflowSource.root);
+    const verificationStepIds =
+      validationStepIds.length > 0 ? validationStepIds.slice(0, 1) : executableStepIds.slice(0, 1);
+    if (verificationStepIds.length === 0) {
+      return Promise.resolve(
+        err({
+          kind: 'invalid_planner_output',
+          issues: ['Deterministic fixture has no executable verification step.'],
+        }),
+      );
+    }
     const decision = ImplementationPlanningDecisionSchema.parse({
       status: 'ready',
       plan: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         title:
           guidance === null ? 'Implement the requested task' : 'Revise the implementation plan',
         summary:
@@ -432,14 +470,36 @@ export class DeterministicImplementationPlanner implements ImplementationPlanner
           },
         ],
         acceptanceCriteria: [
-          'The task-visible behavior matches the requested outcome.',
-          'The configured verification profile completes with durable evidence.',
+          {
+            id: 'requested-behavior',
+            expected: 'The task-visible behavior matches the requested outcome.',
+            verification: [
+              {
+                kind: 'runtime_evidence',
+                scenario: 'Exercise the task-visible behavior after implementation.',
+                evidence: ['structured_output'],
+                workflowStepIds: verificationStepIds,
+              },
+            ],
+          },
+          {
+            id: 'configured-verification',
+            expected: 'The configured verification profile completes with durable evidence.',
+            verification: [
+              {
+                kind: 'process',
+                profile: analyzed.value.verificationPlan.profile,
+                scenario: analyzed.value.verificationPlan.checks.join('; '),
+                workflowStepIds: verificationStepIds,
+              },
+            ],
+          },
         ],
       },
       followUps: [],
       workflow: {
         assemblyDecisions: analyzed.value.assemblyDecisions,
-        source: WorkflowSourceSchema.parse(analyzed.value.source),
+        source: workflowSource,
         verificationPlan: analyzed.value.verificationPlan,
       },
     });
@@ -451,7 +511,7 @@ export class DeterministicImplementationPlanner implements ImplementationPlanner
         receipt: ImplementationPlannerReceiptSchema.parse({
           status: 'completed',
           provider: 'deterministic',
-          plannerVersion: 'implementation-planner@2',
+          plannerVersion: 'implementation-planner@3',
           profile: 'deterministic',
           profileSha256: promptHash,
           cliVersion: 'deterministic@1',

@@ -14,6 +14,7 @@ import {
   ImplementationPlanLinkSchema,
   PlanningClarificationAnswerCommandSchema,
   PlanningStrategySchema,
+  validateAcceptanceVerificationLinks,
   type PlanningStrategy,
   type PlanningStrategyRequest,
   type PlanningQuestionAnswer,
@@ -1555,6 +1556,25 @@ export class ImplementationPlanningCoordinator {
           readonly executionSnapshot: PlanningSnapshotReference;
         } | null = null;
         if (result.value.decision.status === 'ready') {
+          const acceptanceIssues = validateAcceptanceVerificationLinks(result.value.decision);
+          if (acceptanceIssues.length > 0) {
+            if (planning.validationRevision >= 2) {
+              const failed = this.store.fail(
+                planning,
+                { kind: 'invalid_planner_output', issues: acceptanceIssues },
+                result.value.receipt,
+              );
+              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+            }
+            const rejected = this.store.recordValidationRejection(
+              planning,
+              acceptanceIssues,
+              result.value.decision,
+            );
+            if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
+            planning = rejected.value;
+            continue;
+          }
           const candidateNumber = planning.validationRevision + 1;
           const operationId = `${commandId}:workflow-candidate:${String(candidateNumber)}`;
           const assembled = this.workflows.assembleFromImplementationPlanAtOperation(

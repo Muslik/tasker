@@ -95,7 +95,16 @@ one of three typed decisions:
    be produced. The planner selects only registered blocks whose `availableDuring`
    includes `bootstrap_investigation`.
 3. `ready` — the implementation plan, optional non-blocking follow-ups, and a complete
-   task-specific execution workflow proposal.
+   task-specific execution workflow proposal. Each acceptance criterion contains an
+   observable expectation and typed verification linked to the exact workflow step
+   nodes that will prove it. A missing step reference rejects the whole decision.
+
+Planning chooses whether verification reuses an existing automated test, creates a new
+test during implementation, runs a registered project process, records runtime evidence,
+or performs bounded inspection. No verification kind is mandatory for every task, and
+there is no generic test-materialization block. For a reproduced bug, the planner can
+combine a regression test with `bug.validate_fix@1`, which repeats the investigated
+scenario after implementation.
 
 An external evidence request is a provider protocol response, not a fourth planning
 decision. The provider may not return a provisional decision while requesting evidence.

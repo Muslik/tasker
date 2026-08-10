@@ -141,7 +141,7 @@ export const testTemporalActivities = {
       receipt: {
         status: 'completed' as const,
         provider: 'deterministic' as const,
-        plannerVersion: 'implementation-planner@2',
+        plannerVersion: 'implementation-planner@3',
         profile: 'deterministic',
         profileSha256: HASH,
         cliVersion: 'temporal-test@1',

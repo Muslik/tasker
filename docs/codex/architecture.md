@@ -128,10 +128,15 @@ Assembly input is a bounded, provenance-bearing planner context:
 - exact prompt, skill, policy, and provider-profile versions/hashes.
 
 The planner's `ready` decision emits untrusted `WorkflowSource` JSON together with the
-implementation plan and optional follow-ups. A deterministic compiler parses,
-canonicalizes, validates, and hashes it. The compiler may reject a graph but never
-silently insert missing nodes; otherwise the UI's “why this workflow” provenance would
-be false.
+implementation plan and optional follow-ups. Every acceptance criterion declares an
+observable expected result plus typed verification (`automated_test`, `process`,
+`runtime_evidence`, or `inspection`) and references the exact execution step nodes that
+will prove it. A new automated test is an explicit planning choice and remains part of
+implementation; Tasker does not insert a universal test-materialization step. A
+deterministic boundary rejects references to step nodes absent from the same candidate,
+then the compiler parses, canonicalizes, validates, and hashes the workflow. The
+compiler may reject a graph but never silently insert missing nodes; otherwise the UI's
+“why this workflow” provenance would be false.
 
 Examples of deterministic obligations:
 
@@ -341,9 +346,12 @@ operator-visible state, not permission to retry blindly.
 ## 8. Planning and questions
 
 An implementation plan is always created after graph-free context discovery and any
-planner-selected investigation. The same `ready` decision contains the plan and the
-first complete workflow candidate. `planReviewRequired` is chosen when starting the
-task:
+planner-selected investigation. It decides both acceptance and how acceptance will be
+proved: reuse or create an automated test, run a registered project process, collect
+runtime evidence, or inspect a bounded artifact. Planning remains read-only; test code
+and other workspace mutations happen in execution. The same `ready` decision contains
+the plan and the first complete workflow candidate. `planReviewRequired` is chosen when
+starting the task:
 
 - `false`: an accepted plan proceeds automatically;
 - `true`: the Workflow waits for operator approval or revision.

@@ -11,6 +11,7 @@ import {
 } from '../../../src/providers/index.js';
 import { getHarnessPack } from '../../../src/harness/index.js';
 import { analyzeTaskFixture, findTaskFixture } from '../../../src/planning/index.js';
+import { WorkflowSourceSchema, type WorkflowNodeSource } from '../../../src/workflow/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 
@@ -18,11 +19,37 @@ const task = findTaskFixture('avia-13236-short-bug');
 if (task === undefined) throw new Error('Missing planner test fixture');
 const proposal = analyzeTaskFixture(task);
 if (!proposal.ok) throw new Error('Invalid planner test fixture');
+const workflowSource = WorkflowSourceSchema.parse(proposal.value.source);
+const workflowStepIds: string[] = [];
+const collectWorkflowStepIds = (node: WorkflowNodeSource): void => {
+  switch (node.kind) {
+    case 'step':
+      workflowStepIds.push(node.id);
+      return;
+    case 'sequence':
+      node.children.forEach(collectWorkflowStepIds);
+      return;
+    case 'branch':
+      collectWorkflowStepIds(node.then);
+      collectWorkflowStepIds(node.otherwise);
+      return;
+    case 'bounded_loop':
+      collectWorkflowStepIds(node.body);
+      return;
+    case 'wait':
+    case 'gate':
+    case 'finalize':
+      return;
+  }
+};
+collectWorkflowStepIds(workflowSource.root);
+const verificationStepId = workflowStepIds[0];
+if (verificationStepId === undefined) throw new Error('Planner fixture has no workflow step');
 
 const readyDecision = {
   status: 'ready',
   plan: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     title: 'Repair the seat marker',
     summary: 'Ground the affected component, make the bounded repair, and verify it.',
     steps: [
@@ -37,12 +64,26 @@ const readyDecision = {
     ],
     assumptions: [],
     risks: [],
-    acceptanceCriteria: ['The marker uses the expected color.'],
+    acceptanceCriteria: [
+      {
+        id: 'marker-color',
+        expected: 'The marker uses the expected color.',
+        verification: [
+          {
+            kind: 'automated_test',
+            source: 'existing',
+            level: 'integration',
+            scenario: 'Run the targeted seat selection checks.',
+            workflowStepIds: [verificationStepId],
+          },
+        ],
+      },
+    ],
   },
   followUps: [],
   workflow: {
     assemblyDecisions: proposal.value.assemblyDecisions,
-    source: proposal.value.source,
+    source: workflowSource,
     verificationPlan: proposal.value.verificationPlan,
   },
 } as const;

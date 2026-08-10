@@ -261,7 +261,16 @@ const renderPlan = (evidence: z.infer<typeof AcceptedPlanEvidenceSchema>): strin
     '',
     '## Acceptance criteria',
     '',
-    ...plan.acceptanceCriteria.map((criterion) => `- ${criterion}`),
+    ...plan.acceptanceCriteria.flatMap((criterion) => [
+      `- **${criterion.id}** — ${criterion.expected}`,
+      ...criterion.verification.map((verification) => {
+        const description =
+          verification.kind === 'inspection'
+            ? `${verification.target}: ${verification.expectation}`
+            : verification.scenario;
+        return `  - ${verification.kind}: ${description} (${verification.workflowStepIds.join(', ')})`;
+      }),
+    ]),
     '',
   ];
   return `${sections.join('\n')}\n`;

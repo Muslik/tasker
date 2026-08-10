@@ -615,7 +615,7 @@ export class M1WorkflowService {
 
     const proposal = createWorkflowProposalFromAnalyzerOutput(
       fixture,
-      'implementation-planner@2',
+      'implementation-planner@3',
       output,
     );
     if (!proposal.ok) {

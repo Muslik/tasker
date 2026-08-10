@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema, NodeIdSchema, type WorkflowNodeSource } from '../workflow/schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
 import { TaskFixtureSchema } from './fixtures.js';
@@ -36,15 +36,64 @@ export const ImplementationPlanRiskSchema = z
   })
   .strict();
 
+const AcceptanceVerificationWorkflowStepsSchema = z.array(NodeIdSchema).min(1).max(10);
+
+export const AcceptanceVerificationSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('automated_test'),
+      source: z.enum(['existing', 'new']),
+      level: z.enum(['unit', 'integration', 'e2e', 'visual']),
+      scenario: z.string().min(1).max(2_000),
+      workflowStepIds: AcceptanceVerificationWorkflowStepsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('process'),
+      profile: z.string().min(1).max(160),
+      scenario: z.string().min(1).max(2_000),
+      workflowStepIds: AcceptanceVerificationWorkflowStepsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('runtime_evidence'),
+      scenario: z.string().min(1).max(2_000),
+      evidence: z
+        .array(z.enum(['video', 'image', 'log', 'structured_output']))
+        .min(1)
+        .max(4),
+      workflowStepIds: AcceptanceVerificationWorkflowStepsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('inspection'),
+      target: z.string().min(1).max(1_000),
+      expectation: z.string().min(1).max(2_000),
+      workflowStepIds: AcceptanceVerificationWorkflowStepsSchema,
+    })
+    .strict(),
+]);
+
+export const AcceptanceCriterionSchema = z
+  .object({
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    expected: z.string().min(1).max(1_000),
+    verification: z.array(AcceptanceVerificationSchema).min(1).max(10),
+  })
+  .strict();
+
 export const ImplementationPlanSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     title: z.string().min(1).max(200),
     summary: z.string().min(1).max(4_000),
     steps: z.array(ImplementationPlanStepSchema).min(1).max(30),
     assumptions: z.array(z.string().min(1).max(1_000)).max(20),
     risks: z.array(ImplementationPlanRiskSchema).max(20),
-    acceptanceCriteria: z.array(z.string().min(1).max(1_000)).min(1).max(30),
+    acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1).max(30),
   })
   .strict();
 
@@ -101,6 +150,33 @@ export const WorkflowChangeRequestSchema = z
   })
   .strict();
 
+const workflowStepIds = (root: WorkflowNodeSource): ReadonlySet<string> => {
+  const ids = new Set<string>();
+  const visit = (node: WorkflowNodeSource): void => {
+    switch (node.kind) {
+      case 'step':
+        ids.add(node.id);
+        return;
+      case 'sequence':
+        node.children.forEach(visit);
+        return;
+      case 'branch':
+        visit(node.then);
+        visit(node.otherwise);
+        return;
+      case 'bounded_loop':
+        visit(node.body);
+        return;
+      case 'wait':
+      case 'gate':
+      case 'finalize':
+        return;
+    }
+  };
+  visit(root);
+  return ids;
+};
+
 export const ReadyImplementationPlanningDecisionSchema = z
   .object({
     status: z.literal('ready'),
@@ -109,6 +185,30 @@ export const ReadyImplementationPlanningDecisionSchema = z
     workflow: WorkflowAnalyzerOutputSchema,
   })
   .strict();
+
+export const validateAcceptanceVerificationLinks = (
+  decision: z.infer<typeof ReadyImplementationPlanningDecisionSchema>,
+): readonly string[] => {
+  const criterionIds = new Set<string>();
+  const stepIds = workflowStepIds(decision.workflow.source.root);
+  const issues: string[] = [];
+  decision.plan.acceptanceCriteria.forEach((criterion) => {
+    if (criterionIds.has(criterion.id)) {
+      issues.push(`Duplicate acceptance criterion id ${criterion.id}.`);
+    }
+    criterionIds.add(criterion.id);
+    criterion.verification.forEach((verification) => {
+      verification.workflowStepIds.forEach((stepId) => {
+        if (!stepIds.has(stepId)) {
+          issues.push(
+            `Acceptance criterion ${criterion.id} references missing workflow step ${stepId}.`,
+          );
+        }
+      });
+    });
+  });
+  return issues;
+};
 
 export const ImplementationPlanningDecisionSchema = z.discriminatedUnion('status', [
   ReadyImplementationPlanningDecisionSchema,
@@ -143,6 +243,8 @@ export type PlanningStrategyRequest = z.infer<typeof PlanningStrategyRequestSche
 export type PlanningStrategy = z.infer<typeof PlanningStrategySchema>;
 export type ImplementationPlanLink = z.infer<typeof ImplementationPlanLinkSchema>;
 export type ImplementationPlan = z.infer<typeof ImplementationPlanSchema>;
+export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterionSchema>;
+export type AcceptanceVerification = z.infer<typeof AcceptanceVerificationSchema>;
 export type PlanningQuestionAnswer = z.infer<typeof PlanningQuestionAnswerSchema>;
 export type PlanningClarificationAnswerCommand = z.infer<
   typeof PlanningClarificationAnswerCommandSchema

@@ -38,7 +38,23 @@ Otherwise set `evidenceRequestsJson` to `"[]"` and return exactly one decision.
    will reject unknown blocks, unsafe effects, missing terminals, unbounded loops, or unmet task
    obligations and will invoke you again with exact validationFeedback.
 
-{"status":"ready","plan":{"schemaVersion":1,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":["observable outcome"]},"followUps":[{"id":"kebab-case","title":"...","reason":"..."}],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence","id":"delivery","children":[{"kind":"finalize","id":"finished","outcome":"accepted"}]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
+{"status":"ready","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"observable-outcome","expected":"...","verification":[{"kind":"process","profile":"targeted","scenario":"...","workflowStepIds":["validate-targeted"]}]}]},"followUps":[{"id":"kebab-case","title":"...","reason":"..."}],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence","id":"delivery","children":[{"kind":"step","id":"validate-targeted","uses":"validate.targeted@1","with":{"profile":"targeted","taskId":"..."}},{"kind":"finalize","id":"finished","outcome":"accepted"}]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
+
+Every acceptance criterion must have a unique kebab-case `id`, one observable `expected` outcome,
+and at least one typed verification. Verification is designed during planning and executed later;
+do not add a generic test-materialization step. Use only these exact verification shapes:
+
+- automated_test: {"kind":"automated_test","source":"existing|new","level":"unit|integration|e2e|visual","scenario":"...","workflowStepIds":["..."]}
+- process: {"kind":"process","profile":"project validation profile","scenario":"...","workflowStepIds":["..."]}
+- runtime_evidence: {"kind":"runtime_evidence","scenario":"...","evidence":["video|image|log|structured_output"],"workflowStepIds":["..."]}
+- inspection: {"kind":"inspection","target":"...","expectation":"...","workflowStepIds":["..."]}
+
+Every `workflowStepIds` entry must be the id of an actual `step` node in the proposed workflow that
+performs or proves that verification. Select `source: new` only when a stable automated test is
+appropriate; its creation remains implementation work. A reproduced bug normally uses the exact
+investigated scenario through `bug.validate_fix@1` and may additionally require an automated
+regression test. Visual, configuration, documentation, and integration work do not require an
+artificial new test when process, runtime evidence, or inspection is the honest proof.
 
 The workflow source has exactly the top-level keys `id`, `version`, and `root`. Every node must use
 one of these exact shapes. Fields shown are required unless marked optional:

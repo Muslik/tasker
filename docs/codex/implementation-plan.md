@@ -99,6 +99,14 @@ bounded corrections back to planning before optional review and freeze. The form
 pre-planning assembler, draft-revision Activity, schema v7 reader, and `phase=before`
 execution reproduction are deleted with no compatibility path.
 
+Implementation Plan v2 makes verification part of the accepted planning decision rather
+than an execution-time guess. Each criterion has a stable id, observable expectation,
+typed verification strategy, and references to the exact workflow step nodes that prove
+it. Missing references reject the decision. The planner may select a new automated test,
+but test creation remains implementation work and no universal materialization block is
+inserted. Planner receipts are `implementation-planner@3`; v1 plans and prior receipts
+have no compatibility reader.
+
 Phase 5 is complete. The former raw `workflow.tree` response, persisted
 `workflow.stages`, and Cockpit tree component are deleted. Blocks and durable waits own
 configurable stage descriptors. A dedicated operator endpoint joins the complete

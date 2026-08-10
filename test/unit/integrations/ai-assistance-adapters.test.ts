@@ -28,7 +28,7 @@ const acceptedPlan: JsonValue = {
   attempt: 1,
   selectedStrategy: 'fast',
   plan: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     title: 'Restore the fare card',
     summary: 'Repair the localized rendering regression.',
     steps: [
@@ -43,7 +43,21 @@ const acceptedPlan: JsonValue = {
     ],
     assumptions: [],
     risks: [],
-    acceptanceCriteria: ['The fare card remains visible without baggage data.'],
+    acceptanceCriteria: [
+      {
+        id: 'fare-card-visible',
+        expected: 'The fare card remains visible without baggage data.',
+        verification: [
+          {
+            kind: 'automated_test',
+            source: 'new',
+            level: 'integration',
+            scenario: 'Render the fare card without baggage data.',
+            workflowStepIds: ['validate-targeted'],
+          },
+        ],
+      },
+    ],
   },
 };
 

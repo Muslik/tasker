@@ -138,6 +138,9 @@ describe('file-backed harness pack', () => {
       '{"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":{}}',
     );
     expect(prompt.content).toContain('{"kind":"finalize","id":"...","outcome":"accepted"}');
+    expect(prompt.content).toContain('Every acceptance criterion must have a unique kebab-case');
+    expect(prompt.content).toContain('"workflowStepIds":["..."]');
+    expect(prompt.content).toContain('do not add a generic test-materialization step');
     expect(prompt.content).not.toContain('"maxIterations"');
     expect(prompt.content).not.toContain('"onExhausted"');
     expect(prompt.content).not.toContain('"cases"');

@@ -165,7 +165,7 @@ describe('implementation planning recovery', () => {
                   receipt: {
                     status: 'completed',
                     provider: 'deterministic',
-                    plannerVersion: 'implementation-planner@2',
+                    plannerVersion: 'implementation-planner@3',
                     profile: 'deterministic',
                     profileSha256: '0'.repeat(64),
                     cliVersion: 'deterministic@1',
@@ -423,6 +423,68 @@ describe('implementation planning recovery', () => {
             .listEvents(`implementation-plan:${TASK_REFERENCE}`)
             .map(({ eventType }) => eventType),
         ).toContain('ImplementationWorkflowCandidateRejected');
+      },
+    );
+  });
+
+  it('returns missing acceptance-verification steps to the planner as candidate feedback', async () => {
+    await withPlanningFixture(
+      'tasker-plan-acceptance-link-loop-',
+      async ({ directory, clock, ledger }) => {
+        const fallback = new DeterministicImplementationPlanner();
+        let calls = 0;
+        let feedback: readonly string[] = [];
+        const fixture = planningFixture(ledger, clock, directory, {
+          plan: async (request) => {
+            calls += 1;
+            const base = await fallback.plan(request);
+            if (!base.ok || base.value.decision?.status !== 'ready') return base;
+            if (calls === 1) {
+              const [criterion, ...remainingCriteria] = base.value.decision.plan.acceptanceCriteria;
+              if (criterion === undefined) throw new Error('Expected acceptance criterion');
+              const [verification, ...remainingVerifications] = criterion.verification;
+              if (verification === undefined) throw new Error('Expected acceptance verification');
+              return ok({
+                ...base.value,
+                decision: {
+                  ...base.value.decision,
+                  plan: {
+                    ...base.value.decision.plan,
+                    acceptanceCriteria: [
+                      {
+                        ...criterion,
+                        verification: [
+                          { ...verification, workflowStepIds: ['missing-verification-step'] },
+                          ...remainingVerifications,
+                        ],
+                      },
+                      ...remainingCriteria,
+                    ],
+                  },
+                },
+              });
+            }
+            feedback = request.context.validationFeedback;
+            return base;
+          },
+        });
+
+        const result = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          'tasker:test:planning:acceptance-link-loop',
+          fixture.snapshot,
+          fixture.evidence,
+        );
+
+        expect(result).toMatchObject({
+          ok: true,
+          value: { status: 'ready', validationRevision: 1 },
+        });
+        expect(feedback).toContain(
+          'Acceptance criterion requested-behavior references missing workflow step missing-verification-step.',
+        );
+        expect(calls).toBe(2);
       },
     );
   });

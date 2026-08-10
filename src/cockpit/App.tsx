@@ -1018,6 +1018,40 @@ const ImplementationPlanSurface = ({
                 </li>
               ))}
             </ol>
+            <div className="mt-4 border-t border-border/60 pt-3">
+              <strong className="text-xs font-medium">Acceptance</strong>
+              <ol className="mt-2 space-y-2">
+                {plan.acceptanceCriteria.map((criterion) => (
+                  <li key={criterion.id} className="text-xs">
+                    <p>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {criterion.id}
+                      </span>{' '}
+                      {criterion.expected}
+                    </p>
+                    <ul className="mt-1 space-y-0.5 pl-3 text-[11px] text-muted-foreground">
+                      {criterion.verification.map((verification, index) => {
+                        const description =
+                          verification.kind === 'inspection'
+                            ? `${verification.target}: ${verification.expectation}`
+                            : verification.scenario;
+                        return (
+                          <li key={`${criterion.id}-${String(index)}`}>
+                            <span className="text-foreground/70">{verification.kind}</span>
+                            {' · '}
+                            {description}
+                            <span className="font-mono text-[10px] text-muted-foreground/70">
+                              {' '}
+                              → {verification.workflowStepIds.join(', ')}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </li>
+                ))}
+              </ol>
+            </div>
             <p className="mt-4 text-[11px] text-muted-foreground">
               Why {record.selectedStrategy}: {record.selectionReason}
             </p>
