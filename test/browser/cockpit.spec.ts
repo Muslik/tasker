@@ -58,8 +58,12 @@ const waitForRunWait = async (page: Page, fixtureId: string, waitKind: string): 
   await expect
     .poll(
       async () => {
-        const run = await loadRun(page, fixtureId);
-        return run.status === 'waiting' ? run.wait.waitKind : run.status;
+        try {
+          const run = await loadRun(page, fixtureId);
+          return run.status === 'waiting' ? run.wait.waitKind : run.status;
+        } catch {
+          return 'runtime_query_unavailable';
+        }
       },
       { timeout: 20_000 },
     )
@@ -215,7 +219,7 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
   );
 });
 
-test('generating a backlog task materializes the workflow, timeline, and graph tree', async ({
+test('generating a backlog task materializes the workflow, timeline, and operator stages', async ({
   page,
 }) => {
   const tasks = await loadTasks(page);
@@ -237,7 +241,14 @@ test('generating a backlog task materializes the workflow, timeline, and graph t
   expect(activity.entries.length).toBeGreaterThan(0);
 
   await expect(page.getByTestId('workflow-sidebar')).toContainText(backlog.title);
-  await expect(page.getByTestId('workflow-tree')).toBeVisible();
+  await expect(page.getByTestId('workflow-stages')).toBeVisible();
+  await expect(page.getByTestId('workflow-stages').locator('details')).toHaveCount(5);
+  await expect(
+    page.getByTestId('workflow-stages').getByText('Prepare', { exact: true }),
+  ).toBeVisible();
+  const implementationStage = page.getByTestId('workflow-stage-implementation:2');
+  await implementationStage.locator('summary').click();
+  await expect(implementationStage).toContainText('implementation-loop');
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
   await expect(page.getByTestId('validation-panel')).toContainText('Workflow graph valid');
@@ -370,7 +381,7 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   await expect(page.getByTestId('selected-task')).toContainText('Waiting for code review', {
     timeout: 20_000,
   });
-  await expect(page.getByTestId('workflow-tree').getByLabel('waiting')).toHaveCount(1);
+  await expect(page.getByTestId('workflow-stages').getByLabel('stage waiting')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Sync review' })).toBeVisible();
   await page.getByRole('button', { name: 'Mark done' }).click();
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Done');
@@ -443,10 +454,13 @@ test('an invalid planner candidate pauses planning without an executable graph',
 
   expect(workflow.status).toBe('rejected');
   expect(workflow.view.workflow.graphHash).toBeNull();
-  expect(workflow.view.workflow.tree).toBeNull();
+  expect(workflow.view.workflow.stages).toBeNull();
   expect(workflow.view.workflow.validatorReport.issues.length).toBeGreaterThan(0);
   await expect(page.getByTestId('validation-errors')).toBeVisible();
-  await expect(page.getByTestId('workflow-tree')).toHaveCount(0);
+  await expect(page.getByTestId('workflow-stages')).toHaveCount(0);
+  await expect(page.getByTestId(`task-item-${invalid.id}`)).toContainText('Waiting', {
+    timeout: 20_000,
+  });
   await expect(page.getByText('Action required', { exact: true })).toBeVisible();
   await expect(page.getByTestId('selected-task')).toContainText('Implementation planning failed');
   await expect(page.getByTestId('selected-task')).not.toContainText('Workflow ready');
@@ -493,7 +507,7 @@ test('reloading restores the selected task before subscribing to live updates', 
 
   await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('graph-hash')).toHaveText(hash ?? '', { timeout: 15_000 });
-  await expect(page.getByTestId('workflow-tree')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('workflow-stages')).toBeVisible({ timeout: 15_000 });
 });
 
 test('a ledger event from another page refreshes the visible task status', async ({

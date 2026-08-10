@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { openSqliteLedger } from '../ledger/index.js';
 import { systemClock } from '../shared/clock.js';
-import type { WorkflowTreeNode } from './m1-contracts.js';
+import type { OperatorWorkflowStage, WorkflowTechnicalNode } from './m1-contracts.js';
 import { createM1WorkflowService } from './m1-service.js';
 
 type WriteLine = (line: string) => void;
@@ -16,10 +16,10 @@ const usage = [
   '  tasker-m1 show <fixture-id> [--db path]',
 ].join('\n');
 
-export const renderWorkflowTree = (root: WorkflowTreeNode): string => {
+export const renderWorkflowStages = (stages: readonly OperatorWorkflowStage[]): string => {
   const lines: string[] = [];
 
-  const visit = (node: WorkflowTreeNode, prefix: string, connector: string): void => {
+  const visit = (node: WorkflowTechnicalNode, prefix: string, connector: string): void => {
     const wait = node.waitKind === undefined ? '' : ` · wait=${node.waitKind}`;
     lines.push(`${prefix}${connector}${node.kind}: ${node.label}${wait}`);
 
@@ -29,7 +29,12 @@ export const renderWorkflowTree = (root: WorkflowTreeNode): string => {
     });
   };
 
-  visit(root, '', '');
+  for (const stage of stages) {
+    lines.push(`[${stage.status}] ${stage.label}`);
+    stage.nodes.forEach((node, index) => {
+      visit(node, '  ', index === stage.nodes.length - 1 ? '└─ ' : '├─ ');
+    });
+  }
   return lines.join('\n');
 };
 
@@ -83,14 +88,14 @@ export const runM1Cli = (args: readonly string[], write: WriteLine = console.log
     write(response.view.fixture.title);
     write(`status=${response.status} hash=${response.view.workflow.graphHash ?? 'none'}`);
 
-    if (response.view.workflow.tree === null) {
+    if (response.view.workflow.stages === null) {
       for (const issue of response.view.workflow.validatorReport.issues) {
         write(`- ${issue.code} ${issue.path.join('.')}: ${issue.message}`);
       }
       return 1;
     }
 
-    write(renderWorkflowTree(response.view.workflow.tree));
+    write(renderWorkflowStages(response.view.workflow.stages));
     return 0;
   } finally {
     ledger.close();

@@ -1,14 +1,12 @@
 import { z } from 'zod';
 
+import { WorkflowStageDescriptorSchema } from '../workflow/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const EvidenceReferenceSchema = z.string().min(1);
 
-export const BlockStageSchema = z
-  .object({ id: z.string().min(1), label: z.string().min(1) })
-  .strict()
-  .readonly();
+export const BlockStageSchema = WorkflowStageDescriptorSchema;
 
 export const BlockExecutorSchema = z.discriminatedUnion('kind', [
   z

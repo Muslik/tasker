@@ -99,8 +99,16 @@ bounded corrections back to planning before optional review and freeze. The form
 pre-planning assembler, draft-revision Activity, schema v7 reader, and `phase=before`
 execution reproduction are deleted with no compatibility path.
 
-The next active boundary is Phase 5: project bootstrap state and block receipts into
-readable macro stages without changing the immutable execution graph.
+Phase 5A is complete: the former raw `workflow.tree` response and Cockpit component are
+deleted. Blocks and durable waits own configurable stage descriptors; the control plane
+projects adjacent graph roots into ordered stage episodes, preserves repeated stages,
+derives live state from Temporal nodes, and keeps technical nodes behind an expander.
+The raw graph remains a downloadable diagnostic artifact. View schema v4 projections
+are deleted when encountered instead of being interpreted or upcast.
+
+The next active boundary is Phase 5B: include bootstrap progress and immutable Block
+Receipt/effect summaries in the same operator projection, while keeping those product
+read models outside the frozen graph and Temporal execution authority.
 
 ## Phase 0 exit gate
 
@@ -146,6 +154,19 @@ readable macro stages without changing the immutable execution graph.
   profile for every agent block and both planner strategies;
 - the operator session banner shows the actual profile, provider, model, effort, time,
   measured tokens, and API-equivalent cost status.
+
+## Phase 5 exit gate
+
+- stage identity and labels come from harness block/wait contracts rather than UI code;
+- adjacent work is grouped into ordered episodes and a later revisit creates a new
+  episode with the same semantic stage id;
+- the primary rail shows stage state while technical graph nodes, block attempts,
+  receipts, and effects are expandable details;
+- workspace, context, investigation, planning, review, freezing, and execution progress
+  share one operator projection even before an execution graph exists;
+- changing the projection never mutates, patches, or influences the frozen graph;
+- the removed raw-tree response, component, and schema reader do not remain as a
+  compatibility path.
 
 ## Core release gate
 

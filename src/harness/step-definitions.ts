@@ -415,7 +415,7 @@ export const TWIKET_HARNESS_STEPS = [
   }),
   agentStep('bug.reproduce', {
     description: 'Repeat the investigated scenario after implementation and preserve fix evidence.',
-    stage: stages.investigation,
+    stage: stages.verification,
     profile: 'investigation',
     completion: {
       kind: 'structured_evidence',

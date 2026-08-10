@@ -31,6 +31,29 @@ afterEach(() => {
 });
 
 describe('M1 persisted workflow', () => {
+  it('deletes an obsolete operator projection instead of interpreting it', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const saved = ledger.repository.transact({
+      projections: [
+        {
+          kind: 'upsert',
+          projectionType: 'm1_workflow',
+          projectionId: 'obsolete-workflow',
+          payload: { schemaVersion: 4, workflow: { tree: {} } },
+        },
+      ],
+    });
+    expect(saved.ok).toBe(true);
+
+    const service = createM1WorkflowService(ledger.repository, clock);
+    const read = service.read('obsolete-workflow');
+
+    expect(read).toEqual({ ok: true, value: null });
+    expect(ledger.repository.readProjection('m1_workflow', 'obsolete-workflow')).toBeNull();
+    ledger.close();
+  });
+
   it('restores the same task-specific graph after a process restart', () => {
     const filename = databasePath();
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
@@ -43,6 +66,15 @@ describe('M1 persisted workflow', () => {
 
     const originalHash = generated.value.view.workflow.graphHash;
     expect(originalHash).not.toBeNull();
+    expect(generated.value.view.workflow.stages?.map(({ id }) => id)).toEqual([
+      'preparation',
+      'implementation',
+      'delivery',
+      'implementation',
+      'verification',
+      'delivery',
+      'review',
+    ]);
     firstLedger.close();
 
     clock.advance(60_000);
@@ -66,6 +98,29 @@ describe('M1 persisted workflow', () => {
     restartedLedger.close();
   });
 
+  it('projects a bug graph into operator stages while keeping its technical blocks nested', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const service = createM1WorkflowService(ledger.repository, clock);
+
+    const generated = service.generate('avia-13236-short-bug');
+
+    expect(generated.ok).toBe(true);
+    if (!generated.ok) return;
+    expect(generated.value.view.workflow.stages?.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'preparation', label: 'Prepare' },
+      { id: 'implementation', label: 'Implement' },
+      { id: 'verification', label: 'Verify' },
+      { id: 'delivery', label: 'Deliver' },
+      { id: 'review', label: 'Review' },
+    ]);
+    expect(generated.value.view.workflow.stages?.[2]?.nodes).toMatchObject([
+      { id: 'reproduce-after', kind: 'step', label: 'reproduce-after · bug.reproduce@1' },
+    ]);
+
+    ledger.close();
+  });
+
   it('persists a rejected proposal without a graph or executable command', () => {
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
     const ledger = openSqliteLedger({ filename: databasePath(), clock });
@@ -78,7 +133,7 @@ describe('M1 persisted workflow', () => {
     expect(generated.value.status).toBe('rejected');
     expect(generated.value.view.task.status).toBe('workflow_rejected');
     expect(generated.value.view.workflow.graph).toBeNull();
-    expect(generated.value.view.workflow.tree).toBeNull();
+    expect(generated.value.view.workflow.stages).toBeNull();
     expect(generated.value.view.workflow.validatorReport.issues).toMatchObject([
       { code: 'unknown_reference' },
     ]);

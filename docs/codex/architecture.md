@@ -171,7 +171,11 @@ summaries. Secrets never enter Workflow input or Event History.
 ### 5.1 Runtime vocabulary
 
 - **Stage** is an operator projection such as Investigate, Plan, Implement, Validate,
-  Delivery, CI, or Human review. It groups work but is not schedulable.
+  Delivery, CI, or Human review. It groups work but is not schedulable. Every block and
+  durable wait declares its stage in the harness contract. Tasker groups only adjacent
+  graph roots with the same stage, so a task may revisit Implement, Delivery, or Review
+  without those episodes being merged. Stage state is derived from Temporal node state;
+  expanding a stage reveals the exact immutable graph nodes that produced it.
 - **Block** is a reusable versioned work contract selected into one task graph. It owns
   inputs, outcomes, completion rules, recovery, prompt/skills/profile where relevant,
   and produced evidence.
@@ -417,6 +421,12 @@ The UI is a projection, never execution authority. Runtime status comes from Tem
 Workflow state/history and Search Attributes. Tasker SQLite stores product metadata,
 cached Jira data, graph rationale, transcripts, artifacts, usage, shadow cost,
 retrospective annotations, and UI-friendly indexes.
+
+The primary operator rail renders configured stage episodes, not the raw execution
+tree. The raw graph remains downloadable diagnostic evidence. Changing a block's stage
+or registering a new stage does not require a Cockpit change. Pre-pilot projection
+schema cutovers delete obsolete projections and regenerate them; Tasker does not
+upcast the removed `workflow.tree` shape.
 
 Routine sync successes and failures do not grow the activity timeline. Operational
 logs are redacted, bounded, and separate from agent/task activity. Temporal Event

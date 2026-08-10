@@ -98,6 +98,7 @@ const baseContracts = () => ({
     {
       id: 'review_event',
       version: '1',
+      stage: { id: 'review', label: 'Review' },
       resolutionSchema: z.object({
         decision: z.literal('approved'),
         reviewId: z.string().min(1),
@@ -110,6 +111,7 @@ const baseContracts = () => ({
     {
       id: 'operator_guidance',
       version: '1',
+      stage: { id: 'attention', label: 'Needs attention' },
       resolutionSchema: z.object({
         decision: z.literal('resume'),
         guidance: z.string().min(1),
@@ -446,6 +448,7 @@ describe('workflow compiler', () => {
           {
             id: 'review_event',
             version: '1',
+            stage: { id: 'review', label: 'Review' },
           },
         ]),
       },

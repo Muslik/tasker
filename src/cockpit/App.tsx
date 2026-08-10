@@ -76,7 +76,7 @@ import {
 } from './components/ui/tooltip.js';
 import { cn } from './lib/utils.js';
 import { planningAgentLogFrom, type PlanningAgentEvent } from './planning-agent-log.js';
-import { WorkflowTree } from './WorkflowTree.js';
+import { WorkflowStages } from './WorkflowStages.js';
 
 type WorkflowLoadState =
   | { readonly status: 'loading' }
@@ -2078,10 +2078,10 @@ const WorkflowSidebar = ({
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 py-2">
-        {view.workflow.tree === null ? (
+        {view.workflow.stages === null ? (
           <EmptyState>Workflow rejected before graph materialization</EmptyState>
         ) : (
-          <WorkflowTree root={view.workflow.tree} />
+          <WorkflowStages stages={view.workflow.stages} />
         )}
       </ScrollArea>
     </aside>

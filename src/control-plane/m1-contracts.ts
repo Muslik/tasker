@@ -8,7 +8,7 @@ import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
 import { TaskRunSettingsSchema } from '../temporal/bootstrap-kernel/contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
-export const M1_VIEW_SCHEMA_VERSION = 4;
+export const M1_VIEW_SCHEMA_VERSION = 5;
 
 export const WorkflowGenerationSubjectSchema = z
   .object({
@@ -56,25 +56,44 @@ export const WorkflowAssemblyDecisionViewSchema = z
   })
   .strict();
 
-export const WorkflowTreeNodeSchema: z.ZodType<{
+export const WorkflowNodeStatusSchema = z.enum([
+  'planned',
+  'running',
+  'waiting',
+  'succeeded',
+  'skipped',
+  'failed',
+]);
+
+export const WorkflowTechnicalNodeSchema: z.ZodType<{
   readonly id: string;
   readonly kind: string;
   readonly label: string;
   readonly status: 'planned' | 'running' | 'waiting' | 'succeeded' | 'skipped' | 'failed';
   readonly waitKind?: string | undefined;
-  readonly children: readonly z.infer<typeof WorkflowTreeNodeSchema>[];
+  readonly children: readonly z.infer<typeof WorkflowTechnicalNodeSchema>[];
 }> = z.lazy(() =>
   z
     .object({
       id: z.string().min(1),
       kind: z.string().min(1),
       label: z.string().min(1),
-      status: z.enum(['planned', 'running', 'waiting', 'succeeded', 'skipped', 'failed']),
+      status: WorkflowNodeStatusSchema,
       waitKind: z.string().min(1).optional(),
-      children: z.array(WorkflowTreeNodeSchema),
+      children: z.array(WorkflowTechnicalNodeSchema),
     })
     .strict(),
 );
+
+export const OperatorWorkflowStageSchema = z
+  .object({
+    key: z.string().min(1),
+    id: z.string().min(1),
+    label: z.string().min(1),
+    status: WorkflowNodeStatusSchema,
+    nodes: z.array(WorkflowTechnicalNodeSchema).min(1),
+  })
+  .strict();
 
 export const WorkflowViewSchema = z
   .object({
@@ -105,7 +124,7 @@ export const WorkflowViewSchema = z
         status: z.enum(['valid', 'rejected']),
         graphHash: z.string().min(1).nullable(),
         graph: JsonValueSchema.nullable(),
-        tree: WorkflowTreeNodeSchema.nullable(),
+        stages: z.array(OperatorWorkflowStageSchema).min(1).nullable(),
         validatorReport: z
           .object({
             workflowId: z.string().min(1).optional(),
@@ -302,7 +321,9 @@ export const OperatorStreamEventSchema = z
 
 export type FixtureFamily = z.infer<typeof FixtureFamilySchema>;
 export type FixtureSummary = z.infer<typeof FixtureSummarySchema>;
-export type WorkflowTreeNode = z.infer<typeof WorkflowTreeNodeSchema>;
+export type WorkflowNodeStatus = z.infer<typeof WorkflowNodeStatusSchema>;
+export type WorkflowTechnicalNode = z.infer<typeof WorkflowTechnicalNodeSchema>;
+export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;

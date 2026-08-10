@@ -20,6 +20,11 @@ const ArtifactKindSchema = z.string().min(1);
 const ResumeBoundarySchema = z.enum(['none', 'attempt', 'step']);
 const IdempotencySchema = z.enum(['none', 'key', 'probe']);
 
+export const WorkflowStageDescriptorSchema = z
+  .object({ id: z.string().min(1), label: z.string().min(1) })
+  .strict()
+  .readonly();
+
 export const ReconciliationContractSchema = z.object({
   strategy: z.enum(['probe', 'receipt']),
   description: z.string().min(1).optional(),
@@ -53,6 +58,7 @@ export const PredicateContractSchema = z.object({
 export const WaitContractSchema = z.object({
   id: AbiIdSchema,
   version: AbiVersionSchema,
+  stage: WorkflowStageDescriptorSchema,
   resolutionSchema: RuntimeSchemaSchema.optional(),
   resolutionMapping: WaitResolutionMappingSchema.optional(),
   artifactContracts: z.array(ArtifactKindSchema).optional(),
@@ -64,6 +70,7 @@ export type StepTypeContract = z.infer<typeof StepTypeContractSchema>;
 export type StepTypeContractInput = z.input<typeof StepTypeContractSchema>;
 export type PredicateContract = z.infer<typeof PredicateContractSchema>;
 export type WaitContract = z.infer<typeof WaitContractSchema>;
+export type WorkflowStageDescriptor = z.infer<typeof WorkflowStageDescriptorSchema>;
 
 type VersionedContract = {
   readonly id: string;

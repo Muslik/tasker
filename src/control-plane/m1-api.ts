@@ -31,9 +31,9 @@ import {
   WorkflowResponseSchema,
   type OperatorTaskSummary,
   type WorkflowResponse,
-  type WorkflowTreeNode,
 } from './m1-contracts.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
+import { applyWorkflowNodeStatuses } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import {
@@ -203,20 +203,11 @@ const applyTemporalRunToTask = (
   }
 };
 
-const decorateTreeWithTemporalState = (
-  node: WorkflowTreeNode,
-  run: Extract<TaskRunPublicState, { readonly runtime: 'execution' }>,
-): WorkflowTreeNode => ({
-  ...node,
-  status: run.nodeStates[node.id] ?? node.status,
-  children: node.children.map((child) => decorateTreeWithTemporalState(child, run)),
-});
-
 const decorateWorkflowWithTemporalState = (
   workflow: WorkflowResponse,
   run: TaskRunPublicState | null,
 ): WorkflowResponse => {
-  if (run?.runtime !== 'execution' || workflow.view.workflow.tree === null) return workflow;
+  if (run?.runtime !== 'execution' || workflow.view.workflow.stages === null) return workflow;
 
   return WorkflowResponseSchema.parse({
     ...workflow,
@@ -224,7 +215,7 @@ const decorateWorkflowWithTemporalState = (
       ...workflow.view,
       workflow: {
         ...workflow.view.workflow,
-        tree: decorateTreeWithTemporalState(workflow.view.workflow.tree, run),
+        stages: applyWorkflowNodeStatuses(workflow.view.workflow.stages, run.nodeStates),
       },
     },
   });

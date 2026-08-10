@@ -14,6 +14,7 @@ import {
   type WorkflowAnalyzerReceipt,
 } from '../providers/contracts.js';
 import {
+  M1_VIEW_SCHEMA_VERSION,
   WorkflowGenerationSubjectSchema,
   WorkflowViewSchema,
   type WorkflowGenerationSubject,
@@ -81,6 +82,24 @@ export class M1WorkflowStore {
 
     if (projection === null) {
       return ok(null);
+    }
+
+    if (
+      isRecord(projection.payload) &&
+      typeof projection.payload.schemaVersion === 'number' &&
+      projection.payload.schemaVersion !== M1_VIEW_SCHEMA_VERSION
+    ) {
+      const discarded = this.ledger.transact({
+        projections: [
+          {
+            kind: 'delete',
+            projectionType: M1_WORKFLOW_PROJECTION,
+            projectionId: fixtureId,
+          },
+        ],
+        timestamp: this.clock.now(),
+      });
+      return discarded.ok ? ok(null) : err({ kind: 'ledger_conflict', conflict: discarded.error });
     }
 
     const parsed = WorkflowViewSchema.safeParse(projection.payload);

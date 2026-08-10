@@ -43,6 +43,7 @@ const waitContracts = [
   {
     id: 'code_review',
     version: '1',
+    stage: { id: 'review', label: 'Review' },
     resolutionSchema: z
       .object({
         decision: z.enum(['approved', 'changes_requested']),
@@ -68,6 +69,7 @@ const waitContracts = [
   {
     id: 'operator_guidance',
     version: '1',
+    stage: { id: 'attention', label: 'Needs attention' },
     resolutionSchema: z
       .object({
         decision: z.literal('resume'),
@@ -79,12 +81,14 @@ const waitContracts = [
   {
     id: 'translation_complete',
     version: '1',
+    stage: { id: 'implementation', label: 'Implement' },
     resolutionSchema: z.object({ translationRevision: z.string().min(1) }).strict(),
     description: 'Wait for the translator to finish external work.',
   },
   {
     id: 'final_publish',
     version: '1',
+    stage: { id: 'delivery', label: 'Deliver' },
     resolutionSchema: z.object({ version: z.string().min(1) }).strict(),
     description: 'Wait for a human-owned final package publication.',
   },

@@ -8,9 +8,7 @@ import {
   planTaskWorkflow,
   planWorkflowProposal,
   type PlanningFailure,
-  type PresentationNode,
   type TaskFixture,
-  type WorkflowPresentationTree,
   type WorkflowProposalArtifact,
   type WorkflowAnalyzerOutput,
 } from '../planning/index.js';
@@ -24,17 +22,16 @@ import {
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
-  WorkflowTreeNodeSchema,
   WorkflowViewSchema,
   type FixtureSummary,
   type OperatorActivityResponse,
   type OperatorStreamEvent,
   type WorkflowResponse,
   type WorkflowGenerationSubject,
-  type WorkflowTreeNode,
   type WorkflowView,
 } from './m1-contracts.js';
 import { M1WorkflowStore, type M1StoreError, type M1WorkflowArtifacts } from './m1-store.js';
+import { createOperatorWorkflowStages } from './operator-workflow-projection.js';
 
 export type M1ServiceError =
   | {
@@ -118,66 +115,6 @@ const toJson = (
 ): Outcome<JsonValue, M1ServiceError> => {
   const result = JsonValueSchema.safeParse(value);
   return result.success ? ok(result.data) : err({ kind: 'non_json_artifact', artifact });
-};
-
-const childrenFor = (node: PresentationNode): readonly string[] => {
-  switch (node.kind) {
-    case 'sequence':
-      return node.childIds;
-    case 'branch':
-      return [node.thenId, node.otherwiseId];
-    case 'bounded_loop':
-      return [node.bodyId];
-    case 'finalize':
-    case 'gate':
-    case 'step':
-    case 'wait':
-      return [];
-  }
-};
-
-const nodeLabel = (node: PresentationNode): string => {
-  switch (node.kind) {
-    case 'step':
-      return `${node.id} · ${node.uses}`;
-    case 'bounded_loop':
-      return `${node.id} · max ${String(node.maxAttempts)}`;
-    case 'wait':
-      return `${node.id} · ${node.waitKind}`;
-    case 'gate':
-      return `${node.id} · ${node.reason}`;
-    case 'finalize':
-      return `${node.id} · ${node.outcome}`;
-    case 'branch':
-      return `${node.id} · ${node.when}`;
-    case 'sequence':
-      return node.id;
-  }
-};
-
-const toTree = (presentation: WorkflowPresentationTree): WorkflowTreeNode => {
-  const visit = (nodeId: string, ancestors: ReadonlySet<string>): WorkflowTreeNode => {
-    if (ancestors.has(nodeId)) {
-      throw new Error(`Presentation tree contains a cycle at ${nodeId}`);
-    }
-
-    const node = presentation.nodes[nodeId];
-    if (node === undefined) {
-      throw new Error(`Presentation tree references missing node ${nodeId}`);
-    }
-
-    const nextAncestors = new Set(ancestors).add(nodeId);
-    return WorkflowTreeNodeSchema.parse({
-      id: node.id,
-      kind: node.kind,
-      label: nodeLabel(node),
-      status: node.status,
-      ...(node.kind === 'wait' ? { waitKind: node.waitKind } : {}),
-      children: childrenFor(node).map((childId) => visit(childId, nextAncestors)),
-    });
-  };
-
-  return visit(presentation.rootId, new Set());
 };
 
 const verificationProfile = (
@@ -292,7 +229,7 @@ const buildAcceptedView = (
       status: 'valid',
       graphHash: planned.compiled.hash,
       graph: graph.value,
-      tree: toTree(planned.presentation),
+      stages: createOperatorWorkflowStages(planned.presentation),
       validatorReport: planned.compiled.validatorReport,
     },
   });
@@ -334,7 +271,7 @@ const buildRejectedView = (
       status: 'rejected',
       graphHash: null,
       graph: null,
-      tree: null,
+      stages: null,
       validatorReport: validatorReportValue,
     },
   });
