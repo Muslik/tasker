@@ -3,6 +3,7 @@ import {
   condition,
   isCancellation,
   proxyActivities,
+  rootCause,
   setHandler,
   startChild,
   workflowInfo,
@@ -66,6 +67,12 @@ const retryGuidanceFrom = (resolution: JsonValue): string | null =>
   resolution.guidance.trim().length > 0
     ? resolution.guidance.trim()
     : null;
+
+const activityFailureReason = (summary: string, error: unknown): string =>
+  `${summary}: ${rootCause(error) ?? (error instanceof Error ? error.message : 'Unknown failure')}`.slice(
+    0,
+    4_000,
+  );
 
 const planningBlockedReason = (planning: Extract<BootstrapPlanningState, { status: 'blocked' }>) =>
   (planning.failure.kind === 'invalid_planner_output'
@@ -239,7 +246,11 @@ export async function bootstrapWorkflowV3(
       break;
     } catch (error) {
       if (isCancellation(error)) throw error;
-      await openWait('workspace', 'workspace.retry@1', 'Workspace preparation failed');
+      await openWait(
+        'workspace',
+        'workspace.retry@1',
+        activityFailureReason('Workspace preparation failed', error),
+      );
     }
   }
 
@@ -258,7 +269,11 @@ export async function bootstrapWorkflowV3(
       break;
     } catch (error) {
       if (isCancellation(error)) throw error;
-      await openWait('context', 'context.retry@1', 'Context discovery failed');
+      await openWait(
+        'context',
+        'context.retry@1',
+        activityFailureReason('Context discovery failed', error),
+      );
     }
   }
 
@@ -286,7 +301,11 @@ export async function bootstrapWorkflowV3(
           break;
         } catch (error) {
           if (isCancellation(error)) throw error;
-          await openWait('planning', 'planning.retry@1', 'Implementation planning failed');
+          await openWait(
+            'planning',
+            'planning.retry@1',
+            activityFailureReason('Implementation planning failed', error),
+          );
         }
       }
       planning = result;
@@ -366,7 +385,7 @@ export async function bootstrapWorkflowV3(
             const resolution = await openWait(
               'investigation',
               'investigation.retry@1',
-              `Pre-plan investigation ${step.id} failed`,
+              activityFailureReason(`Pre-plan investigation ${step.id} failed`, error),
             );
             operatorGuidance = retryGuidanceFrom(resolution);
             markRunning('investigation', 'investigation');
@@ -457,7 +476,11 @@ export async function bootstrapWorkflowV3(
       break;
     } catch (error) {
       if (isCancellation(error)) throw error;
-      await openWait('freeze', 'workflow_freeze.retry@1', 'Workflow freeze failed');
+      await openWait(
+        'freeze',
+        'workflow_freeze.retry@1',
+        activityFailureReason('Workflow freeze failed', error),
+      );
     }
   }
 

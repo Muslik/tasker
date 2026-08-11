@@ -33,6 +33,8 @@ Every accepted implementation must prove:
   of overwriting prior observations;
 - initial context discovery and mandatory planning run through Temporal, reuse persisted
   evidence and an accepted planner decision, and resume after transient bootstrap failure;
+- exhausted bootstrap Activity retries expose the bounded root cause in the durable
+  operator wait instead of requiring worker-log access;
 - a draft graph cannot execute product effects before planning, recompilation,
   deterministic validation, and configured plan review complete;
 - a planning workflow proposal cannot mutate the draft or bypass the compiler directly;

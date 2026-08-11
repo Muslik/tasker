@@ -171,6 +171,61 @@ describe('Bootstrap Workflow v3 recovery', () => {
   });
 });
 
+describe('Bootstrap infrastructure failure visibility', () => {
+  it('surfaces the exhausted workspace activity cause in the durable operator wait', async () => {
+    const environment = await TestWorkflowEnvironment.createTimeSkipping();
+    const taskQueue = `tasker-bootstrap-workspace-failure-${String(process.pid)}`;
+    const runs = new TemporalTaskRunService(environment.client, {
+      address: 'test-server',
+      namespace: 'default',
+      taskQueue,
+      queryTimeoutMs: 5_000,
+      updateTimeoutMs: 5_000,
+    });
+    const failure =
+      'Task workspace Docker runtime failed: bootstrap_failed [command: mise install]: No space left on device';
+    const worker = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue,
+      workflowsPath,
+      activities: {
+        ...testTemporalActivities,
+        prepareTaskWorkspace: () => Promise.reject(new Error(failure)),
+      } satisfies BootstrapWorkflowActivities,
+      maxCachedWorkflows: 0,
+    });
+    const workerRun = worker.run();
+
+    try {
+      expect(
+        await runs.start({
+          ...inputFor('fixture:workspace-failure', 'automatic'),
+          settings: {
+            planReview: 'automatic',
+            planningStrategy: 'fast',
+            executionStart: 'manual',
+          },
+        }),
+      ).toMatchObject({ ok: true });
+      await expect
+        .poll(
+          async () => {
+            const result = await runs.read('fixture:workspace-failure');
+            return result.ok && result.value?.status === 'waiting'
+              ? result.value.wait.reason
+              : 'running';
+          },
+          { interval: 50, timeout: 20_000 },
+        )
+        .toBe(`Workspace preparation failed: ${failure}`);
+    } finally {
+      worker.shutdown();
+      await workerRun;
+      await environment.teardown();
+    }
+  }, 60_000);
+});
+
 describe('Bootstrap investigation recovery', () => {
   it('retries an activity failure with the same logical block run', async () => {
     const environment = await TestWorkflowEnvironment.createTimeSkipping();

@@ -107,6 +107,10 @@ Review-ready delivery reconciles one configured-prefix managed PR comment across
 runs: it updates the old link, accepts an existing human comment with the exact current
 URL without rewriting it, and stops on multiple managed matches.
 
+Bootstrap delivery failures now preserve their bounded Activity root cause in the
+durable operator wait. Workspace/Docker, context, planning, investigation, and freeze
+failures are diagnosable from the console and Resume retries only the pending stage.
+
 Phase 4B is complete: Generate starts Bootstrap v3 without a graph/hash, prepares the
 managed worktree and Docker runtime, persists graph-free context and evidence, and runs
 mandatory planning. The planner may request registered investigation blocks and owns

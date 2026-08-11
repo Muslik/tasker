@@ -439,6 +439,12 @@ also submit operator guidance. For an infrastructure or agent block, that guidan
 resumes the same durable wait and is included in the next attempt; the completed
 prefix, worktree, artifacts, and conversation provenance remain intact.
 
+When a bootstrap Activity exhausts its automatic delivery retries, the wait reason
+contains the bounded root cause returned by the Activity, not a generic stage label.
+Docker, repository, context, planner, investigation, and freeze failures must therefore
+be actionable from the operator console without reading worker logs. Resume reruns only
+that pending stage.
+
 ## 11. CI and evidence
 
 CI is part of every PR workflow. After push/PR preparation, Tasker observes Jenkins and
