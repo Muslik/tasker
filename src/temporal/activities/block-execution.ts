@@ -74,6 +74,8 @@ import type {
   RunExecutionBlockInput,
 } from '../execution-kernel/contracts.js';
 import type { WorkspaceStore } from '../../workspaces/store.js';
+import type { DockerWorkspaceRuntimePreparer } from '../../workspaces/docker-runtime-manager.js';
+import { resolveWorkspaceRuntimePolicy } from '../../workspaces/runtime-policy.js';
 import { TaskStepOutputArtifactSchema, type TaskStepOutputArtifact } from '../task-step-output.js';
 import {
   TaskStepRecoveryContextSchema,
@@ -1060,6 +1062,7 @@ export interface TaskExecutionActivityDependencies extends Omit<
 > {
   readonly mutationRecovery: Pick<WorkspaceMutationRecoveryStore, 'prepare' | 'inspectCompletion'>;
   readonly receipts: BlockReceiptStore;
+  readonly runtimes: DockerWorkspaceRuntimePreparer;
 }
 
 export interface TaskRunEvidenceSource {
@@ -1812,6 +1815,7 @@ export const createTaskExecutionActivity = (
         waitKind: `${input.uses}.workspace-required@1`,
       };
     }
+    const preparedWorkspace = workspace.value;
     const snapshotReference = {
       artifactId: planningReference.reference,
       checksum: planningReference.hash,
@@ -1848,6 +1852,41 @@ export const createTaskExecutionActivity = (
     }
     if (existingReceipt.value !== null) return executionResultFromReceipt(existingReceipt.value);
 
+    const runtime = runtimeFactory();
+    runtime.heartbeat({ phase: 'reconcile_docker_runtime' });
+    const heartbeat = setInterval(() => {
+      runtime.heartbeat({ phase: 'reconcile_docker_runtime' });
+    }, 10_000);
+    const preparedRuntime = await (async () => {
+      try {
+        return await dependencies.runtimes.prepare(
+          preparedWorkspace,
+          resolveWorkspaceRuntimePolicy(
+            loadedSnapshot.value.harness.company,
+            loadedSnapshot.value.harness.project?.manifest ?? null,
+          ),
+          {
+            cancellationSignal: runtime.cancellationSignal,
+            onProgress: (progress) => {
+              runtime.heartbeat({
+                phase: `reconcile_docker_runtime:${progress.phase}`,
+                ...(progress.detail === undefined ? {} : { detail: progress.detail }),
+              });
+            },
+          },
+        );
+      } finally {
+        clearInterval(heartbeat);
+      }
+    })();
+    if (!preparedRuntime.ok) {
+      return {
+        status: 'needs_input',
+        summary: `Docker runtime for ${input.uses} could not be restored: ${preparedRuntime.error.kind}: ${preparedRuntime.error.message}. Fix the runtime prerequisite and resume this step; completed workflow nodes and workspace changes are preserved.`,
+        waitKind: 'workspace.runtime-recovery@1',
+      };
+    }
+
     const result = await executeRegisteredTaskStep(
       {
         taskReference: input.taskReference,
@@ -1858,13 +1897,13 @@ export const createTaskExecutionActivity = (
         stepAttempt: input.blockRun,
         uses: input.uses,
         activityDelivery: input.activityDelivery,
-        workspace: workspace.value,
+        workspace: preparedWorkspace,
         planningSnapshot: snapshotReference,
         operatorGuidance: input.operatorGuidance,
         input: input.input,
       },
       dependencies,
-      runtimeFactory(),
+      runtime,
     );
     const operationId = executionOperationIdFor(
       input.workflowId,
@@ -1887,7 +1926,7 @@ export const createTaskExecutionActivity = (
             {
               operationId,
               block: snapshottedStep.block,
-              workspace: workspace.value,
+              workspace: preparedWorkspace,
               outputArtifact: outputArtifact.value,
             },
             dependencies,

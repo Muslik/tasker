@@ -45,6 +45,7 @@ describe('Docker workspace runtime manager', () => {
     };
     const requests: CommandRequest[] = [];
     const existing = new Set<string>();
+    let serviceRunning = false;
     const host: HostControlPlaneCommandRunner = {
       executionEnvironment: 'host_control_plane',
       run: vi.fn((request: CommandRequest) => {
@@ -73,6 +74,21 @@ describe('Docker workspace runtime manager', () => {
         if ((kind === 'network' || kind === 'volume') && operation === 'create') {
           existing.add(`${kind}:${tail.at(-1) ?? ''}`);
         }
+        if (
+          kind === 'inspect' &&
+          operation === '--format' &&
+          request.args.includes('{{.State.Running}}')
+        ) {
+          return Promise.resolve({
+            status: 'exited' as const,
+            exitCode: serviceRunning ? 0 : 1,
+            stdout: serviceRunning ? 'true\n' : '',
+            stderr: serviceRunning ? '' : 'not running',
+            durationMs: 1,
+          });
+        }
+        if (kind === 'rm' && operation === '--force') serviceRunning = false;
+        if (kind === 'run' && request.args.includes('--detach')) serviceRunning = true;
         return Promise.resolve({
           status: 'exited' as const,
           exitCode: 0,
@@ -140,6 +156,7 @@ describe('Docker workspace runtime manager', () => {
       initializedVolumes: [],
       status: 'preparing',
     });
+    serviceRunning = false;
 
     const recovered = await manager.prepare(workspace, policy);
     expect(recovered).toMatchObject({ ok: true, value: { status: 'ready' } });
@@ -151,10 +168,16 @@ describe('Docker workspace runtime manager', () => {
     expect(
       requests.filter(({ args }) => args[0] === 'run' && args.includes('tasker-volume')),
     ).toHaveLength(2);
+    expect(
+      requests.filter(({ args }) => args[0] === 'run' && args.includes('--detach')),
+    ).toHaveLength(2);
     const repeated = await manager.prepare(workspace, policy);
     expect(repeated).toMatchObject({ ok: true, value: { status: 'ready' } });
     expect(
       requests.filter(({ args }) => args[0] === 'run' && args.includes('tasker-volume')),
+    ).toHaveLength(2);
+    expect(
+      requests.filter(({ args }) => args[0] === 'run' && args.includes('--detach')),
     ).toHaveLength(2);
     expect(
       requests.some(({ args }) =>

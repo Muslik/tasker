@@ -13,7 +13,11 @@
     "skills": []
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
-  "completion": { "kind": "workspace_mutation" },
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "workspace_files",
+    "requiredArtifactKinds": ["pull-request-draft"]
+  },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["run_artifact.write"],
   "requiredCapabilities": ["repository.read", "workspace.write"],

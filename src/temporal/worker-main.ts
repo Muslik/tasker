@@ -265,6 +265,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       traces: executionTraces,
       mutationRecovery,
       receipts: blockReceipts,
+      runtimes: dockerRuntimes,
       agentRunner: new SubscriptionCliTaskStepAgentRunner(dockerCommands),
       commands: dockerCommands,
       integrations: integrationAdapters,

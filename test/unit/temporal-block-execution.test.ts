@@ -20,6 +20,10 @@ import {
   TemporalTaskStepTraceStore,
   type TaskStepAgentRunner,
 } from '../../src/temporal/activities/block-execution.js';
+import type {
+  DockerWorkspaceRuntimePreparer,
+  DockerWorkspaceRuntimeReceipt,
+} from '../../src/workspaces/index.js';
 
 const workspaceCommands = (run: CommandRunner['run'] = vi.fn()): WorkspaceCommandRunner => ({
   executionEnvironment: 'docker_workspace',
@@ -58,6 +62,11 @@ const stubWorkspace = {
 const stubWorkspaceStore = {
   read: () => ok(stubWorkspace),
 };
+
+const readyRuntime = (
+  prepare: DockerWorkspaceRuntimePreparer['prepare'] = () =>
+    Promise.resolve(ok({} as DockerWorkspaceRuntimeReceipt)),
+): DockerWorkspaceRuntimePreparer => ({ prepare });
 
 const mutationRecovery = {
   prepare: () =>
@@ -744,8 +753,14 @@ describe('temporal block execution activity', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const receipts = new BlockReceiptStore(ledger.repository, systemClock);
-    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
-      Promise.resolve(
+    const calls: string[] = [];
+    const prepareRuntime = vi.fn<DockerWorkspaceRuntimePreparer['prepare']>(() => {
+      calls.push('runtime');
+      return Promise.resolve(ok({} as DockerWorkspaceRuntimeReceipt));
+    });
+    const run = vi.fn<TaskStepAgentRunner['run']>(() => {
+      calls.push('agent');
+      return Promise.resolve(
         ok({
           stdout: '',
           stderr: '',
@@ -756,8 +771,8 @@ describe('temporal block execution activity', () => {
             blockingReason: null,
           },
         }),
-      ),
-    );
+      );
+    });
     const activity = createTaskExecutionActivity(
       {
         snapshots: { readRunSnapshot: () => ok(makeSnapshot('fill-test-ops-plan@1')) },
@@ -765,6 +780,7 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         receipts,
+        runtimes: readyRuntime(prepareRuntime),
         agentRunner: { run },
         commands: workspaceCommands(),
         workspaces: stubWorkspaceStore,
@@ -810,6 +826,100 @@ describe('temporal block execution activity', () => {
     });
     expect(redelivered).toEqual(first);
     expect(run).toHaveBeenCalledTimes(1);
+    expect(prepareRuntime).toHaveBeenCalledTimes(1);
+    const runtimeCall = prepareRuntime.mock.calls[0];
+    expect(runtimeCall?.[0]).toEqual(stubWorkspace);
+    expect(runtimeCall?.[1].engine).toBe('docker');
+    expect(runtimeCall?.[1].policyHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(runtimeCall?.[2]?.cancellationSignal).toBeInstanceOf(AbortSignal);
+    expect(runtimeCall?.[2]?.onProgress).toBeTypeOf('function');
+    expect(calls).toEqual(['runtime', 'agent']);
+  });
+
+  it('opens a recoverable infrastructure wait and retries the same block after runtime repair', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const prepareRuntime = vi
+      .fn<DockerWorkspaceRuntimePreparer['prepare']>()
+      .mockResolvedValueOnce(
+        err({
+          kind: 'service_failed',
+          service: 'front-avia-app',
+          message: 'service exited with code 143',
+        }),
+      )
+      .mockResolvedValue(ok({} as DockerWorkspaceRuntimeReceipt));
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        ok({
+          stdout: '',
+          stderr: '',
+          finalMessage: {
+            status: 'completed',
+            outputJson: JSON.stringify({ summary: 'Test operations plan ready', artifacts: [] }),
+            requestJson: null,
+            blockingReason: null,
+          },
+        }),
+      ),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('fill-test-ops-plan@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        runtimes: readyRuntime(prepareRuntime),
+        agentRunner: { run },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+    const input = {
+      schemaVersion: 2 as const,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'test-operations-plan',
+      blockRun: 1,
+      uses: 'fill-test-ops-plan@1',
+      activityDelivery: { kind: 'read_only' as const },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: {
+        objective: 'Prepare the test plan',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+
+    const blocked = await activity.runExecutionBlock(input);
+    const resumed = await activity.runExecutionBlock({ ...input, blockRun: 2 });
+
+    expect(blocked).toEqual({
+      status: 'needs_input',
+      summary:
+        'Docker runtime for fill-test-ops-plan@1 could not be restored: service_failed: service exited with code 143. Fix the runtime prerequisite and resume this step; completed workflow nodes and workspace changes are preserved.',
+      waitKind: 'workspace.runtime-recovery@1',
+    });
+    expect(resumed).toMatchObject({ status: 'completed' });
+    expect(prepareRuntime).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('derives independent-review predicates from validated output and restores them from the receipt', async () => {
@@ -848,6 +958,7 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         receipts,
+        runtimes: readyRuntime(),
         agentRunner: { run },
         commands: workspaceCommands(),
         workspaces: stubWorkspaceStore,
@@ -918,6 +1029,7 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         receipts,
+        runtimes: readyRuntime(),
         agentRunner: { run: vi.fn() },
         commands: workspaceCommands(command),
         workspaces: stubWorkspaceStore,
@@ -974,6 +1086,7 @@ describe('temporal block execution activity', () => {
         traces,
         mutationRecovery,
         receipts,
+        runtimes: readyRuntime(),
         agentRunner: {
           run: () =>
             Promise.resolve(

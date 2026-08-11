@@ -278,6 +278,11 @@ describe('file-backed harness pack', () => {
       profile: 'documentation',
       skills: [],
     });
+    expect(describe?.block.completion).toEqual({
+      kind: 'structured_evidence',
+      source: 'workspace_files',
+      requiredArtifactKinds: ['pull-request-draft'],
+    });
   });
 
   it('removes policy-owned blocks from future packs when the policy is disabled', async () => {
