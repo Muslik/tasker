@@ -356,7 +356,10 @@ export class JenkinsBuildClient implements JenkinsBuildPort {
     if (response.status === 'failed') return response;
     const parsed = RawStageResponseSchema.safeParse(response.body);
     return parsed.success
-      ? { status: 'ready', value: parsed.data.stages }
+      ? {
+          status: 'ready',
+          value: parsed.data.stages.map(({ name, status }) => ({ name, status })),
+        }
       : this.invalidResponse('pipeline stages');
   }
 

@@ -314,7 +314,20 @@ describe('Jenkins build observation', () => {
                 actions: [{ lastBuiltRevision: { SHA1: revision } }],
               }
             : url.endsWith('/wfapi/describe')
-              ? { stages: [{ name: 'Tests', status: 'SUCCESS' }] }
+              ? {
+                  stages: [
+                    {
+                      name: 'Tests',
+                      status: 'SUCCESS',
+                      id: '12',
+                      execNode: 'built-in',
+                      startTimeMillis: 1_786_455_000_000,
+                      durationMillis: 12_000,
+                      pauseDurationMillis: 0,
+                      _links: {},
+                    },
+                  ],
+                }
               : { uid: 'root', name: 'root', status: 'passed', children: [] };
         return Promise.resolve(
           new Response(JSON.stringify(body), {
