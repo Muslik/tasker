@@ -174,6 +174,28 @@ describe('Jira lifecycle client', () => {
     expect(requestBody).not.toContain('secret-token');
   });
 
+  it('updates a known managed Jira comment instead of publishing another one', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response(null, { status: 200 })),
+    );
+    const client = new JiraLifecycleClient(configuration, fetchImplementation);
+
+    const result = await client.updateComment(
+      'AVIA-12536',
+      '9',
+      'PR ready: [74|https://example/pr/74]',
+    );
+
+    expect(result).toEqual({ status: 'accepted' });
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      'https://jira.example/rest/api/2/issue/AVIA-12536/comment/9',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ body: 'PR ready: [74|https://example/pr/74]' }),
+      }),
+    );
+  });
+
   it('reads and uploads Jira attachments with the Jira Server multipart contract', async () => {
     const fetchImplementation = vi.fn<typeof fetch>((_input, init) =>
       Promise.resolve(

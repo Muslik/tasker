@@ -252,6 +252,12 @@ Use global policy for reusable workflow knowledge, for example:
 Do not encode a full graph in company policy. It contributes facts, block availability,
 and obligations; the task analyzer still assembles the graph specifically for the task.
 
+`jira-lifecycle.reviewReady.commentPrefix` is also the stable identity of Tasker's one
+managed PR comment on an issue. Future runs update the matching comment. Changing the
+prefix intentionally starts a new identity; migrate existing Jira comments first or
+Tasker will not claim them. Multiple comments with the active prefix fail closed and
+must be resolved explicitly.
+
 For example, the company-wide `ai-assistance` requirement is the file-backed
 `harness/policies/ai-assistance.json` pack, not kernel behavior. It exposes blocks such
 as:

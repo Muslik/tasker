@@ -162,6 +162,13 @@ prefix, worktree, PR, and CI evidence are preserved. Tasker never invents estima
 other business values. Jira validators may still reject a transition after preflight;
 structured 400 reasons remain visible in the same operator action.
 
+The review-ready adapter owns one Tasker-managed PR comment per Jira issue. Its
+configured prefix is the stable remote identity: a later run updates that comment with
+the current PR link instead of appending another one. An existing non-Tasker comment
+that already contains the exact PR URL is accepted without rewriting human text. More
+than one comment with the managed prefix is a remote conflict; Tasker stops instead of
+choosing or deleting a comment silently.
+
 The first compiled candidate is not yet executable or immutable. Validation rejection
 persists exact feedback plus the rejected `ready` decision and asks the planner for a
 complete replacement candidate. Tasker never patches compiled IR or inserts nodes

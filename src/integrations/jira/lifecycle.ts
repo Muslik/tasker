@@ -229,6 +229,11 @@ export interface JiraLifecyclePort {
   assign(issueKey: JiraIssueKey, accountName: string): Promise<JiraLifecycleMutation>;
   transition(issueKey: JiraIssueKey, transitionId: string): Promise<JiraLifecycleMutation>;
   comment(issueKey: JiraIssueKey, body: string): Promise<JiraLifecycleMutation>;
+  updateComment(
+    issueKey: JiraIssueKey,
+    commentId: string,
+    body: string,
+  ): Promise<JiraLifecycleMutation>;
 }
 
 export type JiraTransitionPreflight =
@@ -528,6 +533,18 @@ export class JiraLifecycleClient implements JiraLifecyclePort, JiraAttachmentPor
     return this.mutate('POST', `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment`, {
       body,
     });
+  }
+
+  public updateComment(
+    issueKey: JiraIssueKey,
+    commentId: string,
+    body: string,
+  ): Promise<JiraLifecycleMutation> {
+    return this.mutate(
+      'PUT',
+      `/rest/api/2/issue/${encodeURIComponent(issueKey)}/comment/${encodeURIComponent(commentId)}`,
+      { body },
+    );
   }
 
   public async uploadAttachment(

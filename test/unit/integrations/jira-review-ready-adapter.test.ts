@@ -109,6 +109,7 @@ class StatefulJiraReviewPort implements JiraLifecyclePort {
   public transitionFields: readonly JiraLifecycleTransitionField[] = [];
   public readonly transitionCalls: string[] = [];
   public readonly commentCalls: string[] = [];
+  public readonly updateCommentCalls: { readonly id: string; readonly body: string }[] = [];
   public readonly fieldObservationCalls: string[][] = [];
   public observeCalls = 0;
   public mode: 'normal' | 'forbidden-transition' | 'forbidden-comment' | 'lose-comment-response' =
@@ -196,6 +197,29 @@ class StatefulJiraReviewPort implements JiraLifecyclePort {
         : { status: 'accepted' },
     );
   }
+
+  public updateComment(
+    _issueKey: string,
+    commentId: string,
+    body: string,
+  ): Promise<JiraLifecycleMutation> {
+    this.updateCommentCalls.push({ id: commentId, body });
+    if (this.mode === 'forbidden-comment') {
+      return Promise.resolve({
+        status: 'failed',
+        problem: {
+          kind: 'access_blocked',
+          message: 'Jira returned 403. VPN required',
+          retryable: true,
+          httpStatus: 403,
+        },
+      });
+    }
+    this.comments = this.comments.map((comment) =>
+      comment.id === commentId ? { ...comment, body } : comment,
+    );
+    return Promise.resolve({ status: 'accepted' });
+  }
 }
 
 let ledger: SqliteLedger | undefined;
@@ -211,6 +235,57 @@ const adapterFor = (jira: JiraLifecyclePort): JiraReviewReadyAdapter => {
 };
 
 describe('Jira review-ready effect adapter', () => {
+  it('updates the single managed review comment left by a previous run', async () => {
+    const jira = new StatefulJiraReviewPort();
+    jira.issue = { ...jira.issue, status: 'Code Review' };
+    jira.comments = [
+      {
+        id: '9',
+        body: 'PR ready for review: [72|https://bitbucket.example/pull-requests/72]',
+      },
+    ];
+
+    const result = await adapterFor(jira).execute(
+      requestFor('workflow:jira-review:new-run-attempt-1'),
+    );
+
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(jira.commentCalls).toEqual([]);
+    expect(jira.updateCommentCalls).toEqual([
+      { id: '9', body: `PR ready for review: [73|${pullRequestUrl}]` },
+    ]);
+    expect(jira.comments).toEqual([
+      { id: '9', body: `PR ready for review: [73|${pullRequestUrl}]` },
+    ]);
+  });
+
+  it('fails closed when Jira contains multiple managed review comments', async () => {
+    const jira = new StatefulJiraReviewPort();
+    jira.issue = { ...jira.issue, status: 'Code Review' };
+    jira.comments = [
+      {
+        id: '8',
+        body: 'PR ready for review: [71|https://bitbucket.example/pull-requests/71]',
+      },
+      {
+        id: '9',
+        body: 'PR ready for review: [72|https://bitbucket.example/pull-requests/72]',
+      },
+    ];
+
+    const result = await adapterFor(jira).execute(
+      requestFor('workflow:jira-review:ambiguous-comments-attempt-1'),
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      kind: 'remote_conflict',
+      details: { commentIds: ['8', '9'] },
+    });
+    expect(jira.commentCalls).toEqual([]);
+    expect(jira.updateCommentCalls).toEqual([]);
+  });
+
   it('surfaces missing required transition fields before mutating Jira and resumes in place', async () => {
     const jira = new StatefulJiraReviewPort();
     jira.transitionFields = [

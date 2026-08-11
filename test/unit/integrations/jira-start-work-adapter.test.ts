@@ -168,6 +168,10 @@ class StatefulJiraLifecyclePort implements JiraLifecyclePort {
   public comment(): Promise<JiraLifecycleMutation> {
     return Promise.resolve({ status: 'accepted' });
   }
+
+  public updateComment(): Promise<JiraLifecycleMutation> {
+    return Promise.resolve({ status: 'accepted' });
+  }
 }
 
 let ledger: SqliteLedger | undefined;

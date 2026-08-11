@@ -139,6 +139,7 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
       request,
       issueKey.data,
       pullRequest.url,
+      configured.data.reviewReady.commentPrefix,
       commentBody,
       artifactIds,
     );
@@ -335,6 +336,7 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
     request: IntegrationStepExecutionRequest,
     issueKey: JiraIssueKey,
     pullRequestUrl: string,
+    commentPrefix: string,
     body: string,
     artifactIds: string[],
   ): Promise<{ readonly status: 'commented' } | BlockedIntegrationResult> {
@@ -354,6 +356,22 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
     if (before.status === 'failed') {
       return problemResult(before.problem, artifactIds, receipt.value !== null);
     }
+    const managedPrefix = `${commentPrefix}:`;
+    const managedComments = before.comments.filter((comment) =>
+      comment.body.trimStart().startsWith(managedPrefix),
+    );
+    if (managedComments.length > 1) {
+      return blocked(
+        'remote_conflict',
+        'Jira contains multiple Tasker-managed pull-request comments',
+        {
+          issueKey,
+          commentPrefix,
+          commentIds: managedComments.map(({ id }) => id),
+        },
+        artifactIds,
+      );
+    }
     const existing = before.comments.find((comment) => comment.body.includes(pullRequestUrl));
     if (receipt.value !== null) {
       if (existing === undefined) {
@@ -370,7 +388,11 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
 
     let confirmed = existing;
     if (confirmed === undefined) {
-      const mutation = await this.jira.comment(issueKey, body);
+      const previousManagedComment = managedComments[0];
+      const mutation =
+        previousManagedComment === undefined
+          ? await this.jira.comment(issueKey, body)
+          : await this.jira.updateComment(issueKey, previousManagedComment.id, body);
       if (
         mutation.status === 'failed' &&
         mutation.problem.kind !== 'unavailable' &&
@@ -380,7 +402,22 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
       }
       const after = await this.jira.listComments(issueKey);
       if (after.status === 'failed') return problemResult(after.problem, artifactIds, true);
-      confirmed = after.comments.find((comment) => comment.body.includes(pullRequestUrl));
+      const managedAfter = after.comments.filter((comment) =>
+        comment.body.trimStart().startsWith(managedPrefix),
+      );
+      if (managedAfter.length > 1) {
+        return blocked(
+          'remote_conflict',
+          'Jira contains multiple Tasker-managed pull-request comments after mutation',
+          {
+            issueKey,
+            commentPrefix,
+            commentIds: managedAfter.map(({ id }) => id),
+          },
+          artifactIds,
+        );
+      }
+      confirmed = managedAfter.find((comment) => comment.body.includes(pullRequestUrl));
       if (confirmed === undefined) {
         return mutation.status === 'failed'
           ? problemResult(mutation.problem, artifactIds, true)
@@ -390,6 +427,18 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
               { issueKey, pullRequestUrl },
               artifactIds,
             );
+      }
+      if (previousManagedComment !== undefined && confirmed.id !== previousManagedComment.id) {
+        return blocked(
+          'remote_conflict',
+          'Jira did not preserve the managed pull-request comment identity',
+          {
+            issueKey,
+            expectedCommentId: previousManagedComment.id,
+            observedCommentId: confirmed.id,
+          },
+          artifactIds,
+        );
       }
     }
 
