@@ -41,6 +41,7 @@ import {
   loadJenkinsBuildConfiguration,
   loadJiraConfiguration,
   loadLoopPlanningEvidenceConfiguration,
+  loadGitCommitIdentity,
   loadExternalEffectTaskAuthorization,
   TaskScopedIntegrationAdapter,
 } from '../integrations/index.js';
@@ -124,6 +125,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     systemClock,
   );
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
+  const gitCommitIdentity = loadGitCommitIdentity();
   const bitbucketPullRequestEffectsEnabled =
     process.env.TASKER_ENABLE_BITBUCKET_PR_EFFECTS === 'true';
   const externalEffects = new ExternalEffectStore(ledger.repository, systemClock);
@@ -162,6 +164,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
           authorizeExternalEffect(
             new BitbucketPullRequestAdapter(
               bitbucketConfiguration,
+              gitCommitIdentity,
               nodeCommandRunner,
               new BitbucketPullRequestClient(bitbucketConfiguration),
               externalEffects,

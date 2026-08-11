@@ -12,6 +12,8 @@ import {
   type BitbucketPullRequestLookup,
   type BitbucketPullRequestPort,
   ExternalEffectStore,
+  type GitCommitIdentity,
+  loadGitCommitIdentity,
 } from '../../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
 import { findTaskFixture } from '../../../src/planning/index.js';
@@ -111,6 +113,11 @@ const configuration = {
   requestTimeoutMs: 1_000,
 };
 
+const commitIdentity = {
+  name: 'Tasker Adapter',
+  email: 'tasker-adapter@example.test',
+} satisfies GitCommitIdentity;
+
 const requestFor = (
   workspace: ReturnType<typeof createGitWorkspace>,
   operationId: string,
@@ -157,6 +164,7 @@ const adapterFor = (commands: CommandRunner, pullRequests: BitbucketPullRequestP
   ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
   return new BitbucketPullRequestAdapter(
     configuration,
+    commitIdentity,
     commands,
     pullRequests,
     new ExternalEffectStore(ledger.repository, systemClock),
@@ -164,6 +172,67 @@ const adapterFor = (commands: CommandRunner, pullRequests: BitbucketPullRequestP
 };
 
 describe('Bitbucket pull request effect adapter', () => {
+  it('loads an explicit commit identity from the environment or harness defaults', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tasker-git-identity-'));
+    roots.push(root);
+    writeFileSync(
+      join(root, '.env'),
+      'TASKER_GIT_AUTHOR_NAME=Harness Author\nTASKER_GIT_AUTHOR_EMAIL=harness@example.test\n',
+      'utf8',
+    );
+
+    expect(loadGitCommitIdentity({ TASKER_HARNESS_WORK_PATH: root })).toEqual({
+      name: 'Harness Author',
+      email: 'harness@example.test',
+    });
+    expect(
+      loadGitCommitIdentity({
+        TASKER_HARNESS_WORK_PATH: root,
+        TASKER_GIT_AUTHOR_NAME: 'Runtime Author',
+        TASKER_GIT_AUTHOR_EMAIL: 'runtime@example.test',
+      }),
+    ).toEqual({ name: 'Runtime Author', email: 'runtime@example.test' });
+  });
+
+  it('blocks before staging when a task change needs a missing commit identity', async () => {
+    const workspace = createGitWorkspace();
+    const pullRequests = new StatefulPullRequestPort();
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const adapter = new BitbucketPullRequestAdapter(
+      configuration,
+      null,
+      nodeCommandRunner,
+      pullRequests,
+      new ExternalEffectStore(ledger.repository, systemClock),
+    );
+
+    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      kind: 'configuration',
+      details: {
+        requiredEnvironment: ['TASKER_GIT_AUTHOR_NAME', 'TASKER_GIT_AUTHOR_EMAIL'],
+      },
+    });
+    expect(git(workspace.workspace, ['diff', '--cached', '--name-only'])).toBe('');
+    expect(git(workspace.workspace, ['rev-list', '--count', 'HEAD'])).toBe('1');
+    expect(pullRequests.createCalls).toBe(0);
+  });
+
+  it('commits with the configured identity instead of repository-local defaults', async () => {
+    const workspace = createGitWorkspace();
+    const pullRequests = new StatefulPullRequestPort();
+    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+
+    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(git(workspace.workspace, ['show', '-s', '--format=%an <%ae>|%cn <%ce>', 'HEAD'])).toBe(
+      'Tasker Adapter <tasker-adapter@example.test>|Tasker Adapter <tasker-adapter@example.test>',
+    );
+  });
+
   it('refuses remote publication when a declared branch artifact is not committed', async () => {
     const workspace = createGitWorkspace();
     writeFileSync(
@@ -265,6 +334,7 @@ describe('Bitbucket pull request effect adapter', () => {
     if (ledger === undefined) throw new Error('Missing effect ledger');
     const resumedAdapter = new BitbucketPullRequestAdapter(
       configuration,
+      commitIdentity,
       nodeCommandRunner,
       pullRequests,
       new ExternalEffectStore(ledger.repository, systemClock),

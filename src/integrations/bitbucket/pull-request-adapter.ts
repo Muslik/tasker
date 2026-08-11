@@ -14,6 +14,7 @@ import type {
 } from '../execution.js';
 import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.js';
 import { PullRequestDraftSchema, type PullRequestDraft } from '../pull-request-draft.js';
+import type { GitCommitIdentity } from './git-identity.js';
 import type {
   BitbucketPullRequest,
   BitbucketPullRequestPort,
@@ -135,6 +136,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
 
   public constructor(
     private readonly configuration: BitbucketRepositoryConfiguration,
+    private readonly commitIdentity: GitCommitIdentity | null,
     private readonly commands: CommandRunner,
     private readonly pullRequests: BitbucketPullRequestPort,
     private readonly effects: ExternalEffectStore,
@@ -390,6 +392,21 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       ...new Set([...parseNullSeparated(tracked.stdout), ...parseNullSeparated(untracked.stdout)]),
     ];
     if (changedPaths.length > 0) {
+      if (this.commitIdentity === null) {
+        return {
+          status: 'blocked',
+          result: {
+            status: 'blocked',
+            kind: 'configuration',
+            summary:
+              'Git commit identity is not configured. Set TASKER_GIT_AUTHOR_NAME and TASKER_GIT_AUTHOR_EMAIL.',
+            details: {
+              requiredEnvironment: ['TASKER_GIT_AUTHOR_NAME', 'TASKER_GIT_AUTHOR_EMAIL'],
+            },
+            artifactIds: [],
+          },
+        };
+      }
       const staged = await this.runGit(request, 'stage_task_changes', [
         'add',
         '--',
@@ -401,9 +418,9 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       const title = `${request.task.taskId}: ${request.task.title.replaceAll(/\s+/gu, ' ').trim()}`;
       const committed = await this.runGit(request, 'commit_task_changes', [
         '-c',
-        'user.name=Tasker',
+        `user.name=${this.commitIdentity.name}`,
         '-c',
-        'user.email=tasker@localhost',
+        `user.email=${this.commitIdentity.email}`,
         'commit',
         '-m',
         title,

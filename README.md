@@ -70,6 +70,13 @@ Temporal-backed health check, and stops every process it owns on Ctrl-C. Install
 Temporal CLI first. The operator console is available at `http://127.0.0.1:4311`; the
 Temporal debugging UI is at `http://127.0.0.1:8233`.
 
+Bitbucket pull-request publication also requires an explicit Git identity. Set
+`TASKER_GIT_AUTHOR_NAME` and `TASKER_GIT_AUTHOR_EMAIL` in the Tasker process environment
+or the harness-work `.env`. Tasker uses that identity for task commits so repository
+hooks see the same corporate author as an interactive commit. If it is absent or
+invalid, the PR step pauses with operator guidance and resumes the same worktree after
+the configuration is fixed.
+
 The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:cockpit` commands remain
 available for diagnosing one process in isolation. `demo:m1` starts the same complete
 `pnpm dev` stack; it is not a second runtime.
