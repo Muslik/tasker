@@ -11,10 +11,12 @@ import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.j
 import { JiraIssueKeySchema, type JiraIssueKey } from './contracts.js';
 import {
   jiraLifecyclePolicyConfiguration,
+  preflightJiraTransition,
   sameJiraValue,
   type JiraLifecycleIssue,
   type JiraLifecyclePort,
   type JiraLifecycleProblem,
+  type JiraLifecycleTransition,
 } from './lifecycle.js';
 
 type BlockedIntegrationResult = Extract<
@@ -201,16 +203,9 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
     | BlockedIntegrationResult
   > {
     const effectId = `review-transition-${String(fromIndex)}-${String(fromIndex + 1)}`;
-    const prepared = this.effects.prepare({
-      operationId: request.operationId,
-      effectId,
-      effectKind: 'jira.issue.transition',
-      identity: { issueKey: issue.issueKey, fromStatus: issue.status, toStatus },
-    });
-    if (!prepared.ok) return journalFailure(prepared.error, artifactIds);
-    artifactIds.push(this.effects.intentArtifactId(request.operationId, effectId));
-    const receipt = this.effects.readReceipt(request.operationId, effectId);
+    let receipt = this.effects.readReceipt(request.operationId, effectId);
     if (!receipt.ok) return journalFailure(receipt.error, artifactIds);
+    let selectedTransition: JiraLifecycleTransition | null = null;
 
     if (receipt.value === null) {
       const transitions = await this.jira.listTransitions(issue.issueKey);
@@ -233,8 +228,34 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
           artifactIds,
         );
       }
-      const transition = matches[0];
-      const mutation = await this.jira.transition(issue.issueKey, transition.id);
+      selectedTransition = matches[0];
+      const preflight = await this.preflightTransition(
+        issue.issueKey,
+        selectedTransition,
+        artifactIds,
+      );
+      if (preflight !== null) return preflight;
+
+      const prepared = this.effects.prepare({
+        operationId: request.operationId,
+        effectId,
+        effectKind: 'jira.issue.transition',
+        identity: { issueKey: issue.issueKey, fromStatus: issue.status, toStatus },
+      });
+      if (!prepared.ok) return journalFailure(prepared.error, artifactIds);
+      artifactIds.push(this.effects.intentArtifactId(request.operationId, effectId));
+      receipt = this.effects.readReceipt(request.operationId, effectId);
+      if (!receipt.ok) return journalFailure(receipt.error, artifactIds);
+    }
+
+    if (receipt.value === null) {
+      if (selectedTransition === null) {
+        return blocked('unknown_outcome', 'Jira transition selection was lost before mutation', {
+          issueKey: issue.issueKey,
+          toStatus,
+        });
+      }
+      const mutation = await this.jira.transition(issue.issueKey, selectedTransition.id);
       if (
         mutation.status === 'failed' &&
         mutation.problem.kind !== 'unavailable' &&
@@ -252,7 +273,7 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
           : blocked(
               'unknown_outcome',
               `Jira accepted the transition but ${toStatus} could not be confirmed`,
-              { issueKey: issue.issueKey, transitionId: transition.id, toStatus },
+              { issueKey: issue.issueKey, transitionId: selectedTransition.id, toStatus },
               artifactIds,
             );
       }
@@ -260,7 +281,7 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
         operationId: request.operationId,
         effectId,
         effectKind: 'jira.issue.transition',
-        result: transitionReceipt(issue.issueKey, issue.status, toStatus, transition.id),
+        result: transitionReceipt(issue.issueKey, issue.status, toStatus, selectedTransition.id),
       });
       if (!applied.ok) return journalFailure(applied.error, artifactIds);
       artifactIds.push(this.effects.receiptArtifactId(request.operationId, effectId));
@@ -279,6 +300,35 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
       );
     }
     return { status: 'transitioned', issue: observed.issue };
+  }
+
+  private async preflightTransition(
+    issueKey: JiraIssueKey,
+    transition: JiraLifecycleTransition,
+    artifactIds: readonly string[],
+  ): Promise<BlockedIntegrationResult | null> {
+    const preflight = await preflightJiraTransition(this.jira, issueKey, transition);
+    if (preflight.status === 'failed') return problemResult(preflight.problem, artifactIds);
+    if (preflight.status === 'ready') return null;
+
+    return blocked(
+      'invalid_request',
+      `Jira requires fields before ${transition.name} can run: ${preflight.fields
+        .map(({ name }) => name)
+        .join(', ')}`,
+      {
+        issueKey,
+        transitionId: transition.id,
+        transitionName: transition.name,
+        toStatus: transition.toStatus,
+        missingFields: preflight.fields.map(({ id, name, operations }) => ({
+          id,
+          name,
+          operations: [...operations],
+        })),
+      },
+      artifactIds,
+    );
   }
 
   private async ensurePullRequestComment(

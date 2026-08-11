@@ -8,7 +8,9 @@ import {
   type JiraLifecycleMutation,
   type JiraLifecycleObservation,
   type JiraLifecyclePort,
+  type JiraLifecycleTransitionField,
   type JiraCommentObservation,
+  type JiraFieldValueObservation,
   type JiraTransitionObservation,
 } from '../../../src/integrations/index.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
@@ -73,6 +75,9 @@ class StatefulJiraLifecyclePort implements JiraLifecyclePort {
   };
   public readonly assignmentCalls: string[] = [];
   public readonly transitionCalls: string[] = [];
+  public readonly fieldObservationCalls: string[][] = [];
+  public fieldValues: Record<string, null | number | string> = {};
+  public startWorkTransitionFields: readonly JiraLifecycleTransitionField[] = [];
   public mode: 'normal' | 'forbidden' | 'invalid-at-open' | 'lose-transition-response' = 'normal';
 
   public observeIssue(): Promise<JiraLifecycleObservation> {
@@ -82,11 +87,26 @@ class StatefulJiraLifecyclePort implements JiraLifecyclePort {
   public listTransitions(): Promise<JiraTransitionObservation> {
     const transitions =
       this.issue.status === 'Backlog'
-        ? [{ id: '511', name: 'Take from backlog', toStatus: 'Open' }]
+        ? [{ id: '511', name: 'Take from backlog', toStatus: 'Open', fields: [] }]
         : this.issue.status === 'Open'
-          ? [{ id: '11', name: 'Start work', toStatus: 'In Progress' }]
+          ? [
+              {
+                id: '11',
+                name: 'Start work',
+                toStatus: 'In Progress',
+                fields: this.startWorkTransitionFields,
+              },
+            ]
           : [];
     return Promise.resolve({ status: 'observed', transitions });
+  }
+
+  public observeFieldValues(
+    _issueKey: string,
+    fieldIds: readonly string[],
+  ): Promise<JiraFieldValueObservation> {
+    this.fieldObservationCalls.push([...fieldIds]);
+    return Promise.resolve({ status: 'observed', values: this.fieldValues });
   }
 
   public listComments(): Promise<JiraCommentObservation> {
@@ -163,6 +183,45 @@ const adapterFor = (jira: JiraLifecyclePort): JiraStartWorkAdapter => {
 };
 
 describe('Jira start-work effect adapter', () => {
+  it('pauses on missing transition prerequisites and continues without repeating prior work', async () => {
+    const jira = new StatefulJiraLifecyclePort();
+    jira.startWorkTransitionFields = [
+      {
+        id: 'customfield_12345',
+        name: 'Development estimate',
+        required: true,
+        hasDefaultValue: false,
+        operations: ['set'],
+      },
+    ];
+    const adapter = adapterFor(jira);
+
+    const blocked = await adapter.execute(requestFor('workflow:jira:attempt-1'));
+
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      kind: 'invalid_request',
+      summary: 'Jira requires fields before Start work can run: Development estimate',
+      details: {
+        issueKey: 'AVIA-12536',
+        transitionId: '11',
+        transitionName: 'Start work',
+        toStatus: 'In Progress',
+        missingFields: [{ id: 'customfield_12345', name: 'Development estimate' }],
+      },
+    });
+    expect(jira.issue.status).toBe('Open');
+    expect(jira.assignmentCalls).toHaveLength(1);
+    expect(jira.transitionCalls).toEqual(['511']);
+
+    jira.fieldValues.customfield_12345 = 2;
+    const resumed = await adapter.execute(requestFor('workflow:jira:attempt-2'));
+
+    expect(resumed).toMatchObject({ status: 'completed' });
+    expect(jira.assignmentCalls).toHaveLength(1);
+    expect(jira.transitionCalls).toEqual(['511', '11']);
+  });
+
   it('assigns an eligible issue and follows the configured status path', async () => {
     const jira = new StatefulJiraLifecyclePort();
 

@@ -153,6 +153,15 @@ does not receive Tasker's private before-reproduction evidence automatically; fi
 demo evidence may be published during delivery when the task policy requests it.
 These obligations add no vendor branches to the compiler or Temporal Workflow.
 
+Jira remains the source of truth for transition prerequisites. Before either admission
+or review-ready mutation, its adapter reads `transitions.fields` and the current values
+of required fields without defaults. Missing fields open an actionable durable wait
+before a mutation intent is created. The operator fills the field (or performs an
+intentionally human-only transition) and resumes the same block; the completed graph
+prefix, worktree, PR, and CI evidence are preserved. Tasker never invents estimates or
+other business values. Jira validators may still reject a transition after preflight;
+structured 400 reasons remain visible in the same operator action.
+
 The first compiled candidate is not yet executable or immutable. Validation rejection
 persists exact feedback plus the rejected `ready` decision and asks the planner for a
 complete replacement candidate. Tasker never patches compiled IR or inserts nodes

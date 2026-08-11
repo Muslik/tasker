@@ -8,6 +8,76 @@ const configuration = {
 };
 
 describe('Jira lifecycle client', () => {
+  it('preserves transition field requirements exposed by Jira', async () => {
+    const client = new JiraLifecycleClient(
+      configuration,
+      vi.fn(() =>
+        Promise.resolve(
+          Response.json({
+            transitions: [
+              {
+                id: '31',
+                name: 'Ready for review',
+                to: { name: 'Code Review' },
+                fields: {
+                  customfield_12345: {
+                    required: true,
+                    name: 'Development estimate',
+                    hasDefaultValue: false,
+                    operations: ['set'],
+                  },
+                },
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    const result = await client.listTransitions('AVIA-12536');
+
+    expect(result).toEqual({
+      status: 'observed',
+      transitions: [
+        {
+          id: '31',
+          name: 'Ready for review',
+          toStatus: 'Code Review',
+          fields: [
+            {
+              id: 'customfield_12345',
+              name: 'Development estimate',
+              required: true,
+              hasDefaultValue: false,
+              operations: ['set'],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('reads current values for transition fields in one request', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(() =>
+      Promise.resolve(Response.json({ fields: { customfield_12345: 3, customfield_54321: null } })),
+    );
+    const client = new JiraLifecycleClient(configuration, fetchImplementation);
+
+    const result = await client.observeFieldValues('AVIA-12536', [
+      'customfield_12345',
+      'customfield_54321',
+    ]);
+
+    expect(result).toEqual({
+      status: 'observed',
+      values: { customfield_12345: 3, customfield_54321: null },
+    });
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      'https://jira.example/rest/api/2/issue/AVIA-12536?fields=customfield_12345%2Ccustomfield_54321',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('uses the Jira Server assignment contract without leaking the token into the body', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(() =>
       Promise.resolve(new Response(null, { status: 204 })),

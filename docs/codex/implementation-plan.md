@@ -98,6 +98,12 @@ flaky, infrastructure, and unknown results enter separate durable waits and re-o
 Automatic Jenkins retrigger remains a later reconciled effect; the current flaky branch waits for
 an external retry rather than hiding a non-idempotent mutation in `ci.observe@1`.
 
+Jira lifecycle transitions now preflight provider-owned field requirements for both
+admission and review-ready paths. Missing values become an actionable durable wait
+before mutation; Resume re-observes Jira and continues the same block without replaying
+completed transitions or delivery work. Jira 400 field/validator reasons remain a
+fallback for server rules that transition metadata cannot describe.
+
 Phase 4B is complete: Generate starts Bootstrap v3 without a graph/hash, prepares the
 managed worktree and Docker runtime, persists graph-free context and evidence, and runs
 mandatory planning. The planner may request registered investigation blocks and owns

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "reference": "jira.review-ready@1",
   "policy": "jira-lifecycle",
-  "description": "Move an admitted Jira issue to code review and publish one compact pull-request link.",
+  "description": "Preflight Jira transition requirements, move an admitted issue to code review, and publish one compact pull-request link.",
   "availableDuring": ["execution"],
   "stage": { "id": "delivery", "label": "Deliver" },
   "inputContract": "task_input",

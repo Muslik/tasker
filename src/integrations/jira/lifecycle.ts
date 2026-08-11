@@ -58,9 +58,28 @@ const RawTransitionsSchema = z
           id: z.string().min(1),
           name: z.string().min(1),
           to: z.object({ name: z.string().min(1) }).loose(),
+          fields: z
+            .record(
+              z.string(),
+              z
+                .object({
+                  required: z.boolean().default(false),
+                  name: z.string().min(1),
+                  hasDefaultValue: z.boolean().default(false),
+                  operations: z.array(z.string()).default([]),
+                })
+                .loose(),
+            )
+            .default({}),
         })
         .loose(),
     ),
+  })
+  .loose();
+
+const RawFieldValuesSchema = z
+  .object({
+    fields: z.record(z.string(), JsonValueSchema),
   })
   .loose();
 
@@ -116,6 +135,15 @@ export interface JiraLifecycleTransition {
   readonly id: string;
   readonly name: string;
   readonly toStatus: string;
+  readonly fields: readonly JiraLifecycleTransitionField[];
+}
+
+export interface JiraLifecycleTransitionField {
+  readonly id: string;
+  readonly name: string;
+  readonly required: boolean;
+  readonly hasDefaultValue: boolean;
+  readonly operations: readonly string[];
 }
 
 export type JiraLifecycleProblem =
@@ -164,6 +192,10 @@ export type JiraTransitionObservation =
   | { readonly status: 'observed'; readonly transitions: readonly JiraLifecycleTransition[] }
   | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
 
+export type JiraFieldValueObservation =
+  | { readonly status: 'observed'; readonly values: Readonly<Record<string, JsonValue>> }
+  | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
+
 export type JiraCommentObservation =
   | {
       readonly status: 'observed';
@@ -189,11 +221,49 @@ export type JiraLifecycleMutation =
 export interface JiraLifecyclePort {
   observeIssue(issueKey: JiraIssueKey): Promise<JiraLifecycleObservation>;
   listTransitions(issueKey: JiraIssueKey): Promise<JiraTransitionObservation>;
+  observeFieldValues(
+    issueKey: JiraIssueKey,
+    fieldIds: readonly string[],
+  ): Promise<JiraFieldValueObservation>;
   listComments(issueKey: JiraIssueKey): Promise<JiraCommentObservation>;
   assign(issueKey: JiraIssueKey, accountName: string): Promise<JiraLifecycleMutation>;
   transition(issueKey: JiraIssueKey, transitionId: string): Promise<JiraLifecycleMutation>;
   comment(issueKey: JiraIssueKey, body: string): Promise<JiraLifecycleMutation>;
 }
+
+export type JiraTransitionPreflight =
+  | { readonly status: 'ready' }
+  | {
+      readonly status: 'missing_fields';
+      readonly fields: readonly JiraLifecycleTransitionField[];
+    }
+  | { readonly status: 'failed'; readonly problem: JiraLifecycleProblem };
+
+const hasJiraFieldValue = (value: JsonValue | undefined): boolean => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
+};
+
+export const preflightJiraTransition = async (
+  jira: JiraLifecyclePort,
+  issueKey: JiraIssueKey,
+  transition: JiraLifecycleTransition,
+): Promise<JiraTransitionPreflight> => {
+  const requiredFields = transition.fields.filter(
+    (field) => field.required && !field.hasDefaultValue,
+  );
+  if (requiredFields.length === 0) return { status: 'ready' };
+  const observed = await jira.observeFieldValues(
+    issueKey,
+    requiredFields.map(({ id }) => id),
+  );
+  if (observed.status === 'failed') return observed;
+  const missing = requiredFields.filter(({ id }) => !hasJiraFieldValue(observed.values[id]));
+  return missing.length === 0 ? { status: 'ready' } : { status: 'missing_fields', fields: missing };
+};
 
 export interface JiraAttachmentPort {
   listAttachments(issueKey: JiraIssueKey): Promise<JiraAttachmentObservation>;
@@ -357,8 +427,39 @@ export class JiraLifecycleClient implements JiraLifecyclePort, JiraAttachmentPor
         id: transition.id,
         name: transition.name,
         toStatus: transition.to.name,
+        fields: Object.entries(transition.fields).map(([id, field]) => ({ id, ...field })),
       })),
     };
+  }
+
+  public async observeFieldValues(
+    issueKey: JiraIssueKey,
+    fieldIds: readonly string[],
+  ): Promise<JiraFieldValueObservation> {
+    if (fieldIds.length === 0) return { status: 'observed', values: {} };
+    const fields = [...new Set(fieldIds)].join(',');
+    const response = await this.request(
+      'GET',
+      `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=${encodeURIComponent(fields)}`,
+    );
+    if (response.status === 'failed') return response;
+    const payload = await this.json(
+      response.response,
+      'Jira returned invalid transition field values',
+    );
+    if (payload.status === 'failed') return payload;
+    const parsed = RawFieldValuesSchema.safeParse(payload.value);
+    if (!parsed.success) {
+      return {
+        status: 'failed',
+        problem: {
+          kind: 'invalid_response',
+          message: 'Jira transition field values did not match their contract',
+          retryable: false,
+        },
+      };
+    }
+    return { status: 'observed', values: parsed.data.fields };
   }
 
   public async listComments(issueKey: JiraIssueKey): Promise<JiraCommentObservation> {
@@ -579,6 +680,31 @@ const blocked = (
   details: JsonValue,
   artifactIds: readonly string[] = [],
 ): BlockedIntegrationResult => ({ status: 'blocked', kind, summary, details, artifactIds });
+
+const missingTransitionFields = (
+  issueKey: JiraIssueKey,
+  transition: JiraLifecycleTransition,
+  fields: readonly JiraLifecycleTransitionField[],
+  artifactIds: readonly string[],
+): BlockedIntegrationResult =>
+  blocked(
+    'invalid_request',
+    `Jira requires fields before ${transition.name} can run: ${fields
+      .map(({ name }) => name)
+      .join(', ')}`,
+    {
+      issueKey,
+      transitionId: transition.id,
+      transitionName: transition.name,
+      toStatus: transition.toStatus,
+      missingFields: fields.map(({ id, name, operations }) => ({
+        id,
+        name,
+        operations: [...operations],
+      })),
+    },
+    artifactIds,
+  );
 
 const statusIndex = (path: readonly string[], status: string): number =>
   path.findIndex((candidate) => sameJiraValue(candidate, status));
@@ -803,16 +929,9 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
     | BlockedIntegrationResult
   > {
     const effectId = `transition-${String(fromIndex)}-${String(fromIndex + 1)}`;
-    const prepared = this.effects.prepare({
-      operationId: request.operationId,
-      effectId,
-      effectKind: 'jira.issue.transition',
-      identity: { issueKey: issue.issueKey, fromStatus: issue.status, toStatus },
-    });
-    if (!prepared.ok) return journalFailure(prepared.error, artifactIds);
-    artifactIds.push(this.effects.intentArtifactId(request.operationId, effectId));
-    const receipt = this.effects.readReceipt(request.operationId, effectId);
+    let receipt = this.effects.readReceipt(request.operationId, effectId);
     if (!receipt.ok) return journalFailure(receipt.error, artifactIds);
+    let selectedTransition: JiraLifecycleTransition | null = null;
 
     if (receipt.value === null) {
       const transitions = await this.jira.listTransitions(issue.issueKey);
@@ -836,10 +955,45 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
         );
       }
       const transitionId = matches[0]?.id;
-      if (transitionId === undefined) {
+      selectedTransition = matches[0] ?? null;
+      if (transitionId === undefined || selectedTransition === null) {
         return blocked('invalid_request', 'Jira transition selection failed', {}, artifactIds);
       }
-      const mutation = await this.jira.transition(issue.issueKey, transitionId);
+      const preflight = await preflightJiraTransition(
+        this.jira,
+        issue.issueKey,
+        selectedTransition,
+      );
+      if (preflight.status === 'failed') return problemResult(preflight.problem, artifactIds);
+      if (preflight.status === 'missing_fields') {
+        return missingTransitionFields(
+          issue.issueKey,
+          selectedTransition,
+          preflight.fields,
+          artifactIds,
+        );
+      }
+
+      const prepared = this.effects.prepare({
+        operationId: request.operationId,
+        effectId,
+        effectKind: 'jira.issue.transition',
+        identity: { issueKey: issue.issueKey, fromStatus: issue.status, toStatus },
+      });
+      if (!prepared.ok) return journalFailure(prepared.error, artifactIds);
+      artifactIds.push(this.effects.intentArtifactId(request.operationId, effectId));
+      receipt = this.effects.readReceipt(request.operationId, effectId);
+      if (!receipt.ok) return journalFailure(receipt.error, artifactIds);
+    }
+
+    if (receipt.value === null) {
+      if (selectedTransition === null) {
+        return blocked('unknown_outcome', 'Jira transition selection was lost before mutation', {
+          issueKey: issue.issueKey,
+          toStatus,
+        });
+      }
+      const mutation = await this.jira.transition(issue.issueKey, selectedTransition.id);
       if (
         mutation.status === 'failed' &&
         mutation.problem.kind !== 'unavailable' &&
@@ -858,7 +1012,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
         return blocked(
           'unknown_outcome',
           `Jira accepted the transition but ${toStatus} could not be confirmed`,
-          { issueKey: issue.issueKey, transitionId, toStatus },
+          { issueKey: issue.issueKey, transitionId: selectedTransition.id, toStatus },
           artifactIds,
         );
       }
@@ -866,7 +1020,7 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
         operationId: request.operationId,
         effectId,
         effectKind: 'jira.issue.transition',
-        result: transitionReceipt(issue.issueKey, issue.status, toStatus, transitionId),
+        result: transitionReceipt(issue.issueKey, issue.status, toStatus, selectedTransition.id),
       });
       if (!applied.ok) return journalFailure(applied.error, artifactIds);
       artifactIds.push(this.effects.receiptArtifactId(request.operationId, effectId));

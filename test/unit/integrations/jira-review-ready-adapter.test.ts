@@ -5,10 +5,12 @@ import {
   ExternalEffectStore,
   JiraReviewReadyAdapter,
   type JiraCommentObservation,
+  type JiraFieldValueObservation,
   type JiraLifecycleIssue,
   type JiraLifecycleMutation,
   type JiraLifecycleObservation,
   type JiraLifecyclePort,
+  type JiraLifecycleTransitionField,
   type JiraTransitionObservation,
 } from '../../../src/integrations/index.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
@@ -103,8 +105,11 @@ class StatefulJiraReviewPort implements JiraLifecyclePort {
     },
   };
   public comments: { readonly id: string; readonly body: string }[] = [];
+  public fieldValues: Record<string, null | number | string> = {};
+  public transitionFields: readonly JiraLifecycleTransitionField[] = [];
   public readonly transitionCalls: string[] = [];
   public readonly commentCalls: string[] = [];
+  public readonly fieldObservationCalls: string[][] = [];
   public observeCalls = 0;
   public mode: 'normal' | 'forbidden-transition' | 'forbidden-comment' | 'lose-comment-response' =
     'normal';
@@ -119,9 +124,24 @@ class StatefulJiraReviewPort implements JiraLifecyclePort {
       status: 'observed',
       transitions:
         this.issue.status === 'In Progress'
-          ? [{ id: '31', name: 'Ready for review', toStatus: 'Code Review' }]
+          ? [
+              {
+                id: '31',
+                name: 'Ready for review',
+                toStatus: 'Code Review',
+                fields: this.transitionFields,
+              },
+            ]
           : [],
     });
+  }
+
+  public observeFieldValues(
+    _issueKey: string,
+    fieldIds: readonly string[],
+  ): Promise<JiraFieldValueObservation> {
+    this.fieldObservationCalls.push([...fieldIds]);
+    return Promise.resolve({ status: 'observed', values: this.fieldValues });
   }
 
   public listComments(): Promise<JiraCommentObservation> {
@@ -191,6 +211,52 @@ const adapterFor = (jira: JiraLifecyclePort): JiraReviewReadyAdapter => {
 };
 
 describe('Jira review-ready effect adapter', () => {
+  it('surfaces missing required transition fields before mutating Jira and resumes in place', async () => {
+    const jira = new StatefulJiraReviewPort();
+    jira.transitionFields = [
+      {
+        id: 'customfield_12345',
+        name: 'Development estimate',
+        required: true,
+        hasDefaultValue: false,
+        operations: ['set'],
+      },
+    ];
+    const adapter = adapterFor(jira);
+
+    const blocked = await adapter.execute(requestFor('workflow:jira-review:attempt-1'));
+
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      kind: 'invalid_request',
+      summary: 'Jira requires fields before Ready for review can run: Development estimate',
+      details: {
+        issueKey: 'AVIA-12536',
+        transitionId: '31',
+        transitionName: 'Ready for review',
+        toStatus: 'Code Review',
+        missingFields: [
+          {
+            id: 'customfield_12345',
+            name: 'Development estimate',
+            operations: ['set'],
+          },
+        ],
+      },
+      artifactIds: [],
+    });
+    expect(jira.transitionCalls).toEqual([]);
+    expect(jira.commentCalls).toEqual([]);
+
+    jira.fieldValues.customfield_12345 = 3;
+    const resumed = await adapter.execute(requestFor('workflow:jira-review:attempt-2'));
+
+    expect(resumed).toMatchObject({ status: 'completed' });
+    expect(jira.fieldObservationCalls).toEqual([['customfield_12345'], ['customfield_12345']]);
+    expect(jira.transitionCalls).toEqual(['31']);
+    expect(jira.commentCalls).toHaveLength(1);
+  });
+
   it('moves the issue to code review and posts one compact pull-request comment', async () => {
     const jira = new StatefulJiraReviewPort();
 

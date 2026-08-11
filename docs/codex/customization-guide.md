@@ -385,6 +385,14 @@ admission and not a required reproduction block. Tasker's private before evidenc
 remains in its artifact store. Keep any remote-media policy off until a selected pilot
 task and its transition requirements have been inspected.
 
+Required transition fields are not duplicated in Tasker configuration. Jira remains
+their source of truth: before `jira.start-work@1` or `jira.review-ready@1` mutates an
+issue, the adapter reads the selected transition metadata and current issue values. If
+a required value such as Development estimate is absent, the run names the exact Jira
+field and waits. Fill it in Jira and press Resume; Tasker re-runs only that block and
+preserves the already completed workflow prefix. It does not guess or write business
+estimates on the operator's behalf.
+
 ## 9. Configure provider and model selection
 
 Execution profiles live in `harness/company.json`. A profile is a complete executable
