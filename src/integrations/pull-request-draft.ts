@@ -5,6 +5,9 @@ export const PullRequestDraftArtifactPathSchema = z
   .min(1)
   .refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), {
     message: 'Expected a path relative to the managed worktree',
+  })
+  .refine((value) => !/^(?:\.\/)*\.tasker(?:\/|$)/u.test(value), {
+    message: 'Tasker control-plane files cannot be published as branch artifacts',
   });
 
 export const PullRequestDraftSchema = z
