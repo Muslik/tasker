@@ -749,6 +749,84 @@ describe('temporal block execution activity', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it('preserves an integration verification failure as a verification wait', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('ci.observe@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        runtimes: readyRuntime(),
+        agentRunner: { run: vi.fn() },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+        integrations: new IntegrationStepAdapterRegistry([
+          {
+            id: 'jenkins.build@1',
+            execute: () =>
+              Promise.resolve({
+                status: 'blocked',
+                kind: 'verification',
+                summary: 'Jenkins build failed because payment snapshots changed',
+                details: { status: 'likely_caused_by_change' },
+                artifactIds: [],
+              }),
+          },
+        ]),
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+
+    const result = await activity.runExecutionBlock({
+      schemaVersion: 2,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'observe-ci',
+      blockRun: 1,
+      uses: 'ci.observe@1',
+      activityDelivery: { kind: 'read_only' },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: {
+        objective: 'Observe CI',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'needs_input',
+      waitKind: 'ci.observe@1.verification@1',
+    });
+    expect(
+      receipts.read(
+        blockReceiptId({
+          workflowId: stubWorkspace.workflowId,
+          workflowRunId: stubWorkspace.workflowRunId,
+          nodeId: 'observe-ci',
+          blockRun: 1,
+        }),
+      ),
+    ).toMatchObject({ ok: true, value: { claim: { category: 'verification' } } });
+  });
+
   it('advances the execution graph only after an accepted BlockReceipt', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

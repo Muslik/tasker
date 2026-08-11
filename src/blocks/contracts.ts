@@ -122,7 +122,16 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
     .object({
       status: z.literal('blocked'),
       summary: z.string().min(1),
-      category: z.enum(['infrastructure', 'authorization', 'task_ambiguity']),
+      category: z.enum([
+        'infrastructure',
+        'authorization',
+        'task_ambiguity',
+        'configuration',
+        'invalid_request',
+        'remote_conflict',
+        'verification',
+        'unknown_outcome',
+      ]),
       retryable: z.boolean(),
     })
     .strict()

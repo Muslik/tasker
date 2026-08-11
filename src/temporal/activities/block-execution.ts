@@ -1696,13 +1696,31 @@ const persistedOutput = (artifact: TaskStepOutputArtifact): JsonValue => {
     : {};
 };
 
-const blockedCategory = (
-  summary: string,
-): 'infrastructure' | 'authorization' | 'task_ambiguity' => {
+type BlockedClaimCategory = Extract<AgentClaim, { readonly status: 'blocked' }>['category'];
+
+const integrationBlockedCategories = new Set<BlockedClaimCategory>([
+  'configuration',
+  'infrastructure',
+  'invalid_request',
+  'remote_conflict',
+  'verification',
+  'unknown_outcome',
+]);
+
+const blockedCategory = (summary: string, details: unknown): BlockedClaimCategory => {
   const normalized = summary.toLowerCase();
   if (/auth|credential|permission|forbidden|401|403/u.test(normalized)) return 'authorization';
   if (/ambigu|unclear|question|expected behavior|expected behaviour/u.test(normalized)) {
     return 'task_ambiguity';
+  }
+  if (typeof details === 'object' && details !== null && !Array.isArray(details)) {
+    const kind = (details as Readonly<Record<string, unknown>>).kind;
+    if (
+      typeof kind === 'string' &&
+      integrationBlockedCategories.has(kind as BlockedClaimCategory)
+    ) {
+      return kind as BlockedClaimCategory;
+    }
   }
   return 'infrastructure';
 };
@@ -1724,7 +1742,7 @@ const claimFromResult = (
       return AgentClaimSchema.parse({
         status: 'blocked',
         summary: result.summary,
-        category: blockedCategory(result.summary),
+        category: blockedCategory(result.summary, outputArtifact.details),
         retryable: true,
       });
     case 'workflow_change_required':
