@@ -342,4 +342,47 @@ describe('Jenkins build observation', () => {
       true,
     );
   });
+
+  it('keeps polling while a new build has not published its revision action yet', async () => {
+    const fetchImplementation: typeof fetch = vi.fn((input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const body = url.includes('tree=jobs')
+        ? {
+            jobs: [
+              {
+                name: 'tasker%2FAVIA-13236%2Frun-1',
+                url: 'https://jenkins.example/job/front-avia/job/tasker%252FAVIA-13236/',
+              },
+            ],
+          }
+        : {
+            number: 73,
+            url: 'https://jenkins.example/job/front-avia/job/tasker%252FAVIA-13236/73/',
+            building: true,
+            result: null,
+            duration: 0,
+            actions: [],
+          };
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    });
+    const client = new JenkinsBuildClient(configuration, fetchImplementation);
+
+    await expect(
+      client.observe({
+        job: 'front-avia',
+        branch: 'tasker/AVIA-13236/run-1',
+        expectedRevision: revision,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      status: 'pending',
+      reason: 'building',
+      buildUrl: 'https://jenkins.example/job/front-avia/job/tasker%252FAVIA-13236/73/',
+    });
+  });
 });

@@ -315,6 +315,9 @@ export class JenkinsBuildClient implements JenkinsBuildPort {
     const revision = parsedBuild.data.actions.find(
       ({ lastBuiltRevision }) => lastBuiltRevision !== undefined,
     )?.lastBuiltRevision?.SHA1;
+    if (revision === undefined && (parsedBuild.data.building || parsedBuild.data.result === null)) {
+      return { status: 'pending', reason: 'building', buildUrl: parsedBuild.data.url };
+    }
     if (revision === undefined) return this.invalidResponse('build revision');
     if (revision !== input.expectedRevision) {
       return { status: 'pending', reason: 'stale_revision', buildUrl: parsedBuild.data.url };
