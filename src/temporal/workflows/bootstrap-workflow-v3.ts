@@ -21,6 +21,7 @@ import type {
   BootstrapWorkspaceContext,
   PlanningActivityCommand,
   ResolveBootstrapWaitCommand,
+  WorkflowFreezeReceipt,
 } from '../bootstrap-kernel/contracts.js';
 import {
   bootstrapWorkflowStateQuery,
@@ -66,6 +67,28 @@ const retryGuidanceFrom = (resolution: JsonValue): string | null =>
     ? resolution.guidance.trim()
     : null;
 
+const planningBlockedReason = (planning: Extract<BootstrapPlanningState, { status: 'blocked' }>) =>
+  (planning.failure.kind === 'invalid_planner_output'
+    ? `Workflow candidate rejected after automatic correction: ${planning.failure.message}`
+    : `Implementation planning blocked: ${planning.failure.message}`
+  ).slice(0, 4_000);
+
+const planningRevisionGuidance = (
+  planning: Extract<BootstrapPlanningState, { status: 'blocked' }>,
+  operatorGuidance: string | null,
+): string =>
+  [
+    'Revise the preserved planning decision instead of restarting task analysis.',
+    `Previous planning failure: ${planning.failure.message}`,
+    planning.validationFeedback.length === 0
+      ? null
+      : `Deterministic validation feedback:\n${planning.validationFeedback.join('\n')}`,
+    operatorGuidance === null ? null : `Operator guidance:\n${operatorGuidance}`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
+    .slice(0, 10_000);
+
 const planReviewFrom = (
   resolution: JsonValue,
 ):
@@ -108,6 +131,7 @@ export async function bootstrapWorkflowV3(
   let planningContext: BootstrapContextState | null = null;
   let draft: BootstrapDraftState | null = null;
   let planning: BootstrapPlanningState | null = null;
+  let freezeReceipt: WorkflowFreezeReceipt | null = null;
   let pendingResolution: ResolveBootstrapWaitCommand | null = null;
   let planningCommandSequence = 0;
   const nodeStates: Record<string, BootstrapStageStatus> = Object.fromEntries(
@@ -167,6 +191,7 @@ export async function bootstrapWorkflowV3(
       context: planningContext,
       draft,
       planning,
+      freezeReceipt,
       status: 'running',
       currentNodeId: stage,
       wait: null,
@@ -183,6 +208,7 @@ export async function bootstrapWorkflowV3(
       context: planningContext,
       draft,
       planning,
+      freezeReceipt,
       status: 'waiting',
       currentNodeId: stage,
       wait: { nodeId: stage, waitKind, ...(reason === undefined ? {} : { reason }) },
@@ -267,6 +293,21 @@ export async function bootstrapWorkflowV3(
       activeContext = { ...activeContext, evidenceBundle: result.evidenceBundle };
       planningContext = activeContext;
       state = { ...state, planning, context: activeContext };
+      if (result.status === 'blocked') {
+        const resolution = await openWait(
+          'planning',
+          result.failure.kind === 'invalid_planner_output'
+            ? 'planning.candidate-guidance@1'
+            : 'planning.guidance@1',
+          planningBlockedReason(result),
+        );
+        command = {
+          kind: 'revision',
+          sourceAttempt: result.attempt,
+          guidance: planningRevisionGuidance(result, retryGuidanceFrom(resolution)),
+        };
+        continue;
+      }
       if (result.status === 'ready') {
         draft = result.draft;
         if (investigationRounds === 0) nodeStates.investigation = 'skipped';
@@ -397,7 +438,6 @@ export async function bootstrapWorkflowV3(
   ) {
     throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted candidate and plan');
   }
-  let freezeReceipt;
   for (;;) {
     markRunning('freeze', 'freezing');
     attempts.freeze = (attempts.freeze ?? 0) + 1;

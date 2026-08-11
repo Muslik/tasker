@@ -157,12 +157,19 @@ A `ready` decision contains full workflow source, not an imperative patch. Taske
 
 There are at most three candidate revisions in one planning attempt. Tasker never
 silently inserts missing steps, patches compiled IR, or executes a rejected candidate.
-If those revisions are exhausted, invalid planner output is a non-retryable Activity
-result: Bootstrap opens one durable `planning.retry@1` wait instead of multiplying the
-same expensive planner command through Temporal's infrastructure retry policy. Failures
+If those revisions are exhausted, invalid planner output becomes a typed blocked planning
+result. Bootstrap opens one durable `planning.candidate-guidance@1` wait with the exact
+validator reason instead of multiplying the same expensive planner command through
+Temporal's infrastructure retry policy. Resume creates a new revision command carrying the
+last rejected decision, accumulated validator feedback, and optional operator guidance;
+completed workspace, context, evidence, and investigation remain unchanged. Failures
 classified as transient may still use Activity retries.
 
-Once accepted, Tasker creates an execution snapshot containing only the referenced
+Once accepted, Tasker persists the validated candidate, graph hash, and provider receipt
+before creating the execution snapshot. This checkpoint is internal recovery state, not
+another operator-visible stage. If snapshot materialization or its response path fails,
+the same planning command resumes from the checkpoint and does not invoke the paid
+planner again. Tasker then creates an execution snapshot containing only the referenced
 execution blocks and their pinned prompts, skills, profiles, commands, policies, task,
 workflow, workspace, and evidence reference.
 

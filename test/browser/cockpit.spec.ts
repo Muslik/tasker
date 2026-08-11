@@ -449,7 +449,7 @@ test('an invalid planner candidate pauses planning without an executable graph',
   await clickTask(page, invalid.id);
   await page.getByRole('button', { name: 'Generate workflow' }).click();
 
-  await waitForRunWait(page, invalid.id, 'planning.retry@1');
+  await waitForRunWait(page, invalid.id, 'planning.candidate-guidance@1');
   const workflow = await loadWorkflow(page, invalid.id);
 
   expect(workflow.status).toBe('rejected');
@@ -464,7 +464,9 @@ test('an invalid planner candidate pauses planning without an executable graph',
     timeout: 20_000,
   });
   await expect(page.getByText('Action required', { exact: true })).toBeVisible();
-  await expect(page.getByTestId('selected-task')).toContainText('Implementation planning failed');
+  await expect(page.getByTestId('selected-task')).toContainText(
+    'Workflow candidate rejected after automatic correction',
+  );
   await expect(page.getByTestId('selected-task')).not.toContainText('Workflow ready');
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
 });
@@ -564,7 +566,7 @@ test('a ledger event from another page refreshes the visible task status', async
 
   const generatedWorkflow = await loadWorkflow(page, backlog.id);
   expect(generatedWorkflow.status).toBe('rejected');
-  await waitForRunWait(page, backlog.id, 'planning.retry@1');
+  await waitForRunWait(page, backlog.id, 'planning.candidate-guidance@1');
   await expect(page.getByTestId(`task-item-${backlog.id}`)).toContainText('Waiting');
   await expect(page.getByTestId('selected-task')).toContainText(backlog.title);
   await expect(page.getByTestId('validation-panel')).toBeVisible();

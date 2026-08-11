@@ -30,6 +30,15 @@ export const PlanningEvidenceRoundSchema = PlanningEvidencePendingObjectSchema.e
   .strict()
   .readonly();
 
+export const ValidatedPlanningCandidateSchema = z
+  .object({
+    decision: ReadyImplementationPlanningDecisionSchema,
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    receipt: ImplementationPlannerReceiptSchema,
+  })
+  .strict()
+  .readonly();
+
 export const PlanningFailureViewSchema = z
   .object({
     kind: z.enum([
@@ -71,6 +80,7 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
   PlanningRecordBaseSchema.extend({
     status: z.literal('planning'),
     pendingEvidence: PlanningEvidencePendingSchema.nullable(),
+    validatedCandidate: ValidatedPlanningCandidateSchema.nullable().default(null),
   }).strict(),
   PlanningRecordBaseSchema.extend({
     status: z.literal('ready'),
@@ -110,6 +120,7 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
 export type ImplementationPlanningRecord = z.infer<typeof ImplementationPlanningRecordSchema>;
 export type PlanningEvidencePending = z.infer<typeof PlanningEvidencePendingSchema>;
 export type PlanningEvidenceRound = z.infer<typeof PlanningEvidenceRoundSchema>;
+export type ValidatedPlanningCandidate = z.infer<typeof ValidatedPlanningCandidateSchema>;
 export type ReadyImplementationPlanningRecord = Extract<
   ImplementationPlanningRecord,
   { readonly status: 'ready' }

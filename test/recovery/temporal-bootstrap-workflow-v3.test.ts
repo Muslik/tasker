@@ -142,6 +142,33 @@ describe('Bootstrap Workflow v3 recovery', () => {
       )
       .toBe('completed');
   }, 60_000);
+
+  it('publishes the freeze receipt while manual execution start is waiting', async () => {
+    const taskReference = 'fixture:manual-execution-start';
+    expect(
+      await runs.start({
+        ...inputFor(taskReference, 'automatic'),
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          executionStart: 'manual',
+        },
+      }),
+    ).toMatchObject({ ok: true });
+
+    const waiting = await waitFor(taskReference, 'execution.start@1');
+
+    expect(waiting).toMatchObject({
+      status: 'waiting',
+      phase: 'freezing',
+      nodeStates: { freeze: 'succeeded', execution_start: 'waiting' },
+      freezeReceipt: {
+        schemaVersion: 1,
+        taskReference,
+        workflowHash: 'a'.repeat(64),
+      },
+    });
+  });
 });
 
 describe('Bootstrap investigation recovery', () => {
@@ -277,7 +304,7 @@ describe('Bootstrap investigation recovery', () => {
 });
 
 describe('Bootstrap planning failure recovery', () => {
-  it('opens one durable wait without retrying a non-retryable planner output', async () => {
+  it('surfaces exhausted candidate correction as one typed durable wait', async () => {
     const environment = await TestWorkflowEnvironment.createTimeSkipping();
     const taskQueue = `tasker-bootstrap-planning-failure-${String(process.pid)}`;
     const runs = new TemporalTaskRunService(environment.client, {
@@ -359,8 +386,27 @@ describe('Bootstrap planning failure recovery', () => {
           },
           { interval: 50, timeout: 20_000 },
         )
-        .toBe('planning.retry@1');
+        .toBe('planning.candidate-guidance@1');
       expect(planningCalls).toBe(1);
+      const waiting = await runs.read('fixture:invalid-planner-output');
+      expect(waiting).toMatchObject({
+        ok: true,
+        value: {
+          status: 'waiting',
+          wait: {
+            reason:
+              'Workflow candidate rejected after automatic correction: Workflow has an execution path without a finalize node',
+          },
+          planning: {
+            status: 'blocked',
+            failure: {
+              kind: 'invalid_planner_output',
+              message: 'Workflow has an execution path without a finalize node',
+            },
+            validationFeedback: ['Workflow has an execution path without a finalize node'],
+          },
+        },
+      });
     } finally {
       worker.shutdown();
       await workerRun;

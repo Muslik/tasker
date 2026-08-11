@@ -67,10 +67,24 @@ const planningResult = (
     throw new Error('Implementation planning returned before the provider attempt completed');
   }
   if (record.status === 'failed') {
-    throw ApplicationFailure.create({
-      message: record.failure.message,
-      type: `implementation_planning.${record.failure.kind}`,
-      nonRetryable: !record.failure.retryable,
+    if (record.failure.retryable) {
+      throw ApplicationFailure.create({
+        message: record.failure.message,
+        type: `implementation_planning.${record.failure.kind}`,
+      });
+    }
+    return BootstrapPlanningStateSchema.parse({
+      status: 'blocked',
+      commandId,
+      transcriptId: record.transcriptId,
+      attempt: record.attempt,
+      evidenceBundle: record.evidenceBundle,
+      requestedStrategy: record.requestedStrategy,
+      selectedStrategy: record.selectedStrategy,
+      failure: record.failure,
+      validationFeedback: record.validationFeedback,
+      validationRevision: record.validationRevision,
+      receipt: record.receipt,
     });
   }
   if (record.transcriptId === null) {

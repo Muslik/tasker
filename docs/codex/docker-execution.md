@@ -71,9 +71,11 @@ cache mounts, and optional bootstrap/services. A project may override or extend 
 Temporal Workflow or application wiring.
 
 The first successful preparation stores a runtime receipt under Tasker application
-data. It contains the exact policy/hash, image ID, worktree/source paths, network,
-volumes, initialized-volume IDs, service identities, completed bootstrap command
-hashes, and timestamps. It contains no credentials.
+data, beside the configured managed-worktree store by default. The repository cache may
+live elsewhere and does not determine runtime-state placement. An explicit runtime-store
+setting can still relocate receipts. A receipt contains the exact policy/hash, image ID,
+worktree/source paths, network, volumes, initialized-volume IDs, service identities,
+completed bootstrap command hashes, and timestamps. It contains no credentials.
 
 The receipt advances monotonically for volume initialization and bootstrap progress and
 pins the active run. Editing the harness changes future runs; a retry of an existing run

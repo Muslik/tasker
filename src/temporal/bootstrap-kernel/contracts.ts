@@ -13,6 +13,7 @@ import {
 } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { ImplementationPlannerReceiptSchema } from '../../providers/contracts.js';
+import { PlanningFailureViewSchema } from '../../control-plane/implementation-planning-contracts.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/schema.js';
 import { DockerWorkspaceRuntimeReceiptSchema } from '../../workspaces/docker-runtime-contracts.js';
 import {
@@ -45,14 +46,17 @@ export const BootstrapWorkflowInputSchema = z
   .strict()
   .readonly();
 
-const BootstrapPlanningBaseSchema = z.object({
+const BootstrapPlanningAttemptSchema = z.object({
   commandId: z.string().min(1),
-  transcriptId: z.string().min(1),
   attempt: z.number().int().positive(),
-  artifactId: z.string().min(1),
   evidenceBundle: EvidenceBundleReferenceSchema,
   requestedStrategy: PlanningStrategyRequestSchema,
   selectedStrategy: PlanningStrategySchema,
+});
+
+const BootstrapPlanningBaseSchema = BootstrapPlanningAttemptSchema.extend({
+  transcriptId: z.string().min(1),
+  artifactId: z.string().min(1),
   receipt: ImplementationPlannerReceiptSchema,
 });
 
@@ -68,6 +72,14 @@ export const BootstrapPlanningStateSchema = z.discriminatedUnion('status', [
   BootstrapPlanningBaseSchema.extend({
     status: z.literal('investigation_required'),
     request: PrePlanInvestigationRequestSchema,
+  }).strict(),
+  BootstrapPlanningAttemptSchema.extend({
+    status: z.literal('blocked'),
+    transcriptId: z.string().min(1).nullable(),
+    failure: PlanningFailureViewSchema,
+    validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),
+    validationRevision: z.number().int().nonnegative().max(3),
+    receipt: ImplementationPlannerReceiptSchema.nullable(),
   }).strict(),
 ]);
 

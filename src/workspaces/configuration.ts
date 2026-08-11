@@ -75,7 +75,7 @@ export const loadDockerWorkspaceConfiguration = (
     ),
     runtimeStorePath: resolve(
       environment.TASKER_DOCKER_RUNTIME_STORE?.trim() ||
-        resolve(dirname(defaultRepositoryStorePath(environment)), 'docker-runtimes'),
+        resolve(dirname(workspaceStorePath), 'docker-runtimes'),
     ),
     workspaceStorePath,
   };

@@ -21,7 +21,7 @@ import {
   type ImplementationPlanner,
 } from '../../src/providers/index.js';
 import { makeAdjustableClock, type Clock } from '../../src/shared/clock.js';
-import { ok } from '../../src/shared/outcome.js';
+import { err, ok } from '../../src/shared/outcome.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 
 const TASK_REFERENCE = 'avia-13236-short-bug';
@@ -38,6 +38,7 @@ const planningFixture = (
   clock: Clock,
   directory: string,
   planner: ImplementationPlanner,
+  subjects: WorkflowGenerationSubjectSource = new WorkflowGenerationSubjectSource(directory),
 ): PlanningFixture => {
   const workflows = createM1WorkflowService(ledger.repository, clock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, clock);
@@ -48,7 +49,7 @@ const planningFixture = (
     ledger: ledger.repository,
     clock,
     workflows,
-    subjects: new WorkflowGenerationSubjectSource(directory),
+    subjects,
     evidenceBundles,
     planner,
   });
@@ -64,6 +65,18 @@ const planningFixture = (
     snapshot: snapshot.value.reference,
   };
 };
+
+class InterruptibleSubjectSource extends WorkflowGenerationSubjectSource {
+  public available = true;
+
+  public override resolve(
+    taskReference: string,
+  ): ReturnType<WorkflowGenerationSubjectSource['resolve']> {
+    return this.available
+      ? super.resolve(taskReference)
+      : err({ kind: 'task_not_found', taskReference });
+  }
+}
 
 const withPlanningFixture = async (
   prefix: string,
@@ -253,6 +266,64 @@ describe('implementation planning recovery', () => {
     });
   });
 
+  it('resumes snapshot materialization from the validated candidate without rerunning the planner', async () => {
+    await withPlanningFixture(
+      'tasker-plan-materialization-recovery-',
+      async ({ directory, clock, ledger }) => {
+        const fallback = new DeterministicImplementationPlanner();
+        const subjects = new InterruptibleSubjectSource(directory);
+        let calls = 0;
+        const fixture = planningFixture(
+          ledger,
+          clock,
+          directory,
+          {
+            plan: (request) => {
+              calls += 1;
+              return fallback.plan(request);
+            },
+          },
+          subjects,
+        );
+        const commandId = 'tasker:test:planning:materialization-recovery';
+
+        subjects.available = false;
+        const interrupted = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          commandId,
+          fixture.snapshot,
+          fixture.evidence,
+        );
+
+        expect(interrupted).toMatchObject({ ok: false, error: { kind: 'subject' } });
+        const checkpoint = fixture.coordinator.read(TASK_REFERENCE);
+        if (!checkpoint.ok || checkpoint.value?.status !== 'planning') {
+          throw new Error('Validated planning candidate was not checkpointed');
+        }
+        expect(checkpoint.value.validatedCandidate?.workflowHash).toMatch(/^[a-f0-9]{64}$/u);
+        expect(calls).toBe(1);
+
+        subjects.available = true;
+        const resumed = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          commandId,
+          fixture.snapshot,
+          fixture.evidence,
+        );
+
+        expect(resumed).toMatchObject({ ok: true, value: { status: 'ready', attempt: 1 } });
+        expect(calls).toBe(1);
+        expect(
+          ledger.repository
+            .listEvents(`implementation-plan:${TASK_REFERENCE}`)
+            .map(({ eventType }) => eventType),
+        ).toContain('ImplementationWorkflowCandidateValidated');
+      },
+    );
+  });
+
   it('persists blocking questions and resumes the same task from typed operator answers', async () => {
     await withPlanningFixture('tasker-plan-questions-', async ({ directory, clock, ledger }) => {
       const fallback = new DeterministicImplementationPlanner();
@@ -426,6 +497,88 @@ describe('implementation planning recovery', () => {
             .listEvents(`implementation-plan:${TASK_REFERENCE}`)
             .map(({ eventType }) => eventType),
         ).toContain('ImplementationWorkflowCandidateRejected');
+      },
+    );
+  });
+
+  it('preserves the rejected candidate and validator feedback for an operator-guided revision', async () => {
+    await withPlanningFixture(
+      'tasker-plan-validator-guided-revision-',
+      async ({ directory, clock, ledger }) => {
+        const fallback = new DeterministicImplementationPlanner();
+        const firstCommand = 'tasker:test:planning:validator-exhausted';
+        const revisionCommand = 'tasker:test:planning:validator-guided-revision';
+        let inheritedFeedback: readonly string[] = [];
+        let inheritedDecision: string | null = null;
+        const fixture = planningFixture(ledger, clock, directory, {
+          plan: async (request) => {
+            const base = await fallback.plan(request);
+            if (!base.ok || base.value.decision?.status !== 'ready') return base;
+            if (request.operationId === firstCommand) {
+              const source = base.value.decision.workflow.source;
+              if (source.root.kind !== 'sequence') throw new Error('Expected sequence fixture');
+              return ok({
+                ...base.value,
+                decision: {
+                  ...base.value.decision,
+                  workflow: {
+                    ...base.value.decision.workflow,
+                    source: {
+                      ...source,
+                      root: {
+                        ...source.root,
+                        children: [
+                          {
+                            kind: 'step',
+                            id: 'unknown-step',
+                            uses: 'unknown.step@1',
+                            with: {},
+                          },
+                          ...source.root.children,
+                        ],
+                      },
+                    },
+                  },
+                },
+              });
+            }
+            inheritedFeedback = request.context.validationFeedback;
+            inheritedDecision = request.context.previousDecision?.status ?? null;
+            return base;
+          },
+        });
+
+        const failed = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          firstCommand,
+          fixture.snapshot,
+          fixture.evidence,
+        );
+        expect(failed).toMatchObject({
+          ok: true,
+          value: {
+            status: 'failed',
+            validationRevision: 2,
+            failure: { kind: 'invalid_planner_output', retryable: false },
+          },
+        });
+
+        const revised = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          revisionCommand,
+          fixture.snapshot,
+          fixture.evidence,
+          'Correct the rejected graph using the deterministic feedback.',
+        );
+
+        expect(revised).toMatchObject({ ok: true, value: { status: 'ready', attempt: 2 } });
+        expect(inheritedFeedback.join('\n')).toContain('unknown.step@1');
+        expect(inheritedFeedback.filter((issue) => issue.includes('unknown.step@1'))).toHaveLength(
+          1,
+        );
+        expect(inheritedDecision).toBe('ready');
       },
     );
   });

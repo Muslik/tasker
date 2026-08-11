@@ -75,6 +75,9 @@ Do not add fields outside the selected node shape. A branch always has exactly o
 and two node arms. A loop expresses exhaustion only through its nullable registered wait reference.
 The graph must terminate on every path; use a finalize node for a completed outcome and registered
 wait or gate nodes only for durable suspension boundaries exposed in plannerContext.
+If a branch is the last node of its parent sequence, both arms must themselves reach a finalize
+node. A bounded loop is not a terminal: when it is a branch arm, wrap it in a sequence followed by
+a finalize node or place a finalize after the branch so every arm rejoins that terminal.
 
 Do not claim a bug is reproduced unless investigation evidence says so. Do not repeat bootstrap
 investigation inside execution. For a reproduced bug, execution normally implements the fix,
@@ -89,6 +92,14 @@ declared validation, bounded `code.repair@1` retries until `validation.passed@1`
 review is separate from the later human `code_review@1` wait. Every plan step needs observable
 verification. Use exact paths only when evidence supports them; otherwise use a bounded search
 target.
+
+For a pull-request path that autonomously handles human review feedback, use this control-flow
+shape: prepare the PR, observe CI, wait on `code_review@1`, then run one bounded loop with
+`checkBefore: true` and `until: review.approved@1`. Its body revises actionable feedback, restores
+the complete local-ready boundary, updates the same PR, observes CI, acknowledges resolved
+threads, and waits on `code_review@1` again. Place one finalize node after the loop. Do not wrap
+this review loop in a terminal branch; the initial wait already supplies the predicate fact that
+lets an approved review skip the loop.
 
 plannerContext:
 {{plannerContext}}
