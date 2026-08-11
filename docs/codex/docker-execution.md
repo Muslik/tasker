@@ -9,12 +9,13 @@ Tasker has two intentionally different planes:
 ```text
 host / VPS control plane
   Temporal Worker, API/UI, ledger, managed clone/worktree ownership
-  git worktree control, Docker CLI, Jira/Bitbucket/Jenkins adapters
+  git worktree control, Docker CLI, Jira/Bitbucket/Jenkins remote API adapters
                          |
                          v
 task-scoped Docker runtime
   Codex/Claude CLI, mise toolchains, project bootstrap, agent blocks,
-  process blocks, Playwright, build/tests, and project dev services
+  process blocks, task commits/hooks, branch publication, Playwright,
+  build/tests, and project dev services
 ```
 
 There is no selectable host execution backend and no host fallback. If Docker or the
@@ -23,8 +24,9 @@ boundary; Tasker does not quietly execute the command on the laptop.
 
 The host process runner is an internal control-plane primitive only. It may invoke
 `git` to own managed worktrees and `docker` to own exact Tasker-labelled resources.
-It is not passed to workflow analyzers, planners, agent blocks, process blocks, or Git
-mutation inspection.
+It is not passed to workflow analyzers, planners, agent blocks, process blocks, task
+commit/publication adapters, or Git mutation inspection. A task commit runs inside the
+prepared runtime so repository hooks see the pinned project toolchain and dependencies.
 
 ## Runtime lifecycle
 

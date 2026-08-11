@@ -165,7 +165,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
             new BitbucketPullRequestAdapter(
               bitbucketConfiguration,
               gitCommitIdentity,
-              nodeCommandRunner,
+              dockerCommands,
               new BitbucketPullRequestClient(bitbucketConfiguration),
               externalEffects,
             ),

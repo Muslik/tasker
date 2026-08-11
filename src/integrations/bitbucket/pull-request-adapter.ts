@@ -4,7 +4,7 @@ import { relative, resolve, sep } from 'node:path';
 
 import { z } from 'zod';
 
-import type { CommandResult, CommandRunner } from '../../providers/command-runner.js';
+import type { CommandResult, WorkspaceCommandRunner } from '../../providers/command-runner.js';
 import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import type {
@@ -137,7 +137,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
   public constructor(
     private readonly configuration: BitbucketRepositoryConfiguration,
     private readonly commitIdentity: GitCommitIdentity | null,
-    private readonly commands: CommandRunner,
+    private readonly commands: WorkspaceCommandRunner,
     private readonly pullRequests: BitbucketPullRequestPort,
     private readonly effects: ExternalEffectStore,
   ) {}

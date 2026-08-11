@@ -17,7 +17,7 @@ import {
 } from '../../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
 import { findTaskFixture } from '../../../src/planning/index.js';
-import { nodeCommandRunner, type CommandRunner } from '../../../src/providers/index.js';
+import { nodeCommandRunner, type WorkspaceCommandRunner } from '../../../src/providers/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
 
@@ -118,6 +118,11 @@ const commitIdentity = {
   email: 'tasker-adapter@example.test',
 } satisfies GitCommitIdentity;
 
+const workspaceCommandRunner: WorkspaceCommandRunner = {
+  executionEnvironment: 'docker_workspace',
+  run: (request) => nodeCommandRunner.run(request),
+};
+
 const requestFor = (
   workspace: ReturnType<typeof createGitWorkspace>,
   operationId: string,
@@ -160,7 +165,7 @@ const requestFor = (
   },
 });
 
-const adapterFor = (commands: CommandRunner, pullRequests: BitbucketPullRequestPort) => {
+const adapterFor = (commands: WorkspaceCommandRunner, pullRequests: BitbucketPullRequestPort) => {
   ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
   return new BitbucketPullRequestAdapter(
     configuration,
@@ -201,7 +206,7 @@ describe('Bitbucket pull request effect adapter', () => {
     const adapter = new BitbucketPullRequestAdapter(
       configuration,
       null,
-      nodeCommandRunner,
+      workspaceCommandRunner,
       pullRequests,
       new ExternalEffectStore(ledger.repository, systemClock),
     );
@@ -223,7 +228,7 @@ describe('Bitbucket pull request effect adapter', () => {
   it('commits with the configured identity instead of repository-local defaults', async () => {
     const workspace = createGitWorkspace();
     const pullRequests = new StatefulPullRequestPort();
-    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+    const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
     const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
 
@@ -245,7 +250,7 @@ describe('Bitbucket pull request effect adapter', () => {
       'utf8',
     );
     const pullRequests = new StatefulPullRequestPort();
-    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+    const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
     const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
 
@@ -268,7 +273,8 @@ describe('Bitbucket pull request effect adapter', () => {
   it('reconciles a successful push and PR creation after both responses are lost', async () => {
     const workspace = createGitWorkspace();
     let pushResponsesLost = 0;
-    const commands: CommandRunner = {
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
       run: async (request) => {
         const result = await nodeCommandRunner.run(request);
         if (request.args[0] === 'push' && pushResponsesLost === 0 && result.status === 'exited') {
@@ -313,7 +319,8 @@ describe('Bitbucket pull request effect adapter', () => {
 
   it('resumes only branch publication after a 403 without creating another commit', async () => {
     const workspace = createGitWorkspace();
-    const blockedCommands: CommandRunner = {
+    const blockedCommands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
       run: (request) =>
         request.args[0] === 'push'
           ? Promise.resolve({
@@ -335,7 +342,7 @@ describe('Bitbucket pull request effect adapter', () => {
     const resumedAdapter = new BitbucketPullRequestAdapter(
       configuration,
       commitIdentity,
-      nodeCommandRunner,
+      workspaceCommandRunner,
       pullRequests,
       new ExternalEffectStore(ledger.repository, systemClock),
     );
@@ -358,7 +365,7 @@ describe('Bitbucket pull request effect adapter', () => {
     const workspace = createGitWorkspace();
     const pullRequests = new StatefulPullRequestPort();
     pullRequests.value = pullRequest(`refs/heads/${workspace.branch}`);
-    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+    const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
     const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
 
@@ -369,7 +376,7 @@ describe('Bitbucket pull request effect adapter', () => {
   it('fast-forwards the same guarded task branch for a review revision', async () => {
     const workspace = createGitWorkspace();
     const pullRequests = new StatefulPullRequestPort();
-    const adapter = adapterFor(nodeCommandRunner, pullRequests);
+    const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
     const first = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
     const firstRemoteCommit = git(workspace.workspace, [
