@@ -5,6 +5,7 @@ import {
   type ProjectWorkflowProfile,
 } from './project-policies.js';
 import {
+  branch,
   bounded_loop,
   defineWorkflow,
   finalize,
@@ -238,7 +239,7 @@ const beforeCodeReviewPolicySteps = (
 
 const pullRequestPublication = (
   task: TaskContext,
-  prefix: '' | 'review-',
+  prefix: string,
 ): readonly WorkflowNodeSource[] => [
   ...(aiAssistanceEnabled()
     ? [
@@ -273,9 +274,68 @@ const pullRequestPublication = (
       draftPath: '.tasker/pull-request/draft.json',
     },
   }),
-  step(`${prefix}observe-ci`, {
+];
+
+const observeCi = (task: TaskContext, id: string): WorkflowNodeSource =>
+  step(id, {
     uses: 'ci.observe@1',
-    with: taskInput(task, 'Wait for CI and classify failures before code review completes.'),
+    with: taskInput(
+      task,
+      'Observe the exact published revision and classify its terminal CI result.',
+    ),
+  });
+
+const ciRecoveryBoundary = (
+  task: TaskContext,
+  validationProfile: 'build' | 'full' | 'targeted' | 'visual',
+  repeatBugScenario: boolean,
+  prefix: '' | 'review-',
+): readonly WorkflowNodeSource[] => [
+  observeCi(task, `${prefix}observe-ci`),
+  bounded_loop(`${prefix}ci-recovery-loop`, {
+    maxAttempts: 3,
+    until: 'ci.passed@1',
+    checkBefore: true,
+    exhaustedWait: 'operator_guidance@1',
+    body: branch(`${prefix}ci-change-failure`, {
+      when: 'ci.change_failure@1',
+      then: sequence(`${prefix}repair-ci-change-failure`, [
+        step(`${prefix}repair-ci-failure`, {
+          uses: 'ci.repair@1',
+          with: taskInput(task, 'Repair the exact CI failure attributed to the task change.'),
+        }),
+        ...validationBoundary(task, validationProfile, `${prefix}ci-`),
+        ...(repeatBugScenario
+          ? [
+              step(`${prefix}ci-validate-bug-fix`, {
+                uses: 'bug.validate_fix@1',
+                with: reproductionInput(task, 'Repeat the bug scenario after the CI repair.'),
+              }),
+            ]
+          : []),
+        ...localReviewBoundary(task, validationProfile, `${prefix}ci-`, repeatBugScenario),
+        ...pullRequestPublication(task, `${prefix}ci-repair-`),
+        observeCi(task, `${prefix}observe-repaired-ci`),
+      ]),
+      otherwise: branch(`${prefix}ci-flaky-failure`, {
+        when: 'ci.flaky@1',
+        then: sequence(`${prefix}retry-flaky-ci`, [
+          wait(`${prefix}wait-for-flaky-ci-retry`, { for: 'ci_retry@1' }),
+          observeCi(task, `${prefix}observe-retried-ci`),
+        ]),
+        otherwise: branch(`${prefix}ci-infrastructure-failure`, {
+          when: 'ci.infrastructure@1',
+          then: sequence(`${prefix}resume-ci-infrastructure`, [
+            wait(`${prefix}wait-for-ci-infrastructure`, { for: 'ci_infrastructure@1' }),
+            observeCi(task, `${prefix}observe-ci-after-infrastructure`),
+          ]),
+          otherwise: sequence(`${prefix}resolve-unknown-ci`, [
+            wait(`${prefix}wait-for-unknown-ci-guidance`, { for: 'ci_unknown@1' }),
+            observeCi(task, `${prefix}observe-ci-after-guidance`),
+          ]),
+        }),
+      }),
+    }),
   }),
 ];
 
@@ -285,6 +345,7 @@ const pullRequestReadiness = (
   repeatBugScenario: boolean,
 ): readonly WorkflowNodeSource[] => [
   ...pullRequestPublication(task, ''),
+  ...ciRecoveryBoundary(task, validationProfile, repeatBugScenario, ''),
   ...beforeCodeReviewPolicySteps(task, ''),
   wait('wait-for-code-review', { for: 'code_review@1' }),
   bounded_loop('code-review-revision-loop', {
@@ -308,6 +369,7 @@ const pullRequestReadiness = (
         : []),
       ...localReviewBoundary(task, validationProfile, 'human-review-', repeatBugScenario),
       ...pullRequestPublication(task, 'review-'),
+      ...ciRecoveryBoundary(task, validationProfile, repeatBugScenario, 'review-'),
       step('acknowledge-review-threads', {
         uses: 'review.acknowledge@1',
         with: taskInput(task, 'Acknowledge the pull-request threads addressed by this revision.'),

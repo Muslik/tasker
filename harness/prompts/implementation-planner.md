@@ -93,10 +93,25 @@ review is separate from the later human `code_review@1` wait. Every plan step ne
 verification. Use exact paths only when evidence supports them; otherwise use a bounded search
 target.
 
+Every pull-request publication must prove `ci.passed@1` before `code_review@1`. After
+`pr.prepare@1`, run `ci.observe@1`, then a bounded loop with `checkBefore: true`,
+`until: ci.passed@1`, at most three attempts, and `operator_guidance@1` on exhaustion. Assemble
+the loop body from the registered CI facts and blocks:
+
+- `ci.change_failure@1`: run `ci.repair@1`, restore task-selected validation and independent
+  agent review, update the same PR, and observe the new exact revision;
+- `ci.flaky@1`: wait on `ci_retry@1`, then observe the exact revision again;
+- `ci.infrastructure@1`: wait on `ci_infrastructure@1`, then observe again;
+- otherwise: wait on `ci_unknown@1` for an operator decision, then observe again.
+
+A terminal red Jenkins build is observation data, not an Activity failure. Access, transport, or
+configuration failures may still suspend the `ci.observe@1` block itself. Never place
+`code_review@1` directly after an observation without the passed-CI boundary.
+
 For a pull-request path that autonomously handles human review feedback, use this control-flow
-shape: prepare the PR, observe CI, wait on `code_review@1`, then run one bounded loop with
+shape: prepare the PR, apply the complete CI recovery boundary, wait on `code_review@1`, then run one bounded loop with
 `checkBefore: true` and `until: review.approved@1`. Its body revises actionable feedback, restores
-the complete local-ready boundary, updates the same PR, observes CI, acknowledges resolved
+the complete local-ready boundary, updates the same PR, applies the complete CI recovery boundary, acknowledges resolved
 threads, and waits on `code_review@1` again. Place one finalize node after the loop. Do not wrap
 this review loop in a terminal branch; the initial wait already supplies the predicate fact that
 lets an approved review skip the loop.

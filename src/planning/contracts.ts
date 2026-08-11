@@ -38,6 +38,36 @@ const predicateContracts = [
     description: 'The latest independent local agent review produced actionable findings.',
   },
   {
+    id: 'ci.passed',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest exact-revision CI observation passed.',
+  },
+  {
+    id: 'ci.change_failure',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest exact-revision CI observation is attributable to the task change.',
+  },
+  {
+    id: 'ci.flaky',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest exact-revision CI observation is likely flaky.',
+  },
+  {
+    id: 'ci.infrastructure',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest exact-revision CI observation failed in infrastructure.',
+  },
+  {
+    id: 'ci.unknown',
+    version: '1',
+    inputSchema: z.object({}).strict(),
+    description: 'The latest exact-revision CI observation cannot be classified safely.',
+  },
+  {
     id: 'review.approved',
     version: '1',
     inputSchema: z.object({}).strict(),
@@ -96,6 +126,42 @@ const waitContracts = [
       })
       .strict(),
     description: 'Pause an exhausted bounded loop for explicit operator correction.',
+  },
+  {
+    id: 'ci_retry',
+    version: '1',
+    stage: { id: 'delivery', label: 'Deliver' },
+    resolutionSchema: z
+      .object({
+        decision: z.literal('resume'),
+        guidance: z.string().trim().min(1).optional(),
+      })
+      .strict(),
+    description: 'Wait until a likely-flaky exact-revision CI build has been retried.',
+  },
+  {
+    id: 'ci_infrastructure',
+    version: '1',
+    stage: { id: 'delivery', label: 'Deliver' },
+    resolutionSchema: z
+      .object({
+        decision: z.literal('resume'),
+        guidance: z.string().trim().min(1).optional(),
+      })
+      .strict(),
+    description: 'Wait until the reported CI infrastructure problem has been corrected.',
+  },
+  {
+    id: 'ci_unknown',
+    version: '1',
+    stage: { id: 'attention', label: 'Needs attention' },
+    resolutionSchema: z
+      .object({
+        decision: z.literal('resume'),
+        guidance: z.string().trim().min(1).optional(),
+      })
+      .strict(),
+    description: 'Pause an unclassified CI failure for an operator decision.',
   },
   {
     id: 'translation_complete',

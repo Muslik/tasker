@@ -41,6 +41,31 @@ const removeStep = (node: WorkflowNodeSource, reference: string): WorkflowNodeSo
   }
 };
 
+const removeNode = (node: WorkflowNodeSource, id: string): WorkflowNodeSource => {
+  switch (node.kind) {
+    case 'sequence':
+      return {
+        ...node,
+        children: node.children
+          .filter((child) => child.id !== id)
+          .map((child) => removeNode(child, id)),
+      };
+    case 'branch':
+      return {
+        ...node,
+        then: removeNode(node.then, id),
+        otherwise: removeNode(node.otherwise, id),
+      };
+    case 'bounded_loop':
+      return { ...node, body: removeNode(node.body, id) };
+    case 'step':
+    case 'gate':
+    case 'wait':
+    case 'finalize':
+      return node;
+  }
+};
+
 const findNode = (node: WorkflowNodeSource, id: string): WorkflowNodeSource | undefined => {
   if (node.id === id) return node;
   switch (node.kind) {
@@ -143,15 +168,60 @@ describe('M1 task workflow planning', () => {
 
     const result = planWorkflowProposal(withoutCi);
 
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        stage: 'workflow_validation',
-        validatorReport: {
-          issues: [{ code: 'unsatisfied_workflow_obligation' }],
-        },
-      },
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'pr-requires-ci-and-review' },
+      }),
+    );
+  });
+
+  it('assembles a bounded CI recovery boundary before human review', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+
+    expect(findNode(source.root, 'ci-recovery-loop')).toMatchObject({
+      kind: 'bounded_loop',
+      maxAttempts: 3,
+      until: 'ci.passed@1',
+      checkBefore: true,
+      exhaustedWait: 'operator_guidance@1',
     });
+    expect(findNode(source.root, 'repair-ci-failure')).toMatchObject({
+      kind: 'step',
+      uses: 'ci.repair@1',
+    });
+    expect(findNode(source.root, 'wait-for-flaky-ci-retry')).toMatchObject({
+      kind: 'wait',
+      for: 'ci_retry@1',
+    });
+    expect(findNode(source.root, 'wait-for-ci-infrastructure')).toMatchObject({
+      kind: 'wait',
+      for: 'ci_infrastructure@1',
+    });
+  });
+
+  it('rejects a PR workflow that can enter review without a passed CI fact', () => {
+    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
+    if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');
+    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
+
+    const result = planWorkflowProposal({
+      ...planned.value.proposal,
+      source: { ...source, root: removeNode(source.root, 'ci-recovery-loop') },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') return;
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'pr-requires-passed-ci' },
+      }),
+    );
   });
 
   it('rejects a PR workflow when its enabled company policy is incomplete', () => {
@@ -367,12 +437,16 @@ describe('M1 task workflow planning', () => {
     if (!result.ok) {
       return;
     }
-    expect(result.value.proposal.waits.map((wait) => wait.waitKind)).toEqual([
-      'code_review@1',
-      'final_publish@1',
-      'code_review@1',
-      'translation_complete@1',
-    ]);
+    expect(result.value.proposal.waits.map((wait) => wait.waitKind)).toEqual(
+      expect.arrayContaining([
+        'ci_infrastructure@1',
+        'ci_retry@1',
+        'ci_unknown@1',
+        'code_review@1',
+        'final_publish@1',
+        'translation_complete@1',
+      ]),
+    );
     expect(JSON.stringify(result.value.proposal)).not.toContain('retryBudgets');
     expect(result.value.proposal.expectedArtifacts.length).toBeGreaterThan(0);
     expect(result.value.proposal.verificationPlan.rationale).toContain('translation');

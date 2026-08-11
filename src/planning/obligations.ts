@@ -41,6 +41,12 @@ export const WORKFLOW_OBLIGATIONS = [
     reason: 'Every PR task must expose CI classification and the human review boundary.',
   },
   {
+    id: 'pr-requires-passed-ci',
+    trigger: 'a path prepares a pull request',
+    requires: ['ci.passed@1 proven after exact-revision CI observation and before code review'],
+    reason: 'A red or unclassified CI result must not fall through into human code review.',
+  },
+  {
     id: 'bug-requires-after-evidence',
     trigger: 'the admitted task is a bug',
     requires: ['bug.validate_fix@1 phase=after'],
@@ -51,7 +57,7 @@ export const WORKFLOW_OBLIGATIONS = [
 
 interface ExecutionMarker {
   readonly id: string;
-  readonly kind: 'gate' | 'step' | 'wait';
+  readonly kind: 'gate' | 'predicate' | 'step' | 'wait';
   readonly reference: string;
   readonly input?: JsonValue;
 }
@@ -76,9 +82,22 @@ const executionPaths = (node: CompiledWorkflowNode): readonly (readonly Executio
         [[]],
       );
     case 'branch':
-      return [...executionPaths(node.then), ...executionPaths(node.otherwise)];
-    case 'bounded_loop':
-      return executionPaths(node.body);
+      return [
+        ...executionPaths(node.then).map((path) => [
+          { id: `${node.id}:then`, kind: 'predicate' as const, reference: node.when },
+          ...path,
+        ]),
+        ...executionPaths(node.otherwise),
+      ];
+    case 'bounded_loop': {
+      const completion = {
+        id: `${node.id}:until`,
+        kind: 'predicate' as const,
+        reference: node.until,
+      };
+      const afterIteration = executionPaths(node.body).map((path) => [...path, completion]);
+      return node.checkBefore ? [[completion], ...afterIteration] : afterIteration;
+    }
     case 'finalize':
       return [[]];
   }
@@ -242,6 +261,24 @@ export const validateWorkflowObligations = (
             issue(
               'pr-requires-ci-and-review',
               `Pull request step ${marker.id} has no later code_review@1 wait`,
+              ['root', 'executionPaths', pathIndex, marker.id],
+            ),
+          );
+        }
+        const observationIndex = beforeReview.findIndex(
+          (candidate) => candidate.kind === 'step' && candidate.reference === 'ci.observe@1',
+        );
+        const passedAfterObservation = beforeReview.some(
+          (candidate, candidateIndex) =>
+            candidateIndex > observationIndex &&
+            candidate.kind === 'predicate' &&
+            candidate.reference === 'ci.passed@1',
+        );
+        if (observationIndex >= 0 && !passedAfterObservation) {
+          issues.push(
+            issue(
+              'pr-requires-passed-ci',
+              `Pull request step ${marker.id} can reach code review without proving ci.passed@1 after observation`,
               ['root', 'executionPaths', pathIndex, marker.id],
             ),
           );

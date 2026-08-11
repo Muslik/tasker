@@ -93,6 +93,90 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   },
 });
 
+const ciWorkflowInput = (taskReference: string): ExecutionWorkflowInput => ({
+  schemaVersion: 2,
+  taskReference,
+  workflowHash: 'c'.repeat(64),
+  contextReferences: [
+    { kind: 'block-snapshot', reference: `blocks:${taskReference}`, hash: 'd'.repeat(64) },
+  ],
+  graph: {
+    metadata: {
+      compilerVersion: 4,
+      irVersion: 'm2',
+      references: {
+        predicates: ['ci.change_failure@1', 'ci.passed@1'],
+        stepTypes: ['fixture.ci-observe@1', 'fixture.ci-repair@1'],
+        waits: ['ci.manual@1', 'human.review@1', 'operator.guidance@1'],
+      },
+      workflowId: 'ci-recovery-fixture',
+      workflowVersion: 1,
+    },
+    root: {
+      kind: 'sequence',
+      id: 'ci-delivery',
+      children: [
+        {
+          kind: 'step',
+          id: 'observe-ci',
+          uses: 'fixture.ci-observe@1',
+          activityDelivery: { kind: 'read_only' },
+          with: {},
+        },
+        {
+          kind: 'bounded_loop',
+          id: 'ci-recovery-loop',
+          maxAttempts: 3,
+          until: 'ci.passed@1',
+          checkBefore: true,
+          exhaustedWait: 'operator.guidance@1',
+          body: {
+            kind: 'branch',
+            id: 'ci-failure-kind',
+            when: 'ci.change_failure@1',
+            then: {
+              kind: 'sequence',
+              id: 'repair-ci',
+              children: [
+                {
+                  kind: 'step',
+                  id: 'repair-ci-failure',
+                  uses: 'fixture.ci-repair@1',
+                  activityDelivery: { kind: 'workspace_reconciled' },
+                  with: {},
+                },
+                {
+                  kind: 'step',
+                  id: 'observe-repaired-ci',
+                  uses: 'fixture.ci-observe@1',
+                  activityDelivery: { kind: 'read_only' },
+                  with: {},
+                },
+              ],
+            },
+            otherwise: {
+              kind: 'sequence',
+              id: 'resume-external-ci',
+              children: [
+                { kind: 'wait', id: 'wait-for-ci', for: 'ci.manual@1' },
+                {
+                  kind: 'step',
+                  id: 'observe-resumed-ci',
+                  uses: 'fixture.ci-observe@1',
+                  activityDelivery: { kind: 'read_only' },
+                  with: {},
+                },
+              ],
+            },
+          },
+        },
+        { kind: 'wait', id: 'ci-human-review', for: 'human.review@1' },
+        { kind: 'finalize', id: 'ci-accepted', outcome: 'accepted' },
+      ],
+    },
+  },
+});
+
 const activities: ExecutionWorkflowActivities = {
   runExecutionBlock: (input) => {
     if (
@@ -101,6 +185,26 @@ const activities: ExecutionWorkflowActivities = {
       input.blockRun === 1
     ) {
       return Promise.reject(new Error('receipt persistence failed'));
+    }
+    if (input.uses === 'fixture.ci-observe@1') {
+      const passed = input.taskReference === 'fixture:ci-pass' || input.nodeId !== 'observe-ci';
+      return Promise.resolve({
+        status: 'completed',
+        summary: passed ? 'CI passed' : 'CI failed',
+        predicateFacts: {
+          'ci.passed@1': passed,
+          'ci.change_failure@1': input.taskReference === 'fixture:ci-repair' && !passed,
+        },
+        receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
+      });
+    }
+    if (input.uses === 'fixture.ci-repair@1') {
+      return Promise.resolve({
+        status: 'completed',
+        summary: 'CI failure repaired',
+        predicateFacts: {},
+        receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
+      });
     }
     return Promise.resolve({
       status: 'completed',
@@ -275,5 +379,56 @@ describe('Execution Workflow v2 recovery', () => {
     await environment.client.workflow
       .getHandle('tasker:execution:v2:fixture:activity-failure')
       .cancel();
+  }, 30_000);
+
+  it('skips CI recovery when the first exact-revision observation passes', async () => {
+    const taskReference = 'fixture:ci-pass';
+    expect(await runs.start(ciWorkflowInput(taskReference))).toMatchObject({ ok: true });
+
+    expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
+      status: 'waiting',
+      blockRuns: { 'observe-ci': 1 },
+      loopIterations: {},
+    });
+    await environment.client.workflow.getHandle(`tasker:execution:v2:${taskReference}`).cancel();
+  }, 30_000);
+
+  it('repairs task-caused CI failures and re-observes before review', async () => {
+    const taskReference = 'fixture:ci-repair';
+    expect(await runs.start(ciWorkflowInput(taskReference))).toMatchObject({ ok: true });
+
+    expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
+      status: 'waiting',
+      blockRuns: {
+        'observe-ci': 1,
+        'repair-ci-failure': 1,
+        'observe-repaired-ci': 1,
+      },
+      loopIterations: { 'ci-recovery-loop': 1 },
+    });
+    await environment.client.workflow.getHandle(`tasker:execution:v2:${taskReference}`).cancel();
+  }, 30_000);
+
+  it('durably resumes external CI failures without rerunning completed work', async () => {
+    const taskReference = 'fixture:ci-external';
+    expect(await runs.start(ciWorkflowInput(taskReference))).toMatchObject({ ok: true });
+    expect(await waitFor(taskReference, 'ci.manual@1')).toMatchObject({
+      status: 'waiting',
+      blockRuns: { 'observe-ci': 1 },
+      loopIterations: { 'ci-recovery-loop': 1 },
+    });
+
+    expect(
+      await runs.resolveWait(taskReference, {
+        nodeId: 'wait-for-ci',
+        waitKind: 'ci.manual@1',
+        resolution: { decision: 'resume' },
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
+      status: 'waiting',
+      blockRuns: { 'observe-ci': 1, 'observe-resumed-ci': 1 },
+    });
+    await environment.client.workflow.getHandle(`tasker:execution:v2:${taskReference}`).cancel();
   }, 30_000);
 });

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "reference": "ci.repair@1",
+  "description": "Diagnose and repair an exact-revision CI failure attributed to the task change.",
+  "availableDuring": ["execution"],
+  "stage": { "id": "implementation", "label": "Implement" },
+  "inputContract": "task_input",
+  "outputContract": "agent_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "implementation",
+    "prompt": "prompts/steps/ci-repair.md",
+    "skills": ["jenkins", "typescript-design", "test-design"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": { "kind": "workspace_mutation" },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["workspace.write"],
+  "requiredCapabilities": ["repository.read", "workspace.write"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["source-diff"],
+  "requiredArtifactContracts": ["ci-verdict"],
+  "workflowChanges": [
+    "cross_repository_dependency",
+    "external_process_required",
+    "task_scope_changed",
+    "verification_scope_changed"
+  ],
+  "reconciliation": { "strategy": "receipt" }
+}

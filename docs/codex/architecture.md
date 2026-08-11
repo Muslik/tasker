@@ -433,6 +433,19 @@ classifies failures:
 - attributable to the change -> revision loop;
 - unknown -> diagnostic Activity, then question or guidance wait after its budget.
 
+`ci.observe@1` is an atomic read block. A reachable terminal Jenkins build always completes that
+observation with mutually exclusive predicate facts (`ci.passed`, task-caused, flaky,
+infrastructure, or unknown). Only inability to observe — access, transport, configuration, or
+timeout — blocks the Activity itself.
+
+The frozen task graph owns recovery. It must place a bounded, check-before recovery loop between
+PR publication and human review. Task-caused failures run the editable `ci.repair@1` agent block,
+then repeat declared validation, independent review, publication, and exact-revision observation.
+Flaky, infrastructure, and unknown outcomes enter distinct durable waits and re-observe after the
+operator resumes them. The loop can exit only with `ci.passed@1`; the deterministic validator
+rejects any PR path that can reach code review without that proof. Automatic Jenkins retriggering
+is a future reconciled remote-effect block, not a hidden side effect of observation.
+
 Validation scope is task-specific. Project policy and changed-surface evidence may
 select build-only, targeted tests, full validation, Allure inspection, post-fix
 reproduction, or screenshot snapshot updates. When a bug needs grounding, the planner

@@ -91,6 +91,13 @@ hash. Receipts expose the actual CLI version, session, token usage, duration, pr
 hash, and reported API-equivalent cost where available. There is no legacy model field,
 hard-coded `gpt-5.4` path, or silent provider fallback.
 
+The first Phase 8 vertical slice is implemented as provider-neutral CI predicates plus a
+validator-enforced passed-CI boundary. Exact-revision Jenkins observations classify terminal
+results; task-caused failures enter an agent repair/revalidation/review/republish loop, while
+flaky, infrastructure, and unknown results enter separate durable waits and re-observe on resume.
+Automatic Jenkins retrigger remains a later reconciled effect; the current flaky branch waits for
+an external retry rather than hiding a non-idempotent mutation in `ci.observe@1`.
+
 Phase 4B is complete: Generate starts Bootstrap v3 without a graph/hash, prepares the
 managed worktree and Docker runtime, persists graph-free context and evidence, and runs
 mandatory planning. The planner may request registered investigation blocks and owns

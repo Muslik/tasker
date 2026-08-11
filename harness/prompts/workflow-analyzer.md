@@ -54,11 +54,21 @@ Every workspace-write path must reach a local-ready boundary before remote publi
 
 Agent review is not human pull-request review and must occur before `pr.prepare@1`.
 
+Every published pull-request revision must prove `ci.passed@1` before `code_review@1`. Run
+`ci.observe@1`, then a bounded loop with `checkBefore: true`, `until: ci.passed@1`, at most three
+attempts, and `operator_guidance@1` on exhaustion. Branch its recovery body on the registered CI
+facts: task-caused failures use `ci.repair@1` followed by proportional validation, independent
+review, PR update, and another observation; flaky failures wait on `ci_retry@1`; infrastructure
+failures wait on `ci_infrastructure@1`; unknown failures wait on `ci_unknown@1`. Every wait branch
+must observe the exact revision again before the loop can exit. A terminal red build is evidence,
+not an Activity failure; provider access and transport failures still suspend the observation
+block itself.
+
 For a PR path, keep human review as a durable wait. If review feedback should be fixed
 autonomously, assemble a bounded loop with `checkBefore: true`: start from the
 `code_review@1` wait, skip the body when `review.approved@1` is true, and otherwise run
-`review.revise@1`, task-selected declared validation, independent agent review, PR preparation, CI
-observation, and a
+`review.revise@1`, task-selected declared validation, independent agent review, PR preparation, the
+complete CI recovery boundary, and a
 new `code_review@1` wait. Give the loop `operator_guidance@1` as `exhaustedWait` so
 three unsuccessful review cycles pause for a human correction instead of losing work.
 

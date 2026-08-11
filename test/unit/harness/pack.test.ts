@@ -382,10 +382,12 @@ describe('file-backed harness pack', () => {
     const references = pack.steps.map(({ reference }) => reference);
     const project = pack.projects.find(({ repository }) => repository === 'onetwotrip/front-avia');
     const review = getHarnessStepDefinition('review.agent@1');
+    const ciObservation = getHarnessStepDefinition('ci.observe@1');
 
     expect(references).toEqual(
       expect.arrayContaining([
         'bug.validate_fix@1',
+        'ci.repair@1',
         'code.repair@1',
         'validate.targeted@1',
         'review.agent@1',
@@ -421,6 +423,46 @@ describe('file-backed harness pack', () => {
         changes_requested: {
           'agent_review.accepted@1': false,
           'agent_review.changes_requested@1': true,
+        },
+      },
+    });
+    expect(ciObservation?.contract.outputPredicates).toEqual({
+      discriminator: 'status',
+      cases: {
+        passed: {
+          'ci.passed@1': true,
+          'ci.change_failure@1': false,
+          'ci.flaky@1': false,
+          'ci.infrastructure@1': false,
+          'ci.unknown@1': false,
+        },
+        likely_caused_by_change: {
+          'ci.passed@1': false,
+          'ci.change_failure@1': true,
+          'ci.flaky@1': false,
+          'ci.infrastructure@1': false,
+          'ci.unknown@1': false,
+        },
+        likely_flaky: {
+          'ci.passed@1': false,
+          'ci.change_failure@1': false,
+          'ci.flaky@1': true,
+          'ci.infrastructure@1': false,
+          'ci.unknown@1': false,
+        },
+        infrastructure: {
+          'ci.passed@1': false,
+          'ci.change_failure@1': false,
+          'ci.flaky@1': false,
+          'ci.infrastructure@1': true,
+          'ci.unknown@1': false,
+        },
+        unknown: {
+          'ci.passed@1': false,
+          'ci.change_failure@1': false,
+          'ci.flaky@1': false,
+          'ci.infrastructure@1': false,
+          'ci.unknown@1': true,
         },
       },
     });

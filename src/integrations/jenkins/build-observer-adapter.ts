@@ -75,24 +75,13 @@ const outputFor = (build: JenkinsFinishedBuild, status: JenkinsVerdict) =>
 const terminalResult = (build: JenkinsFinishedBuild): IntegrationStepExecutionResult => {
   const verdict = classify(build);
   const output = outputFor(build, verdict);
-  if (verdict === 'passed') {
-    return {
-      status: 'completed',
-      summary: `Jenkins build #${String(build.number)} passed for ${build.revision.slice(0, 12)}`,
-      output,
-      artifactIds: [],
-    };
-  }
   return {
-    status: 'blocked',
-    kind:
-      verdict === 'likely_caused_by_change'
-        ? 'verification'
-        : verdict === 'unknown'
-          ? 'unknown_outcome'
-          : 'infrastructure',
-    summary: `Jenkins build #${String(build.number)} requires attention: ${verdict.replaceAll('_', ' ')}`,
-    details: output,
+    status: 'completed',
+    summary:
+      verdict === 'passed'
+        ? `Jenkins build #${String(build.number)} passed for ${build.revision.slice(0, 12)}`
+        : `Jenkins build #${String(build.number)} classified as ${verdict.replaceAll('_', ' ')}`,
+    output,
     artifactIds: [],
   };
 };

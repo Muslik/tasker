@@ -355,6 +355,14 @@ For Jenkins, project manifests configure only the replaceable provider mapping:
 binding the same contract to another read adapter and changing project/company policy;
 it does not require a Temporal Workflow branch.
 
+CI control flow is assembled from provider-neutral facts and blocks. The observation contract
+must map every terminal result to all registered CI predicates so a later observation replaces,
+rather than leaks, the previous verdict. `ci.repair@1` is an editable agent block and prompt;
+flaky, infrastructure, and unknown outcomes are durable wait contracts. The graph compiler accepts
+provider-specific adapters but the obligation validator requires a `ci.passed@1` proof after
+observation and before human review. A provider-specific retry mutation needs its own reconciled
+effect block; it must not be added to the read-only observer.
+
 Moving to GitLab Issues and GitLab CI should require:
 
 1. a tracker adapter that produces the normalized task snapshot;

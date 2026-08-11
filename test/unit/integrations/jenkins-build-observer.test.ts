@@ -153,7 +153,7 @@ describe('Jenkins build observation', () => {
     expect(heartbeat).toHaveBeenCalledTimes(3);
   });
 
-  it('blocks product failures with exact Allure evidence instead of entering code review', async () => {
+  it('returns product failures as classified observations for workflow recovery', async () => {
     const failure = {
       uid: 'fare-card-test',
       name: 'renders the fare card',
@@ -174,16 +174,15 @@ describe('Jenkins build observation', () => {
     const result = await adapter.execute(requestFor());
 
     expect(result).toMatchObject({
-      status: 'blocked',
-      kind: 'verification',
-      details: {
+      status: 'completed',
+      output: {
         status: 'likely_caused_by_change',
         failures: [{ uid: 'fare-card-test', message: 'Expected card to be visible' }],
       },
     });
   });
 
-  it('keeps flaky and infrastructure failures out of the implementation retry budget', async () => {
+  it('returns flaky failures as classified observations outside the implementation budget', async () => {
     const adapter = new JenkinsBuildObserverAdapter(
       configuration,
       commands,
@@ -194,13 +193,12 @@ describe('Jenkins build observation', () => {
     const result = await adapter.execute(requestFor());
 
     expect(result).toMatchObject({
-      status: 'blocked',
-      kind: 'infrastructure',
-      details: { status: 'likely_flaky' },
+      status: 'completed',
+      output: { status: 'likely_flaky' },
     });
   });
 
-  it('asks for operator guidance when deterministic evidence cannot classify the failure', async () => {
+  it('returns unknown terminal failures for an explicit workflow decision', async () => {
     const adapter = new JenkinsBuildObserverAdapter(
       configuration,
       commands,
@@ -216,9 +214,8 @@ describe('Jenkins build observation', () => {
     const result = await adapter.execute(requestFor());
 
     expect(result).toMatchObject({
-      status: 'blocked',
-      kind: 'unknown_outcome',
-      details: { status: 'unknown' },
+      status: 'completed',
+      output: { status: 'unknown' },
     });
   });
 
