@@ -222,12 +222,6 @@ export const WorkflowViewSchema = z
   })
   .strict();
 
-export const FixtureListResponseSchema = z
-  .object({
-    fixtures: z.array(FixtureSummarySchema),
-  })
-  .strict();
-
 export const WorkflowResponseSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ready'), view: WorkflowViewSchema }).strict(),
   z.object({ status: z.literal('rejected'), view: WorkflowViewSchema }).strict(),

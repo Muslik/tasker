@@ -182,7 +182,9 @@ const setup = () => {
     clock,
   });
   resources.push(ledger);
-  const service = createM1WorkflowService(ledger.repository, clock);
+  const service = createM1WorkflowService(ledger.repository, clock, {
+    includeTestFixtures: true,
+  });
   const runs = new ContractTaskRunService();
   const api = buildM1Api({
     service,

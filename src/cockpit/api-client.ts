@@ -9,7 +9,6 @@ import {
   OperatorWorkflowProjectionSchema,
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
-  FixtureListResponseSchema,
   WorkflowResponseSchema,
 } from '../control-plane/m1-contracts.js';
 import type {
@@ -20,7 +19,6 @@ import type {
   OperatorStreamEvent,
   OperatorTaskListResponse,
   OperatorWorkflowProjection,
-  FixtureSummary,
   WorkflowResponse,
   ExecutionRunView,
   CodeReviewSyncResponse,
@@ -118,21 +116,6 @@ const fetchJson = async (input: string, init?: RequestInit): Promise<JsonRespons
 
     throw new Error('The server could not be reached', { cause: error });
   }
-};
-
-export const listFixtures = async (): Promise<readonly FixtureSummary[]> => {
-  const result = await fetchJson('/api/fixtures');
-
-  if (!result.response.ok) {
-    throw failureFrom(result);
-  }
-
-  const parsed = FixtureListResponseSchema.safeParse(result.body);
-  if (!parsed.success) {
-    throw new Error('Fixture response does not match the cockpit contract');
-  }
-
-  return parsed.data.fixtures;
 };
 
 export const listOperatorTasks = async (): Promise<OperatorTaskListResponse> => {

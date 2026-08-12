@@ -93,14 +93,19 @@ const taskFromJira = (
 };
 
 export class WorkflowGenerationSubjectSource {
+  private readonly includeTestFixtures: boolean;
+
   public constructor(
     private readonly fixtureRepositoryPath: string,
     private readonly jiraIssueService?: JiraIssueService,
     private readonly dynamicSubjects?: Pick<M1WorkflowService, 'readGenerationSubject'>,
-  ) {}
+    options: { readonly includeTestFixtures?: boolean } = {},
+  ) {
+    this.includeTestFixtures = options.includeTestFixtures ?? false;
+  }
 
   public resolve(taskReference: string): Outcome<WorkflowGenerationSubject, M1ServiceError> {
-    const fixture = findTaskFixture(taskReference);
+    const fixture = this.includeTestFixtures ? findTaskFixture(taskReference) : undefined;
     if (fixture !== undefined) {
       return ok({
         schemaVersion: 1,

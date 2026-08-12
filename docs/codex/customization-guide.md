@@ -30,6 +30,75 @@ The compiler and Temporal Workflow know none of Twiket, Jira, Bitbucket, Jenkins
 translations, or `@ott`. Vendor payloads terminate at adapters. Company policy affects
 analyzer input and block availability, not interpreter code.
 
+### 1.1 Concrete harness map
+
+The editable source pack is [`harness/`](../../harness). Its current ownership is:
+
+| Path | Authority |
+|---|---|
+| [`company.json`](../../harness/company.json) | company capabilities, Docker runtime, provider/model profiles, planner routing, global process and package rules |
+| [`projects/*/project.json`](../../harness/projects) | repository-specific bootstrap, services, CI kind, translation mode, and exact validation commands |
+| [`projects/*/workflow.md`](../../harness/projects) | short repository workflow guidance supplied as evidence to planning |
+| [`policies/*.json`](../../harness/policies) | optional company overlays, required graph ordering, and skills added to existing agent blocks |
+| [`steps/*.json`](../../harness/steps) | file-backed block contracts: stage, executor, prompt, skills, completion, effects, artifacts, and recovery boundary |
+| [`prompts/implementation-planner.md`](../../harness/prompts/implementation-planner.md) | mandatory initial planner and workflow-composer instructions |
+| [`prompts/workflow-analyzer.md`](../../harness/prompts/workflow-analyzer.md) | continuation-workflow analyzer instructions |
+| [`prompts/steps/*.md`](../../harness/prompts/steps) | one readable prompt for each file-backed or built-in agent block |
+| [`workspace/manifest.json`](../../harness/workspace/manifest.json) | provider-neutral skill/profile/override pack copied and pinned into a managed worktree |
+| [`workspace/shared-skills`](../../harness/workspace/shared-skills) | reusable logical agent skills |
+| [`workspace/integration-skills`](../../harness/workspace/integration-skills) | read/write system skills available for explicit planner or step selection |
+| [`workspace/profiles`](../../harness/workspace/profiles) | repository-specific ambient skills, step-only skills, and file overrides |
+
+`loadHarnessPack` in
+[`src/harness/loader.ts`](../../src/harness/loader.ts) validates these files, loads prompt
+content and hashes, resolves enabled policies, merges project overrides, and produces one
+immutable catalog. The exact catalog exposed to the planner is assembled by
+[`src/planning/analyzer-context.ts`](../../src/planning/analyzer-context.ts):
+
+- policy-owned blocks are absent when their policy does not apply to the task origin/family;
+- process blocks are absent when neither company nor project policy binds their executor to a
+  command;
+- each remaining block includes its description, stage, input/output contract, effects,
+  capabilities, artifacts, completion evaluator, execution profile, prompt path/hash, and
+  logical skills;
+- the planner selects only from this catalog and the registered graph primitives, predicates,
+  and waits. It cannot invent a step, prompt, model, effect, or shell command.
+
+The current block storage is intentionally reported as it exists, not as if the migration were
+already complete:
+
+| Storage | Current references |
+|---|---|
+| File-backed `harness/steps/*.json` | `ci.observe@1`, `ci.repair@1`, `jira.start-work@1`, `jira.review-ready@1`, `pr.describe@1`, `review.acknowledge@1`, `review.revise@1` |
+| Built-in `src/harness/step-definitions.ts` | `bug.investigate@1`, `bug.validate_fix@1`, `code.implement@1`, `code.repair@1`, `validate.targeted@1`, `validate.full@1`, `validate.build@1`, `validate.visual@1`, `review.agent@1`, `fill-test-ops-plan@1`, `translations.extract@1`, `translations.pull@1`, `component.dev_publish@1`, `component.consume_published@1`, `pr.prepare@1` |
+| Registered waits/predicates in `src/planning/contracts.ts` | human review/guidance, CI recovery, translation/final-publish waits, and deterministic output facts |
+
+The split is current migration debt. A block expressible with the existing manifest vocabulary
+should move from `step-definitions.ts` to `harness/steps/*.json`; only genuinely new typed data
+contracts, completion evaluators, or adapter implementations require TypeScript. Test-only invalid
+blocks and fixture tasks are not loaded into the production catalog or operator queue.
+
+### 1.2 What an agent actually receives
+
+There is no ambient access to the whole harness:
+
+1. The mandatory planner receives its own system prompt, the frozen task/Evidence Bundle,
+   repository and company/project policy, the filtered block catalog, and only the read-only
+   skills listed by `company.systemPrompts.implementationPlannerSkills`.
+2. A selected agent block receives the full snapshotted step prompt, typed step input, current
+   run evidence, operator guidance when resuming, the resolved provider/model profile, and only
+   that block's logical skills plus applicable policy bindings.
+3. A process block receives an exact command already bound by company/project policy. No LLM is
+   invoked.
+4. An integration block receives a typed adapter and durable effect/reconciliation boundary. No
+   LLM is allowed to perform the remote mutation directly.
+
+[`src/providers/agent-skills.ts`](../../src/providers/agent-skills.ts) materializes the selected
+skill subset into an isolated Codex or Claude provider home. The agent runner in
+[`src/temporal/activities/block-execution.ts`](../../src/temporal/activities/block-execution.ts)
+uses only the prompt, profile, and skill selection frozen for that run. Editing the source pack
+therefore changes future runs, never another active run with the same Jira task identity.
+
 ## 2. Assembly versus execution
 
 ```text

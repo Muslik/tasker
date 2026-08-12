@@ -2,6 +2,10 @@
 
 Status: canonical acceptance and recovery specification, 2026-08-09
 
+Production isolation invariant: validation fixtures are opt-in test data. A normal server and
+workflow subject source expose no fixture tasks, fixture API, or invalid fixture blocks; only the
+explicit e2e/test composition may enable them.
+
 ## 1. Test strategy
 
 The tests prove Tasker behavior, Temporal integration, and external-effect safety. They

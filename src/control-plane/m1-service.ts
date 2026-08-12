@@ -14,7 +14,6 @@ import {
 import type { WorkflowAnalyzerFailure, WorkflowAnalyzerReceipt } from '../providers/index.js';
 import { JsonValueSchema, type JsonValue, type ValidationReport } from '../workflow/index.js';
 import {
-  FixtureListResponseSchema,
   FixtureSummarySchema,
   M1_VIEW_SCHEMA_VERSION,
   OperatorActivityResponseSchema,
@@ -289,35 +288,30 @@ export class M1WorkflowService {
   public constructor(
     private readonly store: M1WorkflowStore,
     private readonly clock: Clock,
+    private readonly includeTestFixtures: boolean,
   ) {}
-
-  public listFixtures(): ReturnType<typeof FixtureListResponseSchema.parse> {
-    return FixtureListResponseSchema.parse({ fixtures: listTaskFixtures().map(toFixtureSummary) });
-  }
 
   public listOperatorTasks(): Outcome<
     ReturnType<typeof OperatorTaskListResponseSchema.parse>,
     M1ServiceError
   > {
-    const tasks = [];
-
-    for (const fixture of listTaskFixtures()) {
-      tasks.push({
-        id: fixture.fixtureId,
-        taskId: fixture.taskId,
-        title: fixture.title,
-        origin: {
-          kind: 'fixture' as const,
-          fixtureId: fixture.fixtureId,
-          family: toFixtureSummary(fixture).family,
-        },
-        planning: { status: 'available' as const },
-        status: 'backlog' as const,
-        attention: 'none' as const,
-        currentStage: 'Awaiting workflow generation',
-        updatedAt: null,
-      });
-    }
+    const tasks = this.includeTestFixtures
+      ? listTaskFixtures().map((fixture) => ({
+          id: fixture.fixtureId,
+          taskId: fixture.taskId,
+          title: fixture.title,
+          origin: {
+            kind: 'fixture' as const,
+            fixtureId: fixture.fixtureId,
+            family: toFixtureSummary(fixture).family,
+          },
+          planning: { status: 'available' as const },
+          status: 'backlog' as const,
+          attention: 'none' as const,
+          currentStage: 'Awaiting workflow generation',
+          updatedAt: null,
+        }))
+      : [];
 
     const streamCursor = this.store.listEvents().at(-1)?.sequence ?? 0;
     return ok(OperatorTaskListResponseSchema.parse({ tasks, streamCursor }));
@@ -634,4 +628,10 @@ export class M1WorkflowService {
 export const createM1WorkflowService = (
   ledger: ConstructorParameters<typeof M1WorkflowStore>[0],
   clock: Clock,
-): M1WorkflowService => new M1WorkflowService(new M1WorkflowStore(ledger, clock), clock);
+  options: { readonly includeTestFixtures?: boolean } = {},
+): M1WorkflowService =>
+  new M1WorkflowService(
+    new M1WorkflowStore(ledger, clock),
+    clock,
+    options.includeTestFixtures ?? false,
+  );

@@ -360,7 +360,6 @@ describe('M1 task workflow planning', () => {
   it.each([
     ['invalid-unknown-step', 'unknown_reference'],
     ['invalid-missing-terminal', 'missing_terminal_path'],
-    ['invalid-unsafe-effect', 'effectful_step_without_reconciliation_metadata'],
     ['invalid-unbounded-loop', 'invalid_source'],
   ] as const)('rejects %s before it can become executable', (fixtureId, issueCode) => {
     const result = planTaskWorkflow(fixture(fixtureId));

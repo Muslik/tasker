@@ -35,7 +35,9 @@ const [blocks, control, jira, ledgerModule, providers, repositories, shared, tem
   ]);
 
 const ledger = ledgerModule.openSqliteLedger({ filename: databasePath, clock: shared.systemClock });
-const service = control.createM1WorkflowService(ledger.repository, shared.systemClock);
+const service = control.createM1WorkflowService(ledger.repository, shared.systemClock, {
+  includeTestFixtures: true,
+});
 const snapshot = jira.JiraIssueSnapshotSchema.parse({
   schemaVersion: 1,
   issueKey: 'AVIA-13235',
@@ -128,6 +130,7 @@ const subjects = new control.WorkflowGenerationSubjectSource(
   resolve('.'),
   jiraIssueService,
   service,
+  { includeTestFixtures: true },
 );
 const evidenceBundles = new control.EvidenceBundleStore(ledger.repository, shared.systemClock);
 const contextDiscovery = new control.ContextDiscoveryService(evidenceBundles, shared.systemClock);

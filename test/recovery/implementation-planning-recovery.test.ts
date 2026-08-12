@@ -40,7 +40,12 @@ const planningFixture = (
   clock: Clock,
   directory: string,
   planner: ImplementationPlanner,
-  subjects: WorkflowGenerationSubjectSource = new WorkflowGenerationSubjectSource(directory),
+  subjects: WorkflowGenerationSubjectSource = new WorkflowGenerationSubjectSource(
+    directory,
+    undefined,
+    undefined,
+    { includeTestFixtures: true },
+  ),
 ): PlanningFixture => {
   const workflows = createM1WorkflowService(ledger.repository, clock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, clock);
@@ -178,7 +183,9 @@ describe('implementation planning recovery', () => {
             ledger: restartedLedger.repository,
             clock,
             workflows: createM1WorkflowService(restartedLedger.repository, clock),
-            subjects: new WorkflowGenerationSubjectSource(directory),
+            subjects: new WorkflowGenerationSubjectSource(directory, undefined, undefined, {
+              includeTestFixtures: true,
+            }),
             planner: {
               plan: () => {
                 calls += 1;
@@ -319,7 +326,9 @@ describe('implementation planning recovery', () => {
       'tasker-plan-materialization-recovery-',
       async ({ directory, clock, ledger }) => {
         const fallback = new DeterministicImplementationPlanner();
-        const subjects = new InterruptibleSubjectSource(directory);
+        const subjects = new InterruptibleSubjectSource(directory, undefined, undefined, {
+          includeTestFixtures: true,
+        });
         let calls = 0;
         const fixture = planningFixture(
           ledger,

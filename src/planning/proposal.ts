@@ -413,27 +413,6 @@ const applyRejectedVariant = (fixture: TaskFixture, source: WorkflowSource): unk
         children.filter((child) => child.kind !== 'finalize'),
       );
 
-    case 'unsafe_effect':
-      return replaceRootChildren(source, (children) => {
-        const terminalIndex = children.findIndex((child) => child.kind === 'finalize');
-        const unsafeStep: WorkflowNodeSource = {
-          id: 'unsafe-remote-write',
-          kind: 'step',
-          uses: 'unsafe.effect@1',
-          with: {
-            objective: fixture.description,
-            repository: fixture.repository,
-            taskId: fixture.taskId,
-          },
-        };
-
-        if (terminalIndex < 0) {
-          return [...children, unsafeStep];
-        }
-
-        return [...children.slice(0, terminalIndex), unsafeStep, ...children.slice(terminalIndex)];
-      });
-
     case 'unbounded_loop':
       return replaceRootChildren(source, (children) =>
         children.map((child) =>

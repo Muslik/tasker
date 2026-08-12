@@ -264,8 +264,6 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     executionRuntime: 'temporal',
   }));
 
-  api.get('/api/fixtures', () => options.service.listFixtures());
-
   api.get('/api/repositories', (_request, reply) => {
     if (options.jiraIssueService === undefined) {
       return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));

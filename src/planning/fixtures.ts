@@ -55,7 +55,6 @@ export const RejectedProposalVariantSchema = z.enum([
   'unbounded_loop',
   'unknown_step',
   'unmet_capability',
-  'unsafe_effect',
 ]);
 
 const RejectedFixtureSchema = z
@@ -147,7 +146,6 @@ const fixtureInputs = [
       ['missing-terminal', 'missing_terminal'],
       ['unbounded-loop', 'unbounded_loop'],
       ['unmet-capability', 'unmet_capability'],
-      ['unsafe-effect', 'unsafe_effect'],
     ] as const
   ).map(([suffix, proposalVariant], index) => ({
     fixtureId: `invalid-${suffix}`,

@@ -79,6 +79,46 @@ afterEach(() => {
 });
 
 describe('operation-scoped workflow persistence', () => {
+  it('does not expose validation fixtures in the production operator queue', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+
+    expect(createM1WorkflowService(ledger.repository, clock).listOperatorTasks()).toEqual({
+      ok: true,
+      value: { tasks: [], streamCursor: 0 },
+    });
+
+    ledger.close();
+  });
+
+  it('exposes validation fixtures only when the test surface enables them', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const tasks = createM1WorkflowService(ledger.repository, clock, {
+      includeTestFixtures: true,
+    }).listOperatorTasks();
+
+    expect(tasks.ok && tasks.value.tasks.length).toBeGreaterThan(0);
+
+    ledger.close();
+  });
+
+  it('does not resolve validation fixtures through the production subject source', () => {
+    const production = new WorkflowGenerationSubjectSource('/fixture-repository');
+    const tests = new WorkflowGenerationSubjectSource('/fixture-repository', undefined, undefined, {
+      includeTestFixtures: true,
+    });
+
+    expect(production.resolve('avia-13236-short-bug')).toEqual({
+      ok: false,
+      error: { kind: 'task_not_found', taskReference: 'avia-13236-short-bug' },
+    });
+    expect(tests.resolve('avia-13236-short-bug')).toMatchObject({
+      ok: true,
+      value: { task: { fixtureId: 'avia-13236-short-bug' } },
+    });
+  });
+
   it('restores only the exact workflow operation after process restart', () => {
     const filename = databasePath();
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
