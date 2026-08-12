@@ -528,6 +528,15 @@ Routine sync successes and failures do not grow the activity timeline. Operation
 logs are redacted, bounded, and separate from agent/task activity. Temporal Event
 History is not used as a transcript store.
 
+Jira refresh is an explicit cache operation. Before planning it refreshes the task snapshot used
+by the next planning episode. After freeze it refreshes only the operator-visible Jira snapshot;
+it never mutates frozen context, the execution graph, or a completed prefix.
+
+Plan annotations are product metadata rather than scheduler state. Cockpit owns the draft editor;
+Tasker SQLite stores append-only review rounds keyed by plan artifact and attempt; Temporal receives
+only the accepted decision or normalized revision guidance. Rich textual review therefore does not
+turn the durable workflow engine into a collaborative-document store.
+
 Time and cost are attributed per Activity attempt:
 
 - queue delay, execution time, wait time, and operator time;

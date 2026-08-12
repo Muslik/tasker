@@ -106,6 +106,14 @@ candidate rejected and then replaced during the same planning episode is project
 an automatic correction, not as a current task failure. An unrecovered rejection remains
 an error.
 
+Plan review is a native Cockpit capability rather than an external annotation tool. The
+operator can open the canonical Markdown document full-screen, select rendered text, attach
+several comments, and submit them with optional overall guidance. Each review round is bound
+to the immutable plan artifact ID and attempt, so Tasker rejects stale submissions instead of
+applying them to a replacement plan. Draft annotations remain UI state; submitted rounds are
+append-only ledger history. Temporal receives only the resulting `approve` decision or the
+normalized `request_changes` guidance.
+
 The provider boundary carries `decision` and `evidenceRequests` as direct structured
 values. They are never JSON serialized inside string fields. Provider-only output
 schemas may make optional workflow-node fields required and nullable when a subscription

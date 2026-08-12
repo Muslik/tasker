@@ -6,6 +6,7 @@ import {
   createM1WorkflowService,
   ExecutionRunViewSchema,
 } from '../../src/control-plane/index.js';
+import { PlanReviewStore } from '../../src/control-plane/plan-review.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
@@ -97,6 +98,7 @@ const setup = () => {
     service,
     temporalRunService: runs,
     blockReceipts: new BlockReceiptStore(ledger.repository, clock),
+    planReviews: new PlanReviewStore(ledger.repository, clock),
   });
   return { api, runs };
 };
@@ -115,7 +117,6 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
         },
       },
     });
-    await api.close();
 
     expect(response.statusCode).toBe(200);
     expect(ExecutionRunViewSchema.parse(response.json())).toMatchObject({
@@ -152,8 +153,6 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
       method: 'GET',
       url: '/api/operator/tasks/avia-13236-short-bug/projection',
     });
-    await api.close();
-
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       schemaVersion: 3,
@@ -186,9 +185,13 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
     const response = await api.inject({
       method: 'POST',
       url: '/api/workflows/avia-13236-short-bug/plan-review',
-      payload: { decision: 'approve' },
+      payload: {
+        decision: 'approve',
+        reviewId: 'review-1',
+        planArtifactId: 'plan:attempt-1',
+        planAttempt: 1,
+      },
     });
-    await api.close();
 
     expect(response.statusCode).toBe(200);
     expect(runs.resolutions).toEqual([
@@ -198,5 +201,21 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
         resolution: { decision: 'approve' },
       },
     ]);
+
+    const history = await api.inject({
+      method: 'GET',
+      url: '/api/workflows/avia-13236-short-bug/plan-reviews',
+    });
+    expect(history.statusCode).toBe(200);
+    expect(history.json()).toMatchObject({
+      rounds: [
+        {
+          reviewId: 'review-1',
+          decision: 'approve',
+          status: 'applied',
+        },
+      ],
+    });
+    await api.close();
   });
 });

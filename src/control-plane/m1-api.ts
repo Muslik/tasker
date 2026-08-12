@@ -27,15 +27,21 @@ import {
   OperatorActivityResponseSchema,
   OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
-  PlanReviewCommandSchema,
   ResumeRunCommandSchema,
   RunStartCommandSchema,
   WorkflowResponseSchema,
   type OperatorTaskSummary,
 } from './m1-contracts.js';
+import {
+  PlanReviewCommandSchema,
+  PlanReviewHistoryResponseSchema,
+  planReviewResolution,
+  type PlanReviewStore,
+} from './plan-review.js';
 import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
+import { projectOperatorActivity } from './operator-activity-projection.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import {
   type TaskRunError,
@@ -66,6 +72,7 @@ export interface BuildM1ApiOptions {
   readonly bitbucketReview?: Pick<BitbucketReviewCoordinator, 'sync'> | undefined;
   readonly temporalRunService: TaskRunService;
   readonly blockReceipts: Pick<BlockReceiptStore, 'read'>;
+  readonly planReviews?: PlanReviewStore | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -320,13 +327,14 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       if (!jiraResult.ok) return sendJiraServiceError(reply, jiraResult.error);
       const workflowResult = options.service.readActivity(params.data.fixtureId);
       if (!workflowResult.ok) return sendServiceError(reply, workflowResult.error);
-      const entries = [
-        ...jiraResult.value.entries,
-        ...workflowResult.value.entries,
-        ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
-        ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
-        ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
-      ];
+      const entries = projectOperatorActivity({
+        jira: jiraResult.value.entries,
+        workflow: workflowResult.value.entries,
+        implementationPlanning:
+          options.implementationPlanning?.readActivity(params.data.fixtureId) ?? [],
+        continuation: options.workflowContinuation?.readActivity(params.data.fixtureId) ?? [],
+        execution: options.executionActivity?.readActivity(params.data.fixtureId) ?? [],
+      });
       return reply.send(
         OperatorActivityResponseSchema.parse({
           fixtureId: params.data.fixtureId,
@@ -343,12 +351,14 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!result.ok) {
       return sendServiceError(reply, result.error);
     }
-    const entries = [
-      ...result.value.entries,
-      ...(options.implementationPlanning?.readActivity(params.data.fixtureId) ?? []),
-      ...(options.workflowContinuation?.readActivity(params.data.fixtureId) ?? []),
-      ...(options.executionActivity?.readActivity(params.data.fixtureId) ?? []),
-    ];
+    const entries = projectOperatorActivity({
+      jira: [],
+      workflow: result.value.entries,
+      implementationPlanning:
+        options.implementationPlanning?.readActivity(params.data.fixtureId) ?? [],
+      continuation: options.workflowContinuation?.readActivity(params.data.fixtureId) ?? [],
+      execution: options.executionActivity?.readActivity(params.data.fixtureId) ?? [],
+    });
     return reply.send(
       OperatorActivityResponseSchema.parse({
         ...result.value,
@@ -759,6 +769,18 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(400)
         .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan guidance'));
     }
+    const planning = options.implementationPlanning?.read(params.data.fixtureId);
+    if (
+      planning !== undefined &&
+      (!planning.ok ||
+        planning.value?.status !== 'ready' ||
+        planning.value.artifactId !== command.data.planArtifactId ||
+        planning.value.attempt !== command.data.planAttempt)
+    ) {
+      return reply
+        .code(409)
+        .send(apiError('stale_plan_review', 'Refresh and review the current planning attempt'));
+    }
     const current = await temporalRunService.read(params.data.fixtureId);
     if (!current.ok) return sendTemporalRunError(reply, current.error);
     if (
@@ -771,14 +793,39 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(409)
         .send(apiError('run_not_at_plan_review', 'The run is not waiting for plan review'));
     }
+    const submitted = options.planReviews?.submit(params.data.fixtureId, command.data);
+    if (submitted !== undefined && !submitted.ok) {
+      return reply
+        .code(409)
+        .send(apiError(submitted.error.kind, 'Plan review could not be stored'));
+    }
     const reviewed = await temporalRunService.resolveWait(params.data.fixtureId, {
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
-      resolution: command.data,
+      resolution: planReviewResolution(command.data),
     });
-    return reviewed.ok
-      ? sendTemporalState(reply, params.data.fixtureId, reviewed.value)
-      : sendTemporalRunError(reply, reviewed.error);
+    if (!reviewed.ok) return sendTemporalRunError(reply, reviewed.error);
+    const applied = options.planReviews?.markApplied(params.data.fixtureId, command.data.reviewId);
+    if (applied !== undefined && !applied.ok) {
+      return reply
+        .code(500)
+        .send(apiError('plan_review_store_failed', 'Plan review was accepted but not projected'));
+    }
+    return sendTemporalState(reply, params.data.fixtureId, reviewed.value);
+  });
+
+  api.get('/api/workflows/:fixtureId/plan-reviews', async (request, reply) => {
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    if (options.planReviews === undefined) {
+      return PlanReviewHistoryResponseSchema.parse({ rounds: [] });
+    }
+    const history = options.planReviews.read(params.data.fixtureId);
+    return history.ok
+      ? PlanReviewHistoryResponseSchema.parse({ rounds: history.value })
+      : reply.code(500).send(apiError(history.error.kind, 'Plan review history is unavailable'));
   });
 
   api.post('/api/workflows/:fixtureId/planning-clarification', async (request, reply) => {

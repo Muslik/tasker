@@ -357,7 +357,7 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
 test('the plan review document renders safe Markdown next to its decision controls', async ({
   page,
 }) => {
-  const fixtureId = 'avia-12536-feature-review';
+  const fixtureId = 'avia-13236-short-bug';
 
   await page.route(`**/api/workflows/${fixtureId}/implementation-plan`, async (route) => {
     const response = await route.fetch();
@@ -378,6 +378,7 @@ test('the plan review document renders safe Markdown next to its decision contro
 
   await page.goto('/');
   await clickTask(page, fixtureId);
+  await page.getByRole('button', { name: 'Generate workflow' }).click();
   await waitForRunWait(page, fixtureId, 'plan.approved@1');
 
   const reviewSurface = page.getByTestId('plan-review-surface');
@@ -388,8 +389,50 @@ test('the plan review document renders safe Markdown next to its decision contro
   await expect(
     reviewSurface.getByText('Verify the changed surface', { exact: true }),
   ).toBeVisible();
+  await reviewSurface.getByRole('button', { name: 'Open plan full screen' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  const planArtifactId = await reviewSurface
+    .locator('[data-plan-anchor]')
+    .getAttribute('data-plan-anchor');
+  if (planArtifactId === null) throw new Error('Expected the plan artifact id');
+  const annotationDraft = JSON.stringify({
+    [planArtifactId]: [
+      {
+        id: 'annotation-browser-test',
+        anchor: planArtifactId,
+        quote: 'Review focus',
+        startOffset: 0,
+        endOffset: 12,
+        comment: 'Keep this constraint explicit in the revised plan.',
+      },
+    ],
+  });
+  await page.evaluate(
+    `globalThis.localStorage.setItem('tasker.operator.planAnnotations', ${JSON.stringify(annotationDraft)})`,
+  );
+  await expect
+    .poll(async () =>
+      page.evaluate(`globalThis.localStorage.getItem('tasker.operator.planAnnotations') ?? ''`),
+    )
+    .toContain('annotation-browser-test');
+  await page.reload();
+  await expect
+    .poll(async () =>
+      page.evaluate(`globalThis.localStorage.getItem('tasker.operator.planAnnotations') ?? ''`),
+    )
+    .toContain('annotation-browser-test');
+  await expect(page.getByTestId('plan-annotation-list')).toContainText(
+    'Keep this constraint explicit in the revised plan.',
+  );
+  await expect(page.getByRole('button', { name: 'Approve plan' })).toBeDisabled();
+  await reviewSurface.getByRole('button', { name: 'Open plan full screen' }).click();
+  await page.getByRole('button', { name: 'Close full screen plan' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByTestId('plan-review-actions')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve plan' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve plan' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Remove annotation 1' }).click();
+  await page.getByRole('button', { name: 'Approve plan' }).click();
+  await waitForRunWait(page, fixtureId, 'execution.start@1');
 });
 
 test('the planner owns a cross-repository workflow candidate before freeze', async ({ page }) => {

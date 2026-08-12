@@ -10,6 +10,7 @@ import {
   GitBranch,
   Image as ImageIcon,
   LoaderCircle,
+  Maximize2,
   MessageSquare,
   Moon,
   PanelLeftClose,
@@ -22,8 +23,9 @@ import {
   Sun,
   Terminal,
   Video,
+  X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type {
   OperatorActivityResponse,
@@ -34,6 +36,11 @@ import type {
 } from '../control-plane/m1-contracts.js';
 import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning-contracts.js';
 import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
+import {
+  PlanReviewAnnotationSchema,
+  type PlanReviewAnnotation,
+  type PlanReviewRound,
+} from '../control-plane/plan-review.js';
 import type { WorkflowContinuationRecord } from '../control-plane/workflow-continuation-contracts.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
@@ -50,6 +57,7 @@ import {
   loadExecutionRun,
   loadImplementationPlan,
   loadPlanningTranscript,
+  loadPlanReviewHistory,
   loadWorkflowContinuation,
   loadJiraIssue,
   loadOperatorActivity,
@@ -81,6 +89,7 @@ import {
 import { cn } from './lib/utils.js';
 import { MarkdownText } from './MarkdownText.js';
 import { planningAgentLogFrom, type PlanningAgentEvent } from './planning-agent-log.js';
+import { implementationPlanMarkdownFrom } from './implementation-plan-markdown.js';
 import { WorkflowStages } from './WorkflowStages.js';
 
 type WorkflowLoadState =
@@ -109,6 +118,11 @@ type PlanningTranscriptLoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'missing' }
   | { readonly status: 'ready'; readonly transcript: PlanningTranscriptView }
+  | { readonly status: 'failed'; readonly message: string };
+
+type PlanReviewHistoryLoadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly rounds: readonly PlanReviewRound[] }
   | { readonly status: 'failed'; readonly message: string };
 
 type WorkflowContinuationLoadState =
@@ -146,6 +160,7 @@ type TaskOperation =
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 const TASK_RAIL_STORAGE_KEY = 'tasker.operator.tasksCollapsed';
 const THEME_STORAGE_KEY = 'tasker.operator.theme';
+const PLAN_ANNOTATION_STORAGE_KEY = 'tasker.operator.planAnnotations';
 type OperatorTheme = 'light' | 'dark';
 
 const formatValue = (value: unknown): string =>
@@ -206,6 +221,34 @@ const readStoredTheme = (): OperatorTheme => {
 const applyTheme = (theme: OperatorTheme): void => {
   document.documentElement.classList.toggle('dark', theme === 'dark');
   window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+};
+
+const readStoredPlanAnnotations = (): ReadonlyMap<string, readonly PlanReviewAnnotation[]> => {
+  if (typeof window === 'undefined') return new Map();
+  try {
+    const parsed: unknown = JSON.parse(
+      window.localStorage.getItem(PLAN_ANNOTATION_STORAGE_KEY) ?? '{}',
+    );
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return new Map();
+    return new Map(
+      Object.entries(parsed).flatMap(([artifactId, annotations]) => {
+        const result = PlanReviewAnnotationSchema.array().safeParse(annotations);
+        return result.success ? [[artifactId, result.data] as const] : [];
+      }),
+    );
+  } catch {
+    return new Map();
+  }
+};
+
+const writeStoredPlanAnnotations = (
+  annotations: ReadonlyMap<string, readonly PlanReviewAnnotation[]>,
+): void => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(
+    PLAN_ANNOTATION_STORAGE_KEY,
+    JSON.stringify(Object.fromEntries(annotations)),
+  );
 };
 
 const chooseInitialTask = (
@@ -632,12 +675,17 @@ const SelectedTaskHeader = ({
                 onClick={() => {
                   onSyncJira(task.taskId);
                 }}
+                title={
+                  task.status === 'backlog' || task.status === 'workflow_rejected'
+                    ? 'Reload Jira fields, comments, links, and attachments before the next plan.'
+                    : 'Refresh the operator snapshot. A frozen execution keeps its original context.'
+                }
               >
                 <RefreshCw
                   data-icon="inline-start"
                   className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
                 />
-                Sync
+                Refresh Jira
               </Button>
             </>
           ) : workflow.status === 'ready' && workflow.response.status === 'ready' && !canStart ? (
@@ -654,6 +702,7 @@ const SelectedTaskHeader = ({
 
 type PlanReviewActions = {
   readonly guidance: string;
+  readonly annotationCount: number;
   readonly pendingOperation: TaskOperation | null;
   readonly onGuidanceChange: (guidance: string) => void;
   readonly onApprove: () => void;
@@ -662,6 +711,7 @@ type PlanReviewActions = {
 
 const PlanReviewActions = ({
   guidance,
+  annotationCount,
   pendingOperation,
   onGuidanceChange,
   onApprove,
@@ -670,17 +720,18 @@ const PlanReviewActions = ({
   const approving = pendingOperation === 'approving_plan';
   const requestingChanges = pendingOperation === 'requesting_plan_changes';
   const busy = approving || requestingChanges;
+  const hasFeedback = guidance.trim().length > 0 || annotationCount > 0;
 
   return (
     <footer
-      className="relative z-20 shrink-0 border-t-2 border-amber-500/70 bg-amber-500/10 px-5 py-4 shadow-[0_-18px_48px_-32px_rgba(245,158,11,0.9)] backdrop-blur"
+      className="relative z-[60] shrink-0 border-t-2 border-amber-500/70 bg-amber-500/10 px-5 py-4 shadow-[0_-18px_48px_-32px_rgba(245,158,11,0.9)] backdrop-blur"
       aria-label="Plan decision"
       data-testid="plan-review-actions"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex gap-2.5">
-          <div className="mt-0.5 rounded-md bg-amber-500/20 p-1.5 text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="size-4" />
+          <div className="mt-0.5 shrink-0 rounded-md bg-amber-500/20 p-1.5 text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="size-4 shrink-0" />
           </div>
           <div>
             <strong className="text-sm text-amber-800 dark:text-amber-200">Action required</strong>
@@ -706,7 +757,7 @@ const PlanReviewActions = ({
           size="sm"
           type="button"
           className="border-amber-500/50 bg-background/70 hover:bg-amber-500/10"
-          disabled={busy || guidance.trim().length === 0}
+          disabled={busy || !hasFeedback}
           onClick={onRequestChanges}
         >
           {requestingChanges ? (
@@ -720,8 +771,9 @@ const PlanReviewActions = ({
           size="sm"
           type="button"
           className="bg-amber-500 text-amber-950 hover:bg-amber-400"
-          disabled={busy}
+          disabled={busy || hasFeedback}
           onClick={onApprove}
+          title={hasFeedback ? 'Clear or submit the review comments before approving.' : undefined}
         >
           {approving ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
           {approving ? 'Approving…' : 'Approve plan'}
@@ -898,11 +950,318 @@ const PlanningSnapshotTag = ({ record }: { readonly record: ImplementationPlanni
   );
 };
 
+type SelectedPlanRange = {
+  readonly quote: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+};
+
+const selectionOffset = (root: HTMLElement, node: Node, offset: number): number => {
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.setEnd(node, offset);
+  return range.toString().length;
+};
+
+const selectedPlanRangeFrom = (
+  root: HTMLElement,
+  selected: Selection | null,
+): SelectedPlanRange | null => {
+  if (selected === null || selected.rangeCount !== 1 || selected.isCollapsed) return null;
+  const range = selected.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  const selectedText = selected.toString();
+  const quote = selectedText.trim();
+  if (quote.length === 0 || quote.length > 2_000) return null;
+  const leadingWhitespace = selectedText.length - selectedText.trimStart().length;
+  const rawStartOffset = selectionOffset(root, range.startContainer, range.startOffset);
+  return {
+    quote,
+    startOffset: rawStartOffset + leadingWhitespace,
+    endOffset: rawStartOffset + leadingWhitespace + quote.length,
+  };
+};
+
+const NativePlanReview = ({
+  artifactId,
+  title,
+  markdown,
+  metadata,
+  annotations,
+  history,
+  decisionActions,
+  onAnnotationsChange,
+}: {
+  readonly artifactId: string;
+  readonly title: string;
+  readonly markdown: string;
+  readonly metadata: ReactNode;
+  readonly annotations: readonly PlanReviewAnnotation[];
+  readonly history: readonly PlanReviewRound[];
+  readonly decisionActions: ReactNode;
+  readonly onAnnotationsChange: (annotations: readonly PlanReviewAnnotation[]) => void;
+}) => {
+  const [fullscreen, setFullscreen] = useState(false);
+  const [selection, setSelection] = useState<SelectedPlanRange | null>(null);
+  const [comment, setComment] = useState('');
+  const documentRef = useRef<HTMLDivElement>(null);
+
+  const captureSelection = useCallback((): void => {
+    const root = documentRef.current;
+    if (root === null) return;
+    const selectedRange = selectedPlanRangeFrom(root, window.getSelection());
+    if (selectedRange !== null) setSelection(selectedRange);
+  }, []);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setFullscreen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [fullscreen]);
+
+  useEffect(() => {
+    const captureCurrentSelection = (): void => {
+      captureSelection();
+    };
+    document.addEventListener('selectionchange', captureCurrentSelection);
+    return () => {
+      document.removeEventListener('selectionchange', captureCurrentSelection);
+    };
+  }, [captureSelection]);
+
+  const addAnnotation = (): void => {
+    if (selection === null || comment.trim().length === 0) return;
+    onAnnotationsChange([
+      ...annotations,
+      {
+        id: crypto.randomUUID(),
+        anchor: artifactId,
+        quote: selection.quote,
+        startOffset: selection.startOffset,
+        endOffset: selection.endOffset,
+        comment: comment.trim(),
+      },
+    ]);
+    setSelection(null);
+    setComment('');
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const content = (
+    <section
+      className={cn(
+        'overflow-hidden border border-amber-500/50 bg-card shadow-[0_18px_58px_-36px_rgba(245,158,11,0.85)]',
+        fullscreen ? 'flex h-full min-h-0 flex-col rounded-xl' : 'mx-4 my-4 rounded-lg',
+      )}
+      aria-label="Review implementation plan"
+      data-testid="plan-review-surface"
+    >
+      <header className="flex items-start gap-3 border-b border-amber-500/30 bg-amber-500/10 px-5 py-4">
+        <div className="mt-0.5 shrink-0 rounded-md bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="size-4 shrink-0" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            Action required · review plan
+          </p>
+          <h2 className="mt-0.5 text-lg font-semibold leading-6">{title}</h2>
+          <div className="mt-2">{metadata}</div>
+        </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                type="button"
+                aria-label={fullscreen ? 'Close full screen plan' : 'Open plan full screen'}
+                onClick={() => {
+                  setFullscreen((open) => !open);
+                }}
+              />
+            }
+          >
+            {fullscreen ? <X className="size-4" /> : <Maximize2 className="size-4" />}
+          </TooltipTrigger>
+          <TooltipContent>{fullscreen ? 'Close full screen' : 'Review full screen'}</TooltipContent>
+        </Tooltip>
+      </header>
+      <div
+        className={cn(
+          'grid min-h-0',
+          fullscreen && 'flex-1',
+          fullscreen || annotations.length > 0 || selection !== null
+            ? 'grid-cols-[minmax(0,1fr)_300px]'
+            : 'grid-cols-1',
+        )}
+      >
+        <div
+          className={cn('min-w-0', fullscreen && 'overflow-y-auto')}
+          data-testid="implementation-plan"
+        >
+          <div
+            className="px-6 py-6 selection:bg-amber-300/40 dark:selection:bg-amber-500/35"
+            data-plan-anchor={artifactId}
+            onMouseUp={captureSelection}
+            ref={documentRef}
+          >
+            <MarkdownText className="mx-auto max-w-4xl text-sm text-muted-foreground">
+              {markdown}
+            </MarkdownText>
+          </div>
+        </div>
+        {fullscreen || annotations.length > 0 || selection !== null ? (
+          <aside
+            className="min-h-0 overflow-y-auto border-l border-border bg-muted/15 p-4"
+            aria-label="Plan annotations"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <strong className="text-sm">Annotations</strong>
+              <StateBadge>{String(annotations.length)}</StateBadge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Select text in the plan, then explain what should change.
+            </p>
+            {selection === null ? null : (
+              <div className="mt-4 rounded-md border border-amber-500/35 bg-amber-500/8 p-3">
+                <blockquote className="line-clamp-4 border-l-2 border-amber-500/60 pl-2 text-xs text-muted-foreground">
+                  {selection.quote}
+                </blockquote>
+                <textarea
+                  className="mt-3 min-h-20 w-full resize-y rounded-md border border-input bg-background px-2.5 py-2 text-xs outline-none focus:border-ring"
+                  aria-label="Annotation comment"
+                  placeholder="What should change here?"
+                  value={comment}
+                  onChange={(event) => {
+                    setComment(event.target.value);
+                  }}
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      setSelection(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    type="button"
+                    disabled={comment.trim().length === 0}
+                    onClick={() => {
+                      addAnnotation();
+                    }}
+                  >
+                    Add annotation
+                  </Button>
+                </div>
+              </div>
+            )}
+            {annotations.length === 0 ? null : (
+              <ol className="mt-4 space-y-3" data-testid="plan-annotation-list">
+                {annotations.map((annotation, index) => (
+                  <li
+                    className="rounded-md border border-border bg-background/70 p-3"
+                    key={annotation.id}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Comment {index + 1}
+                      </span>
+                      <button
+                        className="text-muted-foreground hover:text-destructive"
+                        type="button"
+                        aria-label={`Remove annotation ${String(index + 1)}`}
+                        onClick={() => {
+                          onAnnotationsChange(annotations.filter(({ id }) => id !== annotation.id));
+                        }}
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                    <blockquote className="mt-2 line-clamp-3 border-l-2 border-border pl-2 text-xs text-muted-foreground">
+                      {annotation.quote}
+                    </blockquote>
+                    <p className="mt-2 text-xs leading-5">{annotation.comment}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+            {history.length === 0 ? null : (
+              <details className="mt-4 border-t border-border pt-3 text-xs">
+                <summary className="cursor-pointer text-muted-foreground">
+                  Previous review rounds · {history.length}
+                </summary>
+                <ol className="mt-2 space-y-2">
+                  {history.map((round) => (
+                    <li className="rounded-md bg-muted/40 p-2" key={round.reviewId}>
+                      <div className="flex justify-between gap-2">
+                        <span>Attempt {round.planAttempt}</span>
+                        <StateBadge>{round.decision.replace('_', ' ')}</StateBadge>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">
+                        {round.annotations.length} annotations ·{' '}
+                        {formatShortDateTime(round.submittedAt)}
+                      </p>
+                      {round.guidance === null ? null : (
+                        <p className="mt-2 leading-5">{round.guidance}</p>
+                      )}
+                      {round.annotations.length === 0 ? null : (
+                        <ol className="mt-2 space-y-2">
+                          {round.annotations.map((annotation, index) => (
+                            <li className="border-l-2 border-border pl-2" key={annotation.id}>
+                              <p className="line-clamp-2 text-muted-foreground">
+                                {annotation.quote}
+                              </p>
+                              <p className="mt-1 leading-5">
+                                {String(index + 1)}. {annotation.comment}
+                              </p>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+          </aside>
+        ) : null}
+      </div>
+      {decisionActions}
+    </section>
+  );
+
+  return fullscreen ? (
+    <div
+      className="fixed inset-0 z-50 bg-background/95 p-5 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+    >
+      {content}
+    </div>
+  ) : (
+    content
+  );
+};
+
 const ImplementationPlanSurface = ({
   planning,
   answers,
   pending,
   reviewMode = false,
+  annotations = [],
+  history = [],
+  reviewActions = null,
+  onAnnotationsChange,
   onAnswerChange,
   onSubmitAnswers,
 }: {
@@ -910,6 +1269,10 @@ const ImplementationPlanSurface = ({
   readonly answers: ReadonlyMap<string, string>;
   readonly pending: boolean;
   readonly reviewMode?: boolean;
+  readonly annotations?: readonly PlanReviewAnnotation[];
+  readonly history?: readonly PlanReviewRound[];
+  readonly reviewActions?: ReactNode;
+  readonly onAnnotationsChange?: (annotations: readonly PlanReviewAnnotation[]) => void;
   readonly onAnswerChange: (questionId: string, answer: string) => void;
   readonly onSubmitAnswers: () => void;
 }) => {
@@ -1018,148 +1381,29 @@ const ImplementationPlanSurface = ({
       </span>
     </div>
   );
+  const markdown = implementationPlanMarkdownFrom({
+    plan,
+    strategy: record.selectedStrategy,
+    selectionReason: record.selectionReason,
+  });
   const document = (
-    <div className="space-y-6 px-5 py-5">
-      <MarkdownText className="max-w-4xl text-sm text-muted-foreground">
-        {plan.summary}
-      </MarkdownText>
-      <section aria-labelledby="plan-steps-heading">
-        <h3
-          className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-          id="plan-steps-heading"
-        >
-          Execution steps
-        </h3>
-        <ol className="space-y-4">
-          {plan.steps.map((step, index) => (
-            <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3" key={step.id}>
-              <span className="flex size-6 items-center justify-center rounded-full bg-muted text-[11px] tabular-nums text-muted-foreground">
-                {index + 1}
-              </span>
-              <div className="min-w-0">
-                <strong className="text-sm font-medium">{step.title}</strong>
-                <MarkdownText className="mt-1 text-xs text-muted-foreground">
-                  {step.objective}
-                </MarkdownText>
-                {step.files.length === 0 ? null : (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {step.files.map((file) => (
-                      <code
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-                        key={file}
-                      >
-                        {file}
-                      </code>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-2 space-y-1 border-l border-border pl-3">
-                  {step.verification.map((item) => (
-                    <MarkdownText className="text-xs text-muted-foreground" key={item}>
-                      {item}
-                    </MarkdownText>
-                  ))}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-      <section className="border-t border-border/70 pt-4" aria-labelledby="acceptance-heading">
-        <h3
-          className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-          id="acceptance-heading"
-        >
-          Acceptance
-        </h3>
-        <ol className="space-y-3">
-          {plan.acceptanceCriteria.map((criterion) => (
-            <li key={criterion.id}>
-              <MarkdownText className="text-sm">{criterion.expected}</MarkdownText>
-              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                {criterion.verification.map((verification, index) => {
-                  const description =
-                    verification.kind === 'inspection'
-                      ? `${verification.target}: ${verification.expectation}`
-                      : verification.scenario;
-                  return (
-                    <li className="flex items-start gap-2" key={`${criterion.id}-${String(index)}`}>
-                      <StateBadge>{verification.kind}</StateBadge>
-                      <MarkdownText className="min-w-0 flex-1 text-xs text-muted-foreground">
-                        {description}
-                      </MarkdownText>
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          ))}
-        </ol>
-      </section>
-      {plan.assumptions.length === 0 && plan.risks.length === 0 ? null : (
-        <div className="grid gap-4 border-t border-border/70 pt-4 md:grid-cols-2">
-          {plan.assumptions.length === 0 ? null : (
-            <section>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Assumptions
-              </h3>
-              {plan.assumptions.map((assumption) => (
-                <MarkdownText className="text-xs text-muted-foreground" key={assumption}>
-                  {assumption}
-                </MarkdownText>
-              ))}
-            </section>
-          )}
-          {plan.risks.length === 0 ? null : (
-            <section>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Risks
-              </h3>
-              <ul className="space-y-2">
-                {plan.risks.map((risk) => (
-                  <li key={`${risk.risk}:${risk.mitigation}`}>
-                    <MarkdownText className="text-xs">{risk.risk}</MarkdownText>
-                    <MarkdownText className="text-xs text-muted-foreground">
-                      {risk.mitigation}
-                    </MarkdownText>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </div>
-      )}
-      <p className="border-t border-border/70 pt-3 text-[11px] text-muted-foreground">
-        Why {record.selectedStrategy}: {record.selectionReason}
-      </p>
+    <div className="px-5 py-5" data-plan-anchor={record.artifactId}>
+      <MarkdownText className="max-w-4xl text-sm text-muted-foreground">{markdown}</MarkdownText>
     </div>
   );
 
   if (reviewMode) {
     return (
-      <section
-        className="mx-4 my-4 overflow-hidden rounded-lg border border-amber-500/45 bg-card shadow-[0_16px_48px_-32px_rgba(245,158,11,0.8)]"
-        aria-label="Review implementation plan"
-        data-testid="plan-review-surface"
-      >
-        <div data-testid="implementation-plan">
-          <header className="border-b border-amber-500/30 bg-amber-500/8 px-5 py-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 rounded-md bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300">
-                <AlertTriangle className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                  Action required · review plan
-                </p>
-                <h2 className="mt-0.5 text-lg font-semibold leading-6">{plan.title}</h2>
-                <div className="mt-2">{metadata}</div>
-              </div>
-            </div>
-          </header>
-          {document}
-        </div>
-      </section>
+      <NativePlanReview
+        artifactId={record.artifactId}
+        title={plan.title}
+        markdown={markdown}
+        metadata={metadata}
+        annotations={annotations}
+        history={history}
+        decisionActions={reviewActions}
+        onAnnotationsChange={onAnnotationsChange ?? (() => undefined)}
+      />
     );
   }
 
@@ -1861,6 +2105,11 @@ const PlanningTranscriptSurface = ({
 
   const log = planningAgentLogFrom(transcript.transcript);
   const latestAttempt = log.attempts.at(-1)?.attempt ?? null;
+  const measuredTokens = log.attempts.reduce(
+    (total, attempt) =>
+      total + (attempt.usage === null ? 0 : attempt.usage.inputTokens + attempt.usage.outputTokens),
+    0,
+  );
 
   const renderEvent = (event: PlanningAgentEvent, index: number): ReactNode => {
     if (event.kind === 'command') {
@@ -1935,7 +2184,10 @@ const PlanningTranscriptSurface = ({
             {live ? <StateBadge>Live</StateBadge> : null}
             <span className="text-[11px] text-muted-foreground">
               {log.attempts.length} {log.attempts.length === 1 ? 'attempt' : 'attempts'} ·{' '}
-              {transcript.transcript.totalBytes.toLocaleString()} B
+              {measuredTokens.toLocaleString()} tok
+              {transcript.transcript.totalBytes > 0
+                ? ` · ${(transcript.transcript.totalBytes / 1024).toFixed(1)} KB log`
+                : ''}
               {transcript.transcript.truncated ? ' · truncated' : ''}
             </span>
           </div>
@@ -2290,6 +2542,11 @@ export const App = () => {
     useState<ImplementationPlanLoadState>({ status: 'missing' });
   const [planningTranscriptState, setPlanningTranscriptState] =
     useState<PlanningTranscriptLoadState>({ status: 'missing' });
+  const [planReviewHistoryState, setPlanReviewHistoryState] = useState<PlanReviewHistoryLoadState>({
+    status: 'loading',
+  });
+  const [planAnnotationDrafts, setPlanAnnotationDrafts] =
+    useState<ReadonlyMap<string, readonly PlanReviewAnnotation[]>>(readStoredPlanAnnotations);
   const [workflowContinuationState, setWorkflowContinuationState] =
     useState<WorkflowContinuationLoadState>({ status: 'missing' });
   const [continuationWorkflowState, setContinuationWorkflowState] = useState<WorkflowLoadState>({
@@ -2343,6 +2600,10 @@ export const App = () => {
       writeStoredSelection(selectedId);
     }
   }, [selectedId]);
+
+  useEffect(() => {
+    writeStoredPlanAnnotations(planAnnotationDrafts);
+  }, [planAnnotationDrafts]);
 
   const refreshTasks = async (): Promise<string | null> => {
     const sequence = tasksRefreshSequenceRef.current + 1;
@@ -2478,6 +2739,24 @@ export const App = () => {
     }
   };
 
+  const refreshSelectedPlanReviewHistory = async (
+    fixtureId: string,
+    refreshSequence: number,
+  ): Promise<void> => {
+    setPlanReviewHistoryState({ status: 'loading' });
+    try {
+      const rounds = await loadPlanReviewHistory(fixtureId);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
+      setPlanReviewHistoryState({ status: 'ready', rounds });
+    } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
+      setPlanReviewHistoryState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Plan review history is unavailable',
+      });
+    }
+  };
+
   const refreshSelectedWorkflowContinuation = async (
     fixtureId: string,
     refreshSequence: number,
@@ -2552,6 +2831,7 @@ export const App = () => {
       refreshSelectedActivity(fixtureId, refreshSequence),
       refreshSelectedImplementationPlan(fixtureId, refreshSequence),
       refreshSelectedPlanningTranscript(fixtureId, refreshSequence),
+      refreshSelectedPlanReviewHistory(fixtureId, refreshSequence),
       refreshSelectedWorkflowContinuation(fixtureId, refreshSequence),
       refreshSelectedJiraIssue(fixtureId, refreshSequence),
     ]);
@@ -2783,7 +3063,15 @@ export const App = () => {
     if (selectedTask === null || selectedTask.status !== 'plan_review') return;
     const taskReference = selectedTask.id;
     const guidance = planGuidanceDrafts.get(taskReference)?.trim() ?? '';
-    if (decision === 'request_changes' && guidance.length === 0) return;
+    if (
+      implementationPlanState.status !== 'ready' ||
+      implementationPlanState.record.status !== 'ready'
+    ) {
+      return;
+    }
+    const planningRecord = implementationPlanState.record;
+    const annotations = planAnnotationDrafts.get(planningRecord.artifactId) ?? [];
+    if (decision === 'request_changes' && guidance.length === 0 && annotations.length === 0) return;
     const operation =
       decision === 'approve' ? ('approving_plan' as const) : ('requesting_plan_changes' as const);
     setRuntimeWatchTaskId(taskReference);
@@ -2795,8 +3083,31 @@ export const App = () => {
         return next;
       });
     }
-    void reviewPlan(taskReference, decision === 'approve' ? { decision } : { decision, guidance })
+    const reviewId = crypto.randomUUID();
+    void reviewPlan(
+      taskReference,
+      decision === 'approve'
+        ? {
+            decision,
+            reviewId,
+            planArtifactId: planningRecord.artifactId,
+            planAttempt: planningRecord.attempt,
+          }
+        : {
+            decision,
+            reviewId,
+            planArtifactId: planningRecord.artifactId,
+            planAttempt: planningRecord.attempt,
+            guidance,
+            annotations: [...annotations],
+          },
+    )
       .then(async () => {
+        setPlanAnnotationDrafts((current) => {
+          const next = new Map(current);
+          next.delete(planningRecord.artifactId);
+          return next;
+        });
         await refreshTasks();
         if (selectedIdRef.current === taskReference) {
           await refreshSelection(taskReference);
@@ -3235,6 +3546,54 @@ export const App = () => {
                       answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
                       pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
                       reviewMode
+                      annotations={
+                        implementationPlanState.status === 'ready' &&
+                        implementationPlanState.record.status === 'ready'
+                          ? (planAnnotationDrafts.get(implementationPlanState.record.artifactId) ??
+                            [])
+                          : []
+                      }
+                      history={
+                        planReviewHistoryState.status === 'ready'
+                          ? planReviewHistoryState.rounds
+                          : []
+                      }
+                      reviewActions={
+                        <PlanReviewActions
+                          guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
+                          annotationCount={
+                            implementationPlanState.status === 'ready' &&
+                            implementationPlanState.record.status === 'ready'
+                              ? (planAnnotationDrafts.get(implementationPlanState.record.artifactId)
+                                  ?.length ?? 0)
+                              : 0
+                          }
+                          pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
+                          onGuidanceChange={(guidance) => {
+                            setPlanGuidanceDrafts((current) =>
+                              new Map(current).set(selectedTask.id, guidance),
+                            );
+                          }}
+                          onApprove={() => {
+                            handlePlanReview('approve');
+                          }}
+                          onRequestChanges={() => {
+                            handlePlanReview('request_changes');
+                          }}
+                        />
+                      }
+                      onAnnotationsChange={(annotations) => {
+                        if (
+                          implementationPlanState.status !== 'ready' ||
+                          implementationPlanState.record.status !== 'ready'
+                        ) {
+                          return;
+                        }
+                        const artifactId = implementationPlanState.record.artifactId;
+                        setPlanAnnotationDrafts((current) =>
+                          new Map(current).set(artifactId, annotations),
+                        );
+                      }}
                       onAnswerChange={(questionId, answer) => {
                         setPlanningAnswerDrafts((current) => {
                           const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
@@ -3277,25 +3636,6 @@ export const App = () => {
                     </>
                   )}
                 </ScrollArea>
-                {selectedTask.status === 'plan_review' &&
-                implementationPlanState.status === 'ready' &&
-                implementationPlanState.record.status === 'ready' ? (
-                  <PlanReviewActions
-                    guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
-                    pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
-                    onGuidanceChange={(guidance) => {
-                      setPlanGuidanceDrafts((current) =>
-                        new Map(current).set(selectedTask.id, guidance),
-                      );
-                    }}
-                    onApprove={() => {
-                      handlePlanReview('approve');
-                    }}
-                    onRequestChanges={() => {
-                      handlePlanReview('request_changes');
-                    }}
-                  />
-                ) : null}
               </>
             )}
           </main>

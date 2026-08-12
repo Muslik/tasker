@@ -1,7 +1,6 @@
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
-  PlanReviewCommandSchema,
   RunStartCommandSchema,
   ResumeRunCommandSchema,
   ExecutionRunViewSchema,
@@ -13,7 +12,6 @@ import {
   WorkflowResponseSchema,
 } from '../control-plane/m1-contracts.js';
 import type {
-  PlanReviewCommand,
   RunStartCommand,
   ResumeRunCommand,
   OperatorActivityResponse,
@@ -25,6 +23,12 @@ import type {
   ExecutionRunView,
   CodeReviewSyncResponse,
 } from '../control-plane/m1-contracts.js';
+import {
+  PlanReviewCommandSchema,
+  PlanReviewHistoryResponseSchema,
+  type PlanReviewCommand,
+  type PlanReviewRound,
+} from '../control-plane/plan-review.js';
 import {
   ImplementationPlanningRecordSchema,
   type ImplementationPlanningRecord,
@@ -364,6 +368,14 @@ export const reviewPlan = async (
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Plan review response does not match the cockpit contract');
   return parsed.data;
+};
+
+export const loadPlanReviewHistory = async (
+  fixtureId: string,
+): Promise<readonly PlanReviewRound[]> => {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/plan-reviews`);
+  if (!result.response.ok) throw failureFrom(result);
+  return PlanReviewHistoryResponseSchema.parse(result.body).rounds;
 };
 
 export const answerPlanningClarification = async (

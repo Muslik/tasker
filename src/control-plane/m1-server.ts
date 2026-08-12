@@ -42,6 +42,7 @@ import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
+import { PlanReviewStore } from './plan-review.js';
 import { createM1WorkflowService } from './m1-service.js';
 import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
@@ -156,6 +157,7 @@ export const startM1Server = async (): Promise<void> => {
     ...(bitbucketReview === undefined ? {} : { bitbucketReview }),
     temporalRunService: temporalRuntime.service,
     blockReceipts: new BlockReceiptStore(ledger.repository, systemClock),
+    planReviews: new PlanReviewStore(ledger.repository, systemClock),
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

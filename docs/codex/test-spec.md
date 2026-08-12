@@ -152,6 +152,9 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `large_planning_evidence_is_externalized_and_checksum_materialized`
 - `plan_review_false_proceeds_after_valid_plan`
 - `plan_review_true_waits_for_approval`
+- `plan_review_annotations_are_bound_to_the_current_artifact`
+- `stale_plan_review_is_rejected`
+- `submitted_plan_review_rounds_survive_restart`
 - `plan_feedback_creates_new_plan_attempt`
 - `blocking_question_waits_even_when_plan_review_is_false`
 - `answer_update_validates_question_and_payload_identity`

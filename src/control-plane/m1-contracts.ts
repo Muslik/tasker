@@ -242,16 +242,6 @@ export const DEFAULT_RUN_START_COMMAND = {
   },
 } as const satisfies z.input<typeof RunStartCommandSchema>;
 
-export const PlanReviewCommandSchema = z.discriminatedUnion('decision', [
-  z.object({ decision: z.literal('approve') }).strict(),
-  z
-    .object({
-      decision: z.literal('request_changes'),
-      guidance: z.string().trim().min(1).max(10_000),
-    })
-    .strict(),
-]);
-
 export const ResumeRunCommandSchema = z
   .object({
     guidance: z.string().trim().min(1).max(10_000).optional(),
@@ -379,7 +369,6 @@ export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
-export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;
 export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
 export type CodeReviewSyncResponse = z.infer<typeof CodeReviewSyncResponseSchema>;
 export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
