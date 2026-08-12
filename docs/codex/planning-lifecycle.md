@@ -30,6 +30,22 @@ Bootstrap run
 
 Only the frozen workflow is input to the generic execution interpreter.
 
+## Isolation boundary
+
+Each Bootstrap run is a separate consistency boundary. The stable Jira/task reference
+groups history; it does not identify a plan or workflow. The Bootstrap `runId` is carried
+into a unique `planningEpisodeId`, and every candidate has its own
+`workflowOperationId`. Evidence revisions use an explicit operation scope. Plan review
+is keyed by planning episode, freeze by Bootstrap workflow/run, execution evidence by
+Execution workflow/run, and continuation by parent run.
+
+All reads start from the current Temporal lifecycle and follow these exact references.
+Tasker never falls back to the most recent artifact for the task. If the current run's
+candidate, plan, evidence, or receipt is absent, the current run blocks; an artifact from
+an older run is not a substitute. Restarting from scratch creates a new workspace,
+planning episode, evidence scope, workflow operation, freeze, Execution workflow, and
+continuation namespace while retaining the old run only as history.
+
 ## End-to-end lifecycle
 
 ```mermaid
@@ -75,6 +91,9 @@ Each Evidence Bundle entry records:
 New observations append a bundle revision; they never rewrite earlier evidence. Large
 bodies and media remain separate content-addressed artifacts. Temporal history carries
 only bounded references and hashes.
+
+Bundle ancestry is confined to one explicit evidence scope. Two runs of the same task
+cannot share a revision chain merely because their task references match.
 
 The planner receives the graph-free snapshot and materialized bundle. It retains its
 pinned read-only repository skills so it can challenge shallow context discovery. Jira,

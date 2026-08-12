@@ -71,7 +71,7 @@ describe('execution activity', () => {
     });
 
     expect(
-      new LedgerExecutionActivityReader(ledger.repository).readActivity('jira:AVIA-12329'),
+      new LedgerExecutionActivityReader(ledger.repository).readActivity('tasker:jira:AVIA-12329'),
     ).toEqual([
       expect.objectContaining({
         source: 'tool',
@@ -117,7 +117,7 @@ describe('execution activity', () => {
     });
 
     const entries = new LedgerExecutionActivityReader(ledger.repository).readActivity(
-      'jira:AVIA-12045',
+      'tasker:jira:AVIA-12045',
     );
     expect(entries).toEqual([
       expect.objectContaining({

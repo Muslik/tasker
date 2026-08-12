@@ -155,6 +155,7 @@ const makeSnapshot = (
     task,
     taskSnapshot: task,
     workflow: {},
+    acceptedPlan: null,
     evidenceBundle: {
       artifactId: 'evidence-bundle:fixture:r1',
       checksum: '4'.repeat(64),

@@ -444,8 +444,10 @@ a new attempt with bounded persisted context.
 Editing a prompt, skill, policy, or block affects future snapshots, not an already frozen
 execution graph. During pre-pilot development, if an unfinished run must consume the new harness,
 use the cockpit's confirmed `Restart from scratch` action. This preserves the abandoned Temporal
-history but intentionally creates a new run and worktree. Do not use it for ordinary retries: fix
-the prerequisite and `Resume` the same run so completed work is retained.
+history but intentionally creates a new run, worktree, planning episode, evidence scope, graph,
+review scope, and execution identity. The replacement cannot read mutable artifacts from the
+abandoned run. Do not use restart for ordinary retries: fix the prerequisite and `Resume` the same
+run so completed work is retained.
 
 Codex and Claude are current first-class subscription-CLI adapters for analysis,
 planning, and agent steps. Adding another provider means implementing this same adapter

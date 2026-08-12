@@ -225,6 +225,8 @@ describe('Execution Workflow v2 recovery', () => {
   let workerRun: Promise<void>;
   let runs: TemporalExecutionRunService;
   const taskQueue = `tasker-execution-v2-${String(process.pid)}`;
+  const workflowIdFor = (taskReference: string): string =>
+    `tasker:execution:v2:${taskReference}:test-run`;
 
   const startWorker = async (): Promise<void> => {
     worker = await Worker.create({
@@ -240,11 +242,12 @@ describe('Execution Workflow v2 recovery', () => {
   const waitFor = async (
     taskReference: string,
     waitKind: string,
+    workflowId = workflowIdFor(taskReference),
   ): Promise<ExecutionWorkflowPublicState> => {
     await expect
       .poll(
         async () => {
-          const result = await runs.read(taskReference);
+          const result = await runs.read(workflowId);
           if (!result.ok || result.value === null) return 'missing';
           const state = result.value;
           return state.status === 'waiting' ? state.wait.waitKind : state.status;
@@ -252,7 +255,7 @@ describe('Execution Workflow v2 recovery', () => {
         { interval: 100, timeout: 10_000 },
       )
       .toBe(waitKind);
-    const result = await runs.read(taskReference);
+    const result = await runs.read(workflowId);
     if (!result.ok || result.value === null) throw new Error('Execution run is unavailable');
     return result.value;
   };
@@ -274,20 +277,29 @@ describe('Execution Workflow v2 recovery', () => {
   });
 
   it('keeps frozen graph progress and two waits independent across worker replacement', async () => {
-    expect(await runs.start(workflowInput('fixture:first'))).toMatchObject({ ok: true });
-    expect(await runs.start(workflowInput('fixture:second'))).toMatchObject({ ok: true });
-    expect(await runs.start(workflowInput('fixture:first'))).toMatchObject({ ok: true });
     expect(
-      await runs.start({ ...workflowInput('fixture:first'), workflowHash: 'c'.repeat(64) }),
+      await runs.start(workflowIdFor('fixture:first'), workflowInput('fixture:first')),
+    ).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor('fixture:second'), workflowInput('fixture:second')),
+    ).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor('fixture:first'), workflowInput('fixture:first')),
+    ).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor('fixture:first'), {
+        ...workflowInput('fixture:first'),
+        workflowHash: 'c'.repeat(64),
+      }),
     ).toEqual({
       ok: false,
-      error: { kind: 'run_input_conflict', taskReference: 'fixture:first' },
+      error: { kind: 'run_input_conflict', workflowId: workflowIdFor('fixture:first') },
     });
     const first = environment.client.workflow.getHandle<typeof executionWorkflowV2>(
-      'tasker:execution:v2:fixture:first',
+      workflowIdFor('fixture:first'),
     );
     const second = environment.client.workflow.getHandle<typeof executionWorkflowV2>(
-      'tasker:execution:v2:fixture:second',
+      workflowIdFor('fixture:second'),
     );
     const [firstApproval, secondApproval] = await Promise.all([
       waitFor('fixture:first', 'review.accepted@1'),
@@ -307,14 +319,14 @@ describe('Execution Workflow v2 recovery', () => {
     const secondAfterRestart = environment.client.workflow.getHandle(second.workflowId);
 
     expect(
-      await runs.resolveWait('fixture:first', {
+      await runs.resolveWait(workflowIdFor('fixture:first'), {
         nodeId: 'approval',
         waitKind: 'review.accepted@1',
         resolution: { approved: true },
       }),
     ).toMatchObject({ ok: true });
     await waitFor('fixture:first', 'human.review@1');
-    expect(await runs.read('fixture:second')).toMatchObject({
+    expect(await runs.read(workflowIdFor('fixture:second'))).toMatchObject({
       ok: true,
       value: {
         status: 'waiting',
@@ -323,7 +335,7 @@ describe('Execution Workflow v2 recovery', () => {
     });
 
     expect(
-      await runs.resolveWait('fixture:second', {
+      await runs.resolveWait(workflowIdFor('fixture:second'), {
         nodeId: 'approval',
         waitKind: 'review.accepted@1',
         resolution: { approved: true },
@@ -332,7 +344,7 @@ describe('Execution Workflow v2 recovery', () => {
     await waitFor('fixture:second', 'human.review@1');
 
     expect(
-      await runs.resolveWait('fixture:first', {
+      await runs.resolveWait(workflowIdFor('fixture:first'), {
         nodeId: 'human-review',
         waitKind: 'human.review@1',
         resolution: { decision: 'approved' },
@@ -344,7 +356,7 @@ describe('Execution Workflow v2 recovery', () => {
       outcome: 'accepted',
     });
 
-    expect(await runs.read('fixture:second')).toMatchObject({
+    expect(await runs.read(workflowIdFor('fixture:second'))).toMatchObject({
       ok: true,
       value: {
         status: 'waiting',
@@ -354,9 +366,46 @@ describe('Execution Workflow v2 recovery', () => {
     await secondAfterRestart.cancel();
   }, 30_000);
 
+  it('keeps two execution runs of the same task isolated by workflow identity', async () => {
+    const taskReference = 'fixture:same-task';
+    const firstWorkflowId = `${workflowIdFor(taskReference)}:run-a`;
+    const secondWorkflowId = `${workflowIdFor(taskReference)}:run-b`;
+    const input = workflowInput(taskReference);
+
+    expect(await runs.start(firstWorkflowId, input)).toMatchObject({ ok: true });
+    expect(await runs.start(secondWorkflowId, input)).toMatchObject({ ok: true });
+    await Promise.all([
+      waitFor(taskReference, 'review.accepted@1', firstWorkflowId),
+      waitFor(taskReference, 'review.accepted@1', secondWorkflowId),
+    ]);
+
+    expect(
+      await runs.resolveWait(firstWorkflowId, {
+        nodeId: 'approval',
+        waitKind: 'review.accepted@1',
+        resolution: { approved: true },
+      }),
+    ).toMatchObject({ ok: true });
+    await waitFor(taskReference, 'human.review@1', firstWorkflowId);
+    expect(await runs.read(secondWorkflowId)).toMatchObject({
+      ok: true,
+      value: {
+        status: 'waiting',
+        wait: { nodeId: 'approval', waitKind: 'review.accepted@1' },
+      },
+    });
+
+    await Promise.all([
+      environment.client.workflow.getHandle(firstWorkflowId).cancel(),
+      environment.client.workflow.getHandle(secondWorkflowId).cancel(),
+    ]);
+  });
+
   it('turns an exhausted Activity failure into a resumable operator wait', async () => {
     const taskReference = 'fixture:activity-failure';
-    expect(await runs.start(workflowInput(taskReference))).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor(taskReference), workflowInput(taskReference)),
+    ).toMatchObject({ ok: true });
 
     expect(await waitFor(taskReference, 'fixture.inspect@1.activity-failed@1')).toMatchObject({
       status: 'waiting',
@@ -365,7 +414,7 @@ describe('Execution Workflow v2 recovery', () => {
     });
 
     expect(
-      await runs.resolveWait(taskReference, {
+      await runs.resolveWait(workflowIdFor(taskReference), {
         nodeId: 'inspect',
         waitKind: 'fixture.inspect@1.activity-failed@1',
         resolution: { decision: 'resume', guidance: 'Retry the preserved execution.' },
@@ -376,26 +425,28 @@ describe('Execution Workflow v2 recovery', () => {
       status: 'waiting',
       blockRuns: { inspect: 2 },
     });
-    await environment.client.workflow
-      .getHandle('tasker:execution:v2:fixture:activity-failure')
-      .cancel();
+    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
   }, 30_000);
 
   it('skips CI recovery when the first exact-revision observation passes', async () => {
     const taskReference = 'fixture:ci-pass';
-    expect(await runs.start(ciWorkflowInput(taskReference))).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
+    ).toMatchObject({ ok: true });
 
     expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
       status: 'waiting',
       blockRuns: { 'observe-ci': 1 },
       loopIterations: {},
     });
-    await environment.client.workflow.getHandle(`tasker:execution:v2:${taskReference}`).cancel();
+    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
   }, 30_000);
 
   it('repairs task-caused CI failures and re-observes before review', async () => {
     const taskReference = 'fixture:ci-repair';
-    expect(await runs.start(ciWorkflowInput(taskReference))).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
+    ).toMatchObject({ ok: true });
 
     expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
       status: 'waiting',
@@ -406,12 +457,14 @@ describe('Execution Workflow v2 recovery', () => {
       },
       loopIterations: { 'ci-recovery-loop': 1 },
     });
-    await environment.client.workflow.getHandle(`tasker:execution:v2:${taskReference}`).cancel();
+    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
   }, 30_000);
 
   it('durably resumes external CI failures without rerunning completed work', async () => {
     const taskReference = 'fixture:ci-external';
-    expect(await runs.start(ciWorkflowInput(taskReference))).toMatchObject({ ok: true });
+    expect(
+      await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
+    ).toMatchObject({ ok: true });
     expect(await waitFor(taskReference, 'ci.manual@1')).toMatchObject({
       status: 'waiting',
       blockRuns: { 'observe-ci': 1 },
@@ -419,7 +472,7 @@ describe('Execution Workflow v2 recovery', () => {
     });
 
     expect(
-      await runs.resolveWait(taskReference, {
+      await runs.resolveWait(workflowIdFor(taskReference), {
         nodeId: 'wait-for-ci',
         waitKind: 'ci.manual@1',
         resolution: { decision: 'resume' },
@@ -429,6 +482,6 @@ describe('Execution Workflow v2 recovery', () => {
       status: 'waiting',
       blockRuns: { 'observe-ci': 1, 'observe-resumed-ci': 1 },
     });
-    await environment.client.workflow.getHandle(`tasker:execution:v2:${taskReference}`).cancel();
+    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
   }, 30_000);
 });

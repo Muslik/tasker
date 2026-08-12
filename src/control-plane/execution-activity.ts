@@ -33,7 +33,7 @@ const jenkinsEvidenceFrom = (details: unknown): z.infer<typeof JenkinsEvidenceSc
 };
 
 export interface ExecutionActivityReader {
-  readActivity(taskReference: string): OperatorActivityResponse['entries'];
+  readActivity(workflowId: string): OperatorActivityResponse['entries'];
   readCurrentTranscript(execution: ExecutionWorkflowPublicState): PlanningTranscriptView | null;
 }
 
@@ -56,8 +56,8 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
     return transcript.ok ? transcript.value : null;
   }
 
-  public readActivity(taskReference: string): OperatorActivityResponse['entries'] {
-    const prefix = `task-step-output:tasker:${taskReference}:`;
+  public readActivity(workflowId: string): OperatorActivityResponse['entries'] {
+    const prefix = `task-step-output:${workflowId}:`;
     return this.ledger
       .listEvents()
       .filter(

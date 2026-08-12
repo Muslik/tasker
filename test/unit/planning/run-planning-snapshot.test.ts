@@ -61,6 +61,7 @@ describe('run planning snapshot', () => {
       kind: 'execution',
       workflowHash: 'a'.repeat(64),
       workflow: {},
+      acceptedPlan: null,
       evidenceBundle: {
         artifactId: 'evidence-bundle:jira:AVIA-12045:r1',
         checksum: 'b'.repeat(64),

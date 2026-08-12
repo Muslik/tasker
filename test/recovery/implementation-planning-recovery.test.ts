@@ -26,6 +26,8 @@ import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 
 const TASK_REFERENCE = 'avia-13236-short-bug';
 const REPOSITORY = 'onetwotrip/front-avia';
+const PLANNING_EPISODE_ID = 'tasker:test:planning';
+const EVIDENCE_SCOPE_ID = `test:${TASK_REFERENCE}`;
 
 interface PlanningFixture {
   readonly coordinator: ImplementationPlanningCoordinator;
@@ -43,7 +45,7 @@ const planningFixture = (
   const workflows = createM1WorkflowService(ledger.repository, clock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, clock);
   recordTestEvidenceBundle(ledger.repository, clock, TASK_REFERENCE);
-  const evidence = evidenceBundles.readLatest(TASK_REFERENCE);
+  const evidence = evidenceBundles.readLatest(EVIDENCE_SCOPE_ID);
   if (!evidence.ok || evidence.value === null) throw new Error('Missing planning evidence');
   const coordinator = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
@@ -100,6 +102,43 @@ const withPlanningFixture = async (
 };
 
 describe('implementation planning recovery', () => {
+  it('never supplies a plan from another run of the same task as previousDecision', async () => {
+    await withPlanningFixture(
+      'tasker-plan-run-isolation-',
+      async ({ directory, clock, ledger }) => {
+        const fallback = new DeterministicImplementationPlanner();
+        const previousDecisions: unknown[] = [];
+        const fixture = planningFixture(ledger, clock, directory, {
+          plan: (request) => {
+            previousDecisions.push(request.context.previousDecision);
+            return fallback.plan(request);
+          },
+        });
+
+        const first = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          'tasker:v3:jira:AVIA-12045:run-a:planning:1',
+          'tasker:v3:jira:AVIA-12045:run-a:planning',
+          fixture.snapshot,
+          fixture.evidence,
+        );
+        const second = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          'tasker:v3:jira:AVIA-12045:run-b:planning:1',
+          'tasker:v3:jira:AVIA-12045:run-b:planning',
+          fixture.snapshot,
+          fixture.evidence,
+        );
+
+        expect(first).toMatchObject({ ok: true, value: { status: 'ready', attempt: 1 } });
+        expect(second).toMatchObject({ ok: true, value: { status: 'ready', attempt: 1 } });
+        expect(previousDecisions).toEqual([null, null]);
+      },
+    );
+  });
+
   it('restores the accepted plan and planner-created workflow without rerunning the provider', async () => {
     await withPlanningFixture(
       'tasker-plan-recovery-',
@@ -115,6 +154,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           commandId,
+          PLANNING_EPISODE_ID,
           first.snapshot,
           first.evidence,
         );
@@ -150,6 +190,7 @@ describe('implementation planning recovery', () => {
             TASK_REFERENCE,
             'fast',
             commandId,
+            PLANNING_EPISODE_ID,
             first.snapshot,
             first.evidence,
           );
@@ -209,6 +250,7 @@ describe('implementation planning recovery', () => {
         TASK_REFERENCE,
         'fast',
         commandId,
+        PLANNING_EPISODE_ID,
         fixture.snapshot,
         fixture.evidence,
       );
@@ -219,14 +261,18 @@ describe('implementation planning recovery', () => {
           failure: { kind: 'invalid_planner_output', retryable: false },
         },
       });
-      expect(createM1WorkflowService(ledger.repository, clock).read(TASK_REFERENCE)).toEqual(
-        ok(null),
-      );
+      expect(
+        createM1WorkflowService(ledger.repository, clock).readPlanningOperation(
+          TASK_REFERENCE,
+          `${PLANNING_EPISODE_ID}:workflow-candidate:1`,
+        ),
+      ).toEqual(ok(null));
 
       const retried = await fixture.coordinator.prepare(
         TASK_REFERENCE,
         'fast',
         commandId,
+        PLANNING_EPISODE_ID,
         fixture.snapshot,
         fixture.evidence,
       );
@@ -250,6 +296,7 @@ describe('implementation planning recovery', () => {
         TASK_REFERENCE,
         'fast',
         commandId,
+        PLANNING_EPISODE_ID,
         fixture.snapshot,
         fixture.evidence,
       );
@@ -257,6 +304,7 @@ describe('implementation planning recovery', () => {
         TASK_REFERENCE,
         'fast',
         commandId,
+        PLANNING_EPISODE_ID,
         fixture.snapshot,
         fixture.evidence,
       );
@@ -292,12 +340,13 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           commandId,
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
         );
 
         expect(interrupted).toMatchObject({ ok: false, error: { kind: 'subject' } });
-        const checkpoint = fixture.coordinator.read(TASK_REFERENCE);
+        const checkpoint = fixture.coordinator.read(PLANNING_EPISODE_ID);
         if (!checkpoint.ok || checkpoint.value?.status !== 'planning') {
           throw new Error('Validated planning candidate was not checkpointed');
         }
@@ -309,6 +358,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           commandId,
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
         );
@@ -317,7 +367,7 @@ describe('implementation planning recovery', () => {
         expect(calls).toBe(1);
         expect(
           ledger.repository
-            .listEvents(`implementation-plan:${TASK_REFERENCE}`)
+            .listEvents(`implementation-plan:${PLANNING_EPISODE_ID}`)
             .map(({ eventType }) => eventType),
         ).toContain('ImplementationWorkflowCandidateValidated');
       },
@@ -357,6 +407,7 @@ describe('implementation planning recovery', () => {
         TASK_REFERENCE,
         'fast',
         'tasker:test:planning:questions:1',
+        PLANNING_EPISODE_ID,
         fixture.snapshot,
         fixture.evidence,
       );
@@ -372,6 +423,7 @@ describe('implementation planning recovery', () => {
         TASK_REFERENCE,
         [{ questionId: 'target-scenario', answer: 'Use the card payment scenario.' }],
         'tasker:test:planning:questions:2',
+        PLANNING_EPISODE_ID,
         fixture.snapshot,
         fixture.evidence,
       );
@@ -417,6 +469,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           'tasker:test:planning:investigation',
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
         );
@@ -482,6 +535,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           'tasker:test:planning:validator-loop',
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
         );
@@ -494,10 +548,10 @@ describe('implementation planning recovery', () => {
         expect(calls).toBe(2);
         expect(
           ledger.repository
-            .listEvents(`implementation-plan:${TASK_REFERENCE}`)
+            .listEvents(`implementation-plan:${PLANNING_EPISODE_ID}`)
             .map(({ eventType }) => eventType),
         ).toContain('ImplementationWorkflowCandidateRejected');
-        expect(fixture.coordinator.readActivity(TASK_REFERENCE)).toEqual(
+        expect(fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               level: 'info',
@@ -560,6 +614,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           firstCommand,
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
         );
@@ -576,6 +631,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           revisionCommand,
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
           'Correct the rejected graph using the deterministic feedback.',
@@ -637,6 +693,7 @@ describe('implementation planning recovery', () => {
           TASK_REFERENCE,
           'fast',
           'tasker:test:planning:acceptance-link-loop',
+          PLANNING_EPISODE_ID,
           fixture.snapshot,
           fixture.evidence,
         );

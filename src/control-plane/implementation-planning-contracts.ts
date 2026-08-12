@@ -34,6 +34,7 @@ export const ValidatedPlanningCandidateSchema = z
   .object({
     decision: ReadyImplementationPlanningDecisionSchema,
     workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    workflowOperationId: z.string().min(1),
     receipt: ImplementationPlannerReceiptSchema,
   })
   .strict()
@@ -58,8 +59,9 @@ export const PlanningFailureViewSchema = z
   .strict();
 
 const PlanningRecordBaseSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   taskReference: z.string().min(1),
+  planningEpisodeId: z.string().min(1),
   commandId: z.string().min(1).nullable(),
   transcriptId: z.string().min(1).nullable(),
   planningSnapshot: PlanningSnapshotReferenceSchema.nullable(),
@@ -88,6 +90,7 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
     artifactId: z.string().min(1),
     decision: ImplementationPlanningDecisionSchema.and(z.object({ status: z.literal('ready') })),
     workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    workflowOperationId: z.string().min(1),
     executionSnapshot: PlanningSnapshotReferenceSchema,
     receipt: ImplementationPlannerReceiptSchema,
   }).strict(),

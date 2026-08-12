@@ -10,8 +10,6 @@ import {
 } from '../temporal/freeze-contracts.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
-export const WORKFLOW_FREEZE_PROJECTION = 'workflow_freeze_by_task';
-
 export type WorkflowFreezeStoreError =
   | { readonly kind: 'ledger_conflict' }
   | { readonly kind: 'receipt_conflict'; readonly receiptId: string }
@@ -24,6 +22,8 @@ export type WorkflowFreezeStoreError =
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const receiptIdFor = (input: FreezeTaskWorkflowInput): string =>
   `workflow-freeze:${input.workflowId}:${input.workflowRunId}`;
+const receiptIdFromRun = (workflowId: string, workflowRunId: string): string =>
+  `workflow-freeze:${workflowId}:${workflowRunId}`;
 
 const parseReceipt = (
   receiptId: string,
@@ -62,12 +62,12 @@ export class WorkflowFreezeStore {
   ) {}
 
   public read(
-    taskReference: string,
+    workflowId: string,
+    workflowRunId: string,
   ): Outcome<WorkflowFreezeReceipt | null, WorkflowFreezeStoreError> {
-    const projection = this.ledger.readProjection(WORKFLOW_FREEZE_PROJECTION, taskReference);
-    return projection === null
-      ? ok(null)
-      : parseReceipt(`projection:${taskReference}`, projection.payload);
+    const receiptId = receiptIdFromRun(workflowId, workflowRunId);
+    const artifact = this.ledger.readArtifact(receiptId);
+    return artifact === null ? ok(null) : parseReceipt(receiptId, artifact.payload);
   }
 
   public record(
@@ -99,14 +99,6 @@ export class WorkflowFreezeStore {
           },
         ],
       },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: WORKFLOW_FREEZE_PROJECTION,
-          projectionId: receipt.taskReference,
-          payload: asJson(receipt),
-        },
-      ],
       artifacts: [
         {
           artifactId: receiptId,

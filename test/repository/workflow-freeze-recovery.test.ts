@@ -42,7 +42,8 @@ describe('workflow freeze recovery', () => {
         workflowHash: freezeInput.workflowHash,
         planningSnapshot: freezeInput.planningSnapshot,
       });
-      expect(store.read(freezeInput.taskReference)).toEqual(first);
+      expect(store.read(freezeInput.workflowId, freezeInput.workflowRunId)).toEqual(first);
+      expect(store.read(freezeInput.workflowId, 'another-run')).toEqual({ ok: true, value: null });
       expect(
         ledger.repository
           .listEvents(first.value.receiptId)

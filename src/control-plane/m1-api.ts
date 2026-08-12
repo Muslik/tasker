@@ -46,6 +46,7 @@ import { projectOperatorActivity } from './operator-activity-projection.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import {
   type TaskRunError,
+  type TaskRunLifecycle,
   type TaskRunPublicState,
   type TaskRunService,
 } from '../temporal/index.js';
@@ -56,7 +57,6 @@ const JiraSyncBodySchema = z.object({ repository: RepositoryReferenceSchema.opti
 const JiraAttachmentParamsSchema = z
   .object({ issueKey: z.string().min(1), attachmentId: z.string().min(1) })
   .strict();
-const ProjectionParamsSchema = z.object({ projectionId: z.string().min(1) }).strict();
 const AssetParamsSchema = z.object({ '*': z.string().min(1) }).strict();
 const StreamQuerySchema = z
   .object({ after: z.coerce.number().int().nonnegative().optional() })
@@ -173,16 +173,7 @@ const applyTemporalRunToTask = (
   task: OperatorTaskSummary,
   run: TaskRunPublicState | null,
 ): OperatorTaskSummary => {
-  if (run === null) {
-    return task.status === 'planned'
-      ? OperatorTaskSummarySchema.parse({
-          ...task,
-          status: 'needs_attention',
-          attention: 'operator',
-          currentStage: 'Workflow has no active Temporal run',
-        })
-      : task;
-  }
+  if (run === null) return task;
 
   switch (run.status) {
     case 'running':
@@ -246,6 +237,21 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
   const api = Fastify({ logger: options.logger ?? false });
   const temporalRunService = options.temporalRunService;
 
+  const readCurrentLifecycle = async (taskReference: string, reply: FastifyReply) => {
+    const lifecycle = await temporalRunService.readLifecycle(taskReference);
+    if (!lifecycle.ok) {
+      sendTemporalRunError(reply, lifecycle.error);
+      return null;
+    }
+    return lifecycle.value;
+  };
+
+  const currentPlanningEpisodeId = (lifecycle: TaskRunLifecycle | null): string | null =>
+    lifecycle?.bootstrap.planning?.planningEpisodeId ?? null;
+
+  const currentRunId = (lifecycle: TaskRunLifecycle | null): string | null =>
+    lifecycle?.bootstrap.runId ?? null;
+
   const sendTemporalState = (
     reply: FastifyReply,
     _taskReference: string,
@@ -298,24 +304,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!jiraTasks.ok) return sendJiraServiceError(reply, jiraTasks.error);
     const hydratedJiraTasks = [];
     for (const task of jiraTasks.value) {
-      const workflow = options.service.read(task.id);
-      if (!workflow.ok) return sendServiceError(reply, workflow.error);
-      hydratedJiraTasks.push(
-        await withRunState(
-          workflow.value === null
-            ? task
-            : OperatorTaskSummarySchema.parse({
-                ...task,
-                status: workflow.value.status === 'ready' ? 'planned' : 'workflow_rejected',
-                attention: workflow.value.status === 'ready' ? 'none' : 'operator',
-                currentStage:
-                  workflow.value.status === 'ready'
-                    ? 'Workflow ready · ready for Temporal execution'
-                    : 'Workflow validation failed',
-                updatedAt: workflow.value.view.persistedAt,
-              }),
-        ),
-      );
+      hydratedJiraTasks.push(await withRunState(task));
     }
     return reply.send({
       tasks: [...hydratedJiraTasks, ...(await Promise.all(result.value.tasks.map(withRunState)))],
@@ -329,18 +318,32 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
+    const bootstrapRunId = currentRunId(lifecycle);
+    const executionWorkflowId = lifecycle?.execution?.workflowId ?? null;
+
     if (params.data.fixtureId.startsWith('jira:') && options.jiraIssueService !== undefined) {
       const jiraResult = options.jiraIssueService.readActivity(params.data.fixtureId);
       if (!jiraResult.ok) return sendJiraServiceError(reply, jiraResult.error);
-      const workflowResult = options.service.readActivity(params.data.fixtureId);
+      const workflowResult = options.service.readActivity(params.data.fixtureId, planningEpisodeId);
       if (!workflowResult.ok) return sendServiceError(reply, workflowResult.error);
       const entries = projectOperatorActivity({
         jira: jiraResult.value.entries,
         workflow: workflowResult.value.entries,
         implementationPlanning:
-          options.implementationPlanning?.readActivity(params.data.fixtureId) ?? [],
-        continuation: options.workflowContinuation?.readActivity(params.data.fixtureId) ?? [],
-        execution: options.executionActivity?.readActivity(params.data.fixtureId) ?? [],
+          planningEpisodeId === null
+            ? []
+            : (options.implementationPlanning?.readActivity(planningEpisodeId) ?? []),
+        continuation:
+          bootstrapRunId === null
+            ? []
+            : (options.workflowContinuation?.readActivity(bootstrapRunId) ?? []),
+        execution:
+          executionWorkflowId === null
+            ? []
+            : (options.executionActivity?.readActivity(executionWorkflowId) ?? []),
       });
       return reply.send(
         OperatorActivityResponseSchema.parse({
@@ -354,7 +357,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       );
     }
 
-    const result = options.service.readActivity(params.data.fixtureId);
+    const result = options.service.readActivity(params.data.fixtureId, planningEpisodeId);
     if (!result.ok) {
       return sendServiceError(reply, result.error);
     }
@@ -362,9 +365,17 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       jira: [],
       workflow: result.value.entries,
       implementationPlanning:
-        options.implementationPlanning?.readActivity(params.data.fixtureId) ?? [],
-      continuation: options.workflowContinuation?.readActivity(params.data.fixtureId) ?? [],
-      execution: options.executionActivity?.readActivity(params.data.fixtureId) ?? [],
+        planningEpisodeId === null
+          ? []
+          : (options.implementationPlanning?.readActivity(planningEpisodeId) ?? []),
+      continuation:
+        bootstrapRunId === null
+          ? []
+          : (options.workflowContinuation?.readActivity(bootstrapRunId) ?? []),
+      execution:
+        executionWorkflowId === null
+          ? []
+          : (options.executionActivity?.readActivity(executionWorkflowId) ?? []),
     });
     return reply.send(
       OperatorActivityResponseSchema.parse({
@@ -503,33 +514,22 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     return reply;
   });
 
-  const registerProjectionRoute = (
-    route: '/api/intakes/:projectionId' | '/api/tasks/:projectionId',
-    projectionType: 'm1_intake' | 'm1_task',
-  ): void => {
-    api.get(route, (request, reply) => {
-      const params = ProjectionParamsSchema.safeParse(request.params);
-      if (!params.success) {
-        return reply.code(400).send(apiError('invalid_request', 'projectionId is required'));
-      }
-
-      const projection = options.service.readProjection(projectionType, params.data.projectionId);
-      return projection === null
-        ? reply.code(404).send(apiError('projection_not_found', 'Projection does not exist'))
-        : reply.send(projection);
-    });
-  };
-
-  registerProjectionRoute('/api/intakes/:projectionId', 'm1_intake');
-  registerProjectionRoute('/api/tasks/:projectionId', 'm1_task');
-
   api.get('/api/workflows/:fixtureId', async (request, reply) => {
     const params = FixtureParamsSchema.safeParse(request.params);
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
-    const result = options.service.read(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const operationId =
+      lifecycle?.bootstrap.planning?.status === 'ready'
+        ? lifecycle.bootstrap.planning.workflowOperationId
+        : null;
+    const result =
+      operationId === null
+        ? { ok: true as const, value: null }
+        : options.service.readPlanningOperation(params.data.fixtureId, operationId);
     if (!result.ok) return sendServiceError(reply, result.error);
     if (result.value === null) {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
@@ -550,7 +550,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(ExecutionRunViewSchema.parse(result.value));
   });
 
-  api.get('/api/workflows/:fixtureId/implementation-plan', (request, reply) => {
+  api.get('/api/workflows/:fixtureId/implementation-plan', async (request, reply) => {
     if (options.implementationPlanning === undefined) {
       return reply
         .code(404)
@@ -560,7 +560,15 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
-    const result = options.implementationPlanning.read(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
+    if (planningEpisodeId === null) {
+      return reply
+        .code(404)
+        .send(apiError('implementation_plan_not_found', 'No plan exists for the current run'));
+    }
+    const result = options.implementationPlanning.read(planningEpisodeId);
     if (!result.ok) {
       return reply
         .code(500)
@@ -573,7 +581,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(ImplementationPlanningRecordSchema.parse(result.value));
   });
 
-  api.get('/api/workflows/:fixtureId/planning-transcript', (request, reply) => {
+  api.get('/api/workflows/:fixtureId/planning-transcript', async (request, reply) => {
     if (options.implementationPlanning === undefined) {
       return reply
         .code(404)
@@ -583,7 +591,17 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
-    const result = options.implementationPlanning.readTranscript(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
+    if (planningEpisodeId === null) {
+      return reply
+        .code(404)
+        .send(
+          apiError('planning_transcript_not_found', 'No transcript exists for the current run'),
+        );
+    }
+    const result = options.implementationPlanning.readTranscript(planningEpisodeId);
     if (!result.ok) {
       return reply
         .code(500)
@@ -750,7 +768,13 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(400)
         .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan guidance'));
     }
-    const planning = options.implementationPlanning?.read(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
+    const planning =
+      planningEpisodeId === null
+        ? undefined
+        : options.implementationPlanning?.read(planningEpisodeId);
     if (
       planning !== undefined &&
       (!planning.ok ||
@@ -774,7 +798,16 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(409)
         .send(apiError('run_not_at_plan_review', 'The run is not waiting for plan review'));
     }
-    const submitted = options.planReviews?.submit(params.data.fixtureId, command.data);
+    if (planningEpisodeId === null) {
+      return reply
+        .code(409)
+        .send(apiError('stale_plan_review', 'The current run has no planning episode'));
+    }
+    const submitted = options.planReviews?.submit(
+      planningEpisodeId,
+      params.data.fixtureId,
+      command.data,
+    );
     if (submitted !== undefined && !submitted.ok) {
       return reply
         .code(409)
@@ -786,7 +819,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       resolution: planReviewResolution(command.data),
     });
     if (!reviewed.ok) return sendTemporalRunError(reply, reviewed.error);
-    const applied = options.planReviews?.markApplied(params.data.fixtureId, command.data.reviewId);
+    const applied = options.planReviews?.markApplied(planningEpisodeId, command.data.reviewId);
     if (applied !== undefined && !applied.ok) {
       return reply
         .code(500)
@@ -803,7 +836,13 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     if (options.planReviews === undefined) {
       return PlanReviewHistoryResponseSchema.parse({ rounds: [] });
     }
-    const history = options.planReviews.read(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
+    if (planningEpisodeId === null) {
+      return PlanReviewHistoryResponseSchema.parse({ rounds: [] });
+    }
+    const history = options.planReviews.read(planningEpisodeId);
     return history.ok
       ? PlanReviewHistoryResponseSchema.parse({ rounds: history.value })
       : reply.code(500).send(apiError(history.error.kind, 'Plan review history is unavailable'));
@@ -913,7 +952,16 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
-    const result = options.service.read(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const operationId =
+      lifecycle?.bootstrap.planning?.status === 'ready'
+        ? lifecycle.bootstrap.planning.workflowOperationId
+        : null;
+    const result =
+      operationId === null
+        ? { ok: true as const, value: null }
+        : options.service.readPlanningOperation(params.data.fixtureId, operationId);
     if (!result.ok) return sendServiceError(reply, result.error);
     if (result.value === null) {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
@@ -936,7 +984,16 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
     }
 
-    const result = options.service.read(params.data.fixtureId);
+    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    if (reply.sent) return reply;
+    const operationId =
+      lifecycle?.bootstrap.planning?.status === 'ready'
+        ? lifecycle.bootstrap.planning.workflowOperationId
+        : null;
+    const result =
+      operationId === null
+        ? { ok: true as const, value: null }
+        : options.service.readPlanningOperation(params.data.fixtureId, operationId);
     if (!result.ok) return sendServiceError(reply, result.error);
     if (result.value === null) {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));

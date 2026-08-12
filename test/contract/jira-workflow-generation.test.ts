@@ -91,8 +91,8 @@ describe('Jira bootstrap context assembly', () => {
 
     expect(assembled.ok).toBe(true);
     if (!assembled.ok) throw new Error(`Expected planning context: ${assembled.error.kind}`);
-    expect(workflows.read(taskReference)).toEqual(ok(null));
-    expect(ledger.repository.listEvents(`workflow:${taskReference}`)).toEqual([]);
+    expect(workflows.readPlanningOperation(taskReference, 'bootstrap:context:1')).toEqual(ok(null));
+    expect(workflows.listStreamEventsAfter(0)).toEqual([]);
 
     const snapshot = new ImplementationPlanningStore(ledger.repository, clock).readRunSnapshot(
       assembled.value.planningSnapshot,

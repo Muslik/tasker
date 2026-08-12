@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
+import { ApplicationFailure } from '@temporalio/client';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -243,7 +244,7 @@ describe('Bootstrap infrastructure failure visibility', () => {
 });
 
 describe('Bootstrap investigation recovery', () => {
-  it('retries an activity failure with the same logical block run', async () => {
+  it('resumes an activity failure with the same logical block run', async () => {
     const environment = await TestWorkflowEnvironment.createTimeSkipping();
     const taskQueue = `tasker-bootstrap-investigation-${String(process.pid)}`;
     const runs = new TemporalTaskRunService(environment.client, {
@@ -261,6 +262,7 @@ describe('Bootstrap investigation recovery', () => {
         const ready = await testTemporalActivities.planTaskImplementation(input);
         if (input.command.kind !== 'initial') return ready;
         const base = {
+          planningEpisodeId: ready.planningEpisodeId,
           commandId: ready.commandId,
           transcriptId: ready.transcriptId,
           attempt: ready.attempt,
@@ -288,8 +290,10 @@ describe('Bootstrap investigation recovery', () => {
       runBootstrapInvestigation: (input) => {
         observedBlockRuns.push(input.blockRun);
         investigationCalls += 1;
-        if (investigationCalls <= 3) {
-          return Promise.reject(new Error('Response adapter failed after receipt persistence'));
+        if (investigationCalls === 1) {
+          return Promise.reject(
+            ApplicationFailure.nonRetryable('Response adapter failed after receipt persistence'),
+          );
         }
         return Promise.resolve({
           status: 'completed' as const,
@@ -327,11 +331,13 @@ describe('Bootstrap investigation recovery', () => {
           .poll(
             async () => {
               const result = await runs.read('fixture:investigation-retry');
-              return result.ok && result.value?.status === 'waiting'
-                ? result.value.wait.waitKind
-                : 'running';
+              return result.ok
+                ? result.value?.status === 'waiting'
+                  ? result.value.wait.waitKind
+                  : `${result.value?.status ?? 'missing'}:${result.value?.currentNodeId ?? 'none'}`
+                : `error:${result.error.kind}`;
             },
-            { interval: 50, timeout: 20_000 },
+            { interval: 50, timeout: 10_000 },
           )
           .toBe('investigation.retry@1');
         const result = await runs.read('fixture:investigation-retry');
@@ -360,7 +366,7 @@ describe('Bootstrap investigation recovery', () => {
         )
         .toBe('code_review@1');
 
-      expect(observedBlockRuns).toEqual([1, 1, 1, 1]);
+      expect(observedBlockRuns).toEqual([1, 1]);
       const recovered = await runs.readLifecycle('fixture:investigation-retry');
       expect(recovered).toMatchObject({
         ok: true,
@@ -390,13 +396,21 @@ describe('Bootstrap planning failure recovery', () => {
     });
     let planningCalls = 0;
     const coordinator: TemporalImplementationPlanningCoordinator = {
-      prepare: (taskReference, requestedStrategy, commandId, planningSnapshot, evidenceBundle) => {
+      prepare: (
+        taskReference,
+        requestedStrategy,
+        commandId,
+        planningEpisodeId,
+        planningSnapshot,
+        evidenceBundle,
+      ) => {
         planningCalls += 1;
         return Promise.resolve(
           ok(
             ImplementationPlanningRecordSchema.parse({
-              schemaVersion: 1,
+              schemaVersion: 2,
               taskReference,
+              planningEpisodeId,
               commandId,
               transcriptId: `planning-transcript:${commandId}`,
               planningSnapshot,

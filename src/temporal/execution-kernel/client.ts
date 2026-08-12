@@ -18,19 +18,20 @@ import { executionWorkflowStateQuery, resolveExecutionWaitUpdate } from './messa
 import { executionWorkflowV2 } from '../workflows/execution-workflow-v2.js';
 
 export type ExecutionTemporalRunError =
-  | { readonly kind: 'run_not_found'; readonly taskReference: string }
-  | { readonly kind: 'run_input_conflict'; readonly taskReference: string }
+  | { readonly kind: 'run_not_found'; readonly workflowId: string }
+  | { readonly kind: 'run_input_conflict'; readonly workflowId: string }
   | { readonly kind: 'runtime_unavailable'; readonly message: string };
 
 export interface ExecutionTemporalRunService {
   start(
+    workflowId: string,
     input: ExecutionWorkflowInput,
   ): Promise<Outcome<ExecutionWorkflowPublicState, ExecutionTemporalRunError>>;
   read(
-    taskReference: string,
+    workflowId: string,
   ): Promise<Outcome<ExecutionWorkflowPublicState | null, ExecutionTemporalRunError>>;
   resolveWait(
-    taskReference: string,
+    workflowId: string,
     command: ResolveExecutionWaitCommand,
   ): Promise<Outcome<ExecutionWorkflowPublicState, ExecutionTemporalRunError>>;
 }
@@ -49,8 +50,6 @@ export const DEFAULT_EXECUTION_TEMPORAL_CLIENT_CONFIGURATION = {
   updateTimeoutMs: 10_000,
 } as const satisfies ExecutionTemporalClientConfiguration;
 
-const workflowIdFor = (taskReference: string): string => `tasker:execution:v2:${taskReference}`;
-
 const messageFrom = (error: unknown): string => {
   const messages: string[] = [];
   let current = error;
@@ -68,12 +67,13 @@ export class TemporalExecutionRunService implements ExecutionTemporalRunService 
   ) {}
 
   public async start(
+    workflowId: string,
     inputValue: ExecutionWorkflowInput,
   ): Promise<Outcome<ExecutionWorkflowPublicState, ExecutionTemporalRunError>> {
     const input = ExecutionWorkflowInputSchema.parse(inputValue);
     try {
       const handle = await this.client.workflow.start(executionWorkflowV2, {
-        workflowId: workflowIdFor(input.taskReference),
+        workflowId,
         taskQueue: this.configuration.taskQueue,
         args: [input],
         memo: {
@@ -89,24 +89,20 @@ export class TemporalExecutionRunService implements ExecutionTemporalRunService 
       if (!(error instanceof WorkflowExecutionAlreadyStartedError)) {
         return err({ kind: 'runtime_unavailable', message: messageFrom(error) });
       }
-      const existing = await this.read(input.taskReference);
+      const existing = await this.read(workflowId);
       if (!existing.ok || existing.value === null) {
-        return existing.ok
-          ? err({ kind: 'run_not_found', taskReference: input.taskReference })
-          : existing;
+        return existing.ok ? err({ kind: 'run_not_found', workflowId }) : existing;
       }
       return existing.value.workflowHash === input.workflowHash
         ? ok(existing.value)
-        : err({ kind: 'run_input_conflict', taskReference: input.taskReference });
+        : err({ kind: 'run_input_conflict', workflowId });
     }
   }
 
   public async read(
-    taskReference: string,
+    workflowId: string,
   ): Promise<Outcome<ExecutionWorkflowPublicState | null, ExecutionTemporalRunError>> {
-    const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(
-      workflowIdFor(taskReference),
-    );
+    const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(workflowId);
     try {
       return ok(await this.readHandle(handle));
     } catch (error) {
@@ -117,13 +113,11 @@ export class TemporalExecutionRunService implements ExecutionTemporalRunService 
   }
 
   public async resolveWait(
-    taskReference: string,
+    workflowId: string,
     commandValue: ResolveExecutionWaitCommand,
   ): Promise<Outcome<ExecutionWorkflowPublicState, ExecutionTemporalRunError>> {
     const command = ResolveExecutionWaitCommandSchema.parse(commandValue);
-    const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(
-      workflowIdFor(taskReference),
-    );
+    const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(workflowId);
     try {
       await this.client.withDeadline(Date.now() + this.configuration.updateTimeoutMs, () =>
         handle.executeUpdate(resolveExecutionWaitUpdate, { args: [command] }),
@@ -131,7 +125,7 @@ export class TemporalExecutionRunService implements ExecutionTemporalRunService 
       return ok(await this.readHandle(handle));
     } catch (error) {
       return error instanceof WorkflowNotFoundError
-        ? err({ kind: 'run_not_found', taskReference })
+        ? err({ kind: 'run_not_found', workflowId })
         : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
     }
   }

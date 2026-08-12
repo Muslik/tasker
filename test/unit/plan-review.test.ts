@@ -14,6 +14,7 @@ import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const resources: SqliteLedger[] = [];
 const directories: string[] = [];
+const PLANNING_EPISODE_ID = 'tasker:v3:jira:AVIA-12045:run-1:planning';
 
 afterEach(() => {
   for (const ledger of resources.splice(0)) ledger.close();
@@ -68,19 +69,23 @@ describe('native plan review', () => {
     resources.push(ledger);
     const store = new PlanReviewStore(ledger.repository, clock);
 
-    expect(store.submit('jira:AVIA-12045', changeRequest)).toMatchObject({ ok: true });
-    expect(store.submit('jira:AVIA-12045', changeRequest)).toMatchObject({ ok: true });
+    expect(store.submit(PLANNING_EPISODE_ID, 'jira:AVIA-12045', changeRequest)).toMatchObject({
+      ok: true,
+    });
+    expect(store.submit(PLANNING_EPISODE_ID, 'jira:AVIA-12045', changeRequest)).toMatchObject({
+      ok: true,
+    });
     clock.advance(1_000);
-    expect(store.markApplied('jira:AVIA-12045', changeRequest.reviewId)).toEqual({
+    expect(store.markApplied(PLANNING_EPISODE_ID, changeRequest.reviewId)).toEqual({
       ok: true,
       value: undefined,
     });
-    expect(store.markApplied('jira:AVIA-12045', changeRequest.reviewId)).toEqual({
+    expect(store.markApplied(PLANNING_EPISODE_ID, changeRequest.reviewId)).toEqual({
       ok: true,
       value: undefined,
     });
 
-    const history = store.read('jira:AVIA-12045');
+    const history = store.read(PLANNING_EPISODE_ID);
     expect(history).toMatchObject({
       ok: true,
       value: [
@@ -93,7 +98,7 @@ describe('native plan review', () => {
         },
       ],
     });
-    expect(ledger.repository.listEvents('plan-review:jira:AVIA-12045')).toHaveLength(2);
+    expect(ledger.repository.listEvents(`plan-review:${PLANNING_EPISODE_ID}`)).toHaveLength(2);
   });
 
   it('restores review rounds after the ledger is reopened', () => {
@@ -104,15 +109,19 @@ describe('native plan review', () => {
     const firstLedger = openSqliteLedger({ filename, clock });
     const firstStore = new PlanReviewStore(firstLedger.repository, clock);
 
-    expect(firstStore.submit('jira:AVIA-12045', changeRequest)).toMatchObject({ ok: true });
-    expect(firstStore.markApplied('jira:AVIA-12045', changeRequest.reviewId)).toMatchObject({
+    expect(firstStore.submit(PLANNING_EPISODE_ID, 'jira:AVIA-12045', changeRequest)).toMatchObject({
+      ok: true,
+    });
+    expect(firstStore.markApplied(PLANNING_EPISODE_ID, changeRequest.reviewId)).toMatchObject({
       ok: true,
     });
     firstLedger.close();
 
     const restartedLedger = openSqliteLedger({ filename, clock });
     resources.push(restartedLedger);
-    const history = new PlanReviewStore(restartedLedger.repository, clock).read('jira:AVIA-12045');
+    const history = new PlanReviewStore(restartedLedger.repository, clock).read(
+      PLANNING_EPISODE_ID,
+    );
 
     expect(history).toMatchObject({
       ok: true,
@@ -126,9 +135,11 @@ describe('native plan review', () => {
     resources.push(ledger);
     const store = new PlanReviewStore(ledger.repository, clock);
 
-    expect(store.submit('jira:AVIA-12045', changeRequest)).toMatchObject({ ok: true });
+    expect(store.submit(PLANNING_EPISODE_ID, 'jira:AVIA-12045', changeRequest)).toMatchObject({
+      ok: true,
+    });
     expect(
-      store.submit('jira:AVIA-12045', {
+      store.submit(PLANNING_EPISODE_ID, 'jira:AVIA-12045', {
         ...changeRequest,
         guidance: 'A different decision under the same id.',
       }),
@@ -136,5 +147,19 @@ describe('native plan review', () => {
       ok: false,
       error: { kind: 'review_conflict', reviewId: 'review-1' },
     });
+  });
+
+  it('does not expose review state from another run of the same task', () => {
+    const clock = makeAdjustableClock('2026-08-12T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: ':memory:', clock });
+    resources.push(ledger);
+    const store = new PlanReviewStore(ledger.repository, clock);
+    const nextEpisode = 'tasker:v3:jira:AVIA-12045:run-2:planning';
+
+    expect(store.submit(PLANNING_EPISODE_ID, 'jira:AVIA-12045', changeRequest)).toMatchObject({
+      ok: true,
+    });
+
+    expect(store.read(nextEpisode)).toEqual({ ok: true, value: [] });
   });
 });

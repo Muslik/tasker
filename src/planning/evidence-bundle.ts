@@ -84,7 +84,8 @@ export const EvidenceEntrySchema = z
 
 export const EvidenceBundleSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
+    scopeId: z.string().min(1),
     taskReference: z.string().min(1),
     revision: z.number().int().positive(),
     inputFingerprint: EvidenceContentHashSchema,

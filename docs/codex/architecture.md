@@ -189,7 +189,37 @@ snapshots, transcripts, videos, and screenshots stay
 in the Tasker artifact store; history contains stable IDs, hashes, metadata, and bounded
 summaries. Secrets never enter Workflow input or Event History.
 
-### 5.1 Runtime vocabulary
+### 5.1 Run isolation
+
+`taskReference` is a business identity used to start the current Temporal lifecycle and
+group historical runs. It is never a storage key for mutable run state. Every mutable
+artifact is addressed by the identity of the run boundary that created it:
+
+- Bootstrap and Execution state: exact Temporal `workflowId` and `runId`;
+- planning records, transcripts, questions, and plan reviews: `planningEpisodeId`, which
+  contains the Bootstrap `runId`;
+- workflow proposals, compiled graphs, validator reports, and analyzer receipts:
+  `workflowOperationId` from that planning episode;
+- planning/investigation evidence: an explicit operation scope and append-only bundle
+  revision;
+- freeze receipts: exact Bootstrap workflow/run pair;
+- execution receipts, evidence, reviews, and transcripts: exact Execution workflow/run;
+- continuations: exact parent `runId`, with a distinct child identity derived from it.
+
+The control plane first asks Temporal for the current lifecycle and then follows only
+the exact identifiers exposed by that lifecycle. There is no `latest by task`, fallback
+to a task projection, or scan that substitutes an artifact from another run. A missing
+artifact for the current identifier fails closed even when an older run of the same Jira
+task has a valid artifact. Jira snapshots and repository catalog entries are shared
+source data; a run consumes only the immutable snapshots captured into its own planning
+context.
+
+`Restart from scratch` therefore creates a new isolation domain: new Bootstrap `runId`,
+workspace, planning episode, evidence scope, workflow operation, freeze receipt,
+Execution workflow, reviews, and continuations. The terminated run remains queryable as
+history, but none of its mutable artifacts can become current state for the replacement.
+
+### 5.2 Runtime vocabulary
 
 - **Stage** is an operator projection such as Workspace, Investigate, Plan, Implement,
   Validate, Delivery, or Human review. It groups work but is not schedulable. Every block
@@ -567,8 +597,9 @@ at their durable boundary.
 The API requires a literal confirmation payload and the cockpit exposes a second confirmation step.
 Temporal retains the terminated run history. The replacement reuses the stable business Workflow ID
 but receives a new `runId`; workspace identity and the execution child Workflow ID include that run,
-so the new generation cannot accidentally reuse the abandoned worktree or child execution. Completed
-runs are not restartable through this command.
+so the new generation cannot accidentally reuse the abandoned worktree, planning artifacts, graph,
+receipts, review state, continuation, or child execution. Completed runs are not restartable through
+this command.
 
 Plan annotations are product metadata rather than scheduler state. Cockpit owns the draft editor;
 Tasker SQLite stores append-only review rounds keyed by plan artifact and attempt; Temporal receives
@@ -635,6 +666,9 @@ fail-closed; an analyzer cannot grant itself a Jira/Bitbucket/publish capability
 14. Retrospective recommendations never modify the harness automatically.
 15. Provider and project commands execute only in Docker; missing Docker is a durable
     infrastructure block, never permission to fall back to host execution.
+16. Mutable state is resolved by exact run/episode/operation identity; a task reference
+    may group history but can never select the current graph, plan, evidence, receipt,
+    review, continuation, or transcript.
 
 ## 16. Decision record
 

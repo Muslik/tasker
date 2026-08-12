@@ -1,5 +1,3 @@
-import type { Clock } from '../shared/clock.js';
-import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type {
   ArtifactWrite,
@@ -7,22 +5,21 @@ import type {
   EventWrite,
   JsonValue,
   LedgerConflict,
-  ProjectionMutation,
 } from '../ledger/types.js';
 import {
   WorkflowAnalyzerReceiptSchema,
   type WorkflowAnalyzerReceipt,
 } from '../providers/contracts.js';
+import type { Clock } from '../shared/clock.js';
+import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
-  M1_VIEW_SCHEMA_VERSION,
   WorkflowGenerationSubjectSchema,
   WorkflowViewSchema,
   type WorkflowGenerationSubject,
   type WorkflowView,
 } from './m1-contracts.js';
 
-export const M1_WORKFLOW_PROJECTION = 'm1_workflow';
-export const M1_ANALYZER_PROJECTION = 'm1_analyzer';
+export const M1_WORKFLOW_OPERATION_PROJECTION = 'm1_workflow_by_operation';
 export const M1_GENERATION_SUBJECT_PROJECTION = 'm1_generation_subject';
 
 export interface M1WorkflowArtifacts {
@@ -57,71 +54,26 @@ export interface M1GenerationSubjectSaveResult {
   readonly subject: WorkflowGenerationSubject;
 }
 
-export interface M1WorkflowSaveOptions {
-  readonly operationId?: string;
-  readonly projectTask?: boolean;
-  readonly replaceValid?: boolean;
-}
-
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 
-const workflowAggregateId = (taskReference: string): string =>
-  taskReference.startsWith('jira:') ? `workflow:${taskReference}` : `intake:${taskReference}`;
+const workflowAggregateId = (operationId: string): string => `workflow-operation:${operationId}`;
 
 const isRecord = (value: JsonValue): value is Readonly<Record<string, JsonValue>> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const eventBelongsToFixture = (event: EventRecord, fixtureId: string): boolean =>
+  isRecord(event.payload) && event.payload.fixtureId === fixtureId;
+
+const candidateAttempt = (operationId: string): number => {
+  const match = /:workflow-candidate:(\d+)$/u.exec(operationId);
+  return match?.[1] === undefined ? 1 : Number(match[1]);
+};
 
 export class M1WorkflowStore {
   public constructor(
     private readonly ledger: LedgerRepository,
     private readonly clock: Clock,
   ) {}
-
-  public read(fixtureId: string): Outcome<WorkflowView | null, M1StoreError> {
-    const projection = this.ledger.readProjection(M1_WORKFLOW_PROJECTION, fixtureId);
-
-    if (projection === null) {
-      return ok(null);
-    }
-
-    if (
-      isRecord(projection.payload) &&
-      typeof projection.payload.schemaVersion === 'number' &&
-      projection.payload.schemaVersion !== M1_VIEW_SCHEMA_VERSION
-    ) {
-      const discarded = this.ledger.transact({
-        projections: [
-          {
-            kind: 'delete',
-            projectionType: M1_WORKFLOW_PROJECTION,
-            projectionId: fixtureId,
-          },
-        ],
-        timestamp: this.clock.now(),
-      });
-      return discarded.ok ? ok(null) : err({ kind: 'ledger_conflict', conflict: discarded.error });
-    }
-
-    const parsed = WorkflowViewSchema.safeParse(projection.payload);
-    if (!parsed.success) {
-      return err({
-        kind: 'projection_corrupt',
-        fixtureId,
-        issues: parsed.error.issues.map(
-          (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-        ),
-      });
-    }
-
-    return ok(parsed.data);
-  }
-
-  public readProjection(
-    projectionType: 'm1_analyzer' | 'm1_intake' | 'm1_task',
-    projectionId: string,
-  ): JsonValue | null {
-    return this.ledger.readProjection(projectionType, projectionId)?.payload ?? null;
-  }
 
   public readGenerationSubject(
     taskReference: string,
@@ -199,65 +151,43 @@ export class M1WorkflowStore {
   }
 
   public listEvents(fixtureId?: string): readonly EventRecord[] {
-    return this.ledger.listEvents(
-      fixtureId === undefined ? undefined : workflowAggregateId(fixtureId),
-    );
+    const events = this.ledger
+      .listEvents()
+      .filter((event) => event.aggregateId.startsWith('workflow-operation:'));
+    return fixtureId === undefined
+      ? events
+      : events.filter((event) => eventBelongsToFixture(event, fixtureId));
   }
 
-  public readAnalyzerSession(
+  public readAnalyzerSessionForEpisode(
     fixtureId: string,
+    planningEpisodeId: string,
   ): Outcome<WorkflowAnalyzerReceipt | null, M1StoreError> {
-    const projection = this.ledger.readProjection(M1_ANALYZER_PROJECTION, fixtureId);
-    if (projection === null) {
-      return ok(null);
-    }
-
-    const parsed = WorkflowAnalyzerReceiptSchema.safeParse(projection.payload);
-    if (!parsed.success) {
-      return err({
-        kind: 'projection_corrupt',
-        fixtureId,
-        issues: parsed.error.issues.map(
-          (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-        ),
-      });
-    }
-
-    return ok(parsed.data);
-  }
-
-  public readPlanningOperation(
-    fixtureId: string,
-    operationId: string,
-  ): Outcome<WorkflowView | null, M1StoreError> {
-    const event = this.ledger
-      .listEvents(workflowAggregateId(fixtureId))
-      .find(
-        (candidate) =>
-          (candidate.eventType === 'WorkflowPlanned' ||
-            candidate.eventType === 'WorkflowRejected') &&
-          isRecord(candidate.payload) &&
-          candidate.payload.operationId === operationId,
-      );
+    const event = this.listEvents(fixtureId).findLast(
+      (candidate) =>
+        candidate.eventType === 'WorkflowAnalyzed' &&
+        isRecord(candidate.payload) &&
+        typeof candidate.payload.operationId === 'string' &&
+        candidate.payload.operationId.startsWith(`${planningEpisodeId}:`),
+    );
     if (event === undefined || !isRecord(event.payload)) return ok(null);
-    const attempt = event.payload.attempt;
-    if (typeof attempt !== 'number' || !Number.isInteger(attempt) || attempt < 1) {
+    const operationId = event.payload.operationId;
+    if (typeof operationId !== 'string') {
       return err({
         kind: 'projection_corrupt',
         fixtureId,
-        issues: [`Planning operation ${operationId} has no valid attempt number`],
+        issues: [`Planning episode ${planningEpisodeId} has no workflow operation`],
       });
     }
-    const suffix = attempt === 1 ? '' : `:attempt-${String(attempt)}`;
-    const snapshot = this.ledger.readSnapshot(`snapshot:${fixtureId}${suffix}`);
-    if (snapshot === null) {
+    const artifact = this.ledger.readArtifact(`analyzer-receipt:${operationId}`);
+    if (artifact === null) {
       return err({
         kind: 'projection_corrupt',
         fixtureId,
-        issues: [`Planning operation ${operationId} has no snapshot`],
+        issues: [`Planning operation ${operationId} has no analyzer receipt`],
       });
     }
-    const parsed = WorkflowViewSchema.safeParse(snapshot.payload);
+    const parsed = WorkflowAnalyzerReceiptSchema.safeParse(artifact.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
@@ -269,212 +199,159 @@ export class M1WorkflowStore {
         });
   }
 
+  public readPlanningOperation(
+    fixtureId: string,
+    operationId: string,
+  ): Outcome<WorkflowView | null, M1StoreError> {
+    const projection = this.ledger.readProjection(M1_WORKFLOW_OPERATION_PROJECTION, operationId);
+    if (projection === null) return ok(null);
+    const parsed = WorkflowViewSchema.safeParse(projection.payload);
+    if (!parsed.success) {
+      return err({
+        kind: 'projection_corrupt',
+        fixtureId,
+        issues: parsed.error.issues.map(
+          (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+        ),
+      });
+    }
+    return parsed.data.fixture.id === fixtureId ? ok(parsed.data) : ok(null);
+  }
+
   public save(
     viewInput: WorkflowView,
     artifacts: M1WorkflowArtifacts,
+    operationId: string,
     analyzerReceipt?: WorkflowAnalyzerReceipt,
-    options: M1WorkflowSaveOptions = {},
   ): Outcome<M1StoreResult, M1StoreError> {
     const candidateView = WorkflowViewSchema.parse(viewInput);
-    if (options.operationId !== undefined) {
-      const completed = this.readPlanningOperation(candidateView.fixture.id, options.operationId);
-      if (!completed.ok) return completed;
-      if (completed.value !== null) {
-        return ok({ disposition: 'already_exists', view: completed.value });
-      }
-    }
-    const existing = this.read(candidateView.fixture.id);
-
-    if (!existing.ok) {
-      return existing;
-    }
-
-    if (existing.value?.workflow.status === 'valid' && options.replaceValid !== true) {
-      return ok({ disposition: 'already_exists', view: existing.value });
+    const completed = this.readPlanningOperation(candidateView.fixture.id, operationId);
+    if (!completed.ok) return completed;
+    if (completed.value !== null) {
+      return ok({ disposition: 'already_exists', view: completed.value });
     }
 
     const fixtureId = candidateView.fixture.id;
-    const aggregateId = workflowAggregateId(fixtureId);
-    const existingEvents = this.ledger.listEvents(aggregateId);
-    const attempt =
-      existingEvents.filter(
-        (event) => event.eventType === 'WorkflowPlanned' || event.eventType === 'WorkflowRejected',
-      ).length + 1;
-    const attemptSuffix = attempt === 1 ? '' : `:attempt-${String(attempt)}`;
-    const proposalArtifactId = `proposal:${fixtureId}${attemptSuffix}`;
-    const view =
-      attempt === 1
-        ? candidateView
-        : WorkflowViewSchema.parse({
-            ...candidateView,
-            workflow: { ...candidateView.workflow, proposalId: proposalArtifactId },
-          });
+    const aggregateId = workflowAggregateId(operationId);
+    const proposalArtifactId = `proposal:${operationId}`;
+    const view = WorkflowViewSchema.parse({
+      ...candidateView,
+      workflow: { ...candidateView.workflow, proposalId: proposalArtifactId },
+    });
     const artifactWrites: ArtifactWrite[] = [
       {
         artifactId: proposalArtifactId,
         artifactKind: 'workflow_proposal',
         storageUri: `ledger://artifacts/${proposalArtifactId}`,
         payload: artifacts.proposal,
-        metadata: { analyzer: artifacts.analyzerVersion },
+        metadata: { analyzer: artifacts.analyzerVersion, operationId },
       },
       {
-        artifactId: `validator:${fixtureId}${attemptSuffix}`,
+        artifactId: `validator:${operationId}`,
         artifactKind: 'workflow_validator_report',
-        storageUri: `ledger://artifacts/validator:${fixtureId}${attemptSuffix}`,
+        storageUri: `ledger://artifacts/validator:${operationId}`,
         payload: artifacts.validatorReport,
-        metadata: { workflowStatus: view.workflow.status },
+        metadata: { workflowStatus: view.workflow.status, operationId },
         parentArtifactId: proposalArtifactId,
       },
     ];
 
     if (artifacts.compiledGraph !== undefined) {
       artifactWrites.push({
-        artifactId: `graph:${fixtureId}${attemptSuffix}`,
+        artifactId: `graph:${operationId}`,
         artifactKind: 'compiled_workflow_graph',
-        storageUri: `ledger://artifacts/graph:${fixtureId}${attemptSuffix}`,
+        storageUri: `ledger://artifacts/graph:${operationId}`,
         payload: artifacts.compiledGraph,
-        metadata: { graphHash: view.workflow.graphHash ?? 'rejected' },
+        metadata: { graphHash: view.workflow.graphHash ?? 'rejected', operationId },
         parentArtifactId: proposalArtifactId,
       });
     }
 
     if (analyzerReceipt !== undefined) {
       artifactWrites.push({
-        artifactId: `analyzer-receipt:${fixtureId}${attemptSuffix}`,
+        artifactId: `analyzer-receipt:${operationId}`,
         artifactKind: 'workflow_analyzer_receipt',
-        storageUri: `ledger://artifacts/analyzer-receipt:${fixtureId}${attemptSuffix}`,
+        storageUri: `ledger://artifacts/analyzer-receipt:${operationId}`,
         payload: asJson(analyzerReceipt),
         metadata: {
           analyzer: analyzerReceipt.analyzerVersion,
           provider: analyzerReceipt.provider,
+          operationId,
         },
       });
     }
 
-    const persistedAt = this.clock.now();
-    const events: EventWrite[] =
-      fixtureId.startsWith('jira:') || existingEvents.length > 0
-        ? []
-        : [
-            {
-              eventId: `event:intake-accepted:${fixtureId}`,
-              eventType: 'IntakeAccepted',
-              eventSchemaVersion: 1,
-              payload: { fixtureId, intakeId: view.intake.id },
-              actor: 'm1_local_fixture',
-            },
-            {
-              eventId: `event:task-created:${fixtureId}`,
-              eventType: 'TaskCreated',
-              eventSchemaVersion: 1,
-              payload: { fixtureId, taskId: view.task.id },
-              actor: 'm1_local_fixture',
-            },
-          ];
-
+    const attempt = candidateAttempt(operationId);
+    const events: EventWrite[] = [];
     if (analyzerReceipt !== undefined) {
       events.push({
-        eventId: `event:workflow-analyzed:${fixtureId}${attemptSuffix}`,
+        eventId: `event:workflow-analyzed:${operationId}`,
         eventType: 'WorkflowAnalyzed',
         eventSchemaVersion: 1,
-        payload: {
+        payload: asJson({
           analyzerVersion: analyzerReceipt.analyzerVersion,
           durationMs: analyzerReceipt.durationMs,
           fixtureId,
           attempt,
+          operationId,
           sessionId: analyzerReceipt.sessionId,
-          usage: asJson(analyzerReceipt.usage),
-        },
+          usage: analyzerReceipt.usage,
+        }),
         actor: 'subscription_cli_analyzer',
       });
     }
-
     events.push({
-      eventId: `event:workflow-planned:${fixtureId}${attemptSuffix}`,
+      eventId: `event:workflow-planned:${operationId}`,
       eventType: view.workflow.status === 'valid' ? 'WorkflowPlanned' : 'WorkflowRejected',
       eventSchemaVersion: 1,
-      payload: {
+      payload: asJson({
         fixtureId,
         attempt,
         graphHash: view.workflow.graphHash,
-        operationId: options.operationId ?? null,
+        operationId,
         status: view.workflow.status,
-      },
+      }),
       actor:
         artifacts.analyzerVersion === 'm1-deterministic@1'
           ? 'm1_deterministic_planner'
           : 'm1_planner',
     });
 
-    const projections: ProjectionMutation[] = [
-      {
-        kind: 'upsert',
-        projectionType: 'm1_intake',
-        projectionId: view.intake.id,
-        payload: asJson({ fixture: view.fixture, intake: view.intake }),
-      },
-      {
-        kind: 'upsert',
-        projectionType: M1_WORKFLOW_PROJECTION,
-        projectionId: fixtureId,
-        payload: asJson(view),
-      },
-    ];
-
-    if (options.projectTask !== false) {
-      projections.push({
-        kind: 'upsert',
-        projectionType: 'm1_task',
-        projectionId: view.task.id,
-        payload: asJson({ fixture: view.fixture, task: view.task }),
-      });
-    }
-
-    if (analyzerReceipt !== undefined) {
-      projections.push({
-        kind: 'upsert',
-        projectionType: M1_ANALYZER_PROJECTION,
-        projectionId: fixtureId,
-        payload: asJson(analyzerReceipt),
-      });
-    }
-
     const result = this.ledger.transact({
       aggregate: {
         aggregateId,
-        expectedVersion: existingEvents.length,
+        expectedVersion: 0,
         events,
       },
       snapshots: [
         {
-          snapshotId: `snapshot:${fixtureId}${attemptSuffix}`,
+          snapshotId: `snapshot:${operationId}`,
           aggregateId,
-          aggregateVersion: existingEvents.length + events.length,
+          aggregateVersion: events.length,
           snapshotSchemaVersion: 1,
           payload: asJson(view),
         },
       ],
-      projections,
+      projections: [
+        {
+          kind: 'upsert',
+          projectionType: M1_WORKFLOW_OPERATION_PROJECTION,
+          projectionId: operationId,
+          payload: asJson(view),
+        },
+      ],
       artifacts: artifactWrites,
-      timestamp: persistedAt,
+      timestamp: this.clock.now(),
     });
 
     if (!result.ok) {
       if (result.error.kind === 'version_conflict') {
-        if (options.operationId !== undefined) {
-          const completed = this.readPlanningOperation(fixtureId, options.operationId);
-          if (!completed.ok) return completed;
-          if (completed.value !== null) {
-            return ok({ disposition: 'already_exists', view: completed.value });
-          }
-          return err({ kind: 'ledger_conflict', conflict: result.error });
-        }
-        const concurrent = this.read(fixtureId);
-        if (concurrent.ok && concurrent.value !== null) {
+        const concurrent = this.readPlanningOperation(fixtureId, operationId);
+        if (!concurrent.ok) return concurrent;
+        if (concurrent.value !== null) {
           return ok({ disposition: 'already_exists', view: concurrent.value });
         }
       }
-
       return err({ kind: 'ledger_conflict', conflict: result.error });
     }
 

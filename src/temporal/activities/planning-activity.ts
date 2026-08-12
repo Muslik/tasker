@@ -33,6 +33,7 @@ export interface TemporalImplementationPlanningCoordinator {
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
     commandId: string,
+    planningEpisodeId: string,
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
     operatorGuidance?: string | null,
@@ -41,6 +42,7 @@ export interface TemporalImplementationPlanningCoordinator {
     taskReference: string,
     answers: readonly PlanningQuestionAnswer[],
     commandId: string,
+    planningEpisodeId: string,
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
   ): Promise<PlanningOutcome>;
@@ -75,6 +77,7 @@ const planningResult = (
     }
     return BootstrapPlanningStateSchema.parse({
       status: 'blocked',
+      planningEpisodeId: record.planningEpisodeId,
       commandId,
       transcriptId: record.transcriptId,
       attempt: record.attempt,
@@ -93,6 +96,7 @@ const planningResult = (
 
   const common = {
     status: record.status,
+    planningEpisodeId: record.planningEpisodeId,
     commandId,
     transcriptId: record.transcriptId,
     attempt: record.attempt,
@@ -107,7 +111,11 @@ const planningResult = (
     case 'ready': {
       const draft = coordinator.draftFor(record);
       if (!draft.ok) throw new Error(`Validated workflow is unavailable: ${draft.error.kind}`);
-      return BootstrapPlanningStateSchema.parse({ ...common, draft: draft.value });
+      return BootstrapPlanningStateSchema.parse({
+        ...common,
+        workflowOperationId: record.workflowOperationId,
+        draft: draft.value,
+      });
     }
     case 'needs_clarification':
       return BootstrapPlanningStateSchema.parse({
@@ -137,6 +145,7 @@ export const createPlanningActivity = (
             input.taskReference,
             input.requestedStrategy,
             input.commandId,
+            input.planningEpisodeId,
             input.planningSnapshot,
             input.evidenceBundle,
             null,
@@ -146,6 +155,7 @@ export const createPlanningActivity = (
             input.taskReference,
             input.command.answers,
             input.commandId,
+            input.planningEpisodeId,
             input.planningSnapshot,
             input.evidenceBundle,
           );
@@ -154,6 +164,7 @@ export const createPlanningActivity = (
             input.taskReference,
             input.requestedStrategy,
             input.commandId,
+            input.planningEpisodeId,
             input.planningSnapshot,
             input.evidenceBundle,
             'The requested pre-plan investigation completed. Use the appended evidence and produce the plan and execution workflow.',
@@ -163,6 +174,7 @@ export const createPlanningActivity = (
             input.taskReference,
             input.requestedStrategy,
             input.commandId,
+            input.planningEpisodeId,
             input.planningSnapshot,
             input.evidenceBundle,
             input.command.guidance,

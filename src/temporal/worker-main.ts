@@ -266,7 +266,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       agentRunner: new SubscriptionCliTaskStepAgentRunner(dockerCommands),
       commands: dockerCommands,
       integrations: integrationAdapters,
-      evidence: new LedgerTaskRunEvidenceSource(planningStore, executionTraces, reviewEvidence),
+      evidence: new LedgerTaskRunEvidenceSource(executionTraces, reviewEvidence),
       workspaces: workspaceStore,
     });
     const runtime = await connectTaskerTemporalWorker(configuration, {

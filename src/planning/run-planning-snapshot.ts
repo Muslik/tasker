@@ -94,6 +94,7 @@ export const ExecutionRunSnapshotSchema = RunSnapshotBaseSchema.extend({
   kind: z.literal('execution'),
   workflowHash: ContentHashSchema,
   workflow: JsonValueSchema,
+  acceptedPlan: JsonValueSchema,
   evidenceBundle: EvidenceBundleReferenceSchema,
 })
   .strict()

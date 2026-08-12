@@ -4,6 +4,7 @@ import { BlockReceiptSchema } from '../../src/blocks/contracts.js';
 import { createM1WorkflowService } from '../../src/control-plane/m1-service.js';
 import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { findTaskFixture } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
@@ -20,8 +21,11 @@ describe('operator workflow projection', () => {
     const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
     const ledger = openSqliteLedger({ filename: ':memory:', clock });
     resources.push(ledger);
-    const generated = createM1WorkflowService(ledger.repository, clock).generate(
-      'avia-13236-short-bug',
+    const fixture = findTaskFixture('avia-13236-short-bug');
+    if (fixture === undefined) throw new Error('Expected workflow fixture');
+    const generated = createM1WorkflowService(ledger.repository, clock).assembleTaskAtOperation(
+      fixture,
+      'tasker:test:projection:workflow-candidate:1',
     );
     if (!generated.ok) {
       throw new Error(`Expected a compiled workflow fixture: ${JSON.stringify(generated.error)}`);

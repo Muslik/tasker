@@ -55,6 +55,11 @@ Every accepted implementation must prove:
 - large artifacts and secrets do not enter Workflow payloads, Search Attributes, or
   logs;
 - two task states are independent;
+- two runs of the same task are independent: current graph, plan, transcript, evidence,
+  freeze, review, execution receipts, and continuation are selected only by exact
+  run/episode/operation identity;
+- a missing current-run artifact fails closed instead of falling back to a valid artifact
+  from an older run of the same task;
 - manual guidance resumes from the blocked boundary;
 - retrospective changes require human approval.
 - one provider invocation produces exactly one agent row with its snapshotted profile,
@@ -363,6 +368,10 @@ Playwright acceptance scenarios:
   survive worker/API replacement without repeating completed boundaries;
 - explicit restart-from-scratch is distinct from recovery: it creates a new `runId` and
   workspace while leaving the abandoned run queryable as terminated;
+- restart-from-scratch also creates a new planning episode, evidence scope, workflow
+  operation, freeze, execution identity, review scope, and continuation namespace;
+- seeding valid artifacts for run A and making run B current never exposes run A through
+  workflow, graph, plan, transcript, activity, review, or continuation API reads;
 - disposable repository changes and selected validation survive response loss without
   duplicate mutation;
 - an independent reviewer can reject the implementation before publication;

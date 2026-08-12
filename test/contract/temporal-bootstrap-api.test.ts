@@ -6,9 +6,11 @@ import {
   createM1WorkflowService,
   ExecutionRunViewSchema,
   OperatorTaskListResponseSchema,
+  OperatorWorkflowProjectionSchema,
 } from '../../src/control-plane/index.js';
 import { PlanReviewStore } from '../../src/control-plane/plan-review.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { findTaskFixture } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import {
@@ -30,28 +32,94 @@ const bootstrapWait = (
   input: BootstrapWorkflowInput,
   waitKind = 'plan.approved@1',
 ): TaskRunPublicState =>
-  BootstrapWorkflowPublicStateSchema.parse({
-    runtime: 'bootstrap',
-    schemaVersion: 3,
-    taskReference: input.taskReference,
-    workflowId: `tasker:v3:${input.taskReference}`,
-    runId: `run:${input.taskReference}`,
-    workflowHash: null,
-    settings: input.settings,
-    phase: waitKind === 'plan.approved@1' ? 'plan_review' : 'planning',
-    workspaceContext: null,
-    context: null,
-    draft: null,
-    planning: null,
-    freezeReceipt: null,
-    executionWorkflowId: null,
-    nodeStates: { plan_review: 'waiting' },
-    attempts: { planning: 1 },
-    status: 'waiting',
-    currentNodeId: 'plan_review',
-    wait: { nodeId: 'plan_review', waitKind },
-    outcome: null,
-  });
+  BootstrapWorkflowPublicStateSchema.parse(
+    (() => {
+      const workflowId = `tasker:v3:${input.taskReference}`;
+      const runId = `run:${input.taskReference}`;
+      const planningEpisodeId = `${workflowId}:${runId}:planning`;
+      const evidenceBundle = {
+        artifactId: `evidence-bundle:${planningEpisodeId}:r1`,
+        checksum: '0'.repeat(64),
+        revision: 1,
+      };
+      const planningSnapshot = {
+        artifactId: `planning-snapshot:${planningEpisodeId}`,
+        checksum: '1'.repeat(64),
+      };
+      const graph = {
+        metadata: {
+          compilerVersion: 4,
+          irVersion: 'm2',
+          workflowId: `${input.taskReference}-workflow`,
+          workflowVersion: 1,
+          references: { predicates: [], stepTypes: [], waits: [] },
+        },
+        root: { kind: 'finalize', id: 'accepted', outcome: 'accepted' },
+      };
+      const draft = {
+        workflowHash: '2'.repeat(64),
+        graph,
+        planningSnapshot,
+        evidenceBundle,
+      };
+      return {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: input.taskReference,
+        workflowId,
+        runId,
+        workflowHash: draft.workflowHash,
+        settings: input.settings,
+        phase: waitKind === 'plan.approved@1' ? 'plan_review' : 'planning',
+        workspaceContext: null,
+        context: null,
+        draft,
+        planning: {
+          status: 'ready',
+          planningEpisodeId,
+          commandId: `${planningEpisodeId}:1`,
+          transcriptId: `planning-transcript:${planningEpisodeId}:1`,
+          attempt: 1,
+          artifactId: 'plan:attempt-1',
+          workflowOperationId: `${planningEpisodeId}:1:workflow-candidate:1`,
+          evidenceBundle,
+          requestedStrategy: input.settings.planningStrategy,
+          selectedStrategy: input.settings.planningStrategy === 'ralplan' ? 'ralplan' : 'fast',
+          draft,
+          receipt: {
+            status: 'completed',
+            provider: 'deterministic',
+            plannerVersion: 'implementation-planner@3',
+            profile: 'contract',
+            profileSha256: '3'.repeat(64),
+            cliVersion: 'contract@1',
+            model: 'deterministic',
+            effort: 'low',
+            serviceTier: null,
+            strategy: input.settings.planningStrategy === 'ralplan' ? 'ralplan' : 'fast',
+            sessionId: `${planningEpisodeId}:session`,
+            promptHash: '4'.repeat(64),
+            durationMs: 0,
+            usage: {
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              reasoningOutputTokens: 0,
+            },
+            hypotheticalApiCostUsd: 0,
+          },
+        },
+        freezeReceipt: null,
+        executionWorkflowId: null,
+        nodeStates: { plan_review: 'waiting' },
+        attempts: { planning: 1 },
+        status: 'waiting',
+        currentNodeId: 'plan_review',
+        wait: { nodeId: 'plan_review', waitKind },
+        outcome: null,
+      };
+    })(),
+  );
 
 class ContractTaskRunService implements TaskRunService {
   public readonly starts: BootstrapWorkflowInput[] = [];
@@ -212,9 +280,16 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
     });
   });
 
-  it('surfaces a materialized workflow without a Temporal run as operator attention', async () => {
+  it('does not present task-level workflow history without a current Temporal run', async () => {
     const { api, service } = setup();
-    expect(service.generate('avia-13236-short-bug')).toMatchObject({ ok: true });
+    const fixture = findTaskFixture('avia-13236-short-bug');
+    if (fixture === undefined) throw new Error('Expected workflow fixture');
+    expect(
+      service.assembleTaskAtOperation(
+        fixture,
+        'tasker:v3:fixture:historical-run:planning:workflow-candidate:1',
+      ),
+    ).toMatchObject({ ok: true });
 
     const response = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
     expect(response.statusCode).toBe(200);
@@ -222,9 +297,49 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
       ({ id }) => id === 'avia-13236-short-bug',
     );
     expect(task).toMatchObject({
-      status: 'needs_attention',
-      attention: 'operator',
-      currentStage: 'Workflow has no active Temporal run',
+      status: 'backlog',
+      attention: 'none',
+      currentStage: 'Awaiting workflow generation',
+    });
+  });
+
+  it('projects only the workflow operation owned by the current Temporal run', async () => {
+    const { api, runs, service } = setup();
+    const taskReference = 'avia-13236-short-bug';
+    const fixture = findTaskFixture(taskReference);
+    if (fixture === undefined) throw new Error('Expected workflow fixture');
+
+    expect(
+      service.assembleTaskAtOperation(
+        fixture,
+        `tasker:v3:${taskReference}:old-run:planning:1:workflow-candidate:1`,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      await runs.start({
+        schemaVersion: 3,
+        taskReference,
+        settings: {
+          planReview: 'required',
+          planningStrategy: 'fast',
+          executionStart: 'automatic',
+        },
+      }),
+    ).toMatchObject({ ok: true });
+    const currentOperationId = `tasker:v3:${taskReference}:run:${taskReference}:planning:1:workflow-candidate:1`;
+    expect(service.assembleTaskAtOperation(fixture, currentOperationId)).toMatchObject({
+      ok: true,
+    });
+
+    const response = await api.inject({
+      method: 'GET',
+      url: `/api/workflows/${taskReference}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'ready',
+      view: { workflow: { proposalId: `proposal:${currentOperationId}` } },
     });
   });
 
@@ -246,18 +361,25 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
       url: '/api/operator/tasks/avia-13236-short-bug/projection',
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    const projection = OperatorWorkflowProjectionSchema.parse(response.json());
+    expect(projection).toMatchObject({
       schemaVersion: 4,
       taskReference: 'avia-13236-short-bug',
       status: 'waiting',
       activeRuntime: 'bootstrap',
-      graphHash: null,
-      stages: [
-        { key: 'bootstrap:workspace:1', label: 'Workspace' },
-        { key: 'bootstrap:investigation:2', label: 'Investigate' },
-        { key: 'bootstrap:planning:3', label: 'Plan', status: 'waiting' },
-      ],
+      graphHash: '2'.repeat(64),
     });
+    expect(projection.stages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'bootstrap:workspace:1', label: 'Workspace' }),
+        expect.objectContaining({ key: 'bootstrap:investigation:2', label: 'Investigate' }),
+        expect.objectContaining({
+          key: 'bootstrap:planning:3',
+          label: 'Plan',
+          status: 'waiting',
+        }),
+      ]),
+    );
   });
 
   it('routes plan approval to the active bootstrap wait', async () => {

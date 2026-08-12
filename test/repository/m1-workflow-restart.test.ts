@@ -1,10 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createM1WorkflowService,
+  M1_WORKFLOW_OPERATION_PROJECTION,
   WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
@@ -12,8 +14,13 @@ import {
   analyzeTaskFixture,
   findTaskFixture,
   WorkflowAnalyzerOutputSchema,
+  type TaskFixture,
+  type WorkflowAnalyzerOutput,
 } from '../../src/planning/index.js';
-import { WorkflowAnalyzerReceiptSchema } from '../../src/providers/contracts.js';
+import {
+  WorkflowAnalyzerReceiptSchema,
+  type WorkflowAnalyzerReceipt,
+} from '../../src/providers/contracts.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const directories: string[] = [];
@@ -24,126 +31,102 @@ const databasePath = (): string => {
   return join(directory, 'ledger.sqlite');
 };
 
+const workflowFixture = (): {
+  readonly fixture: TaskFixture;
+  readonly output: WorkflowAnalyzerOutput;
+} => {
+  const fixture = findTaskFixture('avia-13236-short-bug');
+  if (fixture === undefined) throw new Error('Expected workflow fixture');
+  const analyzed = analyzeTaskFixture(fixture);
+  if (!analyzed.ok) throw new Error('Expected deterministic proposal fixture');
+  return {
+    fixture,
+    output: WorkflowAnalyzerOutputSchema.parse({
+      assemblyDecisions: analyzed.value.assemblyDecisions,
+      source: analyzed.value.source,
+      verificationPlan: analyzed.value.verificationPlan,
+    }),
+  };
+};
+
+const receipt = (sessionId: string): WorkflowAnalyzerReceipt =>
+  WorkflowAnalyzerReceiptSchema.parse({
+    status: 'completed',
+    provider: 'codex_cli',
+    analyzerVersion: 'workflow-analyzer@2',
+    profile: 'test-analyzer',
+    profileSha256: 'b'.repeat(64),
+    cliVersion: 'codex-cli 0.120.0',
+    model: 'gpt-5.6-terra',
+    effort: 'medium',
+    serviceTier: 'fast',
+    sessionId,
+    promptHash: createHash('sha256').update(sessionId).digest('hex'),
+    durationMs: 1_250,
+    usage: {
+      inputTokens: 1_200,
+      cachedInputTokens: 800,
+      outputTokens: 240,
+      reasoningOutputTokens: 40,
+    },
+    hypotheticalApiCostUsd: null,
+  });
+
 afterEach(() => {
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-describe('M1 persisted workflow', () => {
-  it('deletes an obsolete operator projection instead of interpreting it', () => {
-    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
-    const ledger = openSqliteLedger({ filename: databasePath(), clock });
-    const saved = ledger.repository.transact({
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: 'm1_workflow',
-          projectionId: 'obsolete-workflow',
-          payload: { schemaVersion: 5, workflow: { stages: [] } },
-        },
-      ],
-    });
-    expect(saved.ok).toBe(true);
-
-    const service = createM1WorkflowService(ledger.repository, clock);
-    const read = service.read('obsolete-workflow');
-
-    expect(read).toEqual({ ok: true, value: null });
-    expect(ledger.repository.readProjection('m1_workflow', 'obsolete-workflow')).toBeNull();
-    ledger.close();
-  });
-
-  it('restores the same task-specific graph after a process restart', () => {
+describe('operation-scoped workflow persistence', () => {
+  it('restores only the exact workflow operation after process restart', () => {
     const filename = databasePath();
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const { fixture } = workflowFixture();
+    const operationId = 'tasker:v3:fixture:run-a:planning:workflow-candidate:1';
     const firstLedger = openSqliteLedger({ filename, clock });
-    const firstService = createM1WorkflowService(firstLedger.repository, clock);
-
-    const generated = firstService.generate('avia-14001-translation-component');
-    expect(generated.ok).toBe(true);
-    if (!generated.ok) return;
-
-    const originalHash = generated.value.view.workflow.graphHash;
-    expect(originalHash).not.toBeNull();
+    const generated = createM1WorkflowService(
+      firstLedger.repository,
+      clock,
+    ).assembleTaskAtOperation(fixture, operationId);
+    expect(generated).toMatchObject({ ok: true, value: { status: 'ready' } });
     firstLedger.close();
 
-    clock.advance(60_000);
     const restartedLedger = openSqliteLedger({ filename, clock });
-    const restartedService = createM1WorkflowService(restartedLedger.repository, clock);
-    const restored = restartedService.read('avia-14001-translation-component');
-
-    expect(restored.ok).toBe(true);
-    if (!restored.ok || restored.value === null) return;
-    expect(restored.value.view.workflow.graphHash).toBe(originalHash);
-    expect(restored.value.view.persistedAt).toBe('2026-08-01T12:00:00.000Z');
+    const restarted = createM1WorkflowService(restartedLedger.repository, clock);
+    expect(restarted.readPlanningOperation(fixture.fixtureId, operationId)).toEqual(generated);
     expect(
-      restartedLedger.repository.readSnapshot('snapshot:avia-14001-translation-component'),
-    ).not.toBeNull();
-    expect(
-      restartedLedger.repository.readArtifact('proposal:avia-14001-translation-component'),
-    ).not.toBeNull();
-    expect(
-      restartedLedger.repository.readArtifact('graph:avia-14001-translation-component'),
-    ).not.toBeNull();
+      restarted.readPlanningOperation(
+        fixture.fixtureId,
+        'tasker:v3:fixture:run-b:planning:workflow-candidate:1',
+      ),
+    ).toEqual({ ok: true, value: null });
+    expect(restartedLedger.repository.readSnapshot(`snapshot:${operationId}`)).not.toBeNull();
+    expect(restartedLedger.repository.readArtifact(`proposal:${operationId}`)).not.toBeNull();
+    expect(restartedLedger.repository.readArtifact(`graph:${operationId}`)).not.toBeNull();
     restartedLedger.close();
   });
 
-  it('persists the compiled graph without runtime presentation state', () => {
+  it('isolates two runs of the same task including graph and provider session', () => {
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
     const ledger = openSqliteLedger({ filename: databasePath(), clock });
     const service = createM1WorkflowService(ledger.repository, clock);
+    const { fixture, output } = workflowFixture();
+    const episodeA = 'tasker:v3:fixture:run-a:planning';
+    const episodeB = 'tasker:v3:fixture:run-b:planning';
+    const operationA = `${episodeA}:workflow-candidate:1`;
+    const operationB = `${episodeB}:workflow-candidate:1`;
 
-    const generated = service.generate('avia-13236-short-bug');
+    const runA = service.assembleFromAnalyzerOutputAtOperation(
+      fixture,
+      output,
+      receipt('session-run-a'),
+      operationA,
+    );
+    expect(runA).toMatchObject({ ok: true, value: { status: 'ready' } });
 
-    expect(generated.ok).toBe(true);
-    if (!generated.ok) return;
-    expect(generated.value.view.workflow.graphHash).toMatch(/^[a-f0-9]{64}$/u);
-    expect(generated.value.view.workflow.graph).toMatchObject({
-      root: { kind: 'sequence' },
-    });
-
-    ledger.close();
-  });
-
-  it('persists a rejected proposal without a graph or executable command', () => {
-    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
-    const ledger = openSqliteLedger({ filename: databasePath(), clock });
-    const service = createM1WorkflowService(ledger.repository, clock);
-
-    const generated = service.generate('invalid-unknown-step');
-
-    expect(generated.ok).toBe(true);
-    if (!generated.ok) return;
-    expect(generated.value.status).toBe('rejected');
-    expect(generated.value.view.task.status).toBe('workflow_rejected');
-    expect(generated.value.view.workflow.graph).toBeNull();
-    expect(generated.value.view.workflow.validatorReport.issues).toMatchObject([
-      { code: 'unknown_reference' },
-    ]);
-    expect(ledger.repository.readArtifact('graph:invalid-unknown-step')).toBeNull();
-
-    ledger.close();
-  });
-
-  it('projects a rejected candidate as corrected after a later valid workflow', () => {
-    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
-    const ledger = openSqliteLedger({ filename: databasePath(), clock });
-    const service = createM1WorkflowService(ledger.repository, clock);
-    const fixture = findTaskFixture('avia-13236-short-bug');
-    if (fixture === undefined) throw new Error('Expected workflow fixture');
-    const analyzed = analyzeTaskFixture(fixture);
-    if (!analyzed.ok) throw new Error('Expected a workflow proposal fixture');
-    const output = WorkflowAnalyzerOutputSchema.parse({
-      assemblyDecisions: analyzed.value.assemblyDecisions,
-      source: analyzed.value.source,
-      verificationPlan: analyzed.value.verificationPlan,
-    });
-    if (output.source.root.kind !== 'sequence') {
-      throw new Error('Expected a sequence proposal fixture');
-    }
-    const sourceRoot = output.source.root;
-    const invalidOutput = WorkflowAnalyzerOutputSchema.parse({
+    if (output.source.root.kind !== 'sequence') throw new Error('Expected sequence proposal');
+    const runBOutput = WorkflowAnalyzerOutputSchema.parse({
       ...output,
       source: {
         ...output.source,
@@ -151,153 +134,81 @@ describe('M1 persisted workflow', () => {
           ...output.source.root,
           children: [
             { kind: 'step', id: 'unknown-step', uses: 'unknown.step@1', with: {} },
-            ...sourceRoot.children,
+            ...output.source.root.children,
           ],
         },
       },
     });
-    const receipt = WorkflowAnalyzerReceiptSchema.parse({
-      status: 'completed',
-      provider: 'codex_cli',
-      analyzerVersion: 'workflow-analyzer@2',
-      profile: 'test-analyzer',
-      profileSha256: 'b'.repeat(64),
-      cliVersion: 'codex-cli 0.120.0',
-      model: 'gpt-5.6-terra',
-      effort: 'medium',
-      serviceTier: 'fast',
-      sessionId: 'thread-correction',
-      promptHash: 'a'.repeat(64),
-      durationMs: 1250,
-      usage: {
-        inputTokens: 1200,
-        cachedInputTokens: 800,
-        outputTokens: 240,
-        reasoningOutputTokens: 40,
-      },
-      hypotheticalApiCostUsd: null,
-    });
-
-    const rejected = service.generateFromAnalyzerOutput(fixture.fixtureId, invalidOutput, receipt);
-    expect(rejected).toMatchObject({ ok: true, value: { status: 'rejected' } });
-    const corrected = service.reviseFromAnalyzerOutputForTask(
+    const runB = service.assembleFromAnalyzerOutputAtOperation(
       fixture,
-      output,
-      { ...receipt, sessionId: 'thread-corrected', promptHash: 'c'.repeat(64) },
-      'tasker:test:corrected-candidate',
+      runBOutput,
+      receipt('session-run-b'),
+      operationB,
     );
-    expect(corrected).toMatchObject({ ok: true, value: { status: 'ready' } });
-    const activity = service.readActivity(fixture.fixtureId);
-    expect(activity.ok).toBe(true);
-    if (!activity.ok) return;
-    expect(
-      activity.value.entries.some(
-        (entry) => entry.level === 'info' && entry.title === 'Workflow candidate corrected',
-      ),
-    ).toBe(true);
+    expect(runB).toMatchObject({ ok: true, value: { status: 'rejected' } });
 
+    expect(service.readPlanningOperation(fixture.fixtureId, operationA)).toEqual(runA);
+    expect(service.readPlanningOperation(fixture.fixtureId, operationB)).toEqual(runB);
+    expect(service.readActivity(fixture.fixtureId, episodeA)).toMatchObject({
+      ok: true,
+      value: { providerSession: { sessionId: 'session-run-a' } },
+    });
+    expect(service.readActivity(fixture.fixtureId, episodeB)).toMatchObject({
+      ok: true,
+      value: { providerSession: { sessionId: 'session-run-b' } },
+    });
+    expect(
+      ledger.repository.readProjection(M1_WORKFLOW_OPERATION_PROJECTION, operationA)?.payload,
+    ).toMatchObject({ workflow: { status: 'valid' } });
+    expect(
+      ledger.repository.readProjection(M1_WORKFLOW_OPERATION_PROJECTION, operationB)?.payload,
+    ).toMatchObject({ workflow: { status: 'rejected' } });
+    expect(ledger.repository.readProjection('m1_workflow', fixture.fixtureId)).toBeNull();
+    expect(ledger.repository.readProjection('m1_analyzer', fixture.fixtureId)).toBeNull();
     ledger.close();
   });
 
-  it('restores provider provenance without re-planning an existing workflow', () => {
-    const filename = databasePath();
+  it('deduplicates an exact operation without accepting another run as its result', () => {
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
-    const fixture = findTaskFixture('avia-13236-short-bug');
-    if (fixture === undefined) throw new Error('Expected workflow fixture');
-    const analyzed = analyzeTaskFixture(fixture);
-    if (!analyzed.ok) throw new Error('Expected deterministic proposal fixture');
-
-    const output = WorkflowAnalyzerOutputSchema.parse({
-      assemblyDecisions: analyzed.value.assemblyDecisions,
-      source: analyzed.value.source,
-      verificationPlan: analyzed.value.verificationPlan,
-    });
-    const receipt = WorkflowAnalyzerReceiptSchema.parse({
-      status: 'completed',
-      provider: 'codex_cli',
-      analyzerVersion: 'workflow-analyzer@2',
-      profile: 'test-analyzer',
-      profileSha256: 'b'.repeat(64),
-      cliVersion: 'codex-cli 0.120.0',
-      model: 'gpt-5.6-terra',
-      effort: 'medium',
-      serviceTier: 'fast',
-      sessionId: 'thread-first',
-      promptHash: 'a'.repeat(64),
-      durationMs: 1250,
-      usage: {
-        inputTokens: 1200,
-        cachedInputTokens: 800,
-        outputTokens: 240,
-        reasoningOutputTokens: 40,
-      },
-      hypotheticalApiCostUsd: null,
-    });
-    const firstLedger = openSqliteLedger({ filename, clock });
-    const firstService = createM1WorkflowService(firstLedger.repository, clock);
-
-    const generated = firstService.generateFromAnalyzerOutput(fixture.fixtureId, output, receipt);
-    expect(generated.ok).toBe(true);
-    expect(firstLedger.repository.listEvents(`intake:${fixture.fixtureId}`)).toHaveLength(4);
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const service = createM1WorkflowService(ledger.repository, clock);
+    const { fixture, output } = workflowFixture();
+    const operationId = 'tasker:v3:fixture:run-provider:planning:workflow-candidate:1';
+    const first = service.assembleFromAnalyzerOutputAtOperation(
+      fixture,
+      output,
+      receipt('session-first'),
+      operationId,
+    );
+    const duplicate = service.assembleFromAnalyzerOutputAtOperation(
+      fixture,
+      output,
+      receipt('session-ignored'),
+      operationId,
+    );
+    expect(duplicate).toEqual(first);
     expect(
-      firstLedger.repository.readArtifact(`analyzer-receipt:${fixture.fixtureId}`),
-    ).not.toBeNull();
-    firstLedger.close();
-
-    const restartedLedger = openSqliteLedger({ filename, clock });
-    const restartedService = createM1WorkflowService(restartedLedger.repository, clock);
-    const activity = restartedService.readActivity(fixture.fixtureId);
-    const duplicate = restartedService.generateFromAnalyzerOutput(fixture.fixtureId, output, {
-      ...receipt,
-      sessionId: 'thread-second',
-      promptHash: 'b'.repeat(64),
-    });
-
-    expect(activity).toMatchObject({
+      service.readActivity(fixture.fixtureId, 'tasker:v3:fixture:run-provider:planning'),
+    ).toMatchObject({
       ok: true,
-      value: { providerSession: { sessionId: 'thread-first' } },
+      value: { providerSession: { sessionId: 'session-first' } },
     });
-    if (!activity.ok) return;
-    expect(activity.value.entries).toHaveLength(4);
-    expect(activity.value.entries[2]).toMatchObject({
-      source: 'agent',
-      title: 'Task and repository analyzed',
-    });
-    expect(duplicate).toEqual(generated);
-    expect(
-      restartedLedger.repository.readProjection('m1_analyzer', fixture.fixtureId)?.payload,
-    ).toMatchObject({ sessionId: 'thread-first' });
-    expect(restartedLedger.repository.listEvents(`intake:${fixture.fixtureId}`)).toHaveLength(4);
-
-    restartedLedger.close();
+    ledger.close();
   });
 
   it('restores an immutable dynamic continuation subject after restart', () => {
     const filename = databasePath();
     const clock = makeAdjustableClock('2026-08-03T12:00:00.000Z');
-    const fixture = findTaskFixture('avia-13236-short-bug');
-    if (fixture === undefined) throw new Error('Expected workflow fixture');
-    const taskReference = 'continuation-avia-13236-short-bug-1';
+    const { fixture } = workflowFixture();
+    const taskReference = 'continuation-avia-13236-short-bug-run-scope-1';
     const subject = {
       schemaVersion: 1 as const,
       repositoryPath: '/managed/twiket-ui-kit',
-      task: {
-        ...fixture,
-        fixtureId: taskReference,
-        repository: 'twiket/ui-kit',
-      },
-      taskSnapshot: {
-        origin: 'workflow_continuation',
-        parentTaskReference: fixture.fixtureId,
-      },
+      task: { ...fixture, fixtureId: taskReference, repository: 'twiket/ui-kit' },
+      taskSnapshot: { origin: 'workflow_continuation', parentTaskReference: fixture.fixtureId },
     };
     const firstLedger = openSqliteLedger({ filename, clock });
     const firstService = createM1WorkflowService(firstLedger.repository, clock);
-
-    expect(firstService.saveGenerationSubject(taskReference, subject)).toEqual({
-      ok: true,
-      value: subject,
-    });
     expect(firstService.saveGenerationSubject(taskReference, subject)).toEqual({
       ok: true,
       value: subject,
@@ -306,13 +217,12 @@ describe('M1 persisted workflow', () => {
 
     const restartedLedger = openSqliteLedger({ filename, clock });
     const restartedService = createM1WorkflowService(restartedLedger.repository, clock);
-    const restartedSource = new WorkflowGenerationSubjectSource(
+    const source = new WorkflowGenerationSubjectSource(
       '/fixture-repository',
       undefined,
       restartedService,
     );
-
-    expect(restartedSource.resolve(taskReference)).toEqual({ ok: true, value: subject });
+    expect(source.resolve(taskReference)).toEqual({ ok: true, value: subject });
     expect(
       restartedService.saveGenerationSubject(taskReference, {
         ...subject,
@@ -320,12 +230,8 @@ describe('M1 persisted workflow', () => {
       }),
     ).toMatchObject({
       ok: false,
-      error: {
-        kind: 'store_failure',
-        error: { kind: 'generation_subject_conflict', taskReference },
-      },
+      error: { kind: 'store_failure', error: { kind: 'generation_subject_conflict' } },
     });
-
     restartedLedger.close();
   });
 });

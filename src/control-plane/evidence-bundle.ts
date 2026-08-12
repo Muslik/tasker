@@ -19,7 +19,7 @@ import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 
-export const EVIDENCE_BUNDLE_PROJECTION = 'evidence_bundle_by_task';
+export const EVIDENCE_BUNDLE_PROJECTION = 'evidence_bundle_by_scope';
 
 export interface EvidenceBundleRecord {
   readonly reference: EvidenceBundleReference;
@@ -31,7 +31,7 @@ export type EvidenceBundleStoreError =
   | { readonly kind: 'bundle_not_found'; readonly artifactId: string }
   | {
       readonly kind: 'bundle_reference_corrupt';
-      readonly taskReference: string;
+      readonly scopeId: string;
       readonly issues: readonly string[];
     }
   | {
@@ -60,7 +60,7 @@ export type EvidenceBundleStoreError =
     };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
-const aggregateIdFor = (taskReference: string): string => `evidence-bundle:${taskReference}`;
+const aggregateIdFor = (scopeId: string): string => `evidence-bundle:${scopeId}`;
 const MAX_INLINE_EXTERNAL_EVIDENCE_BYTES = 64 * 1024;
 
 export class EvidenceBundleStore {
@@ -70,15 +70,15 @@ export class EvidenceBundleStore {
   ) {}
 
   public readLatest(
-    taskReference: string,
+    scopeId: string,
   ): Outcome<EvidenceBundleRecord | null, EvidenceBundleStoreError> {
-    const projection = this.ledger.readProjection(EVIDENCE_BUNDLE_PROJECTION, taskReference);
+    const projection = this.ledger.readProjection(EVIDENCE_BUNDLE_PROJECTION, scopeId);
     if (projection === null) return ok(null);
     const parsed = EvidenceBundleReferenceSchema.safeParse(projection.payload);
     if (!parsed.success) {
       return err({
         kind: 'bundle_reference_corrupt',
-        taskReference,
+        scopeId,
         issues: parsed.error.issues.map(
           (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
         ),
@@ -157,6 +157,7 @@ export class EvidenceBundleStore {
   }
 
   public record(
+    scopeId: string,
     taskReference: string,
     inputFingerprint: string,
     entriesInput: readonly EvidenceEntry[],
@@ -164,7 +165,7 @@ export class EvidenceBundleStore {
     const entries = entriesInput.map((entry) => EvidenceEntrySchema.parse(entry));
     let lastConflict: LedgerConflict | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const latest = this.readLatest(taskReference);
+      const latest = this.readLatest(scopeId);
       if (!latest.ok) return latest;
       if (latest.value?.bundle.inputFingerprint === inputFingerprint) return ok(latest.value);
 
@@ -177,7 +178,8 @@ export class EvidenceBundleStore {
         if (!mergedEntries.has(entry.evidenceId)) mergedEntries.set(entry.evidenceId, entry);
       }
       const bundle = EvidenceBundleSchema.parse({
-        schemaVersion: 1,
+        schemaVersion: 2,
+        scopeId,
         taskReference,
         revision,
         inputFingerprint,
@@ -185,17 +187,17 @@ export class EvidenceBundleStore {
         entries: [...mergedEntries.values()],
         createdAt,
       });
-      const artifactId = `${aggregateIdFor(taskReference)}:r${String(revision)}:${inputFingerprint.slice(0, 16)}`;
+      const artifactId = `${aggregateIdFor(scopeId)}:r${String(revision)}:${inputFingerprint.slice(0, 16)}`;
       const saved = this.ledger.transact({
         aggregate: {
-          aggregateId: aggregateIdFor(taskReference),
+          aggregateId: aggregateIdFor(scopeId),
           expectedVersion: revision - 1,
           events: [
             {
               eventId: `event:${artifactId}`,
               eventType: 'EvidenceBundleRevisionRecorded',
               eventSchemaVersion: 1,
-              payload: asJson({ artifactId, inputFingerprint, revision }),
+              payload: asJson({ artifactId, inputFingerprint, revision, scopeId, taskReference }),
               actor: 'evidence_recorder',
             },
           ],
@@ -206,7 +208,7 @@ export class EvidenceBundleStore {
             artifactKind: 'evidence_bundle',
             storageUri: `ledger://artifacts/${encodeURIComponent(artifactId)}`,
             payload: asJson(bundle),
-            metadata: asJson({ taskReference, revision, inputFingerprint }),
+            metadata: asJson({ scopeId, taskReference, revision, inputFingerprint }),
             createdAt,
             ...(latest.value === null
               ? {}
@@ -217,7 +219,7 @@ export class EvidenceBundleStore {
           {
             kind: 'upsert',
             projectionType: EVIDENCE_BUNDLE_PROJECTION,
-            projectionId: taskReference,
+            projectionId: scopeId,
             payload: asJson({
               artifactId,
               checksum: checksumString(JSON.stringify(bundle)),
@@ -253,7 +255,7 @@ export class EvidenceBundleStore {
   }
 
   public appendPlanningEvidence(
-    taskReference: string,
+    baseReference: EvidenceBundleReference,
     operationId: string,
     capturesInput: readonly PlanningEvidenceCapture[],
   ): Outcome<EvidenceBundleRecord, EvidenceBundleStoreError> {
@@ -290,16 +292,21 @@ export class EvidenceBundleStore {
         }),
       );
     }
-    const latest = this.readLatest(taskReference);
-    if (!latest.ok) return latest;
-    const evidenceIds = new Set(latest.value?.bundle.entries.map(({ evidenceId }) => evidenceId));
+    const base = this.read(baseReference);
+    if (!base.ok) return base;
+    const evidenceIds = new Set(base.value.bundle.entries.map(({ evidenceId }) => evidenceId));
     for (const entry of entries) evidenceIds.add(entry.evidenceId);
     const inputFingerprint = checksumString(JSON.stringify([...evidenceIds].sort()));
-    return this.record(taskReference, inputFingerprint, entries);
+    return this.record(
+      base.value.bundle.scopeId,
+      base.value.bundle.taskReference,
+      inputFingerprint,
+      entries,
+    );
   }
 
   public appendInvestigationEvidence(
-    taskReference: string,
+    baseReference: EvidenceBundleReference,
     operationId: string,
     receipts: readonly BlockReceipt[],
   ): Outcome<EvidenceBundleRecord, EvidenceBundleStoreError> {
@@ -318,12 +325,17 @@ export class EvidenceBundleStore {
         contentSha256,
       });
     });
-    const latest = this.readLatest(taskReference);
-    if (!latest.ok) return latest;
-    const evidenceIds = new Set(latest.value?.bundle.entries.map(({ evidenceId }) => evidenceId));
+    const base = this.read(baseReference);
+    if (!base.ok) return base;
+    const evidenceIds = new Set(base.value.bundle.entries.map(({ evidenceId }) => evidenceId));
     for (const entry of entries) evidenceIds.add(entry.evidenceId);
     const inputFingerprint = checksumString(JSON.stringify([...evidenceIds].sort()));
-    return this.record(taskReference, inputFingerprint, entries);
+    return this.record(
+      base.value.bundle.scopeId,
+      base.value.bundle.taskReference,
+      inputFingerprint,
+      entries,
+    );
   }
 
   private recordEvidenceBody(
@@ -512,6 +524,6 @@ export class ContextDiscoveryService {
     const inputFingerprint = checksumString(
       JSON.stringify(entries.map((entry) => entry.evidenceId).sort()),
     );
-    return this.store.record(input.taskReference, inputFingerprint, entries);
+    return this.store.record(input.operationId, input.taskReference, inputFingerprint, entries);
   }
 }

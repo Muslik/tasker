@@ -76,7 +76,7 @@ import type {
   PlanningEvidenceReadError,
 } from './planning-evidence.js';
 
-export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_task';
+export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_episode';
 export {
   ImplementationPlanningRecordSchema,
   PlanningFailureViewSchema,
@@ -112,18 +112,8 @@ export type ImplementationPlanningStoreError =
     };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
-const aggregateIdFor = (taskReference: string): string => `implementation-plan:${taskReference}`;
-const planningEpisodeIdFor = (commandId: string | null): string | null => {
-  if (commandId === null) return null;
-  const episodeCommand = /^(.*:planning-episode:\d+):command:\d+$/u.exec(commandId);
-  return episodeCommand?.[1] ?? commandId;
-};
-const planningEpisodePayloadFor = (
-  commandId: string | null,
-): Readonly<Record<string, never>> | { readonly episodeId: string } => {
-  const episodeId = planningEpisodeIdFor(commandId);
-  return episodeId === null ? {} : { episodeId };
-};
+const aggregateIdFor = (planningEpisodeId: string): string =>
+  `implementation-plan:${planningEpisodeId}`;
 
 const PlanningActivityEventPayloadSchema = z.looseObject({
   attempt: z.number().int().positive(),
@@ -169,28 +159,31 @@ export class ImplementationPlanningStore {
   }
 
   public read(
-    taskReference: string,
+    planningEpisodeId: string,
   ): Outcome<ImplementationPlanningRecord | null, ImplementationPlanningStoreError> {
-    const projection = this.ledger.readProjection(IMPLEMENTATION_PLAN_PROJECTION, taskReference);
+    const projection = this.ledger.readProjection(
+      IMPLEMENTATION_PLAN_PROJECTION,
+      planningEpisodeId,
+    );
     if (projection === null) return ok(null);
     const parsed = ImplementationPlanningRecordSchema.safeParse(projection.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
           kind: 'projection_corrupt',
-          taskReference,
+          taskReference: planningEpisodeId,
           issues: parsed.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
   }
 
-  public listEvents(taskReference?: string): readonly EventRecord[] {
-    return taskReference === undefined
+  public listEvents(planningEpisodeId?: string): readonly EventRecord[] {
+    return planningEpisodeId === undefined
       ? this.ledger
           .listEvents()
           .filter((event) => event.aggregateId.startsWith('implementation-plan:'))
-      : this.ledger.listEvents(aggregateIdFor(taskReference));
+      : this.ledger.listEvents(aggregateIdFor(planningEpisodeId));
   }
 
   public persistRunSnapshot(
@@ -294,6 +287,7 @@ export class ImplementationPlanningStore {
 
   public begin(input: {
     readonly taskReference: string;
+    readonly planningEpisodeId: string;
     readonly commandId: string | null;
     readonly planningSnapshot: PlanningSnapshotReference | null;
     readonly evidenceBundle: EvidenceBundleReference;
@@ -305,14 +299,15 @@ export class ImplementationPlanningStore {
     readonly previousDecision:
       Extract<ImplementationPlanningRecord, { readonly status: 'ready' }>['decision'] | null;
   }): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
-    const current = this.read(input.taskReference);
+    const current = this.read(input.planningEpisodeId);
     if (!current.ok) return current;
     const attempt = (current.value?.attempt ?? 0) + 1;
     const startedAt = this.clock.now();
     const record = ImplementationPlanningRecordSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'planning',
       taskReference: input.taskReference,
+      planningEpisodeId: input.planningEpisodeId,
       commandId: input.commandId,
       transcriptId: input.commandId === null ? null : planningTranscriptIdFor(input.commandId),
       planningSnapshot: input.planningSnapshot,
@@ -335,7 +330,7 @@ export class ImplementationPlanningStore {
       attempt,
       requestedStrategy: input.requestedStrategy,
       selectedStrategy: input.selectedStrategy,
-      ...planningEpisodePayloadFor(input.commandId),
+      episodeId: input.planningEpisodeId,
     });
   }
 
@@ -347,10 +342,11 @@ export class ImplementationPlanningStore {
     },
     materialized: {
       readonly workflowHash: string;
+      readonly workflowOperationId: string;
       readonly executionSnapshot: PlanningSnapshotReference;
     } | null,
   ): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
@@ -362,7 +358,7 @@ export class ImplementationPlanningStore {
     if (result.decision.status === 'ready' && materialized === null) {
       throw new Error('Ready planning decision has no validated execution workflow');
     }
-    const artifactId = `implementation-plan:${planning.taskReference}:attempt-${String(planning.attempt)}`;
+    const artifactId = `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}`;
     const { pendingEvidence, validatedCandidate, ...completedPlanning } = current.value;
     void pendingEvidence;
     void validatedCandidate;
@@ -376,6 +372,7 @@ export class ImplementationPlanningStore {
       ...(result.decision.status === 'ready'
         ? {
             workflowHash: materialized?.workflowHash,
+            workflowOperationId: materialized?.workflowOperationId,
             executionSnapshot: materialized?.executionSnapshot,
           }
         : {}),
@@ -401,7 +398,7 @@ export class ImplementationPlanningStore {
         attempt: planning.attempt,
         strategy: planning.selectedStrategy,
         artifactId,
-        ...planningEpisodePayloadFor(planning.commandId),
+        episodeId: planning.planningEpisodeId,
       },
       {
         artifactId,
@@ -432,7 +429,7 @@ export class ImplementationPlanningStore {
     Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     ImplementationPlanningStoreError
   > {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
@@ -450,7 +447,7 @@ export class ImplementationPlanningStore {
     if (updated.status !== 'planning') {
       throw new Error('Validated workflow candidate changed the planning state');
     }
-    const artifactId = `implementation-plan:${planning.taskReference}:attempt-${String(planning.attempt)}:validated-candidate`;
+    const artifactId = `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}:validated-candidate`;
     const saved = this.persist(
       updated,
       'ImplementationWorkflowCandidateValidated',
@@ -459,7 +456,7 @@ export class ImplementationPlanningStore {
         attempt: planning.attempt,
         workflowHash: candidate.workflowHash,
         artifactId,
-        ...planningEpisodePayloadFor(planning.commandId),
+        episodeId: planning.planningEpisodeId,
       },
       {
         artifactId,
@@ -489,7 +486,7 @@ export class ImplementationPlanningStore {
     Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     ImplementationPlanningStoreError
   > {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
@@ -506,7 +503,7 @@ export class ImplementationPlanningStore {
     if (updated.status !== 'planning') {
       throw new Error('Planning evidence update changed the planning state');
     }
-    const artifactId = `implementation-plan:${planning.taskReference}:attempt-${String(planning.attempt)}:evidence-round-${String(pending.round)}`;
+    const artifactId = `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}:evidence-round-${String(pending.round)}`;
     const saved = this.persist(
       updated,
       'PlanningEvidenceRequested',
@@ -517,7 +514,7 @@ export class ImplementationPlanningStore {
         operationId: pending.operationId,
         requestCount: pending.requests.length,
         artifactId,
-        ...planningEpisodePayloadFor(planning.commandId),
+        episodeId: planning.planningEpisodeId,
       },
       {
         artifactId,
@@ -549,7 +546,7 @@ export class ImplementationPlanningStore {
     Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     ImplementationPlanningStoreError
   > {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
@@ -584,7 +581,7 @@ export class ImplementationPlanningStore {
       operationId: round.operationId,
       evidenceBundleArtifactId: evidenceBundle.artifactId,
       evidenceBundleRevision: evidenceBundle.revision,
-      ...planningEpisodePayloadFor(planning.commandId),
+      episodeId: planning.planningEpisodeId,
     });
     if (!saved.ok) return saved;
     if (saved.value.status !== 'planning') {
@@ -604,7 +601,7 @@ export class ImplementationPlanningStore {
     Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     ImplementationPlanningStoreError
   > {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
@@ -622,7 +619,7 @@ export class ImplementationPlanningStore {
       taskReference: planning.taskReference,
       attempt: planning.attempt,
       issues: [...issues],
-      ...planningEpisodePayloadFor(planning.commandId),
+      episodeId: planning.planningEpisodeId,
     });
     if (!saved.ok) return saved;
     if (saved.value.status !== 'planning') {
@@ -635,7 +632,7 @@ export class ImplementationPlanningStore {
     planning: Extract<ImplementationPlanningRecord, { readonly status: 'needs_clarification' }>,
     answers: readonly PlanningQuestionAnswer[],
   ): Outcome<{ readonly artifactId: string }, ImplementationPlanningStoreError> {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (
       current.value?.status !== 'needs_clarification' ||
@@ -647,7 +644,7 @@ export class ImplementationPlanningStore {
       });
     }
 
-    const artifactId = `planning-answers:${planning.taskReference}:attempt-${String(planning.attempt)}`;
+    const artifactId = `planning-answers:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}`;
     const payload = PlanningClarificationAnswerCommandSchema.parse({ answers });
     const existing = this.ledger.readArtifact(artifactId);
     if (existing !== null) {
@@ -657,7 +654,7 @@ export class ImplementationPlanningStore {
         : err({ kind: 'clarification_answer_conflict', taskReference: planning.taskReference });
     }
 
-    const aggregateId = aggregateIdFor(planning.taskReference);
+    const aggregateId = aggregateIdFor(planning.planningEpisodeId);
     const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
     const recordedAt = this.clock.now();
     const result = this.ledger.transact({
@@ -674,7 +671,7 @@ export class ImplementationPlanningStore {
               attempt: planning.attempt,
               artifactId,
               questionCount: planning.decision.questions.length,
-              ...planningEpisodePayloadFor(planning.commandId),
+              episodeId: planning.planningEpisodeId,
             }),
             actor: 'operator',
           },
@@ -712,7 +709,7 @@ export class ImplementationPlanningStore {
     failure: ImplementationPlannerFailure,
     receipt: ImplementationPlannerDecisionSuccess['receipt'] | null = null,
   ): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
-    const current = this.read(planning.taskReference);
+    const current = this.read(planning.planningEpisodeId);
     if (!current.ok) return current;
     if (current.value?.status !== 'planning' || current.value.attempt !== planning.attempt) {
       return err({ kind: 'planning_attempt_not_current', taskReference: planning.taskReference });
@@ -730,7 +727,7 @@ export class ImplementationPlanningStore {
     if (record.status !== 'failed') {
       throw new Error('Planning failure did not produce a failed record');
     }
-    const artifactId = `implementation-plan:${planning.taskReference}:attempt-${String(planning.attempt)}:failed-provider-output`;
+    const artifactId = `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}:failed-provider-output`;
     return this.persist(
       record,
       'ImplementationPlanningFailed',
@@ -739,7 +736,7 @@ export class ImplementationPlanningStore {
         attempt: planning.attempt,
         strategy: planning.selectedStrategy,
         failureKind: failure.kind,
-        ...planningEpisodePayloadFor(planning.commandId),
+        episodeId: planning.planningEpisodeId,
         ...(receipt === null ? {} : { artifactId }),
       },
       receipt === null
@@ -774,7 +771,7 @@ export class ImplementationPlanningStore {
       readonly createdAt: string;
     },
   ): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
-    const aggregateId = aggregateIdFor(record.taskReference);
+    const aggregateId = aggregateIdFor(record.planningEpisodeId);
     const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
     const result = this.ledger.transact({
       aggregate: {
@@ -794,7 +791,7 @@ export class ImplementationPlanningStore {
         {
           kind: 'upsert',
           projectionType: IMPLEMENTATION_PLAN_PROJECTION,
-          projectionId: record.taskReference,
+          projectionId: record.planningEpisodeId,
           payload: asJson(record),
         },
       ],
@@ -1040,6 +1037,8 @@ export class ImplementationPlanningCoordinator {
   public createExecutionSnapshot(
     taskReference: string,
     expectedWorkflowHash: string,
+    workflowOperationId: string,
+    acceptedPlan: JsonValue,
     evidenceBundle: EvidenceBundleReference,
     workspace: PlanningSnapshotWorkspace,
     planningContextReference: PlanningSnapshotReference,
@@ -1054,7 +1053,7 @@ export class ImplementationPlanningCoordinator {
         actualReference: workspace.reference,
       });
     }
-    const workflow = this.workflows.read(taskReference);
+    const workflow = this.workflows.readPlanningOperation(taskReference, workflowOperationId);
     if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
     if (workflow.value?.status !== 'ready') {
       return err({ kind: 'workflow_not_ready', taskReference });
@@ -1089,6 +1088,7 @@ export class ImplementationPlanningCoordinator {
       task: subject.value.task,
       taskSnapshot: subject.value.taskSnapshot,
       workflow: JsonValueSchema.parse(workflow.value.view.workflow),
+      acceptedPlan,
       evidenceBundle,
       repository: {
         workspaceId: workspace.workspaceId,
@@ -1108,16 +1108,16 @@ export class ImplementationPlanningCoordinator {
   }
 
   public read(
-    taskReference: string,
+    planningEpisodeId: string,
   ): Outcome<ImplementationPlanningRecord | null, ImplementationPlanningError> {
-    const record = this.store.read(taskReference);
+    const record = this.store.read(planningEpisodeId);
     return record.ok ? record : err({ kind: 'store', error: record.error });
   }
 
   public readTranscript(
-    taskReference: string,
+    planningEpisodeId: string,
   ): Outcome<PlanningTranscriptView | null, ImplementationPlanningError> {
-    const planning = this.store.read(taskReference);
+    const planning = this.store.read(planningEpisodeId);
     if (!planning.ok) return err({ kind: 'store', error: planning.error });
     if (planning.value === null || planning.value.commandId === null) return ok(null);
     const transcript = this.transcripts.read(planning.value.commandId);
@@ -1128,6 +1128,7 @@ export class ImplementationPlanningCoordinator {
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
     commandId: string,
+    planningEpisodeId: string,
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
     operatorGuidance: string | null = null,
@@ -1139,6 +1140,7 @@ export class ImplementationPlanningCoordinator {
       taskReference,
       requestedStrategy,
       commandId,
+      planningEpisodeId,
       snapshotReference,
       evidenceReference,
       operatorGuidance,
@@ -1153,6 +1155,7 @@ export class ImplementationPlanningCoordinator {
     taskReference: string,
     answersInput: readonly PlanningQuestionAnswer[],
     commandId: string,
+    planningEpisodeId: string,
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
@@ -1170,7 +1173,7 @@ export class ImplementationPlanningCoordinator {
         }),
       );
     }
-    const current = this.store.read(taskReference);
+    const current = this.store.read(planningEpisodeId);
     if (!current.ok) return Promise.resolve(err({ kind: 'store', error: current.error }));
     if (current.value?.commandId === commandId) {
       if (current.value.status === 'failed' || current.value.status === 'planning') {
@@ -1178,6 +1181,7 @@ export class ImplementationPlanningCoordinator {
           taskReference,
           current.value.requestedStrategy,
           commandId,
+          planningEpisodeId,
           snapshotReference,
           evidenceReference,
           current.value.operatorGuidance,
@@ -1241,6 +1245,7 @@ export class ImplementationPlanningCoordinator {
       taskReference,
       current.value.requestedStrategy,
       commandId,
+      planningEpisodeId,
       snapshotReference,
       evidenceReference,
       guidance,
@@ -1265,15 +1270,22 @@ export class ImplementationPlanningCoordinator {
     },
     ImplementationPlanningError
   > {
-    const workflow = this.workflows.read(record.taskReference);
-    if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
+    const snapshot = this.store.readRunSnapshot(record.executionSnapshot);
+    if (!snapshot.ok) return err({ kind: 'store', error: snapshot.error });
     if (
-      workflow.value?.status !== 'ready' ||
-      workflow.value.view.workflow.graphHash !== record.workflowHash
+      snapshot.value.kind !== 'execution' ||
+      snapshot.value.workflowHash !== record.workflowHash
     ) {
       return err({ kind: 'workflow_not_ready', taskReference: record.taskReference });
     }
-    const graph = CompiledWorkflowSchema.safeParse(workflow.value.view.workflow.graph);
+    const workflow = z
+      .object({ graph: JsonValueSchema })
+      .loose()
+      .safeParse(snapshot.value.workflow);
+    if (!workflow.success) {
+      return err({ kind: 'workflow_not_ready', taskReference: record.taskReference });
+    }
+    const graph = CompiledWorkflowSchema.safeParse(workflow.data.graph);
     if (!graph.success) {
       return err({ kind: 'workflow_not_ready', taskReference: record.taskReference });
     }
@@ -1286,49 +1298,10 @@ export class ImplementationPlanningCoordinator {
   }
 
   public decorateTask(task: OperatorTaskSummary): OperatorTaskSummary {
-    const planning = this.store.read(task.id);
-    if (!planning.ok || planning.value === null) return task;
-    const record = planning.value;
-    if (record.status === 'planning') {
-      return {
-        ...task,
-        status: 'running',
-        attention: 'none',
-        currentStage: `Planning · ${record.selectedStrategy}`,
-        updatedAt: record.startedAt,
-      };
-    }
-    if (record.status === 'failed') {
-      return {
-        ...task,
-        status: 'needs_attention',
-        attention: 'operator',
-        currentStage: `Planning failed · ${record.failure.kind}`,
-        updatedAt: record.completedAt,
-      };
-    }
-    if (record.status === 'needs_clarification') {
-      return {
-        ...task,
-        status: 'needs_attention',
-        attention: 'operator',
-        currentStage: 'Planning needs clarification',
-        updatedAt: record.completedAt,
-      };
-    }
-    if (record.status === 'investigation_required') {
-      return {
-        ...task,
-        status: 'needs_attention',
-        attention: 'operator',
-        currentStage: 'Pre-plan investigation required',
-        updatedAt: record.completedAt,
-      };
-    }
     return task;
   }
 
-  public readActivity(taskReference: string): OperatorActivityResponse['entries'] {
+  public readActivity(planningEpisodeId: string): OperatorActivityResponse['entries'] {
     const entries: Array<OperatorActivityResponse['entries'][number]> = [];
     const episodes = new Map<string, PlanningActivityEpisode>();
     let legacyEpisodeId: string | null = null;
@@ -1370,7 +1343,7 @@ export class ImplementationPlanningCoordinator {
       if (terminal && explicitEpisodeId === undefined) legacyEpisodeId = null;
     };
 
-    const planningEvents = this.store.listEvents(taskReference);
+    const planningEvents = this.store.listEvents(planningEpisodeId);
     for (const event of planningEvents) {
       switch (event.eventType) {
         case 'ImplementationPlanningStarted':
@@ -1477,24 +1450,32 @@ export class ImplementationPlanningCoordinator {
     return this.store
       .listEvents()
       .filter((event) => event.sequence > sequence)
-      .map((event) =>
-        OperatorStreamEventSchema.parse({
-          sequence: event.sequence,
-          fixtureId: event.aggregateId.slice('implementation-plan:'.length),
-          eventType: event.eventType,
-        }),
-      );
+      .flatMap((event) => {
+        const payload = z
+          .looseObject({ taskReference: z.string().min(1) })
+          .safeParse(event.payload);
+        return payload.success
+          ? [
+              OperatorStreamEventSchema.parse({
+                sequence: event.sequence,
+                fixtureId: payload.data.taskReference,
+                eventType: event.eventType,
+              }),
+            ]
+          : [];
+      });
   }
 
   private async prepareOnce(
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,
     commandId: string,
+    planningEpisodeId: string,
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
     operatorGuidance: string | null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
-    const existing = this.store.read(taskReference);
+    const existing = this.store.read(planningEpisodeId);
     if (!existing.ok) return err({ kind: 'store', error: existing.error });
     if (
       existing.value?.commandId === commandId &&
@@ -1533,6 +1514,7 @@ export class ImplementationPlanningCoordinator {
         ? ok(existing.value)
         : this.store.begin({
             taskReference,
+            planningEpisodeId,
             commandId,
             planningSnapshot: snapshotReference,
             evidenceBundle: suppliedEvidence.value.reference,
@@ -1586,7 +1568,7 @@ export class ImplementationPlanningCoordinator {
           captures.push({ request, observation: observed.value });
         }
         const appended = this.evidenceBundles.appendPlanningEvidence(
-          taskReference,
+          planning.evidenceBundle,
           planning.pendingEvidence.operationId,
           captures,
         );
@@ -1761,6 +1743,7 @@ export class ImplementationPlanningCoordinator {
           const checkpointed = this.store.recordValidatedCandidate(planning, {
             decision: result.value.decision,
             workflowHash,
+            workflowOperationId: operationId,
             receipt: result.value.receipt,
           });
           if (!checkpointed.ok) return err({ kind: 'store', error: checkpointed.error });
@@ -1847,6 +1830,13 @@ export class ImplementationPlanningCoordinator {
     const executionSnapshot = this.createExecutionSnapshot(
       planning.taskReference,
       candidate.workflowHash,
+      candidate.workflowOperationId,
+      asJson({
+        artifactId: `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}`,
+        attempt: planning.attempt,
+        selectedStrategy: planning.selectedStrategy,
+        plan: candidate.decision.plan,
+      }),
       planning.evidenceBundle,
       workspace,
       planningContextReference,
@@ -1857,6 +1847,7 @@ export class ImplementationPlanningCoordinator {
       { decision: candidate.decision, receipt: candidate.receipt },
       {
         workflowHash: candidate.workflowHash,
+        workflowOperationId: candidate.workflowOperationId,
         executionSnapshot: executionSnapshot.value,
       },
     );

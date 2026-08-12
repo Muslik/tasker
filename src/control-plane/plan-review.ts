@@ -72,7 +72,8 @@ export const PlanReviewCommandSchema = z.discriminatedUnion('decision', [
 
 const PlanReviewSubmissionSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
+    planningEpisodeId: z.string().min(1),
     taskReference: z.string().min(1),
     reviewId: z.string().min(1),
     planArtifactId: z.string().min(1),
@@ -109,9 +110,9 @@ export type PlanReviewStoreError =
     };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
-const aggregateIdFor = (taskReference: string): string => `plan-review:${taskReference}`;
-const artifactIdFor = (taskReference: string, reviewId: string): string =>
-  `plan-review-submission:${taskReference}:${reviewId}`;
+const aggregateIdFor = (planningEpisodeId: string): string => `plan-review:${planningEpisodeId}`;
+const artifactIdFor = (planningEpisodeId: string, reviewId: string): string =>
+  `plan-review-submission:${planningEpisodeId}:${reviewId}`;
 
 const commandPayload = (command: PlanReviewCommand) => ({
   reviewId: command.reviewId,
@@ -124,9 +125,11 @@ const commandPayload = (command: PlanReviewCommand) => ({
 
 const sameSubmission = (
   submission: z.infer<typeof PlanReviewSubmissionSchema>,
+  planningEpisodeId: string,
   taskReference: string,
   command: PlanReviewCommand,
 ): boolean =>
+  submission.planningEpisodeId === planningEpisodeId &&
   submission.taskReference === taskReference &&
   JSON.stringify({
     reviewId: submission.reviewId,
@@ -151,22 +154,26 @@ export class PlanReviewStore {
   ) {}
 
   public submit(
+    planningEpisodeId: string,
     taskReference: string,
     commandValue: PlanReviewCommand,
   ): Outcome<PlanReviewRound, PlanReviewStoreError> {
     const command = PlanReviewCommandSchema.parse(commandValue);
-    const artifactId = artifactIdFor(taskReference, command.reviewId);
+    const artifactId = artifactIdFor(planningEpisodeId, command.reviewId);
     const existing = this.ledger.readArtifact(artifactId);
-    if (existing !== null) return this.restoreSubmission(taskReference, command, existing.payload);
+    if (existing !== null) {
+      return this.restoreSubmission(planningEpisodeId, taskReference, command, existing.payload);
+    }
 
     const submittedAt = this.clock.now();
     const submission = PlanReviewSubmissionSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
+      planningEpisodeId,
       taskReference,
       ...commandPayload(command),
       submittedAt,
     });
-    const aggregateId = aggregateIdFor(taskReference);
+    const aggregateId = aggregateIdFor(planningEpisodeId);
     const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
     const committed = this.ledger.transact({
       aggregate: {
@@ -190,6 +197,7 @@ export class PlanReviewStore {
           payload: asJson(submission),
           metadata: asJson({
             taskReference,
+            planningEpisodeId,
             planArtifactId: command.planArtifactId,
             planAttempt: command.planAttempt,
             decision: command.decision,
@@ -203,14 +211,17 @@ export class PlanReviewStore {
       const concurrent = this.ledger.readArtifact(artifactId);
       return concurrent === null
         ? err({ kind: 'ledger_conflict' })
-        : this.restoreSubmission(taskReference, command, concurrent.payload);
+        : this.restoreSubmission(planningEpisodeId, taskReference, command, concurrent.payload);
     }
     return ok(PlanReviewRoundSchema.parse({ ...submission, status: 'submitted', appliedAt: null }));
   }
 
-  public markApplied(taskReference: string, reviewId: string): Outcome<void, PlanReviewStoreError> {
-    const aggregateId = aggregateIdFor(taskReference);
-    const appliedEventId = `event:${artifactIdFor(taskReference, reviewId)}:applied`;
+  public markApplied(
+    planningEpisodeId: string,
+    reviewId: string,
+  ): Outcome<void, PlanReviewStoreError> {
+    const aggregateId = aggregateIdFor(planningEpisodeId);
+    const appliedEventId = `event:${artifactIdFor(planningEpisodeId, reviewId)}:applied`;
     if (this.ledger.listEvents(aggregateId).some((event) => event.eventId === appliedEventId)) {
       return ok(undefined);
     }
@@ -238,8 +249,10 @@ export class PlanReviewStore {
       : err({ kind: 'ledger_conflict' });
   }
 
-  public read(taskReference: string): Outcome<readonly PlanReviewRound[], PlanReviewStoreError> {
-    const events = this.ledger.listEvents(aggregateIdFor(taskReference));
+  public read(
+    planningEpisodeId: string,
+  ): Outcome<readonly PlanReviewRound[], PlanReviewStoreError> {
+    const events = this.ledger.listEvents(aggregateIdFor(planningEpisodeId));
     const applied = new Map<string, string>();
     for (const event of events) {
       if (event.eventType !== 'PlanReviewApplied') continue;
@@ -285,6 +298,7 @@ export class PlanReviewStore {
   }
 
   private restoreSubmission(
+    planningEpisodeId: string,
     taskReference: string,
     command: PlanReviewCommand,
     payload: JsonValue,
@@ -297,11 +311,11 @@ export class PlanReviewStore {
         issues: parsed.error.issues.map((issue) => issue.message),
       });
     }
-    if (!sameSubmission(parsed.data, taskReference, command)) {
+    if (!sameSubmission(parsed.data, planningEpisodeId, taskReference, command)) {
       return err({ kind: 'review_conflict', reviewId: command.reviewId });
     }
     const applied = this.ledger
-      .listEvents(aggregateIdFor(taskReference))
+      .listEvents(aggregateIdFor(planningEpisodeId))
       .find(
         (event) =>
           event.eventType === 'PlanReviewApplied' &&

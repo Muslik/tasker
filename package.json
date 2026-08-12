@@ -38,8 +38,6 @@
     "demo:m1": "pnpm dev",
     "dev:api:m1": "pnpm build:server && node dist/control-plane/m1-server.js",
     "dev:cockpit": "vite",
-    "m1": "pnpm build:server && node dist/control-plane/m1-cli.js",
-    "analyze:workflow": "pnpm build:server && node dist/control-plane/analyzer-cli.js",
     "temporal:dev": "temporal server start-dev --namespace tasker-dev --db-filename .tasker/temporal.sqlite",
     "temporal:api": "pnpm dev:api:m1",
     "temporal:worker": "pnpm build:server && node dist/temporal/worker-main.js",

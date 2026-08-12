@@ -3,9 +3,13 @@ import { EvidenceBundleStore } from '../../src/control-plane/evidence-bundle.js'
 import type { LedgerRepository } from '../../src/ledger/repository.js';
 import type { Clock } from '../../src/shared/clock.js';
 
-export const makeEvidenceBundle = (taskReference = 'jira:AVIA-13235'): EvidenceBundle =>
+export const makeEvidenceBundle = (
+  taskReference = 'jira:AVIA-13235',
+  scopeId = `test:${taskReference}`,
+): EvidenceBundle =>
   EvidenceBundleSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
+    scopeId,
     taskReference,
     revision: 1,
     inputFingerprint: '1'.repeat(64),
@@ -36,6 +40,7 @@ export const recordTestEvidenceBundle = (
 ): void => {
   const bundle = makeEvidenceBundle(taskReference);
   const recorded = new EvidenceBundleStore(ledger, clock).record(
+    `test:${taskReference}`,
     taskReference,
     bundle.inputFingerprint,
     bundle.entries,

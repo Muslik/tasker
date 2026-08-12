@@ -32,6 +32,41 @@ const entry = (suffix: string, capturedAt: string) =>
   });
 
 describe('evidence bundle recovery', () => {
+  it('does not merge evidence between run scopes for the same task', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-evidence-run-isolation-'));
+    const clock = makeAdjustableClock('2026-08-05T08:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    try {
+      const store = new EvidenceBundleStore(ledger.repository, clock);
+      const taskReference = 'jira:AVIA-12045';
+      const first = store.record(
+        'tasker:v3:jira:AVIA-12045:run-a:context:initial',
+        taskReference,
+        'a'.repeat(64),
+        [entry('a', clock.now())],
+      );
+      const secondEntry = {
+        ...entry('b', clock.now()),
+        title: 'Run B only',
+      };
+      const second = store.record(
+        'tasker:v3:jira:AVIA-12045:run-b:context:initial',
+        taskReference,
+        'b'.repeat(64),
+        [secondEntry],
+      );
+
+      expect(first).toMatchObject({ ok: true, value: { bundle: { revision: 1 } } });
+      expect(second).toMatchObject({
+        ok: true,
+        value: { bundle: { revision: 1, entries: [{ title: 'Run B only' }] } },
+      });
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('deduplicates an observed state and appends new immutable revisions', () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-evidence-store-'));
     const databasePath = join(directory, 'ledger.sqlite');
@@ -39,16 +74,21 @@ describe('evidence bundle recovery', () => {
     const firstLedger = openSqliteLedger({ filename: databasePath, clock });
     try {
       const store = new EvidenceBundleStore(firstLedger.repository, clock);
-      const first = store.record('jira:AVIA-13235', '1'.repeat(64), [entry('a', clock.now())]);
+      const scopeId = 'test:run:context';
+      const first = store.record(scopeId, 'jira:AVIA-13235', '1'.repeat(64), [
+        entry('a', clock.now()),
+      ]);
       if (!first.ok) throw new Error(`First revision failed: ${first.error.kind}`);
 
       clock.advance(60_000);
-      const duplicate = store.record('jira:AVIA-13235', '1'.repeat(64), [entry('a', clock.now())]);
+      const duplicate = store.record(scopeId, 'jira:AVIA-13235', '1'.repeat(64), [
+        entry('a', clock.now()),
+      ]);
       if (!duplicate.ok) throw new Error(`Duplicate revision failed: ${duplicate.error.kind}`);
       expect(duplicate.value.reference).toEqual(first.value.reference);
-      expect(firstLedger.repository.listEvents('evidence-bundle:jira:AVIA-13235')).toHaveLength(1);
+      expect(firstLedger.repository.listEvents(`evidence-bundle:${scopeId}`)).toHaveLength(1);
 
-      const second = store.record('jira:AVIA-13235', '2'.repeat(64), [
+      const second = store.record(scopeId, 'jira:AVIA-13235', '2'.repeat(64), [
         entry('a', clock.now()),
         entry('b', clock.now()),
       ]);
@@ -69,7 +109,7 @@ describe('evidence bundle recovery', () => {
       const restartedLedger = openSqliteLedger({ filename: databasePath, clock });
       try {
         const restored = new EvidenceBundleStore(restartedLedger.repository, clock).readLatest(
-          'jira:AVIA-13235',
+          scopeId,
         );
         expect(restored).toEqual(second);
       } finally {
@@ -159,6 +199,10 @@ describe('evidence bundle recovery', () => {
     const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
     try {
       const store = new EvidenceBundleStore(ledger.repository, clock);
+      const base = store.record('test:planning:evidence', 'jira:AVIA-13235', '0'.repeat(64), [
+        entry('a', clock.now()),
+      ]);
+      if (!base.ok) throw new Error(`Base evidence failed: ${base.error.kind}`);
       const content = { pageId: '42', body: 'external evidence '.repeat(8_000) };
       const capture = {
         request: {
@@ -177,12 +221,12 @@ describe('evidence bundle recovery', () => {
         },
       } as const;
 
-      const recorded = store.appendPlanningEvidence('jira:AVIA-13235', 'planning:evidence:1', [
+      const recorded = store.appendPlanningEvidence(base.value.reference, 'planning:evidence:1', [
         capture,
       ]);
       if (!recorded.ok) throw new Error(`Evidence append failed: ${recorded.error.kind}`);
       const storedContent = EvidenceBodyReferenceSchema.parse(
-        recorded.value.bundle.entries[0]?.content,
+        recorded.value.bundle.entries.find((item) => item.title === 'Delivery policy')?.content,
       );
       expect(storedContent.byteLength).toBeGreaterThan(64 * 1024);
       expect(ledger.repository.readArtifact(storedContent.artifactId)).toMatchObject({
@@ -191,14 +235,17 @@ describe('evidence bundle recovery', () => {
       });
 
       const materialized = store.readMaterialized(recorded.value.reference);
-      expect(materialized).toMatchObject({
-        ok: true,
-        value: { bundle: { entries: [{ content }] } },
-      });
+      expect(materialized.ok).toBe(true);
+      if (!materialized.ok) return;
+      expect(
+        materialized.value.bundle.entries.find((item) => item.title === 'Delivery policy')?.content,
+      ).toEqual(content);
 
-      const duplicate = store.appendPlanningEvidence('jira:AVIA-13235', 'planning:evidence:1', [
-        capture,
-      ]);
+      const duplicate = store.appendPlanningEvidence(
+        recorded.value.reference,
+        'planning:evidence:1',
+        [capture],
+      );
       expect(duplicate).toEqual(recorded);
     } finally {
       ledger.close();

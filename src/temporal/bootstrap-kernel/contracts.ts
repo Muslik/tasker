@@ -47,6 +47,7 @@ export const BootstrapWorkflowInputSchema = z
   .readonly();
 
 const BootstrapPlanningAttemptSchema = z.object({
+  planningEpisodeId: z.string().min(1),
   commandId: z.string().min(1),
   attempt: z.number().int().positive(),
   evidenceBundle: EvidenceBundleReferenceSchema,
@@ -63,6 +64,7 @@ const BootstrapPlanningBaseSchema = BootstrapPlanningAttemptSchema.extend({
 export const BootstrapPlanningStateSchema = z.discriminatedUnion('status', [
   BootstrapPlanningBaseSchema.extend({
     status: z.literal('ready'),
+    workflowOperationId: z.string().min(1),
     draft: z.lazy(() => BootstrapDraftStateSchema),
   }).strict(),
   BootstrapPlanningBaseSchema.extend({
@@ -230,6 +232,7 @@ export const PlanningActivityCommandSchema = z.discriminatedUnion('kind', [
 export const PlanTaskImplementationInputSchema = z
   .object({
     taskReference: z.string().min(1),
+    planningEpisodeId: z.string().min(1),
     planningSnapshot: PlanningSnapshotReferenceSchema,
     evidenceBundle: EvidenceBundleReferenceSchema,
     commandId: z.string().min(1),
@@ -277,6 +280,7 @@ export const RunBootstrapInvestigationInputSchema = z
     workflowRunId: z.string().min(1),
     contextHash: z.string().regex(/^[a-f0-9]{64}$/u),
     planningSnapshot: PlanningSnapshotReferenceSchema,
+    evidenceBundle: EvidenceBundleReferenceSchema,
     workspace: WorkspaceLocatorSchema,
     step: PrePlanInvestigationRequestSchema.shape.steps.element,
     blockRun: z.number().int().positive(),

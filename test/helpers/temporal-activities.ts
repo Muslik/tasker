@@ -81,10 +81,12 @@ export const testTemporalActivities = {
   planTaskImplementation: (input) =>
     Promise.resolve({
       status: 'ready' as const,
+      planningEpisodeId: input.planningEpisodeId,
       commandId: input.commandId,
       transcriptId: `planning-transcript:${input.commandId}`,
       attempt: 1,
       artifactId: `test-plan:${input.taskReference}`,
+      workflowOperationId: `${input.commandId}:workflow-candidate:1`,
       evidenceBundle: {
         artifactId: `evidence-bundle:${input.taskReference}:r1:test`,
         checksum: HASH,

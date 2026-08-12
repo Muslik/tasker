@@ -1074,7 +1074,6 @@ export interface TaskRunEvidenceSource {
 
 export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
   public constructor(
-    private readonly planning: Pick<ImplementationPlanningStore, 'read'>,
     private readonly traces: TemporalTaskStepTraceStore,
     private readonly reviews?: {
       list(
@@ -1087,23 +1086,13 @@ export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
     taskReference: string,
     workflowId: string,
   ): Outcome<TaskRunEvidence, { readonly kind: string }> {
-    const planning = this.planning.read(taskReference);
-    if (!planning.ok) return err({ kind: `planning_${planning.error.kind}` });
+    void taskReference;
     const completedSteps = this.traces.readRunStepEvidence(workflowId);
     if (!completedSteps.ok) return err({ kind: completedSteps.error.kind });
     const reviewInputs = this.reviews?.list(workflowId) ?? ok([]);
     if (!reviewInputs.ok) return err({ kind: reviewInputs.error.kind });
-    const record = planning.value;
     return ok({
-      acceptedPlan:
-        record?.status === 'ready'
-          ? asJson({
-              artifactId: record.artifactId,
-              attempt: record.attempt,
-              selectedStrategy: record.selectedStrategy,
-              plan: record.decision.plan,
-            })
-          : null,
+      acceptedPlan: null,
       completedSteps: completedSteps.value,
       reviewInputs: reviewInputs.value,
     });
@@ -1134,15 +1123,19 @@ export const executeRegisteredTaskStep = async (
     );
   }
   const snapshot = loaded.value;
-  const evidence =
+  const runEvidence =
     dependencies.evidence?.read(input.taskReference, input.workflowId) ??
     ok({ acceptedPlan: null, completedSteps: [], reviewInputs: [] });
-  if (!evidence.ok) {
+  if (!runEvidence.ok) {
     return block(
-      `Execution evidence for ${input.uses} is unavailable: ${evidence.error.kind}`,
+      `Execution evidence for ${input.uses} is unavailable: ${runEvidence.error.kind}`,
       blockingWaitKindFor(input.uses),
     );
   }
+  const evidence: TaskRunEvidence = {
+    ...runEvidence.value,
+    acceptedPlan: snapshot.kind === 'execution' ? snapshot.acceptedPlan : null,
+  };
   const snapshottedStep = snapshottedStepFrom(snapshot, input.uses);
   if (snapshottedStep === null) {
     return block(
@@ -1224,7 +1217,7 @@ export const executeRegisteredTaskStep = async (
       stepInput: JsonValueSchema.parse(validatedInput.data),
       workspace: input.workspace,
       operatorGuidance: input.operatorGuidance,
-      evidence: evidence.value,
+      evidence,
       policies: snapshot.harness.policies,
       project: snapshot.harness.project?.manifest ?? null,
       runtime,
@@ -1364,7 +1357,7 @@ export const executeRegisteredTaskStep = async (
       skills: snapshottedStep.block.executor.skills,
       recovery,
       operatorGuidance: input.operatorGuidance,
-      evidence: evidence.value,
+      evidence,
     });
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),

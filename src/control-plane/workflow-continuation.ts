@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
+import { z } from 'zod';
 import {
   createWorkflowAnalyzerContext,
   TaskFixtureSchema,
@@ -37,7 +40,7 @@ import {
 
 export * from './workflow-continuation-contracts.js';
 
-export const WORKFLOW_CONTINUATION_PROJECTION = 'workflow_continuation_by_parent';
+export const WORKFLOW_CONTINUATION_PROJECTION = 'workflow_continuation_by_parent_run';
 
 interface WorkflowChangePlanningRecord {
   readonly artifactId: string;
@@ -65,8 +68,7 @@ export type WorkflowContinuationError =
   | { readonly kind: 'subject'; readonly error: M1ServiceError }
   | { readonly kind: 'parent_workflow_not_ready'; readonly parentTaskReference: string };
 
-const aggregateIdFor = (parentTaskReference: string): string =>
-  `workflow-continuation:${parentTaskReference}`;
+const aggregateIdFor = (parentRunId: string): string => `workflow-continuation:${parentRunId}`;
 
 const asJson = (input: unknown): JsonValue => JsonValueSchema.parse(input);
 
@@ -77,38 +79,35 @@ class WorkflowContinuationStore {
   ) {}
 
   public read(
-    parentTaskReference: string,
+    parentRunId: string,
   ): Outcome<WorkflowContinuationRecord | null, WorkflowContinuationStoreError> {
-    const projection = this.ledger.readProjection(
-      WORKFLOW_CONTINUATION_PROJECTION,
-      parentTaskReference,
-    );
+    const projection = this.ledger.readProjection(WORKFLOW_CONTINUATION_PROJECTION, parentRunId);
     if (projection === null) return ok(null);
     const parsed = WorkflowContinuationRecordSchema.safeParse(projection.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
           kind: 'projection_corrupt',
-          parentTaskReference,
+          parentTaskReference: parentRunId,
           issues: parsed.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
   }
 
-  public listEvents(parentTaskReference?: string): readonly EventRecord[] {
-    return parentTaskReference === undefined
+  public listEvents(parentRunId?: string): readonly EventRecord[] {
+    return parentRunId === undefined
       ? this.ledger
           .listEvents()
           .filter((event) => event.aggregateId.startsWith('workflow-continuation:'))
-      : this.ledger.listEvents(aggregateIdFor(parentTaskReference));
+      : this.ledger.listEvents(aggregateIdFor(parentRunId));
   }
 
   public save(
     record: WorkflowContinuationRecord,
     eventType: string,
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
-    const aggregateId = aggregateIdFor(record.parent.taskReference);
+    const aggregateId = aggregateIdFor(record.parent.runId);
     const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
     const result = this.ledger.transact({
       aggregate: {
@@ -143,7 +142,7 @@ class WorkflowContinuationStore {
         {
           kind: 'upsert',
           projectionType: WORKFLOW_CONTINUATION_PROJECTION,
-          projectionId: record.parent.taskReference,
+          projectionId: record.parent.runId,
           payload: asJson(record),
         },
       ],
@@ -167,10 +166,10 @@ class WorkflowContinuationStore {
   }
 
   public review(
-    parentTaskReference: string,
+    parentRunId: string,
     command: WorkflowContinuationReviewCommand,
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
-    const current = this.read(parentTaskReference);
+    const current = this.read(parentRunId);
     if (!current.ok) return current;
     if (current.value !== null && current.value.continuationId !== command.continuationId) {
       return ok(current.value);
@@ -189,7 +188,7 @@ class WorkflowContinuationStore {
       return ok(current.value);
     }
     if (current.value?.status !== 'awaiting_review') {
-      return err({ kind: 'continuation_not_reviewable', parentTaskReference });
+      return err({ kind: 'continuation_not_reviewable', parentTaskReference: parentRunId });
     }
     const reviewedAt = this.clock.now();
     const reviewed = WorkflowContinuationRecordSchema.parse(
@@ -211,10 +210,10 @@ class WorkflowContinuationStore {
   }
 
   public linkExecution(
-    parentTaskReference: string,
+    parentRunId: string,
     child: { readonly taskReference: string; readonly runId: string },
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
-    const current = this.read(parentTaskReference);
+    const current = this.read(parentRunId);
     if (!current.ok) return current;
     if (
       current.value?.status === 'linked' &&
@@ -227,7 +226,7 @@ class WorkflowContinuationStore {
       current.value?.status !== 'accepted' ||
       current.value.candidate.taskReference !== child.taskReference
     ) {
-      return err({ kind: 'continuation_not_linkable', parentTaskReference });
+      return err({ kind: 'continuation_not_linkable', parentTaskReference: parentRunId });
     }
     const linked = WorkflowContinuationRecordSchema.parse({
       ...current.value,
@@ -239,10 +238,10 @@ class WorkflowContinuationStore {
   }
 
   public supersedeWithPlan(
-    parentTaskReference: string,
+    parentRunId: string,
     implementationPlanArtifactId: string,
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationStoreError> {
-    const current = this.read(parentTaskReference);
+    const current = this.read(parentRunId);
     if (!current.ok) return current;
     if (
       current.value?.status === 'superseded_by_plan' &&
@@ -251,7 +250,7 @@ class WorkflowContinuationStore {
       return ok(current.value);
     }
     if (current.value?.status !== 'rejected_by_operator') {
-      return err({ kind: 'continuation_not_resolvable', parentTaskReference });
+      return err({ kind: 'continuation_not_resolvable', parentTaskReference: parentRunId });
     }
     const superseded = WorkflowContinuationRecordSchema.parse({
       ...current.value,
@@ -263,12 +262,17 @@ class WorkflowContinuationStore {
   }
 }
 
-const continuationTaskReference = (parentTaskReference: string, attempt: number): string => {
+const continuationTaskReference = (
+  parentTaskReference: string,
+  parentRunId: string,
+  attempt: number,
+): string => {
   const normalized = parentTaskReference
     .toLocaleLowerCase('en-US')
     .replace(/[^a-z0-9]+/gu, '-')
     .replace(/^-|-$/gu, '');
-  return `continuation-${normalized}-${String(attempt)}`;
+  const runScope = createHash('sha256').update(parentRunId).digest('hex').slice(0, 12);
+  return `continuation-${normalized}-${runScope}-${String(attempt)}`;
 };
 
 const targetRepositoryFor = (subject: WorkflowGenerationSubject): string =>
@@ -333,25 +337,29 @@ export class WorkflowContinuationCoordinator {
   ) {}
 
   public read(
-    parentTaskReference: string,
+    parentRunId: string,
   ): Outcome<WorkflowContinuationRecord | null, WorkflowContinuationError> {
-    const record = this.store.read(parentTaskReference);
+    const record = this.store.read(parentRunId);
     return record.ok ? record : err({ kind: 'store', error: record.error });
   }
 
   public async proposeFromPlanning(
     parentTaskReference: string,
     parentRunId: string,
+    parentWorkflowOperationId: string,
     planning: WorkflowChangePlanningRecord,
     options: { readonly retry?: boolean } = {},
   ): Promise<Outcome<WorkflowContinuationRecord, WorkflowContinuationError>> {
-    const current = this.store.read(parentTaskReference);
+    const current = this.store.read(parentRunId);
     if (!current.ok) return err({ kind: 'store', error: current.error });
     if (current.value?.source.artifactId === planning.artifactId && options.retry !== true) {
       return ok(current.value);
     }
 
-    const parentWorkflow = this.workflows.read(parentTaskReference);
+    const parentWorkflow = this.workflows.readPlanningOperation(
+      parentTaskReference,
+      parentWorkflowOperationId,
+    );
     if (!parentWorkflow.ok) return err({ kind: 'subject', error: parentWorkflow.error });
     if (parentWorkflow.value?.status !== 'ready') {
       return err({ kind: 'parent_workflow_not_ready', parentTaskReference });
@@ -362,7 +370,11 @@ export class WorkflowContinuationCoordinator {
 
     const attempt = (current.value?.attempt ?? 0) + 1;
     const continuationId = `${parentRunId}:continuation-${String(attempt)}`;
-    const candidateTaskReference = continuationTaskReference(parentTaskReference, attempt);
+    const candidateTaskReference = continuationTaskReference(
+      parentTaskReference,
+      parentRunId,
+      attempt,
+    );
     const base = {
       schemaVersion: 1 as const,
       continuationId,
@@ -446,7 +458,12 @@ export class WorkflowContinuationCoordinator {
         }),
       );
     }
-    const generated = await this.generateContinuation(fixture, repository.path, taskSnapshot);
+    const generated = await this.generateContinuation(
+      fixture,
+      repository.path,
+      taskSnapshot,
+      continuationId,
+    );
     if (!generated.ok) {
       return this.persistRecord(
         WorkflowContinuationRecordSchema.parse({
@@ -499,37 +516,35 @@ export class WorkflowContinuationCoordinator {
   }
 
   public review(
-    parentTaskReference: string,
+    parentRunId: string,
     commandInput: WorkflowContinuationReviewCommand,
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationError> {
     const command = WorkflowContinuationReviewCommandSchema.parse(commandInput);
-    const reviewed = this.store.review(parentTaskReference, command);
+    const reviewed = this.store.review(parentRunId, command);
     return reviewed.ok ? reviewed : err({ kind: 'store', error: reviewed.error });
   }
 
   public linkExecution(
-    parentTaskReference: string,
+    parentRunId: string,
     child: { readonly taskReference: string; readonly runId: string },
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationError> {
-    const linked = this.store.linkExecution(parentTaskReference, child);
+    const linked = this.store.linkExecution(parentRunId, child);
     return linked.ok ? linked : err({ kind: 'store', error: linked.error });
   }
 
   public supersedeWithPlan(
-    parentTaskReference: string,
+    parentRunId: string,
     implementationPlanArtifactId: string,
   ): Outcome<WorkflowContinuationRecord, WorkflowContinuationError> {
-    const superseded = this.store.supersedeWithPlan(
-      parentTaskReference,
-      implementationPlanArtifactId,
-    );
+    const superseded = this.store.supersedeWithPlan(parentRunId, implementationPlanArtifactId);
     return superseded.ok ? superseded : err({ kind: 'store', error: superseded.error });
   }
 
   public async retry(
-    parentTaskReference: string,
+    parentRunId: string,
+    parentWorkflowOperationId: string,
   ): Promise<Outcome<WorkflowContinuationRecord, WorkflowContinuationError>> {
-    const current = this.store.read(parentTaskReference);
+    const current = this.store.read(parentRunId);
     if (!current.ok) return err({ kind: 'store', error: current.error });
     if (
       current.value === null ||
@@ -538,7 +553,7 @@ export class WorkflowContinuationCoordinator {
     ) {
       return err({
         kind: 'store',
-        error: { kind: 'continuation_not_retryable', parentTaskReference },
+        error: { kind: 'continuation_not_retryable', parentTaskReference: parentRunId },
       });
     }
     const planning: WorkflowChangePlanningRecord = {
@@ -549,79 +564,21 @@ export class WorkflowContinuationCoordinator {
         request: current.value.source.request,
       },
     };
-    return this.proposeFromPlanning(parentTaskReference, current.value.parent.runId, planning, {
-      retry: true,
-    });
+    return this.proposeFromPlanning(
+      current.value.parent.taskReference,
+      parentRunId,
+      parentWorkflowOperationId,
+      planning,
+      { retry: true },
+    );
   }
 
   public decorateTask(task: OperatorTaskSummary): OperatorTaskSummary {
-    const continuation = this.store.read(task.id);
-    if (!continuation.ok || continuation.value === null) return task;
-    const record = continuation.value;
-    switch (record.status) {
-      case 'awaiting_review':
-        return {
-          ...task,
-          status: 'needs_attention',
-          attention: 'operator',
-          currentStage: 'Review workflow continuation',
-          updatedAt: record.createdAt,
-        };
-      case 'accepted':
-        return {
-          ...task,
-          status: 'waiting',
-          attention: 'none',
-          currentStage: 'Continuation accepted · linked execution pending',
-          updatedAt: record.reviewedAt,
-        };
-      case 'linked':
-        return {
-          ...task,
-          status: 'waiting',
-          attention: 'none',
-          currentStage: 'Linked continuation executing',
-          updatedAt: record.linkedAt,
-        };
-      case 'rejected_by_operator':
-        return {
-          ...task,
-          status: 'needs_attention',
-          attention: 'operator',
-          currentStage: 'Continuation rejected by operator',
-          updatedAt: record.reviewedAt,
-        };
-      case 'superseded_by_plan':
-        return task;
-      case 'blocked':
-        return {
-          ...task,
-          status: 'needs_attention',
-          attention: 'operator',
-          currentStage: `Continuation blocked · ${record.issues[0]?.code ?? 'repository'}`,
-          updatedAt: record.createdAt,
-        };
-      case 'invalid':
-        return {
-          ...task,
-          status: 'needs_attention',
-          attention: 'operator',
-          currentStage: 'Continuation validation failed',
-          updatedAt: record.createdAt,
-        };
-      case 'failed':
-        return {
-          ...task,
-          status: 'needs_attention',
-          attention: 'operator',
-          currentStage: 'Continuation generation failed',
-          updatedAt: record.createdAt,
-        };
-    }
+    return task;
   }
 
-  public readActivity(parentTaskReference: string): OperatorActivityResponse['entries'] {
-    return this.store.listEvents(parentTaskReference).map((event) => {
+  public readActivity(parentRunId: string): OperatorActivityResponse['entries'] {
+    return this.store.listEvents(parentRunId).map((event) => {
       const common = {
         sequence: event.sequence,
         occurredAt: event.occurredAt,
@@ -698,13 +655,21 @@ export class WorkflowContinuationCoordinator {
     return this.store
       .listEvents()
       .filter((event) => event.sequence > sequence)
-      .map((event) =>
-        OperatorStreamEventSchema.parse({
-          sequence: event.sequence,
-          fixtureId: event.aggregateId.slice('workflow-continuation:'.length),
-          eventType: event.eventType,
-        }),
-      );
+      .flatMap((event) => {
+        const payload = z
+          .object({ parentTaskReference: z.string().min(1) })
+          .loose()
+          .safeParse(event.payload);
+        return payload.success
+          ? [
+              OperatorStreamEventSchema.parse({
+                sequence: event.sequence,
+                fixtureId: payload.data.parentTaskReference,
+                eventType: event.eventType,
+              }),
+            ]
+          : [];
+      });
   }
 
   private persistRecord(
@@ -799,11 +764,12 @@ export class WorkflowContinuationCoordinator {
     fixture: TaskFixture,
     repositoryPath: string,
     taskSnapshot: JsonValue,
+    continuationId: string,
   ): Promise<Outcome<WorkflowResponse, M1ServiceError>> {
     const analyzerContext = createWorkflowAnalyzerContext(fixture, taskSnapshot);
     const evidence = await this.contextDiscovery.discover({
       taskReference: fixture.fixtureId,
-      operationId: `continuation:${fixture.fixtureId}`,
+      operationId: `${continuationId}:context`,
       taskSnapshot,
       plannerContext: analyzerContext.plannerContext,
       repositoryReference: fixture.repository,
@@ -816,7 +782,10 @@ export class WorkflowContinuationCoordinator {
         reason: `Continuation context discovery failed: ${evidence.error.kind}`,
       });
     }
-    if (this.analyzer === undefined) return this.workflows.generateContinuationTask(fixture);
+    const workflowOperationId = `${continuationId}:workflow-candidate:1`;
+    if (this.analyzer === undefined) {
+      return this.workflows.assembleTaskAtOperation(fixture, workflowOperationId);
+    }
     const analyzed = await this.analyzer.analyze({
       ...analyzerContext,
       repositoryPath,
@@ -824,10 +793,11 @@ export class WorkflowContinuationCoordinator {
       evidenceBundle: evidence.value.bundle,
     });
     return analyzed.ok
-      ? this.workflows.generateContinuationFromAnalyzerOutput(
+      ? this.workflows.assembleContinuationFromAnalyzerOutputAtOperation(
           fixture,
           analyzed.value.output,
           analyzed.value.receipt,
+          workflowOperationId,
         )
       : err({ kind: 'provider_failure', provider: 'subscription_cli', failure: analyzed.error });
   }

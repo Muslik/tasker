@@ -280,6 +280,7 @@ export async function bootstrapWorkflowV3(
 
   const preparedWorkspaceContext = workspaceContext;
   let activeContext: BootstrapContextState = planningContext;
+  const planningEpisodeId = `${execution.workflowId}:${execution.runId}:planning`;
   const runPlanning = async (initialCommand: PlanningActivityCommand): Promise<void> => {
     let command = initialCommand;
     let investigationRounds = 0;
@@ -293,6 +294,7 @@ export async function bootstrapWorkflowV3(
         try {
           result = await activities.planTaskImplementation({
             taskReference: input.taskReference,
+            planningEpisodeId,
             planningSnapshot: activeContext.planningSnapshot,
             evidenceBundle: activeContext.evidenceBundle,
             commandId,
@@ -376,6 +378,7 @@ export async function bootstrapWorkflowV3(
               workflowRunId: execution.runId,
               contextHash: activeContext.contextHash,
               planningSnapshot: activeContext.planningSnapshot,
+              evidenceBundle: activeContext.evidenceBundle,
               workspace: preparedWorkspaceContext.workspace,
               step,
               blockRun: attempts[attemptKey] ?? 1,

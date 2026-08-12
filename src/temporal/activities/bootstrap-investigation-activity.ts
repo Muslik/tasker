@@ -111,7 +111,7 @@ export const createBootstrapInvestigationActivity = (
       throw new Error(`Investigation receipt ${receiptReference} is unavailable`);
     }
     const appended = evidenceBundles.appendInvestigationEvidence(
-      input.taskReference,
+      input.evidenceBundle,
       `${input.workflowId}:${input.step.id}:run-${String(input.blockRun)}`,
       [receipt.value],
     );
