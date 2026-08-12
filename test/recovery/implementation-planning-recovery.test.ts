@@ -497,6 +497,14 @@ describe('implementation planning recovery', () => {
             .listEvents(`implementation-plan:${TASK_REFERENCE}`)
             .map(({ eventType }) => eventType),
         ).toContain('ImplementationWorkflowCandidateRejected');
+        expect(fixture.coordinator.readActivity(TASK_REFERENCE)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              level: 'info',
+              title: 'Workflow candidate corrected',
+            }),
+          ]),
+        );
       },
     );
   });

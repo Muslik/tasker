@@ -99,6 +99,13 @@ one of three typed decisions:
    observable expectation and typed verification linked to the exact workflow step
    nodes that will prove it. A missing step reference rejects the whole decision.
 
+When operator review is enabled, Cockpit presents the ready plan and its approve/revise
+actions as one primary review surface. Plan prose is ordinary Markdown rendered without
+raw HTML; graph node references remain diagnostic metadata rather than review copy. A
+candidate rejected and then replaced during the same planning episode is projected as
+an automatic correction, not as a current task failure. An unrecovered rejection remains
+an error.
+
 The provider boundary carries `decision` and `evidenceRequests` as direct structured
 values. They are never JSON serialized inside string fields. Provider-only output
 schemas may make optional workflow-node fields required and nullable when a subscription

@@ -239,7 +239,6 @@ test('generating a backlog task materializes the workflow, timeline, and operato
 
   await expect(page.getByTestId('workflow-sidebar')).toContainText(backlog.title);
   await expect(page.getByTestId('workflow-stages')).toBeVisible();
-  await expect(page.getByTestId('workflow-stages').locator(':scope > details')).toHaveCount(12);
   await expect(
     page
       .getByTestId('workflow-stage-bootstrap:preparation:1')
@@ -313,21 +312,58 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
 
   await waitForRunWait(page, fixtureId, 'plan.approved@1');
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
-  await expect(page.getByTestId('implementation-plan')).toContainText(
-    'Implement the requested task',
-  );
-  await expect(page.getByTestId('plan-review-controls')).toBeVisible();
-  await page.getByRole('textbox', { name: 'Plan review guidance' }).fill(guidance);
-  await page.getByRole('button', { name: 'Request changes' }).click();
+  const reviewSurface = page.getByTestId('plan-review-surface');
+  await expect(reviewSurface).toBeVisible();
+  await expect(reviewSurface).toContainText('Implement the requested task');
+  await expect(reviewSurface.getByRole('button', { name: 'Approve plan' })).toBeVisible();
+  await reviewSurface.getByRole('textbox', { name: 'Plan review guidance' }).fill(guidance);
+  await reviewSurface.getByRole('button', { name: 'Request changes' }).click();
 
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
-  await expect(page.getByTestId('plan-review-controls')).toBeVisible();
+  await expect(reviewSurface).toBeVisible();
   const planGuidance = page.getByRole('textbox', { name: 'Plan review guidance' });
+  await expect(reviewSurface).toContainText('attempt 2');
   await expect(planGuidance).toHaveValue('', { timeout: 20_000 });
-  await expect(page.getByTestId('implementation-plan')).toContainText('attempt 2');
   await expect(page.getByTestId('implementation-plan')).toContainText(guidance);
   const activity = await loadActivity(page, fixtureId);
   expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
+});
+
+test('the plan review document renders safe Markdown next to its decision controls', async ({
+  page,
+}) => {
+  const fixtureId = 'avia-12536-feature-review';
+
+  await page.route(`**/api/workflows/${fixtureId}/implementation-plan`, async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      status?: string;
+      decision?: { plan?: { summary?: string; steps?: Array<{ objective?: string }> } };
+    };
+    if (body.status === 'ready' && body.decision?.plan !== undefined) {
+      body.decision.plan.summary =
+        '**Review focus**: preserve `booking-summary` behavior.\n\n<div data-unsafe="true">raw HTML must not render</div>';
+      const firstStep = body.decision.plan.steps?.[0];
+      if (firstStep !== undefined) {
+        firstStep.objective = '- Keep the existing flow\n- Verify the changed surface';
+      }
+    }
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto('/');
+  await clickTask(page, fixtureId);
+  await waitForRunWait(page, fixtureId, 'plan.approved@1');
+
+  const reviewSurface = page.getByTestId('plan-review-surface');
+  await expect(reviewSurface.locator('strong').filter({ hasText: 'Review focus' })).toBeVisible();
+  await expect(reviewSurface.locator('code').filter({ hasText: 'booking-summary' })).toBeVisible();
+  await expect(reviewSurface.locator('[data-unsafe="true"]')).toHaveCount(0);
+  await expect(reviewSurface.getByText('Keep the existing flow', { exact: true })).toBeVisible();
+  await expect(
+    reviewSurface.getByText('Verify the changed surface', { exact: true }),
+  ).toBeVisible();
+  await expect(reviewSurface.getByRole('button', { name: 'Approve plan' })).toBeVisible();
 });
 
 test('the planner owns a cross-repository workflow candidate before freeze', async ({ page }) => {

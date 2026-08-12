@@ -313,7 +313,15 @@ const workflowActivities = {
       ? { 'validation.passed@1': true, 'validation.failed@1': false }
       : input.uses === 'review.agent@1'
         ? { 'agent_review.accepted@1': true, 'agent_review.changes_requested@1': false }
-        : {};
+        : input.uses === 'ci.observe@1'
+          ? {
+              'ci.passed@1': true,
+              'ci.change_failure@1': false,
+              'ci.flaky@1': false,
+              'ci.infrastructure@1': false,
+              'ci.unknown@1': false,
+            }
+          : {};
     return {
       status: 'completed',
       summary: `${input.uses} completed`,

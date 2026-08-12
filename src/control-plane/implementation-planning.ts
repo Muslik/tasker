@@ -1362,7 +1362,8 @@ export class ImplementationPlanningCoordinator {
       if (terminal && explicitEpisodeId === undefined) legacyEpisodeId = null;
     };
 
-    for (const event of this.store.listEvents(taskReference)) {
+    const planningEvents = this.store.listEvents(taskReference);
+    for (const event of planningEvents) {
       switch (event.eventType) {
         case 'ImplementationPlanningStarted':
           recordEpisode(event, 'running', false);
@@ -1420,16 +1421,24 @@ export class ImplementationPlanningCoordinator {
             }),
           );
           break;
-        case 'ImplementationWorkflowCandidateRejected':
+        case 'ImplementationWorkflowCandidateRejected': {
+          const corrected = planningEvents.some(
+            (candidate) =>
+              candidate.sequence > event.sequence &&
+              candidate.eventType === 'ImplementationWorkflowCandidateValidated',
+          );
           entries.push(
             OperatorActivityEntrySchema.parse({
               ...common,
-              level: 'warning',
-              title: 'Workflow candidate rejected',
-              detail: 'The deterministic validator returned exact feedback to the same planner.',
+              level: corrected ? 'info' : 'warning',
+              title: corrected ? 'Workflow candidate corrected' : 'Workflow candidate rejected',
+              detail: corrected
+                ? 'The validator returned exact feedback, and the same planner produced a valid candidate.'
+                : 'The deterministic validator returned exact feedback to the same planner.',
             }),
           );
           break;
+        }
         default:
           throw new Error(`Unmapped implementation planning event: ${event.eventType}`);
       }

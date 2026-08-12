@@ -126,6 +126,79 @@ describe('M1 persisted workflow', () => {
     ledger.close();
   });
 
+  it('projects a rejected candidate as corrected after a later valid workflow', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const service = createM1WorkflowService(ledger.repository, clock);
+    const fixture = findTaskFixture('avia-13236-short-bug');
+    if (fixture === undefined) throw new Error('Expected workflow fixture');
+    const analyzed = analyzeTaskFixture(fixture);
+    if (!analyzed.ok) throw new Error('Expected a workflow proposal fixture');
+    const output = WorkflowAnalyzerOutputSchema.parse({
+      assemblyDecisions: analyzed.value.assemblyDecisions,
+      source: analyzed.value.source,
+      verificationPlan: analyzed.value.verificationPlan,
+    });
+    if (output.source.root.kind !== 'sequence') {
+      throw new Error('Expected a sequence proposal fixture');
+    }
+    const sourceRoot = output.source.root;
+    const invalidOutput = WorkflowAnalyzerOutputSchema.parse({
+      ...output,
+      source: {
+        ...output.source,
+        root: {
+          ...output.source.root,
+          children: [
+            { kind: 'step', id: 'unknown-step', uses: 'unknown.step@1', with: {} },
+            ...sourceRoot.children,
+          ],
+        },
+      },
+    });
+    const receipt = WorkflowAnalyzerReceiptSchema.parse({
+      status: 'completed',
+      provider: 'codex_cli',
+      analyzerVersion: 'workflow-analyzer@2',
+      profile: 'test-analyzer',
+      profileSha256: 'b'.repeat(64),
+      cliVersion: 'codex-cli 0.120.0',
+      model: 'gpt-5.6-terra',
+      effort: 'medium',
+      serviceTier: 'fast',
+      sessionId: 'thread-correction',
+      promptHash: 'a'.repeat(64),
+      durationMs: 1250,
+      usage: {
+        inputTokens: 1200,
+        cachedInputTokens: 800,
+        outputTokens: 240,
+        reasoningOutputTokens: 40,
+      },
+      hypotheticalApiCostUsd: null,
+    });
+
+    const rejected = service.generateFromAnalyzerOutput(fixture.fixtureId, invalidOutput, receipt);
+    expect(rejected).toMatchObject({ ok: true, value: { status: 'rejected' } });
+    const corrected = service.reviseFromAnalyzerOutputForTask(
+      fixture,
+      output,
+      { ...receipt, sessionId: 'thread-corrected', promptHash: 'c'.repeat(64) },
+      'tasker:test:corrected-candidate',
+    );
+    expect(corrected).toMatchObject({ ok: true, value: { status: 'ready' } });
+    const activity = service.readActivity(fixture.fixtureId);
+    expect(activity.ok).toBe(true);
+    if (!activity.ok) return;
+    expect(
+      activity.value.entries.some(
+        (entry) => entry.level === 'info' && entry.title === 'Workflow candidate corrected',
+      ),
+    ).toBe(true);
+
+    ledger.close();
+  });
+
   it('restores provider provenance without re-planning an existing workflow', () => {
     const filename = databasePath();
     const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');

@@ -77,6 +77,7 @@ import {
   TooltipTrigger,
 } from './components/ui/tooltip.js';
 import { cn } from './lib/utils.js';
+import { MarkdownText } from './MarkdownText.js';
 import { planningAgentLogFrom, type PlanningAgentEvent } from './planning-agent-log.js';
 import { WorkflowStages } from './WorkflowStages.js';
 
@@ -632,51 +633,46 @@ const SelectedTaskHeader = ({
   );
 };
 
-const PlanReviewControls = ({
-  guidance,
-  pendingOperation,
-  onGuidanceChange,
-  onApprove,
-  onRequestChanges,
-}: {
+type PlanReviewActions = {
   readonly guidance: string;
   readonly pendingOperation: TaskOperation | null;
   readonly onGuidanceChange: (guidance: string) => void;
   readonly onApprove: () => void;
   readonly onRequestChanges: () => void;
-}) => {
+};
+
+const PlanReviewActions = ({
+  guidance,
+  pendingOperation,
+  onGuidanceChange,
+  onApprove,
+  onRequestChanges,
+}: PlanReviewActions) => {
   const approving = pendingOperation === 'approving_plan';
   const requestingChanges = pendingOperation === 'requesting_plan_changes';
   const busy = approving || requestingChanges;
 
   return (
-    <section
-      className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3"
-      data-testid="plan-review-controls"
-    >
-      <div className="flex items-center justify-between gap-4">
+    <footer className="border-t border-primary/20 bg-primary/4 px-5 py-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <strong className="text-sm">Review the implementation plan</strong>
+          <strong className="text-sm">Plan decision</strong>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Approve it, or send guidance for a new immutable planning attempt.
+            Approve this exact plan, or describe what the planner must change.
           </p>
         </div>
-        <Button size="sm" type="button" disabled={busy} onClick={onApprove}>
-          {approving ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-          {approving ? 'Approving…' : 'Approve plan'}
-        </Button>
       </div>
-      <div className="mt-2 flex items-end gap-2">
-        <textarea
-          className="min-h-16 flex-1 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
-          aria-label="Plan review guidance"
-          placeholder="What should the agent change in the plan?"
-          value={guidance}
-          disabled={busy}
-          onChange={(event) => {
-            onGuidanceChange(event.target.value);
-          }}
-        />
+      <textarea
+        className="mt-3 min-h-20 w-full resize-y rounded-md border border-input bg-background/70 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+        aria-label="Plan review guidance"
+        placeholder="What should the agent change in the plan?"
+        value={guidance}
+        disabled={busy}
+        onChange={(event) => {
+          onGuidanceChange(event.target.value);
+        }}
+      />
+      <div className="mt-3 flex justify-end gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -691,8 +687,12 @@ const PlanReviewControls = ({
           )}
           {requestingChanges ? 'Sending…' : 'Request changes'}
         </Button>
+        <Button size="sm" type="button" disabled={busy} onClick={onApprove}>
+          {approving ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+          {approving ? 'Approving…' : 'Approve plan'}
+        </Button>
       </div>
-    </section>
+    </footer>
   );
 };
 
@@ -865,12 +865,14 @@ const ImplementationPlanSurface = ({
   planning,
   answers,
   pending,
+  reviewActions,
   onAnswerChange,
   onSubmitAnswers,
 }: {
   readonly planning: ImplementationPlanLoadState;
   readonly answers: ReadonlyMap<string, string>;
   readonly pending: boolean;
+  readonly reviewActions?: PlanReviewActions;
   readonly onAnswerChange: (questionId: string, answer: string) => void;
   readonly onSubmitAnswers: () => void;
 }) => {
@@ -968,6 +970,161 @@ const ImplementationPlanSurface = ({
     record.receipt.hypotheticalApiCostUsd === null
       ? 'API cost unrated'
       : `~$${record.receipt.hypotheticalApiCostUsd.toFixed(2)} API`;
+  const metadata = (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+      <StateBadge>{record.selectedStrategy}</StateBadge>
+      <PlanningSnapshotTag record={record} />
+      <span>
+        attempt {record.attempt} · {record.receipt.provider} ·{' '}
+        {(record.receipt.durationMs / 1000).toFixed(1)}s · {measuredTokens.toLocaleString()} tok ·{' '}
+        {apiCost}
+      </span>
+    </div>
+  );
+  const document = (
+    <div className="space-y-6 px-5 py-5">
+      <MarkdownText className="max-w-4xl text-sm text-muted-foreground">
+        {plan.summary}
+      </MarkdownText>
+      <section aria-labelledby="plan-steps-heading">
+        <h3
+          className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          id="plan-steps-heading"
+        >
+          Execution steps
+        </h3>
+        <ol className="space-y-4">
+          {plan.steps.map((step, index) => (
+            <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3" key={step.id}>
+              <span className="flex size-6 items-center justify-center rounded-full bg-muted text-[11px] tabular-nums text-muted-foreground">
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <strong className="text-sm font-medium">{step.title}</strong>
+                <MarkdownText className="mt-1 text-xs text-muted-foreground">
+                  {step.objective}
+                </MarkdownText>
+                {step.files.length === 0 ? null : (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {step.files.map((file) => (
+                      <code
+                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        key={file}
+                      >
+                        {file}
+                      </code>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 space-y-1 border-l border-border pl-3">
+                  {step.verification.map((item) => (
+                    <MarkdownText className="text-xs text-muted-foreground" key={item}>
+                      {item}
+                    </MarkdownText>
+                  ))}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+      <section className="border-t border-border/70 pt-4" aria-labelledby="acceptance-heading">
+        <h3
+          className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          id="acceptance-heading"
+        >
+          Acceptance
+        </h3>
+        <ol className="space-y-3">
+          {plan.acceptanceCriteria.map((criterion) => (
+            <li key={criterion.id}>
+              <MarkdownText className="text-sm">{criterion.expected}</MarkdownText>
+              <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                {criterion.verification.map((verification, index) => {
+                  const description =
+                    verification.kind === 'inspection'
+                      ? `${verification.target}: ${verification.expectation}`
+                      : verification.scenario;
+                  return (
+                    <li className="flex items-start gap-2" key={`${criterion.id}-${String(index)}`}>
+                      <StateBadge>{verification.kind}</StateBadge>
+                      <MarkdownText className="min-w-0 flex-1 text-xs text-muted-foreground">
+                        {description}
+                      </MarkdownText>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
+        </ol>
+      </section>
+      {plan.assumptions.length === 0 && plan.risks.length === 0 ? null : (
+        <div className="grid gap-4 border-t border-border/70 pt-4 md:grid-cols-2">
+          {plan.assumptions.length === 0 ? null : (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Assumptions
+              </h3>
+              {plan.assumptions.map((assumption) => (
+                <MarkdownText className="text-xs text-muted-foreground" key={assumption}>
+                  {assumption}
+                </MarkdownText>
+              ))}
+            </section>
+          )}
+          {plan.risks.length === 0 ? null : (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Risks
+              </h3>
+              <ul className="space-y-2">
+                {plan.risks.map((risk) => (
+                  <li key={`${risk.risk}:${risk.mitigation}`}>
+                    <MarkdownText className="text-xs">{risk.risk}</MarkdownText>
+                    <MarkdownText className="text-xs text-muted-foreground">
+                      {risk.mitigation}
+                    </MarkdownText>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
+      <p className="border-t border-border/70 pt-3 text-[11px] text-muted-foreground">
+        Why {record.selectedStrategy}: {record.selectionReason}
+      </p>
+    </div>
+  );
+
+  if (reviewActions !== undefined) {
+    return (
+      <section
+        className="mx-4 my-4 overflow-hidden rounded-lg border border-primary/30 bg-card shadow-[0_12px_40px_-28px_var(--color-primary)]"
+        aria-label="Review implementation plan"
+        data-testid="plan-review-surface"
+      >
+        <div data-testid="implementation-plan">
+          <header className="border-b border-primary/20 bg-primary/5 px-5 py-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-md bg-primary/12 p-2 text-primary">
+                <GitBranch className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-primary">Plan review</p>
+                <h2 className="mt-0.5 text-lg font-semibold leading-6">{plan.title}</h2>
+                <div className="mt-2">{metadata}</div>
+              </div>
+            </div>
+          </header>
+          {document}
+        </div>
+        <PlanReviewActions {...reviewActions} />
+      </section>
+    );
+  }
+
   return (
     <Collapsible defaultOpen>
       <section
@@ -980,83 +1137,13 @@ const ImplementationPlanSurface = ({
             <div className="flex items-center gap-2">
               <GitBranch className="size-4 text-muted-foreground" />
               <strong className="text-sm">Implementation plan</strong>
-              <StateBadge>{record.selectedStrategy}</StateBadge>
-              <PlanningSnapshotTag record={record} />
-              <span className="text-[11px] text-muted-foreground">
-                attempt {record.attempt} · {record.receipt.provider} ·{' '}
-                {(record.receipt.durationMs / 1000).toFixed(1)}s · {measuredTokens.toLocaleString()}{' '}
-                tok · {apiCost}
-              </span>
+              {metadata}
             </div>
             <p className="mt-1 truncate text-xs text-muted-foreground">{plan.title}</p>
           </div>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
         </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="border-t border-border/60 px-5 py-4">
-            <p className="mb-3 max-w-4xl text-[13px] leading-5 text-muted-foreground">
-              {plan.summary}
-            </p>
-            <ol className="space-y-3">
-              {plan.steps.map((step, index) => (
-                <li className="grid grid-cols-[20px_minmax(0,1fr)] gap-2" key={step.id}>
-                  <span className="text-xs tabular-nums text-muted-foreground">{index + 1}</span>
-                  <div className="min-w-0">
-                    <strong className="text-[13px] font-medium">{step.title}</strong>
-                    <p className="text-xs leading-5 text-muted-foreground">{step.objective}</p>
-                    {step.files.length === 0 ? null : (
-                      <p className="truncate font-mono text-[10px] text-muted-foreground/80">
-                        {step.files.join(' · ')}
-                      </p>
-                    )}
-                    <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
-                      {step.verification.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="mt-4 border-t border-border/60 pt-3">
-              <strong className="text-xs font-medium">Acceptance</strong>
-              <ol className="mt-2 space-y-2">
-                {plan.acceptanceCriteria.map((criterion) => (
-                  <li key={criterion.id} className="text-xs">
-                    <p>
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {criterion.id}
-                      </span>{' '}
-                      {criterion.expected}
-                    </p>
-                    <ul className="mt-1 space-y-0.5 pl-3 text-[11px] text-muted-foreground">
-                      {criterion.verification.map((verification, index) => {
-                        const description =
-                          verification.kind === 'inspection'
-                            ? `${verification.target}: ${verification.expectation}`
-                            : verification.scenario;
-                        return (
-                          <li key={`${criterion.id}-${String(index)}`}>
-                            <span className="text-foreground/70">{verification.kind}</span>
-                            {' · '}
-                            {description}
-                            <span className="font-mono text-[10px] text-muted-foreground/70">
-                              {' '}
-                              → {verification.workflowStepIds.join(', ')}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <p className="mt-4 text-[11px] text-muted-foreground">
-              Why {record.selectedStrategy}: {record.selectionReason}
-            </p>
-          </div>
-        </CollapsibleContent>
+        <CollapsibleContent className="border-t border-border/60">{document}</CollapsibleContent>
       </section>
     </Collapsible>
   );
@@ -2657,15 +2744,15 @@ export const App = () => {
       decision === 'approve' ? ('approving_plan' as const) : ('requesting_plan_changes' as const);
     setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, operation));
+    if (decision === 'request_changes') {
+      setPlanGuidanceDrafts((current) => {
+        const next = new Map(current);
+        next.delete(taskReference);
+        return next;
+      });
+    }
     void reviewPlan(taskReference, decision === 'approve' ? { decision } : { decision, guidance })
       .then(async () => {
-        if (decision === 'request_changes') {
-          setPlanGuidanceDrafts((current) => {
-            const next = new Map(current);
-            next.delete(taskReference);
-            return next;
-          });
-        }
         await refreshTasks();
         if (selectedIdRef.current === taskReference) {
           await refreshSelection(taskReference);
@@ -2673,6 +2760,9 @@ export const App = () => {
       })
       .catch((error: unknown) => {
         if (selectedIdRef.current === taskReference) {
+          if (decision === 'request_changes') {
+            setPlanGuidanceDrafts((current) => new Map(current).set(taskReference, guidance));
+          }
           setActivityState({
             status: 'failed',
             message: error instanceof Error ? error.message : 'Unexpected plan review failure',
@@ -3011,23 +3101,6 @@ export const App = () => {
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
                 />
-                {selectedTask.status === 'plan_review' ? (
-                  <PlanReviewControls
-                    guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
-                    pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
-                    onGuidanceChange={(guidance) => {
-                      setPlanGuidanceDrafts((current) =>
-                        new Map(current).set(selectedTask.id, guidance),
-                      );
-                    }}
-                    onApprove={() => {
-                      handlePlanReview('approve');
-                    }}
-                    onRequestChanges={() => {
-                      handlePlanReview('request_changes');
-                    }}
-                  />
-                ) : null}
                 {selectedTask.status === 'code_review' ? (
                   <CodeReviewControls
                     pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
@@ -3088,24 +3161,56 @@ export const App = () => {
                   onRetry={handleWorkflowContinuationRetry}
                 />
                 <ScrollArea className="min-h-0 flex-1">
+                  {selectedTask.status === 'plan_review' ? (
+                    <ImplementationPlanSurface
+                      planning={implementationPlanState}
+                      answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
+                      pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
+                      reviewActions={{
+                        guidance: planGuidanceDrafts.get(selectedTask.id) ?? '',
+                        pendingOperation: pendingOperations.get(selectedTask.id) ?? null,
+                        onGuidanceChange: (guidance) => {
+                          setPlanGuidanceDrafts((current) =>
+                            new Map(current).set(selectedTask.id, guidance),
+                          );
+                        },
+                        onApprove: () => {
+                          handlePlanReview('approve');
+                        },
+                        onRequestChanges: () => {
+                          handlePlanReview('request_changes');
+                        },
+                      }}
+                      onAnswerChange={(questionId, answer) => {
+                        setPlanningAnswerDrafts((current) => {
+                          const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
+                          taskAnswers.set(questionId, answer);
+                          return new Map(current).set(selectedTask.id, taskAnswers);
+                        });
+                      }}
+                      onSubmitAnswers={handlePlanningClarification}
+                    />
+                  ) : null}
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
                   <PlanningTranscriptSurface
                     transcript={planningTranscriptState}
                     live={planningInProgress}
                   />
-                  <ImplementationPlanSurface
-                    planning={implementationPlanState}
-                    answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
-                    pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
-                    onAnswerChange={(questionId, answer) => {
-                      setPlanningAnswerDrafts((current) => {
-                        const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
-                        taskAnswers.set(questionId, answer);
-                        return new Map(current).set(selectedTask.id, taskAnswers);
-                      });
-                    }}
-                    onSubmitAnswers={handlePlanningClarification}
-                  />
+                  {selectedTask.status === 'plan_review' ? null : (
+                    <ImplementationPlanSurface
+                      planning={implementationPlanState}
+                      answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
+                      pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
+                      onAnswerChange={(questionId, answer) => {
+                        setPlanningAnswerDrafts((current) => {
+                          const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
+                          taskAnswers.set(questionId, answer);
+                          return new Map(current).set(selectedTask.id, taskAnswers);
+                        });
+                      }}
+                      onSubmitAnswers={handlePlanningClarification}
+                    />
+                  )}
                   <TaskDetails
                     details={jiraIssueState}
                     onRetry={handleJiraSync}

@@ -343,7 +343,8 @@ export class M1WorkflowService {
       return err({ kind: 'store_failure', error: analyzerSession.error });
     }
 
-    const entries = this.store.listEvents(fixtureId).map((event) => {
+    const taskEvents = this.store.listEvents(fixtureId);
+    const entries = taskEvents.map((event) => {
       const source =
         event.actor === 'subscription_cli_analyzer'
           ? ('agent' as const)
@@ -392,15 +393,22 @@ export class M1WorkflowService {
             title: 'Workflow compiled and persisted',
             detail: 'The deterministic validator accepted the proposed workflow graph.',
           };
-        case 'WorkflowRejected':
+        case 'WorkflowRejected': {
+          const corrected = taskEvents.some(
+            (candidate) =>
+              candidate.sequence > event.sequence && candidate.eventType === 'WorkflowPlanned',
+          );
           return {
             sequence: event.sequence,
             occurredAt: event.occurredAt,
             source,
-            level: 'error' as const,
-            title: 'Workflow rejected',
-            detail: 'The deterministic validator blocked the proposal before execution.',
+            level: corrected ? ('info' as const) : ('error' as const),
+            title: corrected ? 'Workflow candidate corrected' : 'Workflow rejected',
+            detail: corrected
+              ? 'The validator rejected this candidate, and the planner produced a later valid workflow.'
+              : 'The deterministic validator blocked the proposal before execution.',
           };
+        }
         default:
           return {
             sequence: event.sequence,

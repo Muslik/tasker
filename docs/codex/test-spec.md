@@ -304,6 +304,8 @@ Playwright acceptance scenarios:
    right;
 3. start form includes optional repository and plan-review checkbox;
 4. plan review accepts feedback and visibly creates a new attempt;
+   the plan and decision actions share one review surface, and Markdown plan prose is
+   rendered without raw HTML;
 5. blocking question shows evidence/options and accepts an answer;
 6. VPN/403 displays compact sync/infra health without activity-log spam;
 7. stopping/reopening the cockpit restores selected task state;
@@ -312,6 +314,8 @@ Playwright acceptance scenarios:
 10. Jira task details are readable/editable through the integration boundary;
 11. raw Temporal diagnostics are available on demand, not mixed with task activity;
 12. minimal layout remains usable at the supported desktop viewport.
+13. a validator rejection followed by a valid candidate is shown as a resolved planning
+    correction rather than a red current failure.
 
 ## 8. Delivery gates
 
