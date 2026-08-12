@@ -724,7 +724,7 @@ const PlanReviewActions = ({
 
   return (
     <footer
-      className="relative z-[60] shrink-0 border-t-2 border-amber-500/70 bg-amber-500/10 px-5 py-4 shadow-[0_-18px_48px_-32px_rgba(245,158,11,0.9)] backdrop-blur"
+      className="relative z-[60] shrink-0 border-t-2 border-amber-500/70 bg-amber-500/10 px-5 py-3 shadow-[0_-18px_48px_-32px_rgba(245,158,11,0.9)] backdrop-blur"
       aria-label="Plan decision"
       data-testid="plan-review-actions"
     >
@@ -742,7 +742,7 @@ const PlanReviewActions = ({
         </div>
       </div>
       <textarea
-        className="mt-3 min-h-20 w-full resize-y rounded-md border border-input bg-background/70 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+        className="mt-2 min-h-16 w-full resize-y rounded-md border border-input bg-background/70 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
         aria-label="Plan review guidance"
         placeholder="What should the agent change in the plan?"
         value={guidance}
@@ -751,7 +751,7 @@ const PlanReviewActions = ({
           onGuidanceChange(event.target.value);
         }}
       />
-      <div className="mt-3 flex justify-end gap-2">
+      <div className="mt-2 flex justify-end gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -1005,6 +1005,7 @@ const NativePlanReview = ({
   const [selection, setSelection] = useState<SelectedPlanRange | null>(null);
   const [comment, setComment] = useState('');
   const documentRef = useRef<HTMLDivElement>(null);
+  const documentScrollRef = useRef<HTMLDivElement>(null);
 
   const captureSelection = useCallback((): void => {
     const root = documentRef.current;
@@ -1015,6 +1016,7 @@ const NativePlanReview = ({
 
   useEffect(() => {
     if (!fullscreen) return;
+    documentScrollRef.current?.scrollTo({ top: 0 });
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setFullscreen(false);
     };
@@ -1056,12 +1058,14 @@ const NativePlanReview = ({
     <section
       className={cn(
         'overflow-hidden border border-amber-500/50 bg-card shadow-[0_18px_58px_-36px_rgba(245,158,11,0.85)]',
-        fullscreen ? 'flex h-full min-h-0 flex-col rounded-xl' : 'mx-4 my-4 rounded-lg',
+        fullscreen
+          ? 'mx-auto flex h-full min-h-0 w-full max-w-[1800px] flex-col rounded-xl shadow-2xl'
+          : 'mx-4 my-4 rounded-lg',
       )}
       aria-label="Review implementation plan"
       data-testid="plan-review-surface"
     >
-      <header className="flex items-start gap-3 border-b border-amber-500/30 bg-amber-500/10 px-5 py-4">
+      <header className="flex items-start gap-3 border-b border-amber-500/30 bg-amber-500/10 px-5 py-4 lg:px-7">
         <div className="mt-0.5 shrink-0 rounded-md bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300">
           <AlertTriangle className="size-4 shrink-0" />
         </div>
@@ -1093,27 +1097,35 @@ const NativePlanReview = ({
       </header>
       <div
         className={cn(
-          'grid min-h-0',
+          'grid min-h-0 overflow-hidden',
           fullscreen && 'flex-1',
           fullscreen || annotations.length > 0 || selection !== null
-            ? 'grid-cols-[minmax(0,1fr)_300px]'
+            ? 'grid-cols-[minmax(0,1fr)_320px]'
             : 'grid-cols-1',
         )}
       >
-        <div
-          className={cn('min-w-0', fullscreen && 'overflow-y-auto')}
-          data-testid="implementation-plan"
-        >
+        <div className="flex min-h-0 min-w-0 flex-col">
           <div
-            className="px-6 py-6 selection:bg-amber-300/40 dark:selection:bg-amber-500/35"
-            data-plan-anchor={artifactId}
-            onMouseUp={captureSelection}
-            ref={documentRef}
+            className={cn(
+              'min-h-0 min-w-0 flex-1 bg-muted/10',
+              fullscreen ? 'overflow-y-auto' : 'overflow-visible',
+            )}
+            data-testid="implementation-plan"
+            {...(fullscreen ? { 'data-plan-scroll-region': '' } : {})}
+            ref={documentScrollRef}
           >
-            <MarkdownText className="mx-auto max-w-4xl text-sm text-muted-foreground">
-              {markdown}
-            </MarkdownText>
+            <div
+              className="mx-auto w-full max-w-6xl px-7 py-8 selection:bg-amber-300/40 lg:px-10 lg:py-10 dark:selection:bg-amber-500/35"
+              data-plan-anchor={artifactId}
+              onMouseUp={captureSelection}
+              ref={documentRef}
+            >
+              <MarkdownText className="text-[15px] leading-7 text-foreground/80">
+                {markdown}
+              </MarkdownText>
+            </div>
           </div>
+          {decisionActions}
         </div>
         {fullscreen || annotations.length > 0 || selection !== null ? (
           <aside
@@ -1236,13 +1248,12 @@ const NativePlanReview = ({
           </aside>
         ) : null}
       </div>
-      {decisionActions}
     </section>
   );
 
   return fullscreen ? (
     <div
-      className="fixed inset-0 z-50 bg-background/95 p-5 backdrop-blur-sm"
+      className="fixed inset-0 z-50 bg-background/90 p-3 backdrop-blur-md lg:p-6"
       role="dialog"
       aria-modal="true"
     >

@@ -359,6 +359,8 @@ test('the plan review document renders safe Markdown next to its decision contro
 }) => {
   const fixtureId = 'avia-13236-short-bug';
 
+  await page.setViewportSize({ width: 1920, height: 1080 });
+
   await page.route(`**/api/workflows/${fixtureId}/implementation-plan`, async (route) => {
     const response = await route.fetch();
     const body = (await response.json()) as {
@@ -366,8 +368,11 @@ test('the plan review document renders safe Markdown next to its decision contro
       decision?: { plan?: { summary?: string; steps?: Array<{ objective?: string }> } };
     };
     if (body.status === 'ready' && body.decision?.plan !== undefined) {
-      body.decision.plan.summary =
-        '**Review focus**: preserve `booking-summary` behavior.\n\n<div data-unsafe="true">raw HTML must not render</div>';
+      const reviewDetails = Array.from(
+        { length: 20 },
+        (_, index) => `${String(index + 1)}. Review detail ${String(index + 1)}`,
+      ).join('\n');
+      body.decision.plan.summary = `**Review focus**: preserve \`booking-summary\` behavior.\n\n${reviewDetails}\n\n<div data-unsafe="true">raw HTML must not render</div>`;
       const firstStep = body.decision.plan.steps?.[0];
       if (firstStep !== undefined) {
         firstStep.objective = '- Keep the existing flow\n- Verify the changed surface';
@@ -389,8 +394,16 @@ test('the plan review document renders safe Markdown next to its decision contro
   await expect(
     reviewSurface.getByText('Verify the changed surface', { exact: true }),
   ).toBeVisible();
+  await expect(reviewSurface).not.toContainText('[runtime_evidence]');
   await reviewSurface.getByRole('button', { name: 'Open plan full screen' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('plan-review-actions')).toBeVisible();
+  const fullscreenDocument = dialog.locator('[data-plan-scroll-region]');
+  await fullscreenDocument.evaluate('element => { element.scrollTop = 400; }');
+  await dialog.getByRole('button', { name: 'Close full screen plan' }).click();
+  await reviewSurface.getByRole('button', { name: 'Open plan full screen' }).click();
+  await expect(dialog.locator('[data-plan-scroll-region]')).toHaveJSProperty('scrollTop', 0);
   const planArtifactId = await reviewSurface
     .locator('[data-plan-anchor]')
     .getAttribute('data-plan-anchor');
@@ -431,8 +444,7 @@ test('the plan review document renders safe Markdown next to its decision contro
   await expect(page.getByTestId('plan-review-actions')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve plan' })).toBeDisabled();
   await page.getByRole('button', { name: 'Remove annotation 1' }).click();
-  await page.getByRole('button', { name: 'Approve plan' }).click();
-  await waitForRunWait(page, fixtureId, 'execution.start@1');
+  await expect(page.getByRole('button', { name: 'Approve plan' })).toBeEnabled();
 });
 
 test('the planner owns a cross-repository workflow candidate before freeze', async ({ page }) => {

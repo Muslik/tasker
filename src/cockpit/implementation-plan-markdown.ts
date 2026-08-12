@@ -5,20 +5,55 @@ import type {
 
 type ImplementationPlanRisk = ImplementationPlan['risks'][number];
 
+const automatedTestLevelLabels = {
+  unit: 'unit test',
+  integration: 'integration test',
+  e2e: 'end-to-end test',
+  visual: 'visual test',
+} as const satisfies Record<
+  Extract<AcceptanceVerification, { kind: 'automated_test' }>['level'],
+  string
+>;
+
+const evidenceLabels = {
+  video: 'video',
+  image: 'screenshot',
+  log: 'logs',
+  structured_output: 'structured result',
+} as const satisfies Record<
+  Extract<AcceptanceVerification, { kind: 'runtime_evidence' }>['evidence'][number],
+  string
+>;
+
+const processProfileLabel = (profile: string): string => {
+  if (profile === 'full_with_visual') return 'Full verification with visual comparison';
+  if (profile === 'full') return 'Full verification';
+  return profile
+    .split(/[_-]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+    .join(' ');
+};
+
+const listPhrase = (items: readonly string[]): string => {
+  if (items.length < 2) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`;
+};
+
 const linesFromVerification = (verification: AcceptanceVerification): readonly string[] => {
   switch (verification.kind) {
     case 'automated_test':
       return [
-        `- [${verification.kind}] ${verification.level}/${verification.source}: ${verification.scenario}`,
+        `- **${verification.source === 'existing' ? 'Existing' : 'New'} ${automatedTestLevelLabels[verification.level]}:** ${verification.scenario}`,
       ];
     case 'process':
-      return [`- [${verification.kind}] ${verification.profile}: ${verification.scenario}`];
+      return [`- **${processProfileLabel(verification.profile)}:** ${verification.scenario}`];
     case 'runtime_evidence':
       return [
-        `- [${verification.kind}] ${verification.scenario} (${verification.evidence.join(', ')})`,
+        `- **Runtime evidence:** ${verification.scenario} Artifacts: ${listPhrase(verification.evidence.map((evidence) => evidenceLabels[evidence]))}.`,
       ];
     case 'inspection':
-      return [`- [${verification.kind}] ${verification.target}: ${verification.expectation}`];
+      return [`- **Inspect ${verification.target}:** ${verification.expectation}`];
   }
 };
 
