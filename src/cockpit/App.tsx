@@ -18,6 +18,7 @@ import {
   Plus,
   Radio,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   Sun,
   Terminal,
@@ -63,6 +64,7 @@ import {
   loadWorkflow,
   reviewPlan,
   reviewWorkflowContinuation,
+  restartWorkflow,
   resumeWorkflow,
   retryWorkflowContinuation,
   syncCodeReview,
@@ -149,6 +151,7 @@ type TaskOperation =
   | 'completing_review'
   | 'answering_questions'
   | 'resuming'
+  | 'restarting'
   | 'accepting_continuation'
   | 'rejecting_continuation'
   | 'retrying_continuation';
@@ -815,14 +818,22 @@ const OperatorIntervention = ({
   stage,
   guidance,
   pending,
+  restartConfirming,
   onGuidanceChange,
   onResume,
+  onRestartRequest,
+  onRestartCancel,
+  onRestartConfirm,
 }: {
   readonly stage: string;
   readonly guidance: string;
   readonly pending: boolean;
+  readonly restartConfirming: boolean;
   readonly onGuidanceChange: (guidance: string) => void;
   readonly onResume: () => void;
+  readonly onRestartRequest: () => void;
+  readonly onRestartCancel: () => void;
+  readonly onRestartConfirm: () => void;
 }) => (
   <section className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3">
     <div className="flex items-start justify-between gap-4">
@@ -834,10 +845,22 @@ const OperatorIntervention = ({
           resume without repeating completed work.
         </p>
       </div>
-      <Button size="sm" type="button" disabled={pending} onClick={onResume}>
-        {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-        {pending ? 'Resuming…' : 'Resume'}
-      </Button>
+      <div className="flex shrink-0 gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          disabled={pending}
+          onClick={onRestartRequest}
+        >
+          <RotateCcw data-icon="inline-start" />
+          Restart from scratch
+        </Button>
+        <Button size="sm" type="button" disabled={pending} onClick={onResume}>
+          {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+          {pending ? 'Working…' : 'Resume'}
+        </Button>
+      </div>
     </div>
     <textarea
       className="mt-2 min-h-16 w-full resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
@@ -849,6 +872,38 @@ const OperatorIntervention = ({
         onGuidanceChange(event.target.value);
       }}
     />
+    {restartConfirming ? (
+      <div className="mt-3 flex items-center justify-between gap-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+        <div>
+          <strong className="text-sm text-destructive">Abandon this run?</strong>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Tasker will preserve its Temporal history, terminate unfinished work, and create a new
+            workspace from the current harness.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            disabled={pending}
+            onClick={onRestartCancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            type="button"
+            disabled={pending}
+            onClick={onRestartConfirm}
+          >
+            {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+            {pending ? 'Restarting…' : 'Confirm restart'}
+          </Button>
+        </div>
+      </div>
+    ) : null}
   </section>
 );
 
@@ -2647,6 +2702,7 @@ export const App = () => {
   );
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
   const [runtimeWatchTaskId, setRuntimeWatchTaskId] = useState<string | null>(null);
+  const [restartConfirmationTaskId, setRestartConfirmationTaskId] = useState<string | null>(null);
   const [pendingOperations, setPendingOperations] = useState<ReadonlyMap<string, TaskOperation>>(
     new Map(),
   );
@@ -3122,6 +3178,7 @@ export const App = () => {
   }, [bootstrapStatus, selectedId.length]);
 
   const handleSelectTask = (taskId: string): void => {
+    setRestartConfirmationTaskId(null);
     setSelectedId(taskId);
     void refreshSelection(taskId);
   };
@@ -3392,6 +3449,40 @@ export const App = () => {
       });
   };
 
+  const handleRestart = (): void => {
+    if (selectedTask === null || selectedTask.status !== 'waiting') return;
+    const taskReference = selectedTask.id;
+    setRuntimeWatchTaskId(taskReference);
+    setPendingOperations((current) => new Map(current).set(taskReference, 'restarting'));
+    void restartWorkflow(taskReference, { confirmation: 'restart_from_scratch' })
+      .then(async () => {
+        setRestartConfirmationTaskId(null);
+        setInterventionGuidanceDrafts((current) => {
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) await refreshSelection(taskReference);
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message: error instanceof Error ? error.message : 'Unexpected restart failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'restarting') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
   const handleWorkflowContinuationReview = (decision: 'accept' | 'reject'): void => {
     if (selectedTask === null || workflowContinuationState.status !== 'ready') {
       return;
@@ -3640,13 +3731,24 @@ export const App = () => {
                   <OperatorIntervention
                     stage={selectedTask.currentStage}
                     guidance={interventionGuidanceDrafts.get(selectedTask.id) ?? ''}
-                    pending={pendingOperations.get(selectedTask.id) === 'resuming'}
+                    pending={
+                      pendingOperations.get(selectedTask.id) === 'resuming' ||
+                      pendingOperations.get(selectedTask.id) === 'restarting'
+                    }
+                    restartConfirming={restartConfirmationTaskId === selectedTask.id}
                     onGuidanceChange={(guidance) => {
                       setInterventionGuidanceDrafts((current) =>
                         new Map(current).set(selectedTask.id, guidance),
                       );
                     }}
                     onResume={handleResume}
+                    onRestartRequest={() => {
+                      setRestartConfirmationTaskId(selectedTask.id);
+                    }}
+                    onRestartCancel={() => {
+                      setRestartConfirmationTaskId(null);
+                    }}
+                    onRestartConfirm={handleRestart}
                   />
                 ) : null}
                 {view === null ? null : <ValidationSurface view={view} />}

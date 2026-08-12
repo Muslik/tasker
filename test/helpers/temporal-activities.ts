@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { BootstrapWorkflowActivities } from '../../src/temporal/bootstrap-kernel/contracts.js';
 import type { ExecutionWorkflowActivities } from '../../src/temporal/execution-kernel/contracts.js';
 
@@ -5,9 +7,10 @@ const HASH = '0'.repeat(64);
 
 export const testTemporalActivities = {
   prepareTaskWorkspace: (input) => {
+    const workspaceId = createHash('sha256').update(input.workflowRunId).digest('hex').slice(0, 24);
     const workspace = {
       schemaVersion: 1 as const,
-      workspaceId: '0'.repeat(24),
+      workspaceId,
       taskReference: input.taskReference,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
@@ -17,8 +20,8 @@ export const testTemporalActivities = {
         baseCommit: '0'.repeat(40),
       },
       runnerId: 'temporal-test',
-      path: '/tasker/worktrees/fixture',
-      branch: `tasker/${input.taskReference}`,
+      path: `/tasker/worktrees/${workspaceId}`,
+      branch: `tasker/${input.taskReference}/${workspaceId}`,
       preparedAt: '2026-08-09T00:00:00.000Z',
     };
     return Promise.resolve({

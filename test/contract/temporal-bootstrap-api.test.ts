@@ -55,6 +55,7 @@ const bootstrapWait = (
 
 class ContractTaskRunService implements TaskRunService {
   public readonly starts: BootstrapWorkflowInput[] = [];
+  public readonly restarts: string[] = [];
   public readonly resolutions: ResolveBootstrapWaitCommand[] = [];
   private current: TaskRunPublicState | null = null;
 
@@ -75,6 +76,26 @@ class ContractTaskRunService implements TaskRunService {
         this.current?.runtime === 'bootstrap' ? { bootstrap: this.current, execution: null } : null,
       ),
     );
+  }
+
+  public restart(taskReference: string) {
+    if (this.current === null || this.current.taskReference !== taskReference) {
+      return Promise.resolve(err({ kind: 'run_not_found' as const, taskReference }));
+    }
+    if (this.current.runtime !== 'bootstrap') {
+      return Promise.resolve(err({ kind: 'run_not_restartable' as const, taskReference }));
+    }
+    this.restarts.push(taskReference);
+    const input = BootstrapWorkflowInputSchema.parse({
+      schemaVersion: 3,
+      taskReference,
+      settings: this.current.settings,
+    });
+    this.current = BootstrapWorkflowPublicStateSchema.parse({
+      ...bootstrapWait(input),
+      runId: `restarted:${taskReference}`,
+    });
+    return Promise.resolve(ok(this.current));
   }
 
   public resolveWait(taskReference: string, command: ResolveBootstrapWaitCommand) {
@@ -151,6 +172,44 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
 
     expect(response.statusCode).toBe(400);
     expect(runs.starts).toHaveLength(0);
+  });
+
+  it('restarts an unfinished run only after literal operator confirmation', async () => {
+    const { api, runs } = setup();
+    await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+      payload: {
+        settings: {
+          planReview: 'required',
+          planningStrategy: 'fast',
+        },
+      },
+    });
+
+    const unconfirmed = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/restart',
+      payload: { confirmation: true },
+    });
+    const restarted = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/restart',
+      payload: { confirmation: 'restart_from_scratch' },
+    });
+
+    expect(unconfirmed.statusCode).toBe(400);
+    expect(runs.restarts).toEqual(['avia-13236-short-bug']);
+    expect(restarted.statusCode).toBe(200);
+    expect(ExecutionRunViewSchema.parse(restarted.json())).toMatchObject({
+      runtime: 'bootstrap',
+      runId: 'restarted:avia-13236-short-bug',
+      settings: {
+        planReview: 'required',
+        planningStrategy: 'fast',
+        executionStart: 'automatic',
+      },
+    });
   });
 
   it('surfaces a materialized workflow without a Temporal run as operator attention', async () => {

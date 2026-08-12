@@ -266,6 +266,12 @@ export const ResumeRunCommandSchema = z
   })
   .strict();
 
+export const RestartRunCommandSchema = z
+  .object({
+    confirmation: z.literal('restart_from_scratch'),
+  })
+  .strict();
+
 export const CodeReviewSyncResponseSchema = z
   .object({
     status: z.enum(['pending', 'approved', 'changes_requested']),
@@ -388,6 +394,7 @@ export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
 export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
+export type RestartRunCommand = z.infer<typeof RestartRunCommandSchema>;
 export type CodeReviewSyncResponse = z.infer<typeof CodeReviewSyncResponseSchema>;
 export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
 export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;

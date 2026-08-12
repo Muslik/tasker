@@ -14,8 +14,9 @@ import type { DockerWorkspaceRuntimeStore } from './docker-runtime-store.js';
 
 const failureMessage = (result: CommandResult): string => {
   if (result.status === 'spawn_failed') return result.message;
-  if (result.status === 'timed_out') return result.stderr.trim() || 'Docker command timed out';
-  return result.stderr.trim() || `Docker exited with ${String(result.exitCode)}`;
+  const output = result.stderr.trim() || result.stdout.trim();
+  if (result.status === 'timed_out') return output || 'Docker command timed out';
+  return output || `Docker exited with ${String(result.exitCode)}`;
 };
 
 const isSuccessful = (

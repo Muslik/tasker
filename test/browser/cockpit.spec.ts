@@ -592,6 +592,35 @@ test('an invalid planner candidate pauses planning without an executable graph',
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
 });
 
+test('an operator can explicitly replace a waiting run with a fresh Temporal run', async ({
+  page,
+}) => {
+  const tasks = await loadTasks(page);
+  const invalid = requireTask(
+    tasks.tasks.find(
+      (task) => task.origin.kind === 'fixture' && task.origin.family === 'invalid_workflow',
+    ),
+    'Expected an invalid workflow fixture to exist',
+  );
+
+  await page.goto('/');
+  await clickTask(page, invalid.id);
+  if (invalid.status === 'backlog' || invalid.status === 'workflow_rejected') {
+    await page.getByRole('button', { name: 'Generate workflow' }).click();
+    await waitForRunWait(page, invalid.id, 'planning.candidate-guidance@1');
+  }
+  const before = await loadRun(page, invalid.id);
+  await page.getByRole('button', { name: 'Restart from scratch' }).click();
+
+  await expect(page.getByText('Abandon this run?')).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm restart' }).click();
+  await expect
+    .poll(async () => (await loadRun(page, invalid.id)).runId, { timeout: 20_000 })
+    .not.toBe(before.runId);
+  await expect(page.getByText('Abandon this run?')).toHaveCount(0);
+  await expect(page.getByTestId(`task-item-${invalid.id}`)).not.toContainText('Done');
+});
+
 test('reloading restores the selected task before subscribing to live updates', async ({
   page,
 }) => {

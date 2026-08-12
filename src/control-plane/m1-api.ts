@@ -27,6 +27,7 @@ import {
   OperatorActivityResponseSchema,
   OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
+  RestartRunCommandSchema,
   ResumeRunCommandSchema,
   RunStartCommandSchema,
   WorkflowResponseSchema,
@@ -142,6 +143,10 @@ const sendTemporalRunError = (reply: FastifyReply, error: TaskRunError): Fastify
       return reply
         .code(409)
         .send(apiError(error.kind, 'This run already exists with different immutable settings'));
+    case 'run_not_restartable':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'Completed workflows cannot be restarted from scratch'));
     case 'runtime_unavailable':
       return reply.code(503).send(apiError(error.kind, error.message));
   }
@@ -881,6 +886,25 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     return started.ok
       ? sendTemporalState(reply, params.data.fixtureId, started.value)
       : sendTemporalRunError(reply, started.error);
+  });
+
+  api.post('/api/workflows/:fixtureId/restart', async (request, reply) => {
+    const params = FixtureParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+    }
+    const command = RestartRunCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(
+          apiError('restart_confirmation_required', 'Explicit restart confirmation is required'),
+        );
+    }
+    const restarted = await temporalRunService.restart(params.data.fixtureId);
+    return restarted.ok
+      ? sendTemporalState(reply, params.data.fixtureId, restarted.value)
+      : sendTemporalRunError(reply, restarted.error);
   });
 
   api.get('/api/workflows/:fixtureId/graph.json', async (request, reply) => {

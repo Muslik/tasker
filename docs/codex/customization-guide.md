@@ -441,6 +441,12 @@ Provider session resumption is an optimization. Temporal Activity/workflow state
 Tasker artifacts are the durable recovery source. A provider that cannot resume starts
 a new attempt with bounded persisted context.
 
+Editing a prompt, skill, policy, or block affects future snapshots, not an already frozen
+execution graph. During pre-pilot development, if an unfinished run must consume the new harness,
+use the cockpit's confirmed `Restart from scratch` action. This preserves the abandoned Temporal
+history but intentionally creates a new run and worktree. Do not use it for ordinary retries: fix
+the prerequisite and `Resume` the same run so completed work is retained.
+
 Codex and Claude are current first-class subscription-CLI adapters for analysis,
 planning, and agent steps. Adding another provider means implementing this same adapter
 contract and registering profiles. It is not a skill migration or workflow change.

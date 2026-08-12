@@ -333,6 +333,9 @@ Playwright acceptance scenarios:
 12. minimal layout remains usable at the supported desktop viewport.
 13. a validator rejection followed by a valid candidate is shown as a resolved planning
     correction rather than a red current failure.
+14. an operator-confirmed restart terminates an unfinished run, preserves its Temporal
+    history, and creates a new run/workspace with the same task settings; an unconfirmed
+    request is rejected.
 
 ## 8. Delivery gates
 
@@ -358,6 +361,8 @@ Playwright acceptance scenarios:
 
 - context discovery, mandatory planning, optional plan review, validation, and freeze
   survive worker/API replacement without repeating completed boundaries;
+- explicit restart-from-scratch is distinct from recovery: it creates a new `runId` and
+  workspace while leaving the abandoned run queryable as terminated;
 - disposable repository changes and selected validation survive response loss without
   duplicate mutation;
 - an independent reviewer can reject the implementation before publication;

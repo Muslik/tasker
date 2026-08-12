@@ -551,6 +551,25 @@ Jira refresh is an explicit cache operation. Before planning it refreshes the ta
 by the next planning episode. After freeze it refreshes only the operator-visible Jira snapshot;
 it never mutates frozen context, the execution graph, or a completed prefix.
 
+### Replacing an obsolete run
+
+`Resume` and `Restart from scratch` are deliberately different operator commands:
+
+- `Resume` keeps the same Temporal run, workspace, completed prefix, receipts, and frozen graph;
+- `Restart from scratch` terminates an unfinished bootstrap run and starts a new execution
+  generation with the same task reference and run settings.
+
+Restart is reserved for a run whose frozen snapshot is obsolete—for example, the harness or block
+registration changed incompatibly during pre-pilot development. It is never automatic recovery for
+a 403, infrastructure outage, agent question, or ordinary failed attempt. Those conditions resume
+at their durable boundary.
+
+The API requires a literal confirmation payload and the cockpit exposes a second confirmation step.
+Temporal retains the terminated run history. The replacement reuses the stable business Workflow ID
+but receives a new `runId`; workspace identity and the execution child Workflow ID include that run,
+so the new generation cannot accidentally reuse the abandoned worktree or child execution. Completed
+runs are not restartable through this command.
+
 Plan annotations are product metadata rather than scheduler state. Cockpit owns the draft editor;
 Tasker SQLite stores append-only review rounds keyed by plan artifact and attempt; Temporal receives
 only the accepted decision or normalized revision guidance. Rich textual review therefore does not

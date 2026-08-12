@@ -498,7 +498,9 @@ export async function bootstrapWorkflowV3(
     nodeStates.execution_start = 'skipped';
   }
 
-  const executionWorkflowId = `tasker:execution:v2:${input.taskReference}`;
+  const executionWorkflowId = patched('bootstrap-execution-id-by-bootstrap-run')
+    ? `tasker:execution:v2:${input.taskReference}:${execution.runId}`
+    : `tasker:execution:v2:${input.taskReference}`;
   const child = await startChild(executionWorkflowV2, {
     workflowId: executionWorkflowId,
     args: [

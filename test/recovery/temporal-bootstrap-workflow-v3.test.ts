@@ -155,6 +155,36 @@ describe('Bootstrap Workflow v3 recovery', () => {
       wait: { waitKind: 'code_review@1' },
     });
   });
+
+  it('restarts unfinished work in a new run and workspace without deleting old history', async () => {
+    const taskReference = 'fixture:restart-from-scratch';
+    expect(await runs.start(inputFor(taskReference, 'required'))).toMatchObject({ ok: true });
+    const original = await waitFor(taskReference, 'plan.approved@1');
+    if (original.runtime !== 'bootstrap' || original.workspaceContext === null) {
+      throw new Error('Expected the original bootstrap workspace');
+    }
+
+    const restarted = await runs.restart(taskReference);
+    if (!restarted.ok) throw new Error(JSON.stringify(restarted.error));
+    const fresh = await waitFor(taskReference, 'plan.approved@1');
+    if (fresh.runtime !== 'bootstrap' || fresh.workspaceContext === null) {
+      throw new Error('Expected the fresh bootstrap workspace');
+    }
+    const oldHistory = await environment.client.workflow
+      .getHandle(original.workflowId, original.runId)
+      .fetchHistory();
+
+    expect(fresh.runId).not.toBe(original.runId);
+    expect(fresh.workspaceContext.workspace.workspaceId).not.toBe(
+      original.workspaceContext.workspace.workspaceId,
+    );
+    expect(fresh.settings).toEqual(original.settings);
+    expect(
+      oldHistory.events?.some(
+        (event) => event.workflowExecutionTerminatedEventAttributes !== undefined,
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('Bootstrap infrastructure failure visibility', () => {

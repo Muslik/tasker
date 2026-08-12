@@ -1,6 +1,7 @@
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
+  RestartRunCommandSchema,
   RunStartCommandSchema,
   ResumeRunCommandSchema,
   ExecutionRunViewSchema,
@@ -13,6 +14,7 @@ import {
 } from '../control-plane/m1-contracts.js';
 import type {
   RunStartCommand,
+  RestartRunCommand,
   ResumeRunCommand,
   OperatorActivityResponse,
   OperatorStreamEvent,
@@ -318,6 +320,22 @@ export const resumeWorkflow = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Resume response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const restartWorkflow = async (
+  fixtureId: string,
+  commandInput: RestartRunCommand,
+): Promise<ExecutionRunView> => {
+  const command = RestartRunCommandSchema.parse(commandInput);
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/restart`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(command),
+  });
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Restart response does not match the cockpit contract');
   return parsed.data;
 };
 

@@ -46,6 +46,7 @@ describe('Docker workspace runtime manager', () => {
     const requests: CommandRequest[] = [];
     const existing = new Set<string>();
     let serviceRunning = false;
+    let bootstrapFails = true;
     const host: HostControlPlaneCommandRunner = {
       executionEnvironment: 'host_control_plane',
       run: vi.fn((request: CommandRequest) => {
@@ -89,6 +90,20 @@ describe('Docker workspace runtime manager', () => {
         }
         if (kind === 'rm' && operation === '--force') serviceRunning = false;
         if (kind === 'run' && request.args.includes('--detach')) serviceRunning = true;
+        if (
+          bootstrapFails &&
+          kind === 'run' &&
+          request.args.includes('pnpm install --frozen-lockfile')
+        ) {
+          bootstrapFails = false;
+          return Promise.resolve({
+            status: 'exited' as const,
+            exitCode: 1,
+            stdout: '[ERR_PNPM_FETCH_403] Private registry access is forbidden',
+            stderr: '',
+            durationMs: 1,
+          });
+        }
         return Promise.resolve({
           status: 'exited' as const,
           exitCode: 0,
@@ -141,12 +156,22 @@ describe('Docker workspace runtime manager', () => {
       policyHash: 'd'.repeat(64),
     };
 
+    const failed = await manager.prepare(workspace, policy);
+    expect(failed).toEqual({
+      ok: false,
+      error: {
+        kind: 'bootstrap_failed',
+        command: 'pnpm install --frozen-lockfile',
+        message: '[ERR_PNPM_FETCH_403] Private registry access is forbidden',
+      },
+    });
+
     const first = await manager.prepare(workspace, policy);
     expect(first).toMatchObject({ ok: true, value: { status: 'ready' } });
     const bootstrapRunsAfterFirst = requests.filter(
       ({ args }) => args[0] === 'run' && args.includes('pnpm install --frozen-lockfile'),
     ).length;
-    expect(bootstrapRunsAfterFirst).toBe(1);
+    expect(bootstrapRunsAfterFirst).toBe(2);
 
     const interruptedReceipt = await store.read(workspaceId);
     expect(interruptedReceipt).not.toBeNull();
@@ -164,7 +189,7 @@ describe('Docker workspace runtime manager', () => {
       requests.filter(
         ({ args }) => args[0] === 'run' && args.includes('pnpm install --frozen-lockfile'),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       requests.filter(({ args }) => args[0] === 'run' && args.includes('tasker-volume')),
     ).toHaveLength(2);
