@@ -57,6 +57,10 @@ Every accepted implementation must prove:
 - two task states are independent;
 - manual guidance resumes from the blocked boundary;
 - retrospective changes require human approval.
+- all operator stages are expanded on first render and remain individually collapsible;
+- same-phase bounded loops appear once inside the phase with current/max attempts;
+- an operator wait uses the same attention treatment in the graph and decision surface;
+- light and dark themes preserve readable status and attention contrast across reloads.
 
 ## 3. Pure domain tests
 

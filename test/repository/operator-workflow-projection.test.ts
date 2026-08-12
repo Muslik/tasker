@@ -143,4 +143,155 @@ describe('operator workflow projection', () => {
       ],
     });
   });
+
+  it('keeps repair loops visible inside their surrounding operator phase', () => {
+    const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: ':memory:', clock });
+    resources.push(ledger);
+    const graph = CompiledWorkflowSchema.parse({
+      metadata: {
+        compilerVersion: 4,
+        irVersion: 'm2',
+        workflowId: 'workflow-with-repair-loop',
+        workflowVersion: 1,
+        references: {
+          predicates: ['validation.passed@1'],
+          stepTypes: ['code.implement@1', 'code.repair@1', 'validate.targeted@1'],
+          waits: ['operator_guidance@1'],
+        },
+      },
+      root: {
+        kind: 'sequence',
+        id: 'delivery',
+        children: [
+          {
+            kind: 'step',
+            id: 'implement-fix',
+            uses: 'code.implement@1',
+            activityDelivery: { kind: 'workspace_reconciled' },
+            with: { objective: 'Fix the defect', repository: 'front-avia', taskId: 'AVIA-1' },
+          },
+          {
+            kind: 'step',
+            id: 'validate-fix',
+            uses: 'validate.targeted@1',
+            activityDelivery: { kind: 'single_attempt' },
+            with: { profile: 'targeted', taskId: 'AVIA-1' },
+          },
+          {
+            kind: 'bounded_loop',
+            id: 'repair-validation',
+            maxAttempts: 3,
+            until: 'validation.passed@1',
+            checkBefore: true,
+            exhaustedWait: 'operator_guidance@1',
+            body: {
+              kind: 'sequence',
+              id: 'repair-validation-body',
+              children: [
+                {
+                  kind: 'step',
+                  id: 'repair-code',
+                  uses: 'code.repair@1',
+                  activityDelivery: { kind: 'workspace_reconciled' },
+                  with: {
+                    objective: 'Repair validation failure',
+                    repository: 'front-avia',
+                    taskId: 'AVIA-1',
+                  },
+                },
+                {
+                  kind: 'step',
+                  id: 'revalidate-fix',
+                  uses: 'validate.targeted@1',
+                  activityDelivery: { kind: 'single_attempt' },
+                  with: { profile: 'targeted', taskId: 'AVIA-1' },
+                },
+              ],
+            },
+          },
+          {
+            kind: 'step',
+            id: 'confirm-validation',
+            uses: 'validate.targeted@1',
+            activityDelivery: { kind: 'single_attempt' },
+            with: { profile: 'targeted', taskId: 'AVIA-1' },
+          },
+        ],
+      },
+    });
+    const workflowHash = 'a'.repeat(64);
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: 'AVIA-1',
+        workflowId: 'bootstrap-workflow',
+        runId: 'bootstrap-run',
+        workflowHash,
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          executionStart: 'automatic',
+        },
+        phase: 'execution',
+        workspaceContext: null,
+        context: null,
+        draft: {
+          workflowHash,
+          graph,
+          planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'b'.repeat(64) },
+          evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'c'.repeat(64), revision: 1 },
+        },
+        planning: null,
+        freezeReceipt: null,
+        executionWorkflowId: 'execution-workflow',
+        nodeStates: {},
+        attempts: {},
+        status: 'completed',
+        currentNodeId: null,
+        wait: null,
+        outcome: 'execution_started',
+      },
+      execution: {
+        runtime: 'execution',
+        schemaVersion: 2,
+        taskReference: 'AVIA-1',
+        workflowId: 'execution-workflow',
+        runId: 'execution-run',
+        workflowHash,
+        nodeStates: {},
+        blockRuns: {},
+        loopIterations: { 'repair-validation': 1 },
+        status: 'running',
+        currentNodeId: 'repair-code',
+        wait: null,
+        outcome: null,
+      },
+    });
+
+    const projection = createOperatorWorkflowProjection('AVIA-1', lifecycle, {
+      read: () => ok(null),
+    });
+    const executionStages = projection.stages.filter(({ key }) => key.startsWith('execution:'));
+
+    expect(executionStages.map(({ label }) => label)).toEqual(['Implement', 'Validate']);
+    expect(executionStages[1]).toMatchObject({
+      key: 'execution:verification:2',
+      presentation: { kind: 'phase' },
+      nodes: [
+        { id: 'validate-fix' },
+        {
+          id: 'repair-validation',
+          details: {
+            kind: 'loop',
+            completedIterations: 1,
+            maxAttempts: 3,
+            until: 'validation.passed@1',
+          },
+        },
+        { id: 'confirm-validation' },
+      ],
+    });
+  });
 });

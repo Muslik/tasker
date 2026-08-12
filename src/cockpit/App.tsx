@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   MessageSquare,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -18,6 +19,7 @@ import {
   Radio,
   RefreshCw,
   Sparkles,
+  Sun,
   Terminal,
   Video,
 } from 'lucide-react';
@@ -143,6 +145,8 @@ type TaskOperation =
 
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 const TASK_RAIL_STORAGE_KEY = 'tasker.operator.tasksCollapsed';
+const THEME_STORAGE_KEY = 'tasker.operator.theme';
+type OperatorTheme = 'light' | 'dark';
 
 const formatValue = (value: unknown): string =>
   value === undefined ? '—' : JSON.stringify(value, null, 2);
@@ -194,6 +198,16 @@ const writeStoredTaskRailCollapsed = (collapsed: boolean): void => {
   }
 };
 
+const readStoredTheme = (): OperatorTheme => {
+  if (typeof document === 'undefined') return 'dark';
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+};
+
+const applyTheme = (theme: OperatorTheme): void => {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+};
+
 const chooseInitialTask = (
   tasks: readonly OperatorTaskSummary[],
   storedSelection: string | null,
@@ -211,18 +225,18 @@ const statusLabel = (status: OperatorTaskSummary['status']): string =>
 const statusTone = (status: OperatorTaskSummary['status']): string => {
   switch (status) {
     case 'done':
-      return 'bg-emerald-500/12 text-emerald-300';
+      return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300';
     case 'failed':
     case 'workflow_rejected':
       return 'bg-destructive/15 text-destructive';
     case 'needs_attention':
     case 'plan_review':
     case 'waiting':
-      return 'bg-amber-500/12 text-amber-300';
+      return 'bg-amber-500/12 text-amber-700 dark:text-amber-300';
     case 'running':
-      return 'bg-blue-500/12 text-blue-300';
+      return 'bg-blue-500/12 text-blue-700 dark:text-blue-300';
     case 'code_review':
-      return 'bg-violet-500/12 text-violet-300';
+      return 'bg-violet-500/12 text-violet-700 dark:text-violet-300';
     case 'backlog':
     case 'planned':
     case 'queued':
@@ -446,7 +460,10 @@ const TaskQueue = ({
                     </span>
                     <div className="flex items-center gap-1">
                       {task.attention === 'operator' ? (
-                        <AlertTriangle className="size-3 text-amber-400" aria-label="needs input" />
+                        <AlertTriangle
+                          className="size-3 text-amber-600 dark:text-amber-400"
+                          aria-label="needs input"
+                        />
                       ) : null}
                       <StateBadge className={statusTone(task.status)}>
                         {statusLabel(task.status)}
@@ -624,7 +641,9 @@ const SelectedTaskHeader = ({
               </Button>
             </>
           ) : workflow.status === 'ready' && workflow.response.status === 'ready' && !canStart ? (
-            <StateBadge className="bg-emerald-500/12 text-emerald-300">Workflow ready</StateBadge>
+            <StateBadge className="bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
+              Workflow ready
+            </StateBadge>
           ) : null}
         </div>
       </div>
@@ -653,13 +672,22 @@ const PlanReviewActions = ({
   const busy = approving || requestingChanges;
 
   return (
-    <footer className="border-t border-primary/20 bg-primary/4 px-5 py-4">
+    <footer
+      className="relative z-20 shrink-0 border-t-2 border-amber-500/70 bg-amber-500/10 px-5 py-4 shadow-[0_-18px_48px_-32px_rgba(245,158,11,0.9)] backdrop-blur"
+      aria-label="Plan decision"
+      data-testid="plan-review-actions"
+    >
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <strong className="text-sm">Plan decision</strong>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Approve this exact plan, or describe what the planner must change.
-          </p>
+        <div className="flex gap-2.5">
+          <div className="mt-0.5 rounded-md bg-amber-500/20 p-1.5 text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="size-4" />
+          </div>
+          <div>
+            <strong className="text-sm text-amber-800 dark:text-amber-200">Action required</strong>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Approve this exact plan, or describe what the planner must change.
+            </p>
+          </div>
         </div>
       </div>
       <textarea
@@ -677,6 +705,7 @@ const PlanReviewActions = ({
           variant="outline"
           size="sm"
           type="button"
+          className="border-amber-500/50 bg-background/70 hover:bg-amber-500/10"
           disabled={busy || guidance.trim().length === 0}
           onClick={onRequestChanges}
         >
@@ -687,7 +716,13 @@ const PlanReviewActions = ({
           )}
           {requestingChanges ? 'Sending…' : 'Request changes'}
         </Button>
-        <Button size="sm" type="button" disabled={busy} onClick={onApprove}>
+        <Button
+          size="sm"
+          type="button"
+          className="bg-amber-500 text-amber-950 hover:bg-amber-400"
+          disabled={busy}
+          onClick={onApprove}
+        >
           {approving ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
           {approving ? 'Approving…' : 'Approve plan'}
         </Button>
@@ -718,7 +753,9 @@ const CodeReviewControls = ({
           <p className="mt-0.5 text-xs text-muted-foreground">
             Import actionable PR threads, or finish when review needs no revision.
           </p>
-          {notice === null ? null : <p className="mt-1 text-xs text-violet-300">{notice}</p>}
+          {notice === null ? null : (
+            <p className="mt-1 text-xs text-violet-700 dark:text-violet-300">{notice}</p>
+          )}
         </div>
         <div className="flex shrink-0 gap-2">
           <Button variant="outline" size="sm" type="button" disabled={busy} onClick={onSync}>
@@ -801,7 +838,7 @@ const ValidationSurface = ({ view }: { readonly view: WorkflowView }) => {
         {blocked ? (
           <AlertTriangle className="size-4 text-destructive" />
         ) : (
-          <CheckCircle2 className="size-4 text-emerald-400" />
+          <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
         )}
         <strong>{blocked ? 'Workflow graph rejected' : 'Workflow graph valid'}</strong>
         <span className="text-xs text-muted-foreground">
@@ -839,7 +876,7 @@ const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) =
       aria-label="Jira planning status"
     >
       <div className="flex min-w-0 items-center gap-2 text-sm">
-        <AlertTriangle className="size-4 shrink-0 text-amber-400" />
+        <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
         <strong>{repositoryResolved ? 'Repository mapped' : 'Workflow planning paused'}</strong>
         <span className="truncate text-xs text-muted-foreground">{task.planning.reason}</span>
       </div>
@@ -865,14 +902,14 @@ const ImplementationPlanSurface = ({
   planning,
   answers,
   pending,
-  reviewActions,
+  reviewMode = false,
   onAnswerChange,
   onSubmitAnswers,
 }: {
   readonly planning: ImplementationPlanLoadState;
   readonly answers: ReadonlyMap<string, string>;
   readonly pending: boolean;
-  readonly reviewActions?: PlanReviewActions;
+  readonly reviewMode?: boolean;
   readonly onAnswerChange: (questionId: string, answer: string) => void;
   readonly onSubmitAnswers: () => void;
 }) => {
@@ -898,7 +935,7 @@ const ImplementationPlanSurface = ({
   if (record.status === 'failed') {
     return (
       <section className="border-b border-border px-5 py-4" aria-label="Implementation plan">
-        <div className="flex items-center gap-2 text-sm text-amber-300">
+        <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
           <AlertTriangle className="size-4" />
           <strong>Planning paused</strong>
           <span className="text-xs text-muted-foreground">{record.failure.message}</span>
@@ -918,7 +955,7 @@ const ImplementationPlanSurface = ({
         data-testid="planning-clarification"
       >
         <div className="mb-2 flex items-center gap-2 text-sm">
-          <MessageSquare className="size-4 text-amber-300" />
+          <MessageSquare className="size-4 text-amber-700 dark:text-amber-300" />
           <strong>Planner needs clarification</strong>
           <PlanningSnapshotTag record={record} />
         </div>
@@ -1098,21 +1135,23 @@ const ImplementationPlanSurface = ({
     </div>
   );
 
-  if (reviewActions !== undefined) {
+  if (reviewMode) {
     return (
       <section
-        className="mx-4 my-4 overflow-hidden rounded-lg border border-primary/30 bg-card shadow-[0_12px_40px_-28px_var(--color-primary)]"
+        className="mx-4 my-4 overflow-hidden rounded-lg border border-amber-500/45 bg-card shadow-[0_16px_48px_-32px_rgba(245,158,11,0.8)]"
         aria-label="Review implementation plan"
         data-testid="plan-review-surface"
       >
         <div data-testid="implementation-plan">
-          <header className="border-b border-primary/20 bg-primary/5 px-5 py-4">
+          <header className="border-b border-amber-500/30 bg-amber-500/8 px-5 py-4">
             <div className="flex items-start gap-3">
-              <div className="mt-0.5 rounded-md bg-primary/12 p-2 text-primary">
-                <GitBranch className="size-4" />
+              <div className="mt-0.5 rounded-md bg-amber-500/20 p-2 text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-primary">Plan review</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                  Action required · review plan
+                </p>
                 <h2 className="mt-0.5 text-lg font-semibold leading-6">{plan.title}</h2>
                 <div className="mt-2">{metadata}</div>
               </div>
@@ -1120,7 +1159,6 @@ const ImplementationPlanSurface = ({
           </header>
           {document}
         </div>
-        <PlanReviewActions {...reviewActions} />
       </section>
     );
   }
@@ -1201,7 +1239,7 @@ const WorkflowContinuationSurface = ({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <GitBranch className="size-4 text-amber-300" />
+            <GitBranch className="size-4 text-amber-700 dark:text-amber-300" />
             <strong className="text-sm">Workflow continuation</strong>
             <StateBadge>{record.status.replaceAll('_', ' ')}</StateBadge>
             <span className="text-[11px] text-muted-foreground">attempt {record.attempt}</span>
@@ -1580,8 +1618,8 @@ const TaskDetails = ({
             <StateBadge
               className={
                 state.status === 'current'
-                  ? 'bg-emerald-500/12 text-emerald-300'
-                  : 'bg-amber-500/12 text-amber-300'
+                  ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
               }
             >
               {state.status === 'current'
@@ -1601,7 +1639,7 @@ const TaskDetails = ({
           <div className="border-t border-border/60 px-5 py-5">
             {state.status === 'current' ? null : (
               <div
-                className="mb-4 flex items-center justify-between gap-3 bg-amber-500/7 px-3 py-2 text-xs text-amber-200"
+                className="mb-4 flex items-center justify-between gap-3 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"
                 role="status"
               >
                 <span>
@@ -1741,7 +1779,12 @@ const ActivityTimeline = ({
         <h2 className="text-sm font-semibold">Activity</h2>
       </div>
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Radio className={cn('size-3', streamStatus === 'live' && 'text-emerald-400')} />
+        <Radio
+          className={cn(
+            'size-3',
+            streamStatus === 'live' && 'text-emerald-600 dark:text-emerald-400',
+          )}
+        />
         {streamLabel(streamStatus)}
       </div>
     </div>
@@ -1842,7 +1885,7 @@ const PlanningTranscriptSurface = ({
               <summary className="cursor-pointer select-none hover:text-foreground">
                 Command output
               </summary>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/25 p-2 font-mono leading-5">
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-2 font-mono leading-5">
                 {event.output}
               </pre>
             </details>
@@ -1861,7 +1904,7 @@ const PlanningTranscriptSurface = ({
     if (event.kind === 'warning') {
       return (
         <li className="py-2" key={`warning:${String(index)}`}>
-          <details className="text-xs text-amber-300/90">
+          <details className="text-xs text-amber-700 dark:text-amber-300/90">
             <summary className="cursor-pointer select-none">Provider warning</summary>
             <p className="mt-1 break-words pl-5 leading-5 text-muted-foreground">{event.message}</p>
           </details>
@@ -1900,7 +1943,7 @@ const PlanningTranscriptSurface = ({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div
-            className="max-h-[min(55vh,36rem)] overflow-auto border-t border-border/60 bg-black/15"
+            className="max-h-[min(55vh,36rem)] overflow-auto border-t border-border/60 bg-muted/20"
             data-testid="planning-transcript"
           >
             {log.attempts.length === 0 ? (
@@ -1925,7 +1968,7 @@ const PlanningTranscriptSurface = ({
                           <StateBadge
                             className={cn(
                               attempt.status === 'completed' &&
-                                'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+                                'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
                               attempt.status === 'failed' &&
                                 'border-destructive/30 bg-destructive/10 text-destructive',
                             )}
@@ -1958,7 +2001,7 @@ const PlanningTranscriptSurface = ({
                   <summary className="cursor-pointer select-none hover:text-foreground">
                     Raw JSONL
                   </summary>
-                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/30 p-3 font-mono leading-5">
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono leading-5">
                     {log.raw}
                   </pre>
                 </details>
@@ -2093,8 +2136,8 @@ const WorkflowSidebar = ({
               <StateBadge
                 className={
                   workflowReady
-                    ? 'bg-emerald-500/12 text-emerald-300'
-                    : 'bg-amber-500/12 text-amber-300'
+                    ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
                 }
               >
                 {workflowReady ? 'ready' : 'blocked'}
@@ -2185,10 +2228,10 @@ const WorkflowSidebar = ({
               <StateBadge
                 className={
                   view?.workflow.status === 'valid'
-                    ? 'bg-emerald-500/12 text-emerald-300'
+                    ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
                     : projection.projection.status === 'waiting'
-                      ? 'bg-amber-500/12 text-amber-300'
-                      : 'bg-cyan-500/12 text-cyan-300'
+                      ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
+                      : 'bg-cyan-500/12 text-cyan-700 dark:text-cyan-300'
                 }
               >
                 {view?.workflow.status ?? projection.projection.status.replaceAll('_', ' ')}
@@ -2238,6 +2281,7 @@ export const App = () => {
   const [tasksMessage, setTasksMessage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>(() => readStoredSelection() ?? '');
   const [tasksCollapsed, setTasksCollapsed] = useState(readStoredTaskRailCollapsed);
+  const [theme, setTheme] = useState<OperatorTheme>(readStoredTheme);
   const [workflowState, setWorkflowState] = useState<WorkflowLoadState>({ status: 'loading' });
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
   const [operatorProjectionState, setOperatorProjectionState] =
@@ -3043,6 +3087,30 @@ export const App = () => {
               SSE
             </span>
             <StateBadge>Execution</StateBadge>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
+                    variant="ghost"
+                    size="icon-sm"
+                    type="button"
+                    onClick={() => {
+                      setTheme((current) => {
+                        const next = current === 'dark' ? 'light' : 'dark';
+                        applyTheme(next);
+                        return next;
+                      });
+                    }}
+                  />
+                }
+              >
+                {theme === 'dark' ? <Sun /> : <Moon />}
+              </TooltipTrigger>
+              <TooltipContent>
+                {theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </header>
 
@@ -3166,21 +3234,7 @@ export const App = () => {
                       planning={implementationPlanState}
                       answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
                       pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
-                      reviewActions={{
-                        guidance: planGuidanceDrafts.get(selectedTask.id) ?? '',
-                        pendingOperation: pendingOperations.get(selectedTask.id) ?? null,
-                        onGuidanceChange: (guidance) => {
-                          setPlanGuidanceDrafts((current) =>
-                            new Map(current).set(selectedTask.id, guidance),
-                          );
-                        },
-                        onApprove: () => {
-                          handlePlanReview('approve');
-                        },
-                        onRequestChanges: () => {
-                          handlePlanReview('request_changes');
-                        },
-                      }}
+                      reviewMode
                       onAnswerChange={(questionId, answer) => {
                         setPlanningAnswerDrafts((current) => {
                           const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
@@ -3223,6 +3277,25 @@ export const App = () => {
                     </>
                   )}
                 </ScrollArea>
+                {selectedTask.status === 'plan_review' &&
+                implementationPlanState.status === 'ready' &&
+                implementationPlanState.record.status === 'ready' ? (
+                  <PlanReviewActions
+                    guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
+                    pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
+                    onGuidanceChange={(guidance) => {
+                      setPlanGuidanceDrafts((current) =>
+                        new Map(current).set(selectedTask.id, guidance),
+                      );
+                    }}
+                    onApprove={() => {
+                      handlePlanReview('approve');
+                    }}
+                    onRequestChanges={() => {
+                      handlePlanReview('request_changes');
+                    }}
+                  />
+                ) : null}
               </>
             )}
           </main>

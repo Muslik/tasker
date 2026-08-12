@@ -49,3 +49,7 @@ history is the audit trail; they are not inputs to new work.
   lifecycle state, the frozen graph, and immutable Block Receipts. Runtime stages are
   not persisted inside `WorkflowView`; obsolete persisted stage/tree schemas are
   deleted rather than adapted.
+- Operator stages are expanded by default; same-phase repair loops stay visibly nested
+  with their attempt budget instead of masquerading as duplicate phases. Cross-phase
+  loops receive their own label. Required operator decisions remain visible in an amber
+  action surface, and the console persists a light/dark theme preference.

@@ -134,6 +134,10 @@ Bootstrap lifecycle, the frozen graph, live Execution node state, and immutable 
 Receipts into one disposable read model. It shows preparation, investigation, and
 planning before an execution graph exists, then adjacent execution episodes with
 explicit attempt counts, accepted/rejected claims, evidence, and reconciled effects.
+Stages are expanded by default. Repair loops carry typed iteration/limit metadata and
+remain nested in the phase they repair when they return to that phase; cross-phase loops
+receive an explicit named stage. Operator waits use a persistent amber action surface,
+and the console supports persisted light/dark themes.
 The raw graph remains a downloadable diagnostic artifact. View schema v5 projections
 are deleted when encountered instead of being interpreted or upcast.
 

@@ -191,14 +191,16 @@ summaries. Secrets never enter Workflow input or Event History.
 
 ### 5.1 Runtime vocabulary
 
-- **Stage** is an operator projection such as Investigate, Plan, Implement, Validate,
-  Delivery, CI, or Human review. It groups work but is not schedulable. Every block and
-  durable wait declares its stage in the harness contract. Tasker groups only adjacent
-  graph roots with the same stage, so a task may revisit Implement, Delivery, or Review
-  without those episodes being merged. Bootstrap stages come from the complete
-  Bootstrap lifecycle; execution stage state comes from Execution node state.
-  Expanding a stage reveals the exact immutable graph nodes and Block Receipts that
-  produced it.
+- **Stage** is an operator projection such as Workspace, Investigate, Plan, Implement,
+  Validate, Delivery, or Human review. It groups work but is not schedulable. Every block
+  and durable wait declares its stage in the harness contract. All stages start expanded
+  but remain collapsible. A bounded repair loop that returns to the same phase is rendered
+  inside that phase with its completed/max-attempt budget; a loop that crosses phase
+  boundaries becomes its own named stage. This preserves graph order without showing a
+  repair as misleading duplicate Implement/Validate/Delivery stages. Bootstrap stages
+  come from the complete Bootstrap lifecycle; execution stage state comes from Execution
+  node state. Expanding a stage reveals the exact immutable graph nodes and Block Receipts
+  that produced it.
 - **Block** is a reusable versioned work contract selected into one task graph. It owns
   inputs, outcomes, completion rules, recovery, prompt/skills/profile where relevant,
   and produced evidence.
@@ -500,6 +502,11 @@ diagnostic evidence. Changing a block's stage or registering a new stage does no
 require a Cockpit change. Pre-pilot projection schema cutovers delete obsolete
 projections and regenerate them; Tasker does not upcast removed `workflow.tree` or
 `workflow.stages` shapes.
+
+Operator attention is a distinct UI state, not a generic brand accent. A durable wait
+requiring a decision uses one amber treatment in the selected task, the active workflow
+stage, and an always-visible action surface. Informational success remains green. The
+console supports persisted light and dark preferences without changing runtime state.
 
 Routine sync successes and failures do not grow the activity timeline. Operational
 logs are redacted, bounded, and separate from agent/task activity. Temporal Event

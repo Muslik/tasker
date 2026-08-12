@@ -119,6 +119,28 @@ test('the task rail can be hidden, restored, and keeps its preference', async ({
   await expect(page.getByRole('complementary', { name: 'Task queue' })).toBeVisible();
 });
 
+test('the operator theme can be changed and survives reload', async ({ page }) => {
+  await page.goto('/');
+
+  const root = page.locator('html');
+  const rootClass = await root.getAttribute('class');
+  const dark = rootClass?.split(/\s+/u).includes('dark') ?? false;
+  const toggle = page.getByRole('button', {
+    name: dark ? 'Use light theme' : 'Use dark theme',
+  });
+  await toggle.click();
+  if (dark) {
+    await expect(root).not.toHaveClass(/\bdark\b/u);
+  } else {
+    await expect(root).toHaveClass(/\bdark\b/u);
+  }
+
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: dark ? 'Use dark theme' : 'Use light theme' }),
+  ).toBeVisible();
+});
+
 test('the planning agent log presents attempts instead of raw provider JSONL', async ({ page }) => {
   const errorMessage = "Invalid response schema. Missing 'evidenceRequests'.";
   const output = [
@@ -241,15 +263,21 @@ test('generating a backlog task materializes the workflow, timeline, and operato
   await expect(page.getByTestId('workflow-stages')).toBeVisible();
   await expect(
     page
-      .getByTestId('workflow-stage-bootstrap:preparation:1')
-      .getByText('Prepare', { exact: true }),
+      .getByTestId('workflow-stage-bootstrap:workspace:1')
+      .getByText('Workspace', { exact: true }),
   ).toBeVisible();
   const validationStage = page.getByTestId('workflow-stage-execution:verification:3');
-  await validationStage.locator('summary').click();
-  await expect(validationStage).toContainText('validate-targeted · validate.targeted@1');
-  const reviewStage = page.getByTestId('workflow-stage-execution:agent_review:6');
-  await reviewStage.locator('summary').click();
-  await expect(reviewStage).toContainText('agent-review · review.agent@1');
+  await expect(validationStage).toHaveAttribute('open', '');
+  await expect(validationStage).toContainText('Validate targeted');
+  await expect(validationStage).toContainText('Repair validation');
+  await expect(validationStage).toContainText('0/3 attempts');
+  const reviewStage = page.getByTestId('workflow-stage-execution:agent_review:4');
+  await expect(reviewStage).toHaveAttribute('open', '');
+  await expect(reviewStage).toContainText('Agent review');
+  const expandedStages = page.locator('details[data-testid^="workflow-stage-"]');
+  for (let index = 0; index < (await expandedStages.count()); index += 1) {
+    await expect(expandedStages.nth(index)).toHaveAttribute('open', '');
+  }
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
   await expect(page.getByTestId('validation-panel')).toContainText('Workflow graph valid');
@@ -313,11 +341,13 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
   await waitForRunWait(page, fixtureId, 'plan.approved@1');
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
   const reviewSurface = page.getByTestId('plan-review-surface');
+  const reviewActions = page.getByTestId('plan-review-actions');
   await expect(reviewSurface).toBeVisible();
   await expect(reviewSurface).toContainText('Implement the requested task');
-  await expect(reviewSurface.getByRole('button', { name: 'Approve plan' })).toBeVisible();
-  await reviewSurface.getByRole('textbox', { name: 'Plan review guidance' }).fill(guidance);
-  await reviewSurface.getByRole('button', { name: 'Request changes' }).click();
+  await expect(reviewSurface).toContainText('Action required · review plan');
+  await expect(reviewActions.getByRole('button', { name: 'Approve plan' })).toBeVisible();
+  await reviewActions.getByRole('textbox', { name: 'Plan review guidance' }).fill(guidance);
+  await reviewActions.getByRole('button', { name: 'Request changes' }).click();
 
   await expect(page.getByTestId(`task-item-${fixtureId}`)).toContainText('Plan review');
   await expect(reviewSurface).toBeVisible();
@@ -363,7 +393,8 @@ test('the plan review document renders safe Markdown next to its decision contro
   await expect(
     reviewSurface.getByText('Verify the changed surface', { exact: true }),
   ).toBeVisible();
-  await expect(reviewSurface.getByRole('button', { name: 'Approve plan' })).toBeVisible();
+  await expect(page.getByTestId('plan-review-actions')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve plan' })).toBeVisible();
 });
 
 test('the planner owns a cross-repository workflow candidate before freeze', async ({ page }) => {

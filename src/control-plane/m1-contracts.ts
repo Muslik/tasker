@@ -108,6 +108,15 @@ export const WorkflowNodeDetailsSchema = z.discriminatedUnion('kind', [
     })
     .strict()
     .readonly(),
+  z
+    .object({
+      kind: z.literal('loop'),
+      maxAttempts: z.number().int().positive(),
+      completedIterations: z.number().int().nonnegative(),
+      until: z.string().min(1),
+    })
+    .strict()
+    .readonly(),
 ]);
 
 export const WorkflowTechnicalNodeSchema: z.ZodType<{
@@ -138,13 +147,24 @@ export const OperatorWorkflowStageSchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     status: WorkflowNodeStatusSchema,
+    presentation: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('phase') }).strict(),
+      z
+        .object({
+          kind: z.literal('loop'),
+          maxAttempts: z.number().int().positive(),
+          completedIterations: z.number().int().nonnegative(),
+          until: z.string().min(1),
+        })
+        .strict(),
+    ]),
     nodes: z.array(WorkflowTechnicalNodeSchema).min(1),
   })
   .strict();
 
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),

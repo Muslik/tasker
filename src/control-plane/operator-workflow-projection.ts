@@ -22,9 +22,30 @@ type BlockReceiptReader = Pick<BlockReceiptStore, 'read'>;
 
 const fallbackStage = { id: 'workflow', label: 'Workflow' } as const;
 
+const titleCaseIdentifier = (value: string): string => {
+  const words = value.split(/[-_]+/u).filter(Boolean);
+  return words
+    .map((word, index) => {
+      const normalized =
+        word.toLowerCase() === 'ci'
+          ? 'CI'
+          : word.toLowerCase() === 'pr'
+            ? 'PR'
+            : word.toLowerCase() === 'ai'
+              ? 'AI'
+              : word.toLowerCase() === 'jira'
+                ? 'Jira'
+                : word.toLowerCase();
+      return index === 0 && !['AI', 'CI', 'PR', 'Jira'].includes(normalized)
+        ? normalized.replace(/^\w/u, (character) => character.toUpperCase())
+        : normalized;
+    })
+    .join(' ');
+};
+
 const bootstrapGroups = [
   {
-    stage: { id: 'preparation', label: 'Prepare' },
+    stage: { id: 'workspace', label: 'Workspace' },
     nodes: [{ id: 'workspace', label: 'Prepare workspace' }],
   },
   {
@@ -67,19 +88,19 @@ const childrenFor = (node: CompiledWorkflowNode): readonly CompiledWorkflowNode[
 const nodeLabel = (node: CompiledWorkflowNode): string => {
   switch (node.kind) {
     case 'step':
-      return `${node.id} · ${node.uses}`;
+      return titleCaseIdentifier(node.id);
     case 'bounded_loop':
-      return `${node.id} · max ${String(node.maxAttempts)}`;
+      return titleCaseIdentifier(node.id);
     case 'wait':
-      return `${node.id} · ${node.for}`;
+      return titleCaseIdentifier(node.id);
     case 'gate':
-      return `${node.id} · ${node.reason}`;
+      return titleCaseIdentifier(node.id);
     case 'finalize':
-      return `${node.id} · ${node.outcome}`;
+      return titleCaseIdentifier(node.id);
     case 'branch':
-      return `${node.id} · ${node.when}`;
+      return titleCaseIdentifier(node.id);
     case 'sequence':
-      return node.id;
+      return titleCaseIdentifier(node.id);
   }
 };
 
@@ -184,7 +205,14 @@ const toTechnicalNode = (
             attempts,
             receipts: execution === null ? [] : receiptsFor(node.id, attempts, execution, receipts),
           }
-        : { kind: 'none' },
+        : node.kind === 'bounded_loop'
+          ? {
+              kind: 'loop',
+              maxAttempts: node.maxAttempts,
+              completedIterations: execution?.loopIterations[node.id] ?? 0,
+              until: node.until,
+            }
+          : { kind: 'none' },
     children: childrenFor(node).map((child) =>
       toTechnicalNode(child, execution, receipts, nextAncestors),
     ),
@@ -231,9 +259,53 @@ const createBootstrapStages = (lifecycle: TaskRunLifecycle): readonly OperatorWo
       key: `bootstrap:${stage.id}:${String(index + 1)}`,
       ...stage,
       status: aggregateWorkflowStageStatus(technicalNodes),
+      presentation: { kind: 'phase' },
       nodes: technicalNodes,
     });
   });
+
+const executionStageFor = (
+  node: CompiledWorkflowNode,
+  execution: ExecutionWorkflowPublicState | null,
+  fallback: WorkflowStageDescriptor,
+  previousStage: WorkflowStageDescriptor | null,
+  nextStage: WorkflowStageDescriptor | null,
+) => {
+  if (node.kind === 'bounded_loop') {
+    const belongsToSurroundingPhase =
+      previousStage !== null &&
+      ((nextStage !== null && previousStage.id === nextStage.id) ||
+        previousStage.id === fallback.id);
+    if (belongsToSurroundingPhase) {
+      return {
+        descriptor: previousStage,
+        presentation: { kind: 'phase' as const },
+      };
+    }
+    return {
+      descriptor: { id: `loop:${node.id}`, label: titleCaseIdentifier(node.id) },
+      presentation: {
+        kind: 'loop' as const,
+        maxAttempts: node.maxAttempts,
+        completedIterations: execution?.loopIterations[node.id] ?? 0,
+        until: node.until,
+      },
+    };
+  }
+  if (fallback.id === 'preparation') {
+    return {
+      descriptor: { ...fallback, label: 'Start work' },
+      presentation: { kind: 'phase' as const },
+    };
+  }
+  if (node.kind === 'finalize') {
+    return {
+      descriptor: { id: `finalize:${node.id}`, label: 'Complete' },
+      presentation: { kind: 'phase' as const },
+    };
+  }
+  return { descriptor: fallback, presentation: { kind: 'phase' as const } };
+};
 
 const createExecutionStages = (
   graph: CompiledWorkflow,
@@ -241,18 +313,33 @@ const createExecutionStages = (
   receipts: BlockReceiptReader,
 ): readonly OperatorWorkflowStage[] => {
   const roots = graph.root.kind === 'sequence' ? graph.root.children : [graph.root];
-  const candidates = roots.map((node) => ({
-    node: toTechnicalNode(node, execution, receipts, new Set()),
-    stage: firstDescendantStage(node, new Set()),
-  }));
+  const candidates = roots.map((node) => {
+    const descendantStage = firstDescendantStage(node, new Set());
+    return {
+      source: node,
+      node: toTechnicalNode(node, execution, receipts, new Set()),
+      stage: descendantStage,
+    };
+  });
   const stages: OperatorWorkflowStage[] = [];
 
   for (const [index, candidate] of candidates.entries()) {
     const previous = stages.at(-1);
-    const next = candidates.slice(index + 1).find(({ stage }) => stage !== null)?.stage;
-    const descriptor = candidate.stage ?? previous ?? next ?? fallbackStage;
+    const previousCandidate = candidates
+      .slice(0, index)
+      .reverse()
+      .find(({ stage }) => stage !== null)?.stage;
+    const nextCandidate = candidates.slice(index + 1).find(({ stage }) => stage !== null)?.stage;
+    const fallback = candidate.stage ?? previousCandidate ?? nextCandidate ?? fallbackStage;
+    const { descriptor, presentation } = executionStageFor(
+      candidate.source,
+      execution,
+      fallback,
+      previousCandidate ?? null,
+      nextCandidate ?? null,
+    );
 
-    if (previous?.id === descriptor.id) {
+    if (presentation.kind === 'phase' && previous?.id === descriptor.id) {
       const nodes = [...previous.nodes, candidate.node];
       stages[stages.length - 1] = OperatorWorkflowStageSchema.parse({
         ...previous,
@@ -268,6 +355,7 @@ const createExecutionStages = (
         id: descriptor.id,
         label: descriptor.label,
         status: aggregateWorkflowStageStatus([candidate.node]),
+        presentation,
         nodes: [candidate.node],
       }),
     );
@@ -283,7 +371,7 @@ export const createOperatorWorkflowProjection = (
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
@@ -296,7 +384,7 @@ export const createOperatorWorkflowProjection = (
   const active = execution ?? lifecycle.bootstrap;
   const graph = lifecycle.bootstrap.draft?.graph ?? null;
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',
