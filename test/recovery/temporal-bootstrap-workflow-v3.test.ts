@@ -143,30 +143,16 @@ describe('Bootstrap Workflow v3 recovery', () => {
       .toBe('completed');
   }, 60_000);
 
-  it('publishes the freeze receipt while manual execution start is waiting', async () => {
-    const taskReference = 'fixture:manual-execution-start';
-    expect(
-      await runs.start({
-        ...inputFor(taskReference, 'automatic'),
-        settings: {
-          planReview: 'automatic',
-          planningStrategy: 'fast',
-          executionStart: 'manual',
-        },
-      }),
-    ).toMatchObject({ ok: true });
+  it('starts execution immediately after the workflow is frozen', async () => {
+    const taskReference = 'fixture:automatic-execution-start';
+    expect(await runs.start(inputFor(taskReference, 'automatic'))).toMatchObject({ ok: true });
 
-    const waiting = await waitFor(taskReference, 'execution.start@1');
+    const waiting = await waitFor(taskReference, 'code_review@1');
 
     expect(waiting).toMatchObject({
+      runtime: 'execution',
       status: 'waiting',
-      phase: 'freezing',
-      nodeStates: { freeze: 'succeeded', execution_start: 'waiting' },
-      freezeReceipt: {
-        schemaVersion: 1,
-        taskReference,
-        workflowHash: 'a'.repeat(64),
-      },
+      wait: { waitKind: 'code_review@1' },
     });
   });
 });
@@ -203,7 +189,7 @@ describe('Bootstrap infrastructure failure visibility', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
-            executionStart: 'manual',
+            executionStart: 'automatic',
           },
         }),
       ).toMatchObject({ ok: true });
@@ -302,7 +288,7 @@ describe('Bootstrap investigation recovery', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
-            executionStart: 'manual',
+            executionStart: 'automatic',
           },
         }),
       ).toMatchObject({ ok: true });
@@ -342,13 +328,16 @@ describe('Bootstrap investigation recovery', () => {
           },
           { interval: 50, timeout: 20_000 },
         )
-        .toBe('execution.start@1');
+        .toBe('code_review@1');
 
       expect(observedBlockRuns).toEqual([1, 1, 1, 1]);
-      const recovered = await runs.read('fixture:investigation-retry');
+      const recovered = await runs.readLifecycle('fixture:investigation-retry');
       expect(recovered).toMatchObject({
         ok: true,
-        value: { attempts: { 'investigation:reproduce-payment-spacing': 1 } },
+        value: {
+          bootstrap: { attempts: { 'investigation:reproduce-payment-spacing': 1 } },
+          execution: { status: 'waiting', wait: { waitKind: 'code_review@1' } },
+        },
       });
     } finally {
       worker.shutdown();
@@ -427,7 +416,7 @@ describe('Bootstrap planning failure recovery', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
-            executionStart: 'manual',
+            executionStart: 'automatic',
           },
         }),
       ).toMatchObject({ ok: true });

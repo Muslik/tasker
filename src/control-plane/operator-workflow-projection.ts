@@ -2,6 +2,7 @@ import { blockReceiptId, type BlockReceipt, type BlockReceiptStore } from '../bl
 import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from '../planning/index.js';
 import type { RunPlanningSnapshot } from '../planning/run-planning-snapshot.js';
 import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../temporal/index.js';
+import type { PlanningTranscriptView } from './planning-transcript.js';
 import type {
   CompiledWorkflow,
   CompiledWorkflowNode,
@@ -21,6 +22,9 @@ import {
 
 type BlockReceiptReader = Pick<BlockReceiptStore, 'read'>;
 type ExecutionSnapshotReader = (lifecycle: TaskRunLifecycle) => RunPlanningSnapshot | null;
+type ExecutionTranscriptReader = (
+  execution: ExecutionWorkflowPublicState,
+) => PlanningTranscriptView | null;
 
 const titleCaseIdentifier = (value: string): string =>
   value
@@ -324,7 +328,7 @@ const createExecutionStages = (
     return OperatorWorkflowStageSchema.parse({
       key: `execution:${stage.id}:${String(index + 1)}`,
       id: stage.id,
-      label: stage.id === 'preparation' ? 'Start work' : stage.label,
+      label: stage.label,
       status,
       steps: stage.steps,
     });
@@ -345,14 +349,16 @@ export const createOperatorWorkflowProjection = (
   lifecycle: TaskRunLifecycle | null,
   receipts: BlockReceiptReader,
   readSnapshot: ExecutionSnapshotReader = () => null,
+  readExecutionTranscript: ExecutionTranscriptReader = () => null,
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 3,
+      schemaVersion: 4,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
       graphHash: null,
+      current: null,
       stages: [],
     });
   }
@@ -361,12 +367,46 @@ export const createOperatorWorkflowProjection = (
   const active = execution ?? lifecycle.bootstrap;
   const graph = lifecycle.bootstrap.draft?.graph ?? null;
   const snapshot = graph === null ? null : readSnapshot(lifecycle);
+  const executionNodeId =
+    execution === null || execution.status === 'completed'
+      ? null
+      : (execution.currentNodeId ?? graph?.root.id ?? null);
+  const executionNode =
+    executionNodeId === null || graph === null ? null : findNode(graph.root, executionNodeId);
+  const activeNodeId =
+    execution === null
+      ? lifecycle.bootstrap.status === 'completed'
+        ? null
+        : lifecycle.bootstrap.currentNodeId
+      : executionNodeId;
+  const current =
+    activeNodeId === null || active.status === 'completed'
+      ? null
+      : {
+          runtime: execution === null ? ('bootstrap' as const) : ('execution' as const),
+          nodeId: activeNodeId,
+          reference:
+            executionNode?.kind === 'step'
+              ? executionNode.uses
+              : executionNode?.kind === 'wait'
+                ? executionNode.for
+                : null,
+          status: active.status,
+          blockRun:
+            execution === null || executionNodeId === null
+              ? null
+              : (execution.blockRuns[executionNodeId] ?? null),
+          waitKind: active.status === 'waiting' ? active.wait.waitKind : null,
+          reason: active.status === 'waiting' ? (active.wait.reason ?? null) : null,
+          transcript: execution === null ? null : readExecutionTranscript(execution),
+        };
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 3,
+    schemaVersion: 4,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',
     graphHash: lifecycle.bootstrap.workflowHash,
+    current,
     stages: [
       ...createBootstrapStages(lifecycle),
       ...(graph === null ? [] : createExecutionStages(graph, execution, receipts, snapshot)),

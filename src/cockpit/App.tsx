@@ -16,7 +16,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  Play,
   Radio,
   RefreshCw,
   Sparkles,
@@ -54,7 +53,6 @@ import {
   jiraAttachmentUrl,
   listOperatorTasks,
   listRepositories,
-  loadExecutionRun,
   loadImplementationPlan,
   loadPlanningTranscript,
   loadPlanReviewHistory,
@@ -67,7 +65,6 @@ import {
   reviewWorkflowContinuation,
   resumeWorkflow,
   retryWorkflowContinuation,
-  startWorkflow,
   syncCodeReview,
   syncJiraIssue,
 } from './api-client.js';
@@ -146,7 +143,6 @@ type ConsoleStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
 type TaskOperation =
   | 'generating'
-  | 'starting'
   | 'approving_plan'
   | 'requesting_plan_changes'
   | 'syncing_review'
@@ -531,7 +527,6 @@ const SelectedTaskHeader = ({
   workflow,
   activity,
   onGenerate,
-  onStart,
   requirePlanApproval,
   onRequirePlanApprovalChange,
   planningStrategy,
@@ -544,7 +539,6 @@ const SelectedTaskHeader = ({
   readonly workflow: WorkflowLoadState;
   readonly activity: ActivityLoadState;
   readonly onGenerate: () => void;
-  readonly onStart: () => void;
   readonly requirePlanApproval: boolean;
   readonly onRequirePlanApprovalChange: (required: boolean) => void;
   readonly planningStrategy: PlanningStrategyRequest;
@@ -554,14 +548,9 @@ const SelectedTaskHeader = ({
   readonly jiraSync: JiraSyncState;
 }) => {
   const generating = pendingOperation === 'generating';
-  const starting = pendingOperation === 'starting';
   const canGenerate =
     (task.status === 'backlog' || task.status === 'workflow_rejected') &&
     task.planning.status === 'available';
-  const canStart =
-    task.status === 'planned' &&
-    workflow.status === 'ready' &&
-    workflow.response.status === 'ready';
 
   return (
     <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
@@ -637,16 +626,6 @@ const SelectedTaskHeader = ({
               </Button>
             </>
           ) : null}
-          {canStart ? (
-            <Button size="sm" type="button" onClick={onStart} disabled={starting}>
-              {starting ? (
-                <LoaderCircle data-icon="inline-start" className="animate-spin" />
-              ) : (
-                <Play data-icon="inline-start" />
-              )}
-              {starting ? 'Starting…' : 'Run workflow'}
-            </Button>
-          ) : null}
           {task.origin.kind === 'jira' ? (
             <>
               {task.origin.browseUrl === null ? null : (
@@ -688,7 +667,7 @@ const SelectedTaskHeader = ({
                 Refresh Jira
               </Button>
             </>
-          ) : workflow.status === 'ready' && workflow.response.status === 'ready' && !canStart ? (
+          ) : workflow.status === 'ready' && workflow.response.status === 'ready' ? (
             <StateBadge className="bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
               Workflow ready
             </StateBadge>
@@ -2277,6 +2256,100 @@ const PlanningTranscriptSurface = ({
   );
 };
 
+const ExecutionProgressSurface = ({
+  projection,
+}: {
+  readonly projection: OperatorProjectionLoadState;
+}) => {
+  if (projection.status === 'failed') {
+    return (
+      <section
+        className="border-b border-destructive/30 bg-destructive/5 px-5 py-3"
+        data-testid="execution-progress-error"
+      >
+        <strong className="text-sm text-destructive">Runtime state unavailable</strong>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{projection.message}</p>
+      </section>
+    );
+  }
+  if (projection.status !== 'ready' || projection.projection.current === null) return null;
+  const current = projection.projection.current;
+  const transcript = current.transcript;
+  const log = transcript === null ? null : planningAgentLogFrom(transcript);
+  const latestAttempt = log?.attempts.at(-1) ?? null;
+  const tokens =
+    latestAttempt?.usage === null || latestAttempt?.usage === undefined
+      ? null
+      : latestAttempt.usage.inputTokens + latestAttempt.usage.outputTokens;
+
+  return (
+    <section
+      className={cn(
+        'border-b px-5 py-3',
+        current.status === 'waiting'
+          ? 'border-amber-500/30 bg-amber-500/5'
+          : 'border-primary/25 bg-primary/5',
+      )}
+      data-testid="execution-progress"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                'size-2 shrink-0 rounded-full',
+                current.status === 'running' ? 'animate-pulse bg-primary' : 'bg-amber-400',
+              )}
+            />
+            <strong className="text-sm">
+              {current.status === 'running' ? 'Working now' : 'Waiting for you'}
+            </strong>
+            {current.blockRun === null ? null : (
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                attempt {current.blockRun}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 truncate text-sm" title={current.reference ?? current.nodeId}>
+            {current.reference ?? current.nodeId}
+          </p>
+          {current.reason === null ? null : (
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{current.reason}</p>
+          )}
+        </div>
+        <div className="shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+          {transcript === null ? (
+            <span>Temporal activity active</span>
+          ) : (
+            <>
+              <span>{(transcript.totalBytes / 1024).toFixed(1)} KB persisted</span>
+              {tokens === null ? null : <span> · {tokens.toLocaleString()} tok</span>}
+            </>
+          )}
+        </div>
+      </div>
+      {latestAttempt === null || latestAttempt.events.length === 0 ? null : (
+        <div className="mt-2 border-t border-border/60 pt-2 text-xs">
+          {latestAttempt.events.slice(-3).map((event, index) => (
+            <div className="flex min-w-0 gap-2 py-0.5" key={`${event.kind}:${String(index)}`}>
+              <span className="shrink-0 text-muted-foreground">
+                {event.kind === 'command' ? 'command' : event.kind}
+              </span>
+              <span className="truncate">
+                {event.kind === 'command'
+                  ? event.command
+                  : event.kind === 'message'
+                    ? `${event.title}${event.detail === null ? '' : ` · ${event.detail}`}`
+                    : event.message}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
+
 const WhyThisWorkflow = ({ view }: { readonly view: WorkflowView }) => (
   <Collapsible>
     <div className="border-t border-border" data-testid="workflow-decisions">
@@ -2598,6 +2671,7 @@ export const App = () => {
   const streamCursorRef = useRef(0);
   const tasksRefreshSequenceRef = useRef(0);
   const selectionRefreshSequenceRef = useRef(0);
+  const runtimeRefreshSequenceRef = useRef(0);
 
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedId) ?? null,
@@ -2848,6 +2922,76 @@ export const App = () => {
     ]);
   };
 
+  const refreshRuntimeSurfaces = async (
+    fixtureId: string,
+  ): Promise<OperatorWorkflowProjection | null> => {
+    const sequence = runtimeRefreshSequenceRef.current + 1;
+    runtimeRefreshSequenceRef.current = sequence;
+    const [projection, activity] = await Promise.allSettled([
+      loadOperatorWorkflowProjection(fixtureId),
+      loadOperatorActivity(fixtureId),
+    ]);
+    if (sequence !== runtimeRefreshSequenceRef.current || selectedIdRef.current !== fixtureId) {
+      return null;
+    }
+    setOperatorProjectionState(
+      projection.status === 'fulfilled'
+        ? { status: 'ready', projection: projection.value }
+        : {
+            status: 'failed',
+            message:
+              projection.reason instanceof Error
+                ? projection.reason.message
+                : 'Runtime projection is unavailable',
+          },
+    );
+    setActivityState(
+      activity.status === 'fulfilled'
+        ? { status: 'ready', response: activity.value }
+        : {
+            status: 'failed',
+            message:
+              activity.reason instanceof Error
+                ? activity.reason.message
+                : 'Runtime activity is unavailable',
+          },
+    );
+    return projection.status === 'fulfilled' ? projection.value : null;
+  };
+
+  const applyRuntimeProjectionToSelectedTask = (
+    fixtureId: string,
+    projection: OperatorWorkflowProjection,
+  ): void => {
+    setTasks((current) =>
+      current.map((task) => {
+        if (task.id !== fixtureId) return task;
+        if (projection.status === 'completed') {
+          return { ...task, status: 'done', attention: 'none' };
+        }
+        if (projection.status === 'waiting') {
+          const planReview = projection.current?.waitKind === 'plan.approved@1';
+          const codeReview = projection.current?.waitKind === 'code_review@1';
+          return {
+            ...task,
+            status: planReview ? 'plan_review' : codeReview ? 'code_review' : 'waiting',
+            attention: 'operator',
+            currentStage: projection.current?.reason ?? 'Waiting for operator action',
+          };
+        }
+        return {
+          ...task,
+          status: 'running',
+          attention: 'none',
+          currentStage:
+            projection.current?.reference ??
+            projection.current?.nodeId ??
+            'Temporal workflow running',
+        };
+      }),
+    );
+  };
+
   useEffect(() => {
     const controller = new AbortController();
 
@@ -2897,28 +3041,38 @@ export const App = () => {
     const lifecycle = { active: true };
     let inFlight = false;
 
-    const refreshAtNextBoundary = async (): Promise<void> => {
+    const refreshRuntimeProjection = async (): Promise<void> => {
       if (inFlight) return;
       inFlight = true;
       try {
-        const run = await loadExecutionRun(selectedId);
-        if (!lifecycle.active || run.status === 'running') return;
-        const nextSelectedId = await refreshTasks();
-        if (nextSelectedId === null) return;
-        if (selectedIdRef.current === selectedId) {
-          await refreshSelection(selectedId);
+        const projection = await refreshRuntimeSurfaces(selectedId);
+        if (!lifecycle.active) return;
+        if (projection !== null) {
+          applyRuntimeProjectionToSelectedTask(selectedId, projection);
         }
-        setRuntimeWatchTaskId((current) => (current === selectedId ? null : current));
-      } catch {
-        // The normal task refresh surfaces runtime failures; this poll only closes the
-        // observability gap between an accepted Temporal update and its next durable boundary.
+        if (projection !== null && projection.status !== 'running') {
+          if (selectedIdRef.current === selectedId) {
+            await refreshSelection(selectedId);
+          }
+          await refreshTasks();
+          setRuntimeWatchTaskId((current) => (current === selectedId ? null : current));
+        }
+      } catch (error) {
+        if (!lifecycle.active || selectedIdRef.current !== selectedId) return;
+        setOperatorProjectionState({
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Runtime state is unavailable',
+        });
       } finally {
         inFlight = false;
       }
     };
 
-    void refreshAtNextBoundary();
-    const poll = window.setInterval(() => void refreshAtNextBoundary(), 750);
+    void refreshRuntimeProjection().catch(() => undefined);
+    const poll = window.setInterval(
+      () => void refreshRuntimeProjection().catch(() => undefined),
+      750,
+    );
     return () => {
       lifecycle.active = false;
       window.clearInterval(poll);
@@ -3013,7 +3167,6 @@ export const App = () => {
       settings: {
         planReview: requirePlanApproval ? 'required' : 'automatic',
         planningStrategy,
-        executionStart: 'manual',
       },
     })
       .then(async () => {
@@ -3033,36 +3186,6 @@ export const App = () => {
       .finally(() => {
         setPendingOperations((current) => {
           if (current.get(taskReference) !== 'generating') return current;
-          const next = new Map(current);
-          next.delete(taskReference);
-          return next;
-        });
-      });
-  };
-
-  const handleStart = (): void => {
-    if (selectedTask === null || selectedTask.status !== 'planned') return;
-    const taskReference = selectedTask.id;
-    setRuntimeWatchTaskId(taskReference);
-    setPendingOperations((current) => new Map(current).set(taskReference, 'starting'));
-    void startWorkflow(taskReference)
-      .then(async () => {
-        await refreshTasks();
-        if (selectedIdRef.current === taskReference) {
-          await refreshSelection(taskReference);
-        }
-      })
-      .catch((error: unknown) => {
-        if (selectedIdRef.current === taskReference) {
-          setActivityState({
-            status: 'failed',
-            message: error instanceof Error ? error.message : 'Unexpected run failure',
-          });
-        }
-      })
-      .finally(() => {
-        setPendingOperations((current) => {
-          if (current.get(taskReference) !== 'starting') return current;
           const next = new Map(current);
           next.delete(taskReference);
           return next;
@@ -3474,7 +3597,6 @@ export const App = () => {
                   workflow={workflowState}
                   activity={activityState}
                   onGenerate={handleGenerate}
-                  onStart={handleStart}
                   requirePlanApproval={planApprovalDrafts.get(selectedTask.id) ?? true}
                   onRequirePlanApprovalChange={(required) => {
                     setPlanApprovalDrafts((current) =>
@@ -3491,6 +3613,7 @@ export const App = () => {
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
                 />
+                <ExecutionProgressSurface projection={operatorProjectionState} />
                 {selectedTask.status === 'code_review' ? (
                   <CodeReviewControls
                     pendingOperation={pendingOperations.get(selectedTask.id) ?? null}

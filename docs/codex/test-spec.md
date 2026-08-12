@@ -144,6 +144,11 @@ Run these with the TypeScript time-skipping test environment and mocked Activiti
 - `invalid_planner_output_opens_one_durable_wait_without_activity_retries`
 - `draft_revision_infrastructure_failure_waits_without_losing_workspace`
 - `execution_starts_only_with_frozen_workflow_hash`
+- `accepted_plan_starts_execution_without_a_second_operator_gate`
+- `nonterminal_operator_task_is_running_or_waiting_with_a_concrete_reason`
+- `running_projection_refreshes_current_temporal_node_and_persisted_activity`
+- `runtime_refresh_does_not_reload_static_task_or_jira_surfaces`
+- `runtime_projection_failure_is_visible_instead_of_being_treated_as_progress`
 - `redelivered_freeze_returns_exact_immutable_receipt`
 - `conflicting_freeze_for_same_run_is_rejected`
 - `freeze_store_failure_waits_without_losing_run_or_workspace`

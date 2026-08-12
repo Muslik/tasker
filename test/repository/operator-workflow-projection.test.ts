@@ -16,83 +16,6 @@ afterEach(() => {
 });
 
 describe('operator workflow projection', () => {
-  it('completes the plan stage while manual execution start is waiting', () => {
-    const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
-    const ledger = openSqliteLedger({ filename: ':memory:', clock });
-    resources.push(ledger);
-    const generated = createM1WorkflowService(ledger.repository, clock).generate(
-      'avia-13236-short-bug',
-    );
-    if (!generated.ok || generated.value.view.workflow.graphHash === null) {
-      throw new Error('Expected a compiled workflow fixture');
-    }
-
-    const graph = CompiledWorkflowSchema.parse(generated.value.view.workflow.graph);
-    const workflowHash = generated.value.view.workflow.graphHash;
-    const lifecycle = TaskRunLifecycleSchema.parse({
-      bootstrap: {
-        runtime: 'bootstrap',
-        schemaVersion: 3,
-        taskReference: 'avia-13236-short-bug',
-        workflowId: 'bootstrap-workflow',
-        runId: 'bootstrap-run',
-        workflowHash,
-        settings: {
-          planReview: 'required',
-          planningStrategy: 'fast',
-          executionStart: 'manual',
-        },
-        phase: 'execution_start',
-        workspaceContext: null,
-        context: null,
-        draft: {
-          workflowHash,
-          graph,
-          planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'a'.repeat(64) },
-          evidenceBundle: {
-            artifactId: 'evidence-bundle',
-            checksum: 'b'.repeat(64),
-            revision: 1,
-          },
-        },
-        planning: null,
-        freezeReceipt: null,
-        executionWorkflowId: null,
-        nodeStates: {
-          workspace: 'succeeded',
-          context: 'succeeded',
-          investigation: 'succeeded',
-          planning: 'succeeded',
-          plan_review: 'succeeded',
-          freeze: 'succeeded',
-          execution_start: 'waiting',
-        },
-        attempts: { workspace: 1, context: 1, investigation: 1, planning: 1, freeze: 1 },
-        status: 'waiting',
-        currentNodeId: 'execution_start',
-        wait: {
-          nodeId: 'execution_start',
-          waitKind: 'execution.start@1',
-          reason: 'Workflow and plan are ready for execution',
-        },
-        outcome: null,
-      },
-      execution: null,
-    });
-
-    const projection = createOperatorWorkflowProjection('avia-13236-short-bug', lifecycle, {
-      read: () => ok(null),
-    });
-
-    expect(projection.stages.find(({ id }) => id === 'planning')).toMatchObject({
-      status: 'succeeded',
-      steps: [
-        { id: 'bootstrap:planning', status: 'succeeded' },
-        { id: 'bootstrap:plan-review', status: 'succeeded' },
-      ],
-    });
-  });
-
   it('shows one operator step for one executed agent block and hides internal mechanics', () => {
     const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
     const ledger = openSqliteLedger({ filename: ':memory:', clock });
@@ -166,7 +89,7 @@ describe('operator workflow projection', () => {
         blockRuns: { 'implement-fix': 1 },
         loopIterations: {},
         status: 'running',
-        currentNodeId: null,
+        currentNodeId: graph.root.id,
         wait: null,
         outcome: null,
       },
@@ -311,11 +234,29 @@ describe('operator workflow projection', () => {
       },
     });
 
-    const projection = createOperatorWorkflowProjection('AVIA-1', lifecycle, {
-      read: () => ok(null),
-    });
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      lifecycle,
+      { read: () => ok(null) },
+      () => null,
+      () => ({
+        transcriptId: 'task-step-transcript:implement-fix',
+        operationId: 'implement-fix',
+        chunks: [],
+        totalBytes: 0,
+        truncated: false,
+      }),
+    );
     const executionStages = projection.stages.filter(({ key }) => key.startsWith('execution:'));
 
+    expect(projection.current).toMatchObject({
+      runtime: 'execution',
+      nodeId: 'implement-fix',
+      reference: 'code.implement@1',
+      status: 'running',
+      blockRun: 1,
+      transcript: { operationId: 'implement-fix' },
+    });
     expect(executionStages.map(({ label }) => label)).toEqual(['Implement', 'Validate', 'Review']);
     expect(executionStages.map(({ steps }) => steps.length)).toEqual([1, 0, 0]);
   });

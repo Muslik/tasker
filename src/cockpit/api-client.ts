@@ -297,16 +297,6 @@ export const generateWorkflow = async (
   return parsed.data;
 };
 
-export const startWorkflow = async (fixtureId: string): Promise<ExecutionRunView> => {
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/start`, {
-    method: 'POST',
-  });
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = ExecutionRunViewSchema.safeParse(result.body);
-  if (!parsed.success) throw new Error('Run response does not match the cockpit contract');
-  return parsed.data;
-};
-
 export const loadExecutionRun = async (fixtureId: string): Promise<ExecutionRunView> => {
   const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/run`);
   if (!result.response.ok) throw failureFrom(result);

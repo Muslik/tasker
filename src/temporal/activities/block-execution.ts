@@ -995,7 +995,7 @@ const persistBlockedArtifact = (
   return persisted.ok ? [persisted.value.artifactId] : [];
 };
 
-const executionOperationIdFor = (
+export const executionOperationIdFor = (
   workflowId: string,
   workflowRunId: string,
   nodeId: string,
@@ -1930,6 +1930,13 @@ export const createTaskExecutionActivity = (
       input.blockRun,
     );
     const outputArtifact = dependencies.traces.readOutputArtifact(operationId);
+    if (outputArtifact.ok && outputArtifact.value === null && result.status === 'blocked') {
+      return {
+        status: 'needs_input',
+        summary: result.summary,
+        waitKind: result.waitKind,
+      };
+    }
     if (!outputArtifact.ok || outputArtifact.value === null) {
       return {
         status: 'needs_input',

@@ -2,6 +2,7 @@ import {
   ApplicationFailure,
   condition,
   isCancellation,
+  patched,
   proxyActivities,
   rootCause,
   setHandler,
@@ -484,7 +485,10 @@ export async function bootstrapWorkflowV3(
     }
   }
 
-  if (input.settings.executionStart === 'manual') {
+  if (
+    !patched('bootstrap-auto-execution-after-freeze') &&
+    input.settings.executionStart === 'manual'
+  ) {
     await openWait(
       'execution_start',
       'execution.start@1',

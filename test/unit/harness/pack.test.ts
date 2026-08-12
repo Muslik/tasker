@@ -264,6 +264,13 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('ai.assistance.initialize@1')).toBeUndefined();
   });
 
+  it('keeps Jira admission inside the semantic implementation stage', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const admission = pack.steps.find(({ reference }) => reference === 'jira.start-work@1');
+
+    expect(admission?.block.stage).toEqual({ id: 'implementation', label: 'Implement' });
+  });
+
   it('binds company AI guidance to agent work without adding workflow blocks', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const prepare = pack.steps.find(({ reference }) => reference === 'pr.prepare@1');

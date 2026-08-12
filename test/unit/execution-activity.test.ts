@@ -128,4 +128,29 @@ describe('execution activity', () => {
     ]);
     expect(entries[0]?.detail).toContain('completed work preserved');
   });
+
+  it('reads the persisted transcript for the exact active Temporal block run', () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const operationId = 'tasker:jira:AVIA-12045:execution-run:implement-fix:attempt-2';
+    traces.append(operationId, 1, 'stdout', '{"type":"turn.started"}\n');
+
+    const transcript = new LedgerExecutionActivityReader(ledger.repository).readCurrentTranscript({
+      runtime: 'execution',
+      schemaVersion: 2,
+      taskReference: 'jira:AVIA-12045',
+      workflowId: 'tasker:jira:AVIA-12045',
+      runId: 'execution-run',
+      workflowHash: 'a'.repeat(64),
+      nodeStates: { 'implement-fix': 'running' },
+      blockRuns: { 'implement-fix': 2 },
+      loopIterations: {},
+      status: 'running',
+      currentNodeId: 'implement-fix',
+      wait: null,
+      outcome: null,
+    });
+
+    expect(transcript).toMatchObject({ operationId, totalBytes: 24, truncated: false });
+  });
 });

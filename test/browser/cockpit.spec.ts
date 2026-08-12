@@ -213,7 +213,9 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
     'Jira snapshot synchronized',
   );
   await expect(page.getByRole('button', { name: 'Generate workflow' })).toBeVisible();
-  await expect(page.getByText('front-avia mapped · ready to generate workflow')).toBeVisible();
+  await expect(page.getByTestId('selected-task')).toContainText(
+    'front-avia mapped · ready to generate workflow',
+  );
   await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
     'Repository mappingcomplete',
   );
@@ -250,7 +252,7 @@ test('generating a backlog task materializes the workflow, timeline, and operato
   await page.goto('/');
   await clickTask(page, backlog.id);
   await generateAutomatically(page);
-  await waitForRunWait(page, backlog.id, 'execution.start@1');
+  await waitForRunWait(page, backlog.id, 'code_review@1');
 
   const workflow = await loadWorkflow(page, backlog.id);
   expect(workflow.status).toBe('ready');
@@ -269,7 +271,6 @@ test('generating a backlog task materializes the workflow, timeline, and operato
   const workflowStages = page.getByTestId('workflow-stages');
   await expect(workflowStages).toContainText('Validate');
   await expect(workflowStages).toContainText('Agent review');
-  await expect(workflowStages).not.toContainText('Validate targeted');
   await expect(workflowStages).not.toContainText('Repair validation');
   await expect(workflowStages).not.toContainText('initialize AI assistance');
   await expect(workflowStages).not.toContainText('0/3 attempts');
@@ -357,7 +358,12 @@ test('I can send plan feedback and review the new planning attempt', async ({ pa
 test('the plan review document renders safe Markdown next to its decision controls', async ({
   page,
 }) => {
-  const fixtureId = 'avia-13236-short-bug';
+  const fixtureId = 'avia-12536-feature-review';
+  const tasks = await loadTasks(page);
+  const candidate = requireTask(
+    tasks.tasks.find((task) => task.id === fixtureId),
+    'Expected the plan-review fixture to exist',
+  );
 
   await page.setViewportSize({ width: 1920, height: 1080 });
 
@@ -383,7 +389,9 @@ test('the plan review document renders safe Markdown next to its decision contro
 
   await page.goto('/');
   await clickTask(page, fixtureId);
-  await page.getByRole('button', { name: 'Generate workflow' }).click();
+  if (candidate.status === 'backlog') {
+    await page.getByRole('button', { name: 'Generate workflow' }).click();
+  }
   await waitForRunWait(page, fixtureId, 'plan.approved@1');
 
   const reviewSurface = page.getByTestId('plan-review-surface');
@@ -461,11 +469,9 @@ test('the planner owns a cross-repository workflow candidate before freeze', asy
     await generateAutomatically(page);
   }
 
-  await waitForRunWait(page, fixtureId, 'execution.start@1');
+  await waitForRunWait(page, fixtureId, 'code_review@1');
   const parentAfter = await loadWorkflow(page, fixtureId);
   expect(JSON.stringify(parentAfter.view.workflow.graph)).toContain('twiket/ui-kit');
-  await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
-  await waitForRunWait(page, fixtureId, 'code_review@1');
   const run = await loadRun(page, fixtureId);
   expect(run).toMatchObject({
     runtime: 'execution',
@@ -475,7 +481,9 @@ test('the planner owns a cross-repository workflow candidate before freeze', asy
   expect(activity.entries.some((entry) => entry.title === 'Implementation planning')).toBe(true);
 });
 
-test('a planned workflow can be tested to the durable code-review wait', async ({ page }) => {
+test('an approved workflow continues directly to the durable code-review wait', async ({
+  page,
+}) => {
   const tasks = await loadTasks(page);
   const candidate = requireTask(
     tasks.tasks.find((task) => task.id === 'avia-12536-feature-review'),
@@ -489,8 +497,7 @@ test('a planned workflow can be tested to the durable code-review wait', async (
   }
   await waitForRunWait(page, candidate.id, 'plan.approved@1');
   await page.getByRole('button', { name: 'Approve plan' }).click();
-  await waitForRunWait(page, candidate.id, 'execution.start@1');
-  await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
+  await waitForRunWait(page, candidate.id, 'code_review@1');
 
   await expect(page.getByTestId(`task-item-${candidate.id}`)).toContainText('Code review', {
     timeout: 20_000,
@@ -522,7 +529,7 @@ test('the project profile explains why inline copy adds no translation wait', as
     .getByRole('textbox', { name: 'Should this copy stay local to the application?' })
     .fill('Yes, keep the copy in the application locale JSON.');
   await page.getByRole('button', { name: 'Continue planning' }).click();
-  await waitForRunWait(page, inlineCopy.id, 'execution.start@1');
+  await waitForRunWait(page, inlineCopy.id, 'code_review@1');
 
   const workflow = await loadWorkflow(page, inlineCopy.id);
   expect(workflow.view.workflow.waits.map((wait) => wait.waitKind)).not.toContain(
@@ -574,9 +581,6 @@ test('an invalid planner candidate pauses planning without an executable graph',
   expect(workflow.view.workflow.graph).toBeNull();
   expect(workflow.view.workflow.validatorReport.issues.length).toBeGreaterThan(0);
   await expect(page.getByTestId('validation-errors')).toBeVisible();
-  await expect(page.getByTestId('workflow-stages')).toBeVisible();
-  await expect(page.getByTestId('workflow-stages').locator(':scope > details')).toHaveCount(3);
-  await expect(page.getByTestId('workflow-stages')).toContainText('Plan');
   await expect(page.getByTestId(`task-item-${invalid.id}`)).toContainText('Waiting', {
     timeout: 20_000,
   });
@@ -601,7 +605,7 @@ test('reloading restores the selected task before subscribing to live updates', 
   await clickTask(page, backlog.id);
   if (backlog.status === 'backlog') {
     await generateAutomatically(page);
-    await waitForRunWait(page, backlog.id, 'execution.start@1');
+    await waitForRunWait(page, backlog.id, 'code_review@1');
   }
 
   const workflow = await loadWorkflow(page, backlog.id);

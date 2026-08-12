@@ -229,6 +229,25 @@ mandatory planning, optional plan review, deterministic draft validation, and th
 immutable freeze receipt. The Execution Workflow receives only the accepted frozen
 graph and opaque references. It never discovers planning nodes by name.
 
+Plan approval is the execution boundary, not a second launch gate. After a valid plan
+is approved, or immediately after automatic plan acceptance, Bootstrap freezes the
+graph and starts the Execution Workflow without an operator `Run` action. Once a task
+has entered Bootstrap, its public runtime state obeys this invariant:
+
+- a nonterminal task is executing a real Temporal node and exposes that node plus its
+  persisted agent/activity progress;
+- or it is in a durable wait whose reason and required operator action are visible;
+- only a terminal task may be idle without asking the operator for anything.
+
+The console refreshes the selected running projection while the runtime is active. It
+reads the current node from Temporal and the active agent transcript from the durable
+ledger. Provider output is appended while the process runs, so commands, messages,
+byte counts, and measured token usage survive reloads and worker restarts. The console
+does not synthesize progress, animate a timer as evidence, or retain a passive `planned`
+state between plan approval and execution. A failed runtime query is an operator-visible
+observability failure. Tracker admission is an integration effect inside the first
+semantic `Implement` stage, not a separate operator stage named `Start work`.
+
 The interpreter is deterministic. It may inspect only its input, prior Activity
 results, messages, and Workflow state. It must not read the filesystem, call an LLM,
 query Jira, access a database, use wall-clock APIs outside Temporal, or generate random

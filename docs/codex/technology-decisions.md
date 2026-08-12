@@ -73,7 +73,10 @@ Bootstrap input contains only bounded, immutable, non-secret data:
 
 - task reference;
 - planning strategy and optional plan-review policy;
-- manual or automatic execution-start policy.
+
+Plan acceptance is the execution boundary. Bootstrap freezes the validated graph and
+starts Execution immediately; a second manual execution-start policy is not part of
+the public contract.
 
 It does not contain a graph, graph hash, repository path, or planning snapshot. Bootstrap
 creates those only after the managed worktree and Docker runtime exist. Execution input

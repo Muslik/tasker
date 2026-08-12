@@ -1000,6 +1000,62 @@ describe('temporal block execution activity', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves the actual harness-registration blocker when no candidate output was produced', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('fill-test-ops-plan@1')) },
+        currentSteps: new Map(),
+        traces,
+        mutationRecovery,
+        receipts: new BlockReceiptStore(ledger.repository, systemClock),
+        runtimes: readyRuntime(),
+        agentRunner: { run: vi.fn() },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+
+    const result = await activity.runExecutionBlock({
+      schemaVersion: 2,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'test-operations-plan',
+      blockRun: 1,
+      uses: 'fill-test-ops-plan@1',
+      activityDelivery: { kind: 'read_only' },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      input: {
+        objective: 'Prepare the test plan',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    });
+
+    expect(result).toEqual({
+      status: 'needs_input',
+      summary:
+        'Current harness registration for fill-test-ops-plan@1 no longer matches the snapshotted execution boundary',
+      waitKind: 'fill-test-ops-plan.1.blocked@1',
+    });
+  });
+
   it('derives independent-review predicates from validated output and restores them from the receipt', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

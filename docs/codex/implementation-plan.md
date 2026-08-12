@@ -75,6 +75,14 @@ planning, review, validation, and freeze; Execution owns deterministic traversal
 frozen graph. The old Workflow type, compatibility parser, registry, state adapter,
 tests, and Jira before-evidence policy are deleted.
 
+An accepted plan starts Execution immediately after freeze. There is no separate
+operator launch gate or passive planned state. During an active run the operator
+projection must show either a real running Temporal node with persisted progress or a
+durable wait with its required action; tracker admission belongs to `Implement`. The
+runtime refresh path reads only the selected task's Temporal projection, persisted
+transcript, and activity instead of reloading Jira and the full planning surface. Query
+failures are rendered as observability failures rather than swallowed by polling.
+
 Block Contract v3 is the active execution boundary. The immutable planning snapshot
 contains the full block definition; Activities persist the agent/process/effect
 candidate, collect completion evidence independently, evaluate the declared contract,

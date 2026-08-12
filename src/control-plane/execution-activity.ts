@@ -2,6 +2,13 @@ import { z } from 'zod';
 
 import type { LedgerRepository } from '../ledger/repository.js';
 import { TaskStepOutputArtifactSchema } from '../temporal/task-step-output.js';
+import type { ExecutionWorkflowPublicState } from '../temporal/index.js';
+import {
+  executionOperationIdFor,
+  TemporalTaskStepTraceStore,
+} from '../temporal/activities/block-execution.js';
+import { systemClock } from '../shared/clock.js';
+import type { PlanningTranscriptView } from './planning-transcript.js';
 import { OperatorActivityEntrySchema, type OperatorActivityResponse } from './m1-contracts.js';
 
 const ArtifactPointerSchema = z.object({ artifactId: z.string().min(1) }).strict();
@@ -27,10 +34,27 @@ const jenkinsEvidenceFrom = (details: unknown): z.infer<typeof JenkinsEvidenceSc
 
 export interface ExecutionActivityReader {
   readActivity(taskReference: string): OperatorActivityResponse['entries'];
+  readCurrentTranscript(execution: ExecutionWorkflowPublicState): PlanningTranscriptView | null;
 }
 
 export class LedgerExecutionActivityReader implements ExecutionActivityReader {
   public constructor(private readonly ledger: LedgerRepository) {}
+
+  public readCurrentTranscript(
+    execution: ExecutionWorkflowPublicState,
+  ): PlanningTranscriptView | null {
+    if (execution.currentNodeId === null) return null;
+    const blockRun = execution.blockRuns[execution.currentNodeId] ?? 0;
+    if (blockRun < 1) return null;
+    const operationId = executionOperationIdFor(
+      execution.workflowId,
+      execution.runId,
+      execution.currentNodeId,
+      blockRun,
+    );
+    const transcript = new TemporalTaskStepTraceStore(this.ledger, systemClock).read(operationId);
+    return transcript.ok ? transcript.value : null;
+  }
 
   public readActivity(taskReference: string): OperatorActivityResponse['entries'] {
     const prefix = `task-step-output:tasker:${taskReference}:`;

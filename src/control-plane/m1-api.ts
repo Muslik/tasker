@@ -168,7 +168,16 @@ const applyTemporalRunToTask = (
   task: OperatorTaskSummary,
   run: TaskRunPublicState | null,
 ): OperatorTaskSummary => {
-  if (run === null) return task;
+  if (run === null) {
+    return task.status === 'planned'
+      ? OperatorTaskSummarySchema.parse({
+          ...task,
+          status: 'needs_attention',
+          attention: 'operator',
+          currentStage: 'Workflow has no active Temporal run',
+        })
+      : task;
+  }
 
   switch (run.status) {
     case 'running':
@@ -182,17 +191,10 @@ const applyTemporalRunToTask = (
     case 'waiting': {
       const codeReview = run.wait.waitKind === 'code_review@1';
       const planReview = run.wait.waitKind === 'plan.approved@1';
-      const executionStart = run.wait.waitKind === 'execution.start@1';
       return OperatorTaskSummarySchema.parse({
         ...task,
-        status: codeReview
-          ? 'code_review'
-          : planReview
-            ? 'plan_review'
-            : executionStart
-              ? 'planned'
-              : 'waiting',
-        attention: executionStart ? 'none' : 'operator',
+        status: codeReview ? 'code_review' : planReview ? 'plan_review' : 'waiting',
+        attention: 'operator',
         currentStage:
           run.wait.reason ??
           (codeReview
@@ -388,6 +390,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
             const snapshot = options.implementationPlanning.readRunSnapshot(reference);
             return snapshot.ok ? snapshot.value : null;
           },
+          (execution) => options.executionActivity?.readCurrentTranscript(execution) ?? null,
         ),
       ),
     );
@@ -586,33 +589,6 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           .code(404)
           .send(apiError('planning_transcript_not_found', 'No planning transcript exists'))
       : reply.send(PlanningTranscriptViewSchema.parse(result.value));
-  });
-
-  api.post('/api/workflows/:fixtureId/start', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
-    if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
-    }
-    const current = await temporalRunService.read(params.data.fixtureId);
-    if (!current.ok) return sendTemporalRunError(reply, current.error);
-    if (
-      current.value === null ||
-      current.value.runtime !== 'bootstrap' ||
-      current.value.status !== 'waiting' ||
-      current.value.wait.waitKind !== 'execution.start@1'
-    ) {
-      return reply
-        .code(409)
-        .send(apiError('workflow_not_ready', 'The frozen workflow is not waiting to execute'));
-    }
-    const started = await temporalRunService.resolveWait(params.data.fixtureId, {
-      nodeId: current.value.wait.nodeId,
-      waitKind: current.value.wait.waitKind,
-      resolution: { decision: 'start' },
-    });
-    return started.ok
-      ? sendTemporalState(reply, params.data.fixtureId, started.value)
-      : sendTemporalRunError(reply, started.error);
   });
 
   api.post('/api/workflows/:fixtureId/code-review/sync', async (request, reply) => {
@@ -900,7 +876,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     const started = await temporalRunService.start({
       schemaVersion: 3,
       taskReference: params.data.fixtureId,
-      settings: command.data.settings,
+      settings: { ...command.data.settings, executionStart: 'automatic' },
     });
     return started.ok
       ? sendTemporalState(reply, params.data.fixtureId, started.value)

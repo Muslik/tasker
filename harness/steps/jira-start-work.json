@@ -4,7 +4,7 @@
   "policy": "jira-lifecycle",
   "description": "Preflight Jira transition requirements, then assign and move an eligible issue into active work using reconciled effects.",
   "availableDuring": ["execution"],
-  "stage": { "id": "preparation", "label": "Prepare" },
+  "stage": { "id": "implementation", "label": "Implement" },
   "inputContract": "task_input",
   "outputContract": "integration_output",
   "executor": {

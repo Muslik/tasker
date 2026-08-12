@@ -82,7 +82,7 @@ export async function executionWorkflowV2(
     blockRuns,
     loopIterations,
     status: 'running',
-    currentNodeId: null,
+    currentNodeId: input.graph.root.id,
     wait: null,
     outcome: null,
   };

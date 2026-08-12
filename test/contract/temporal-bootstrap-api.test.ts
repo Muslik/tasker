@@ -5,6 +5,7 @@ import {
   buildM1Api,
   createM1WorkflowService,
   ExecutionRunViewSchema,
+  OperatorTaskListResponseSchema,
 } from '../../src/control-plane/index.js';
 import { PlanReviewStore } from '../../src/control-plane/plan-review.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
@@ -100,7 +101,7 @@ const setup = () => {
     blockReceipts: new BlockReceiptStore(ledger.repository, clock),
     planReviews: new PlanReviewStore(ledger.repository, clock),
   });
-  return { api, runs };
+  return { api, runs, service };
 };
 
 describe('Temporal v3 bootstrap HTTP contract', () => {
@@ -113,7 +114,6 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
         settings: {
           planReview: 'automatic',
           planningStrategy: 'fast',
-          executionStart: 'manual',
         },
       },
     });
@@ -130,8 +130,42 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
       settings: {
         planReview: 'automatic',
         planningStrategy: 'fast',
-        executionStart: 'manual',
+        executionStart: 'automatic',
       },
+    });
+  });
+
+  it('rejects the removed manual execution gate', async () => {
+    const { api, runs } = setup();
+    const response = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/avia-13236-short-bug/generate',
+      payload: {
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          executionStart: 'manual',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(runs.starts).toHaveLength(0);
+  });
+
+  it('surfaces a materialized workflow without a Temporal run as operator attention', async () => {
+    const { api, service } = setup();
+    expect(service.generate('avia-13236-short-bug')).toMatchObject({ ok: true });
+
+    const response = await api.inject({ method: 'GET', url: '/api/operator/tasks' });
+    expect(response.statusCode).toBe(200);
+    const task = OperatorTaskListResponseSchema.parse(response.json()).tasks.find(
+      ({ id }) => id === 'avia-13236-short-bug',
+    );
+    expect(task).toMatchObject({
+      status: 'needs_attention',
+      attention: 'operator',
+      currentStage: 'Workflow has no active Temporal run',
     });
   });
 
@@ -144,7 +178,6 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
         settings: {
           planReview: 'required',
           planningStrategy: 'fast',
-          executionStart: 'manual',
         },
       },
     });
@@ -155,7 +188,7 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       taskReference: 'avia-13236-short-bug',
       status: 'waiting',
       activeRuntime: 'bootstrap',
@@ -177,7 +210,6 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
         settings: {
           planReview: 'required',
           planningStrategy: 'auto',
-          executionStart: 'manual',
         },
       },
     });

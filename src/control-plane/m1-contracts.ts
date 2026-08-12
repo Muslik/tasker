@@ -6,8 +6,9 @@ import { TaskFixtureSchema } from '../planning/fixtures.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
-import { TaskRunSettingsSchema } from '../temporal/bootstrap-kernel/contracts.js';
+import { PlanningStrategyRequestSchema } from '../planning/implementation-plan.js';
 import { JsonValueSchema } from '../workflow/schema.js';
+import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 
 export const M1_VIEW_SCHEMA_VERSION = 6;
 
@@ -132,13 +133,26 @@ export const OperatorWorkflowStageSchema = z
 
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
     graphHash: z
       .string()
       .regex(/^[a-f0-9]{64}$/u)
+      .nullable(),
+    current: z
+      .object({
+        runtime: z.enum(['bootstrap', 'execution']),
+        nodeId: z.string().min(1),
+        reference: z.string().min(1).nullable(),
+        status: z.enum(['running', 'waiting']),
+        blockRun: z.number().int().positive().nullable(),
+        waitKind: z.string().min(1).nullable(),
+        reason: z.string().min(1).nullable(),
+        transcript: PlanningTranscriptViewSchema.nullable(),
+      })
+      .strict()
       .nullable(),
     stages: z.array(OperatorWorkflowStageSchema),
   })
@@ -230,7 +244,12 @@ export const ExecutionRunViewSchema = TaskRunPublicStateSchema;
 
 export const RunStartCommandSchema = z
   .object({
-    settings: TaskRunSettingsSchema,
+    settings: z
+      .object({
+        planReview: z.enum(['required', 'automatic']),
+        planningStrategy: PlanningStrategyRequestSchema,
+      })
+      .strict(),
   })
   .strict();
 
@@ -238,7 +257,6 @@ export const DEFAULT_RUN_START_COMMAND = {
   settings: {
     planReview: 'required',
     planningStrategy: 'auto',
-    executionStart: 'manual',
   },
 } as const satisfies z.input<typeof RunStartCommandSchema>;
 
