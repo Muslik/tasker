@@ -371,6 +371,13 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           params.data.fixtureId,
           lifecycle.value,
           options.blockReceipts,
+          (run) => {
+            const reference = run.bootstrap.draft?.planningSnapshot;
+            if (reference === undefined || options.implementationPlanning === undefined)
+              return null;
+            const snapshot = options.implementationPlanning.readRunSnapshot(reference);
+            return snapshot.ok ? snapshot.value : null;
+          },
         ),
       ),
     );

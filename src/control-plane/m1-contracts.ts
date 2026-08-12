@@ -87,59 +87,38 @@ export const BlockReceiptSummarySchema = z
   .strict()
   .readonly();
 
-export const WorkflowNodeDetailsSchema = z.discriminatedUnion('kind', [
-  z
-    .object({ kind: z.literal('none') })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal('bootstrap'),
-      attempts: z.number().int().nonnegative(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal('block'),
-      blockReference: z.string().min(1),
-      attempts: z.number().int().nonnegative(),
-      receipts: z.array(BlockReceiptSummarySchema),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal('loop'),
-      maxAttempts: z.number().int().positive(),
-      completedIterations: z.number().int().nonnegative(),
-      until: z.string().min(1),
-    })
-    .strict()
-    .readonly(),
-]);
+const OperatorWorkflowStepBaseSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  status: WorkflowNodeStatusSchema,
+});
 
-export const WorkflowTechnicalNodeSchema: z.ZodType<{
-  readonly id: string;
-  readonly kind: string;
-  readonly label: string;
-  readonly status: 'planned' | 'running' | 'waiting' | 'succeeded' | 'skipped' | 'failed';
-  readonly waitKind?: string | undefined;
-  readonly details: z.infer<typeof WorkflowNodeDetailsSchema>;
-  readonly children: readonly z.infer<typeof WorkflowTechnicalNodeSchema>[];
-}> = z.lazy(() =>
+export const OperatorWorkflowStepSchema = z.discriminatedUnion('kind', [
+  OperatorWorkflowStepBaseSchema.extend({
+    kind: z.literal('agent'),
+    reference: z.string().min(1),
+    profile: z.string().min(1),
+    skills: z.array(z.string().min(1)),
+    attempts: z.number().int().nonnegative(),
+    receipts: z.array(BlockReceiptSummarySchema),
+  }).strict(),
+  OperatorWorkflowStepBaseSchema.extend({
+    kind: z.literal('process'),
+    reference: z.string().min(1),
+    executor: z.string().min(1),
+    attempts: z.number().int().nonnegative(),
+    receipts: z.array(BlockReceiptSummarySchema),
+  }).strict(),
   z
     .object({
+      kind: z.literal('wait'),
       id: z.string().min(1),
-      kind: z.string().min(1),
       label: z.string().min(1),
       status: WorkflowNodeStatusSchema,
-      waitKind: z.string().min(1).optional(),
-      details: WorkflowNodeDetailsSchema,
-      children: z.array(WorkflowTechnicalNodeSchema),
+      reference: z.string().min(1),
     })
     .strict(),
-);
+]);
 
 export const OperatorWorkflowStageSchema = z
   .object({
@@ -147,24 +126,13 @@ export const OperatorWorkflowStageSchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     status: WorkflowNodeStatusSchema,
-    presentation: z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('phase') }).strict(),
-      z
-        .object({
-          kind: z.literal('loop'),
-          maxAttempts: z.number().int().positive(),
-          completedIterations: z.number().int().nonnegative(),
-          until: z.string().min(1),
-        })
-        .strict(),
-    ]),
-    nodes: z.array(WorkflowTechnicalNodeSchema).min(1),
+    steps: z.array(OperatorWorkflowStepSchema),
   })
   .strict();
 
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
@@ -404,8 +372,7 @@ export type FixtureFamily = z.infer<typeof FixtureFamilySchema>;
 export type FixtureSummary = z.infer<typeof FixtureSummarySchema>;
 export type WorkflowNodeStatus = z.infer<typeof WorkflowNodeStatusSchema>;
 export type BlockReceiptSummary = z.infer<typeof BlockReceiptSummarySchema>;
-export type WorkflowNodeDetails = z.infer<typeof WorkflowNodeDetailsSchema>;
-export type WorkflowTechnicalNode = z.infer<typeof WorkflowTechnicalNodeSchema>;
+export type OperatorWorkflowStep = z.infer<typeof OperatorWorkflowStepSchema>;
 export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;
 export type OperatorWorkflowProjection = z.infer<typeof OperatorWorkflowProjectionSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;

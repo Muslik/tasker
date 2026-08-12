@@ -59,7 +59,7 @@ Each phase follows this order:
 | 2. Block contract v3 | claims require evidence; receipts own predicate facts | B: claim, evaluator, and evidence are inspectable |
 | 3. Execution profiles | Codex/Claude profiles and actual models are configurable | actual profile visible |
 | 4. Honest bootstrap | context, investigation, plan, validation, then freeze | C: real task becomes a task-specific graph |
-| 5. Operator projection | macro stages with expandable blocks/effects | readable parallel live work |
+| 5. Operator projection | semantic stages with configurable agent/process/wait work | readable parallel live work |
 | 6. Local implementation | implementation, selected checks, independent review | D: real feature and bug are locally ready |
 | 7. Delivery | base reconciliation, commit, push, PR, Jira receipts | safe allowlisted publication |
 | 8. CI recovery | passed/flaky/infra/ours/unknown branches | E: Jira task reaches human review wait |
@@ -132,12 +132,13 @@ Phase 5 is complete. The former raw `workflow.tree` response, persisted
 configurable stage descriptors. A dedicated operator endpoint joins the complete
 Bootstrap lifecycle, the frozen graph, live Execution node state, and immutable Block
 Receipts into one disposable read model. It shows preparation, investigation, and
-planning before an execution graph exists, then adjacent execution episodes with
-explicit attempt counts, accepted/rejected claims, evidence, and reconciled effects.
-Stages are expanded by default. Repair loops carry typed iteration/limit metadata and
-remain nested in the phase they repair when they return to that phase; cross-phase loops
-receive an explicit named stage. Operator waits use a persistent amber action surface,
-and the console supports persisted light/dark themes.
+planning before an execution graph exists, then semantic execution stages. Only agent
+invocations, configured process commands, and durable human waits become rows. Internal
+Temporal containers, integrations, retries, reconciliation and receipt validation affect
+stage state but remain diagnostics. Future stages remain compact headers; rows appear
+when their work starts, so unselected recovery branches stay absent. Operator waits use
+a persistent amber action surface, and the console
+supports persisted light/dark themes.
 The raw graph remains a downloadable diagnostic artifact. View schema v5 projections
 are deleted when encountered instead of being interpreted or upcast.
 
@@ -196,10 +197,12 @@ and accepted independent review before enabling remote publication authority.
 ## Phase 5 exit gate
 
 - stage identity and labels come from harness block/wait contracts rather than UI code;
-- adjacent work is grouped into ordered episodes and a later revisit creates a new
-  episode with the same semantic stage id;
-- the primary rail shows stage state while technical graph nodes, block attempts,
-  receipts, and effects are expandable details;
+- one agent invocation, configured process command, or durable wait produces exactly
+  one operator step;
+- the primary rail shows stage state while technical graph nodes, integrations,
+  reconciliation, receipts, and effects stay on diagnostic/transcript surfaces;
+- planned stages remain headers and conditional repair, CI, and review bodies do not
+  appear before their branch executes;
 - workspace, context, investigation, planning, review, freezing, and execution progress
   share one operator projection even before an execution graph exists;
 - changing the projection never mutates, patches, or influences the frozen graph;

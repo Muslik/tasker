@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  BlockDefinitionSchema,
   BlockStageSchema,
   CompletionEvaluatorSchema,
   type BlockDefinition,
@@ -161,7 +162,17 @@ export const HarnessPolicyManifestSchema = z
       .strict()
       .optional(),
     configuration: JsonValueSchema,
-    obligations: z.array(HarnessPathSequenceObligationSchema).min(1),
+    obligations: z.array(HarnessPathSequenceObligationSchema).default([]),
+    agentSkills: z
+      .array(
+        z
+          .object({
+            skill: z.string().min(1),
+            steps: z.array(VersionedReferenceSchema).min(1),
+          })
+          .strict(),
+      )
+      .default([]),
   })
   .strict();
 
@@ -371,6 +382,27 @@ export interface LoadedHarnessPack {
     readonly workflowAnalyzer: LoadedPrompt;
   };
 }
+
+export const applyHarnessPolicySkills = (
+  block: BlockDefinition,
+  reference: string,
+  policies: readonly HarnessPolicyManifest[],
+): BlockDefinition => {
+  if (block.executor.kind !== 'agent') return block;
+  const skills = policies.flatMap((policy) =>
+    policy.agentSkills
+      .filter((binding) => binding.steps.includes(reference))
+      .map((binding) => binding.skill),
+  );
+  if (skills.length === 0) return block;
+  return BlockDefinitionSchema.parse({
+    ...block,
+    executor: {
+      ...block.executor,
+      skills: [...new Set([...block.executor.skills, ...skills])],
+    },
+  });
+};
 
 export const parseVersionedReference = (reference: string): string =>
   VersionedReferenceSchema.parse(reference);

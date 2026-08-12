@@ -156,7 +156,7 @@ describe('Temporal v3 bootstrap HTTP contract', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       taskReference: 'avia-13236-short-bug',
       status: 'waiting',
       activeRuntime: 'bootstrap',

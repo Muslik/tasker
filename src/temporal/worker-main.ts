@@ -16,9 +16,6 @@ import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
 import { loadHarnessPack } from '../harness/index.js';
 import {
-  AiAssistanceInitializeAdapter,
-  AiAssistanceRecordPlanAdapter,
-  AiAssistanceValidateAdapter,
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
   BitbucketReviewClient,
@@ -146,9 +143,6 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jiraLifecycleClient =
     jiraConfiguration === null ? null : new JiraLifecycleClient(jiraConfiguration);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
-    new AiAssistanceInitializeAdapter(externalEffects),
-    new AiAssistanceRecordPlanAdapter(externalEffects),
-    new AiAssistanceValidateAdapter(),
     ...(jenkinsConfiguration === null
       ? []
       : [

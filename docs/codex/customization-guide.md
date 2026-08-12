@@ -259,22 +259,19 @@ Tasker will not claim them. Multiple comments with the active prefix fail closed
 must be resolved explicitly.
 
 For example, the company-wide `ai-assistance` requirement is the file-backed
-`harness/policies/ai-assistance.json` pack, not kernel behavior. It exposes blocks such
-as:
+`harness/policies/ai-assistance.json` pack, not kernel behavior. Its `agentSkills`
+bindings add the logical `ai-assistance` skill to write-capable implementation,
+repair/revision, and PR-description agents. Initial artifact materialization,
+plan/result/verification maintenance, and the PR section happen inside those existing
+agent invocations; they are not standalone workflow bookkeeping blocks.
 
-- `ai.assistance.initialize@1` to create the task README;
-- `ai.assistance.record_plan@1` to persist the accepted plan before implementation;
-- `ai.assistance.finalize@1` to write result/verification evidence and the PR section;
-- `ai.assistance.validate@1` as the deterministic pre-PR gate.
-
-When the policy is enabled, the analyzer selects those ordinary blocks and the
-validator enforces its exact per-path sequence. Step manifests additionally declare
-`artifactContracts` and `requiredArtifactContracts`, so a consumer cannot precede its
-producer. A policy-owned step declares its policy ID in the manifest; disabled-policy
-steps are removed from the analyzer catalog. Disabling the policy and restarting Tasker
-makes future task graphs omit its blocks; snapshotted running graphs remain unchanged. The generic `pr.describe@1` and
-`pr.prepare@1` blocks do not require AI policy artifacts. No Temporal Workflow, API
-route, or Bitbucket adapter changes when this policy is removed.
+When the policy is enabled, its bindings are included in future immutable harness
+snapshots. Disabling it and restarting Tasker removes the skill from future runs;
+snapshotted running work remains unchanged. A policy may still declare path obligations
+or policy-owned blocks when it represents an independently recoverable external effect
+or human wait. Do not use either merely to display an internal checklist item. The
+generic `pr.prepare@1` integration remains unaware of AI policy. No Temporal Workflow,
+API route, or Bitbucket adapter changes when this policy is removed.
 
 The current file-backed manifest vocabulary deliberately reuses named runtime schemas
 (`task_input`, `pull_request_input`, `agent_output`, and so on). Add a schema name in

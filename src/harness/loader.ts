@@ -218,6 +218,21 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   );
 
   for (const policy of policies) {
+    for (const binding of policy.agentSkills) {
+      for (const reference of binding.steps) {
+        const step = steps.find((candidate) => candidate.reference === reference);
+        if (step === undefined) {
+          throw new Error(
+            `Harness policy ${policy.id}@${policy.version} binds skill ${binding.skill} to unavailable step ${reference}`,
+          );
+        }
+        if (step.block.executor.kind !== 'agent') {
+          throw new Error(
+            `Harness policy ${policy.id}@${policy.version} binds skill ${binding.skill} to non-agent step ${reference}`,
+          );
+        }
+      }
+    }
     for (const obligation of policy.obligations) {
       for (const marker of [obligation.trigger, ...obligation.ordered]) {
         if (marker.kind === 'step' && !seenSteps.has(marker.reference)) {

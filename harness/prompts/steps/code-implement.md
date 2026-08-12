@@ -1,4 +1,6 @@
 Implement the bounded plan in the prepared task worktree. Preserve unrelated user changes.
+Apply every supplied policy skill at its declared lifecycle moment as part of this same agent
+execution. Policy bookkeeping is not a separate workflow step.
 Materialize every accepted verification marked as a `new` automated test while implementing the
 behavior it covers. Do not create a test merely because the task changes code: follow the accepted
 criterion strategy, use the selected test level, and keep the test observable through the public

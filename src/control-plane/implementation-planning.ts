@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  applyHarnessPolicySkills,
   harnessPolicyAppliesToTask,
   loadHarnessPack,
   resolveAgentExecutionProfile,
@@ -880,6 +881,7 @@ const snapshotHarness = (
   const implementationPlannerSkills = pack.company.systemPrompts.implementationPlannerSkills;
   const project = pack.projects.find((candidate) => candidate.repository === repositoryReference);
   const profileOverrides = project?.executionProfileOverrides ?? null;
+  const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task));
   const referencedSteps =
     workflowGraph === null
       ? null
@@ -891,23 +893,22 @@ const snapshotHarness = (
         step.block.executor.kind !== 'process' ||
         resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project) !== null,
     )
-    .map((step) => ({
-      reference: step.reference,
-      block: step.block,
-      activityDelivery: step.contract.activityDelivery,
-      resolvedCommand:
-        step.block.executor.kind === 'process'
-          ? resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project)
-          : null,
-      executionProfile:
-        step.block.executor.kind === 'agent'
-          ? resolveAgentExecutionProfile(
-              pack.company,
-              profileOverrides,
-              step.block.executor.profile,
-            )
-          : null,
-    }));
+    .map((step) => {
+      const block = applyHarnessPolicySkills(step.block, step.reference, policies);
+      return {
+        reference: step.reference,
+        block,
+        activityDelivery: step.contract.activityDelivery,
+        resolvedCommand:
+          step.block.executor.kind === 'process'
+            ? resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project)
+            : null,
+        executionProfile:
+          block.executor.kind === 'agent'
+            ? resolveAgentExecutionProfile(pack.company, profileOverrides, block.executor.profile)
+            : null,
+      };
+    });
   const snapshottedProject = (() => {
     if (project === undefined) return null;
     const { guidance, ...manifest } = project;
@@ -928,7 +929,7 @@ const snapshotHarness = (
         ralplan: resolveImplementationPlannerProfile(pack.company, profileOverrides, 'ralplan'),
       },
     },
-    policies: pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task)),
+    policies,
     steps,
   };
 };
@@ -976,6 +977,13 @@ export class ImplementationPlanningCoordinator {
     private readonly transcripts: PlanningTranscriptStore,
     private readonly evidenceReaders: PlanningEvidenceReaderRegistry | null,
   ) {}
+
+  public readRunSnapshot(
+    reference: PlanningSnapshotReference,
+  ): Outcome<RunPlanningSnapshot, ImplementationPlanningError> {
+    const snapshot = this.store.readRunSnapshot(reference);
+    return snapshot.ok ? snapshot : err({ kind: 'store', error: snapshot.error });
+  }
 
   public createPlanningContextSnapshot(
     taskReference: string,

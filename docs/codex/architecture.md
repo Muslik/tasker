@@ -193,14 +193,18 @@ summaries. Secrets never enter Workflow input or Event History.
 
 - **Stage** is an operator projection such as Workspace, Investigate, Plan, Implement,
   Validate, Delivery, or Human review. It groups work but is not schedulable. Every block
-  and durable wait declares its stage in the harness contract. All stages start expanded
-  but remain collapsible. A bounded repair loop that returns to the same phase is rendered
-  inside that phase with its completed/max-attempt budget; a loop that crosses phase
-  boundaries becomes its own named stage. This preserves graph order without showing a
-  repair as misleading duplicate Implement/Validate/Delivery stages. Bootstrap stages
-  come from the complete Bootstrap lifecycle; execution stage state comes from Execution
-  node state. Expanding a stage reveals the exact immutable graph nodes and Block Receipts
-  that produced it.
+  and durable wait declares its stage in the harness contract. A stage is present even
+  when its work is deterministic, but deterministic mechanics do not become operator
+  steps. Expanding a stage reveals only configurable work: one row per agent invocation,
+  one row per configured process command, and one row per durable human wait. A sequence,
+  branch, loop, finalize node, integration adapter, retry, reconciliation probe, and
+  receipt validator affect stage state but are diagnostics rather than operator steps.
+  Planned future stages remain compact headers; their configurable rows appear only
+  when execution starts them. Conditional repair/CI/review bodies therefore remain
+  absent unless their branch actually runs.
+  Bootstrap stages come from the complete Bootstrap lifecycle; execution stage state
+  comes from Execution node state. Attempts, receipts, evidence, and the raw immutable
+  graph remain available from the agent/process transcript and diagnostic surfaces.
 - **Block** is a reusable versioned work contract selected into one task graph. It owns
   inputs, outcomes, completion rules, recovery, prompt/skills/profile where relevant,
   and produced evidence.
@@ -492,8 +496,8 @@ Workflow state/history and Search Attributes. Tasker SQLite stores product metad
 cached Jira data, graph rationale, transcripts, artifacts, usage, shadow cost,
 retrospective annotations, and UI-friendly indexes.
 
-The primary operator rail renders configured stage episodes, not the raw execution
-tree. Its dedicated read model joins three authorities without becoming one itself:
+The primary operator rail renders semantic stages and configurable work, not the raw
+execution tree. Its dedicated read model joins three authorities without becoming one itself:
 the Bootstrap/Execution lifecycle supplies live state, the frozen graph supplies
 structure, and immutable Block Receipts supply attempts, claims, evidence, and effects.
 The persisted `WorkflowView` retains planning decisions, validation, and the immutable
@@ -502,6 +506,18 @@ diagnostic evidence. Changing a block's stage or registering a new stage does no
 require a Cockpit change. Pre-pilot projection schema cutovers delete obsolete
 projections and regenerate them; Tasker does not upcast removed `workflow.tree` or
 `workflow.stages` shapes.
+
+The visibility contract is intentionally stricter than the execution contract:
+
+- one agent invocation with one snapshotted profile, prompt, model and skill set is one
+  operator step;
+- one configured project/company command is one process step;
+- one durable operator decision is one wait step;
+- mechanics without their own harness configuration are never operator steps.
+
+This is a control-plane projection rule, not a Cockpit filter. Temporal may retain a
+larger recovery graph so it can resume exact branches, while the projection schema does
+not expose its containers as pseudo-work.
 
 Operator attention is a distinct UI state, not a generic brand accent. A durable wait
 requiring a decision uses one amber treatment in the selected task, the active workflow

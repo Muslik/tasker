@@ -140,29 +140,6 @@ const localReviewBoundary = (
   }),
 ];
 
-const aiAssistanceEnabled = (): boolean =>
-  getHarnessPack().policies.some((policy) => policy.id === 'ai-assistance');
-
-const aiAssistancePrelude = (task: TaskContext): readonly WorkflowNodeSource[] =>
-  aiAssistanceEnabled()
-    ? [
-        step('initialize-ai-assistance', {
-          uses: 'ai.assistance.initialize@1',
-          with: taskInput(task, 'Initialize the required AI-assistance evidence for this task.'),
-        }),
-      ]
-    : [];
-
-const acceptedPlanRecord = (task: TaskContext): readonly WorkflowNodeSource[] =>
-  aiAssistanceEnabled()
-    ? [
-        step('record-accepted-plan', {
-          uses: 'ai.assistance.record_plan@1',
-          with: taskInput(task, 'Persist the accepted implementation plan before product changes.'),
-        }),
-      ]
-    : [];
-
 const preExecutionPolicySteps = (
   task: TaskContext & PolicyTaskContext,
 ): readonly WorkflowNodeSource[] => {
@@ -241,14 +218,6 @@ const pullRequestPublication = (
   task: TaskContext,
   prefix: string,
 ): readonly WorkflowNodeSource[] => [
-  ...(aiAssistanceEnabled()
-    ? [
-        step(`${prefix}finalize-ai-assistance`, {
-          uses: 'ai.assistance.finalize@1',
-          with: taskInput(task, 'Harvest the actual result and verification evidence.'),
-        }),
-      ]
-    : []),
   step(`${prefix}describe-pr`, {
     uses: 'pr.describe@1',
     with: {
@@ -256,17 +225,6 @@ const pullRequestPublication = (
       draftPath: '.tasker/pull-request/draft.json',
     },
   }),
-  ...(aiAssistanceEnabled()
-    ? [
-        step(`${prefix}validate-ai-assistance`, {
-          uses: 'ai.assistance.validate@1',
-          with: {
-            ...taskInput(task, 'Validate the branch artifacts and pull-request AI section.'),
-            draftPath: '.tasker/pull-request/draft.json',
-          },
-        }),
-      ]
-    : []),
   step(`${prefix}prepare-pr`, {
     uses: 'pr.prepare@1',
     with: {
@@ -382,9 +340,7 @@ const pullRequestReadiness = (
 
 const shortBugfixRoot = (task: TaskContext & PolicyTaskContext): WorkflowNodeSource =>
   sequence('short-bugfix-delivery', [
-    ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
-    ...acceptedPlanRecord(task),
     step('implement-fix', {
       uses: 'code.implement@1',
       with: taskInput(task, task.title),
@@ -408,9 +364,7 @@ const featureWithReviewRoot = (
   options: { readonly includeVisualCheck: boolean },
 ): WorkflowNodeSource =>
   sequence('feature-delivery', [
-    ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
-    ...acceptedPlanRecord(task),
     step('implement-feature', {
       uses: 'code.implement@1',
       with: taskInput(task, task.title),
@@ -450,9 +404,7 @@ const sharedComponentRoot = (
       : [];
 
   return sequence('shared-component-delivery', [
-    ...aiAssistancePrelude(task),
     ...preExecutionPolicySteps(task),
-    ...acceptedPlanRecord(task),
     step('implement-component-copy', {
       uses: 'code.implement@1',
       with: taskInput(

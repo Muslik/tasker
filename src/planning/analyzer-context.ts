@@ -1,6 +1,11 @@
 import { JsonValueSchema, toContractReference, type JsonValue } from '../workflow/index.js';
 import { z } from 'zod';
-import { getHarnessPack, harnessPolicyAppliesToTask } from '../harness/index.js';
+import {
+  applyHarnessPolicySkills,
+  getHarnessPack,
+  harnessPolicyAppliesToTask,
+  type HarnessPolicyManifest,
+} from '../harness/index.js';
 import { M1_AVAILABLE_CAPABILITIES } from './proposal.js';
 import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from './contracts.js';
 import type { TaskFixture } from './fixtures.js';
@@ -24,25 +29,26 @@ const inputContract = (schema: z.ZodType): JsonValue =>
     }),
   );
 
-const stepHarnessMetadata = (reference: string) => {
+const stepHarnessMetadata = (reference: string, policies: readonly HarnessPolicyManifest[]) => {
   const source = getHarnessStepDefinition(reference);
   if (source === undefined) return {};
+  const block = applyHarnessPolicySkills(source.block, reference, policies);
 
   return {
-    availableDuring: source.block.availableDuring,
-    description: source.block.description,
-    stage: source.block.stage,
-    completion: source.block.completion,
+    availableDuring: block.availableDuring,
+    description: block.description,
+    stage: block.stage,
+    completion: block.completion,
     executor:
-      source.block.executor.kind === 'agent'
+      block.executor.kind === 'agent'
         ? {
-            kind: source.block.executor.kind,
-            profile: source.block.executor.profile,
+            kind: block.executor.kind,
+            profile: block.executor.profile,
             prompt: source.prompt?.relativePath,
             promptSha256: source.prompt?.contentSha256,
-            skills: source.block.executor.skills,
+            skills: block.executor.skills,
           }
-        : source.block.executor,
+        : block.executor,
   };
 };
 
@@ -137,7 +143,7 @@ export const createWorkflowAnalyzerContext = (
             ...(contract.outputPredicates === undefined
               ? {}
               : { outputPredicates: contract.outputPredicates }),
-            ...stepHarnessMetadata(toContractReference(contract)),
+            ...stepHarnessMetadata(toContractReference(contract), policies),
           })),
         waits: M1_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
           reference: toContractReference(contract),

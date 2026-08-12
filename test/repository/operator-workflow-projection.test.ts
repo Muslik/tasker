@@ -16,15 +16,20 @@ afterEach(() => {
 });
 
 describe('operator workflow projection', () => {
-  it('joins execution attempts with immutable receipt evidence', () => {
+  it('shows one operator step for one executed agent block and hides internal mechanics', () => {
     const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
     const ledger = openSqliteLedger({ filename: ':memory:', clock });
     resources.push(ledger);
     const generated = createM1WorkflowService(ledger.repository, clock).generate(
       'avia-13236-short-bug',
     );
-    if (!generated.ok || generated.value.view.workflow.graphHash === null) {
-      throw new Error('Expected a compiled workflow fixture');
+    if (!generated.ok) {
+      throw new Error(`Expected a compiled workflow fixture: ${JSON.stringify(generated.error)}`);
+    }
+    if (generated.value.view.workflow.graphHash === null) {
+      throw new Error(
+        `Expected a compiled workflow fixture: ${JSON.stringify(generated.value.view.workflow.validatorReport)}`,
+      );
     }
 
     const graph = CompiledWorkflowSchema.parse(generated.value.view.workflow.graph);
@@ -80,68 +85,162 @@ describe('operator workflow projection', () => {
         workflowId: 'execution-workflow',
         runId: 'execution-run',
         workflowHash,
-        nodeStates: {
-          'initialize-ai-assistance': 'succeeded',
-          'record-accepted-plan': 'running',
-        },
-        blockRuns: { 'initialize-ai-assistance': 1 },
+        nodeStates: { 'implement-fix': 'succeeded' },
+        blockRuns: { 'implement-fix': 1 },
         loopIterations: {},
         status: 'running',
-        currentNodeId: 'record-accepted-plan',
+        currentNodeId: null,
         wait: null,
         outcome: null,
       },
     });
     const receipt = BlockReceiptSchema.parse({
       schemaVersion: 3,
-      receiptId: 'block-receipt:execution-workflow:execution-run:initialize-ai-assistance:run-1',
-      blockReference: 'ai.assistance.initialize@1',
+      receiptId: 'block-receipt:execution-workflow:execution-run:implement-fix:run-1',
+      blockReference: 'code.implement@1',
       blockDefinitionHash: 'block-definition-hash',
       taskReference: 'avia-13236-short-bug',
       workflowId: 'execution-workflow',
       workflowRunId: 'execution-run',
       workflowHash,
-      nodeId: 'initialize-ai-assistance',
+      nodeId: 'implement-fix',
       blockRun: 1,
       claim: {
         status: 'candidate_complete',
-        summary: 'AI assistance initialized',
+        summary: 'Change implemented',
         output: null,
-        evidenceReferences: ['effect:ai-assistance'],
+        evidenceReferences: ['workspace:diff'],
       },
-      verdict: { status: 'accepted', evidenceReferences: ['effect:ai-assistance'] },
+      verdict: { status: 'accepted', evidenceReferences: ['workspace:diff'] },
       predicateFacts: {},
       evidence: [
         {
-          kind: 'effect',
-          reference: 'effect:ai-assistance',
-          reconciled: true,
-          remoteIdentity: 'branch-artifacts',
+          kind: 'workspace_mutation',
+          reference: 'workspace:diff',
+          changed: true,
+          fingerprint: 'diff-fingerprint',
         },
       ],
-      transcriptReference: 'transcript:initialize',
-      usageReference: 'usage:initialize',
+      transcriptReference: 'transcript:implement',
+      usageReference: 'usage:implement',
       completedAt: '2026-08-10T00:01:00.000Z',
     });
 
     const projection = createOperatorWorkflowProjection('avia-13236-short-bug', lifecycle, {
       read: (receiptId) => ok(receiptId === receipt.receiptId ? receipt : null),
     });
-    const preparation = projection.stages.find(({ key }) => key === 'execution:preparation:1');
+    const implementation = projection.stages.find(({ id }) => id === 'implementation');
 
     expect(projection.activeRuntime).toBe('execution');
-    expect(preparation?.status).toBe('running');
-    expect(preparation?.nodes[0]?.details).toMatchObject({
-      kind: 'block',
+    expect(implementation?.steps).toHaveLength(1);
+    expect(implementation?.steps[0]).toMatchObject({
+      kind: 'agent',
+      reference: 'code.implement@1',
       attempts: 1,
       receipts: [
         {
           verdict: 'accepted',
-          summary: 'AI assistance initialized',
-          evidence: [{ kind: 'effect', reconciled: true, remoteIdentity: 'branch-artifacts' }],
+          summary: 'Change implemented',
+          evidence: [{ kind: 'workspace_mutation', changed: true }],
         },
       ],
     });
+    expect(JSON.stringify(projection)).not.toContain('initialize-ai-assistance');
+    expect(JSON.stringify(projection)).not.toContain('bounded_loop');
+  });
+
+  it('keeps future phases compact until their configurable work starts', () => {
+    const graph = CompiledWorkflowSchema.parse({
+      metadata: {
+        compilerVersion: 4,
+        irVersion: 'm2',
+        workflowId: 'future-steps',
+        workflowVersion: 1,
+        references: {
+          predicates: [],
+          stepTypes: ['code.implement@1', 'validate.targeted@1'],
+          waits: ['code_review@1'],
+        },
+      },
+      root: {
+        kind: 'sequence',
+        id: 'delivery',
+        children: [
+          {
+            kind: 'step',
+            id: 'implement-fix',
+            uses: 'code.implement@1',
+            activityDelivery: { kind: 'workspace_reconciled' },
+            with: { objective: 'Fix', repository: 'front-avia', taskId: 'AVIA-1' },
+          },
+          {
+            kind: 'step',
+            id: 'validate-fix',
+            uses: 'validate.targeted@1',
+            activityDelivery: { kind: 'single_attempt' },
+            with: { profile: 'targeted', taskId: 'AVIA-1' },
+          },
+          { kind: 'wait', id: 'review', for: 'code_review@1' },
+        ],
+      },
+    });
+    const workflowHash = 'a'.repeat(64);
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: 'AVIA-1',
+        workflowId: 'bootstrap-workflow',
+        runId: 'bootstrap-run',
+        workflowHash,
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          executionStart: 'automatic',
+        },
+        phase: 'execution',
+        workspaceContext: null,
+        context: null,
+        draft: {
+          workflowHash,
+          graph,
+          planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'b'.repeat(64) },
+          evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'c'.repeat(64), revision: 1 },
+        },
+        planning: null,
+        freezeReceipt: null,
+        executionWorkflowId: 'execution-workflow',
+        nodeStates: {},
+        attempts: {},
+        status: 'completed',
+        currentNodeId: null,
+        wait: null,
+        outcome: 'execution_started',
+      },
+      execution: {
+        runtime: 'execution',
+        schemaVersion: 2,
+        taskReference: 'AVIA-1',
+        workflowId: 'execution-workflow',
+        runId: 'execution-run',
+        workflowHash,
+        nodeStates: { 'implement-fix': 'running' },
+        blockRuns: { 'implement-fix': 1 },
+        loopIterations: {},
+        status: 'running',
+        currentNodeId: 'implement-fix',
+        wait: null,
+        outcome: null,
+      },
+    });
+
+    const projection = createOperatorWorkflowProjection('AVIA-1', lifecycle, {
+      read: () => ok(null),
+    });
+    const executionStages = projection.stages.filter(({ key }) => key.startsWith('execution:'));
+
+    expect(executionStages.map(({ label }) => label)).toEqual(['Implement', 'Validate', 'Review']);
+    expect(executionStages.map(({ steps }) => steps.length)).toEqual([1, 0, 0]);
   });
 
   it('keeps repair loops visible inside their surrounding operator phase', () => {
@@ -210,13 +309,6 @@ describe('operator workflow projection', () => {
               ],
             },
           },
-          {
-            kind: 'step',
-            id: 'confirm-validation',
-            uses: 'validate.targeted@1',
-            activityDelivery: { kind: 'single_attempt' },
-            with: { profile: 'targeted', taskId: 'AVIA-1' },
-          },
         ],
       },
     });
@@ -260,7 +352,13 @@ describe('operator workflow projection', () => {
         workflowId: 'execution-workflow',
         runId: 'execution-run',
         workflowHash,
-        nodeStates: {},
+        nodeStates: {
+          'implement-fix': 'succeeded',
+          'validate-fix': 'succeeded',
+          'repair-validation': 'running',
+          'repair-validation-body': 'running',
+          'repair-code': 'running',
+        },
         blockRuns: {},
         loopIterations: { 'repair-validation': 1 },
         status: 'running',
@@ -276,22 +374,33 @@ describe('operator workflow projection', () => {
     const executionStages = projection.stages.filter(({ key }) => key.startsWith('execution:'));
 
     expect(executionStages.map(({ label }) => label)).toEqual(['Implement', 'Validate']);
-    expect(executionStages[1]).toMatchObject({
-      key: 'execution:verification:2',
-      presentation: { kind: 'phase' },
-      nodes: [
-        { id: 'validate-fix' },
+    expect(executionStages[0]).toMatchObject({
+      key: 'execution:implementation:1',
+      status: 'running',
+      steps: [
         {
-          id: 'repair-validation',
-          details: {
-            kind: 'loop',
-            completedIterations: 1,
-            maxAttempts: 3,
-            until: 'validation.passed@1',
-          },
+          kind: 'agent',
+          reference: 'code.implement@1',
+          status: 'succeeded',
         },
-        { id: 'confirm-validation' },
+        {
+          kind: 'agent',
+          reference: 'code.repair@1',
+          status: 'running',
+        },
       ],
     });
+    expect(executionStages[1]).toMatchObject({
+      key: 'execution:verification:2',
+      status: 'succeeded',
+      steps: [
+        {
+          kind: 'process',
+          reference: 'validate.targeted@1',
+          status: 'succeeded',
+        },
+      ],
+    });
+    expect(JSON.stringify(executionStages)).not.toContain('repair-validation-body');
   });
 });

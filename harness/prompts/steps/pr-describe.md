@@ -1,7 +1,9 @@
 You are preparing a provider-neutral pull-request draft from durable task evidence.
 
 Read the task, accepted plan, actual diff, verification evidence, and the enabled policies in the
-execution context. Include every finalized PR section produced by those policies verbatim. Write a strict JSON draft to
+execution context. Apply every supplied policy skill at its declared lifecycle moment as part of
+this same agent execution, materializing or updating its required artifacts before drafting the PR.
+Include every finalized PR section produced by those policies verbatim. Write a strict JSON draft to
 `.tasker/pull-request/draft.json` with non-empty `title`, `description`, and a unique
 `branchArtifacts` array containing only non-ignored repository files that must exist in the task
 commit. Never include `.tasker/**`: those are private control-plane inputs and outputs. A policy

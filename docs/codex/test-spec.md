@@ -57,8 +57,13 @@ Every accepted implementation must prove:
 - two task states are independent;
 - manual guidance resumes from the blocked boundary;
 - retrospective changes require human approval.
-- all operator stages are expanded on first render and remain individually collapsible;
-- same-phase bounded loops appear once inside the phase with current/max attempts;
+- one provider invocation produces exactly one agent row with its snapshotted profile,
+  skills and attempts;
+- one configured process command produces exactly one process row;
+- deterministic sequence, branch, loop, retry, integration and finalize nodes never
+  produce operator rows;
+- planned future stages have no child rows until execution starts them;
+- an unselected conditional recovery body remains absent;
 - an operator wait uses the same attention treatment in the graph and decision surface;
 - light and dark themes preserve readable status and attention contrast across reloads.
 

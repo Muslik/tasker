@@ -233,9 +233,9 @@ test('I can import a Jira issue, inspect its evidence, and compile its workflow'
   await expect(page.getByTestId('task-activity-timeline')).toContainText(
     'Workflow compiled and persisted',
   );
-  await expect(page.getByRole('complementary', { name: 'Current workflow' })).toContainText(
-    'validate-bug-fix · bug.validate_fix@1',
-  );
+  const workflowRail = page.getByRole('complementary', { name: 'Current workflow' });
+  await expect(workflowRail).toContainText('Validate');
+  await expect(workflowRail).not.toContainText('bug.validate_fix@1');
 });
 
 test('generating a backlog task materializes the workflow, timeline, and operator stages', async ({
@@ -266,18 +266,13 @@ test('generating a backlog task materializes the workflow, timeline, and operato
       .getByTestId('workflow-stage-bootstrap:workspace:1')
       .getByText('Workspace', { exact: true }),
   ).toBeVisible();
-  const validationStage = page.getByTestId('workflow-stage-execution:verification:3');
-  await expect(validationStage).toHaveAttribute('open', '');
-  await expect(validationStage).toContainText('Validate targeted');
-  await expect(validationStage).toContainText('Repair validation');
-  await expect(validationStage).toContainText('0/3 attempts');
-  const reviewStage = page.getByTestId('workflow-stage-execution:agent_review:4');
-  await expect(reviewStage).toHaveAttribute('open', '');
-  await expect(reviewStage).toContainText('Agent review');
-  const expandedStages = page.locator('details[data-testid^="workflow-stage-"]');
-  for (let index = 0; index < (await expandedStages.count()); index += 1) {
-    await expect(expandedStages.nth(index)).toHaveAttribute('open', '');
-  }
+  const workflowStages = page.getByTestId('workflow-stages');
+  await expect(workflowStages).toContainText('Validate');
+  await expect(workflowStages).toContainText('Agent review');
+  await expect(workflowStages).not.toContainText('Validate targeted');
+  await expect(workflowStages).not.toContainText('Repair validation');
+  await expect(workflowStages).not.toContainText('initialize AI assistance');
+  await expect(workflowStages).not.toContainText('0/3 attempts');
   await expect(page.getByTestId('task-activity-timeline')).toBeVisible();
   await expect(page.getByTestId('workflow-decisions')).toBeVisible();
   await expect(page.getByTestId('validation-panel')).toContainText('Workflow graph valid');

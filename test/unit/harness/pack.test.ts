@@ -190,13 +190,13 @@ describe('file-backed harness pack', () => {
   it('loads company policy blocks and path obligations from files', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
 
-    expect(pack.steps.map(({ reference }) => reference)).toEqual(
+    expect(pack.steps.map(({ reference }) => reference)).toContain('pr.describe@1');
+    expect(pack.steps.map(({ reference }) => reference)).not.toEqual(
       expect.arrayContaining([
         'ai.assistance.initialize@1',
         'ai.assistance.record_plan@1',
         'ai.assistance.finalize@1',
         'ai.assistance.validate@1',
-        'pr.describe@1',
       ]),
     );
     expect(pack.policies).toEqual(
@@ -204,7 +204,8 @@ describe('file-backed harness pack', () => {
         expect.objectContaining({
           id: 'ai-assistance',
           version: '1',
-          obligations: [expect.objectContaining({ id: 'pr-requires-ai-assistance' })],
+          obligations: [],
+          agentSkills: [expect.objectContaining({ skill: 'ai-assistance' })],
         }),
         expect.objectContaining({
           id: 'review-feedback',
@@ -260,12 +261,10 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.start-work@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('jira.review-ready@1')).toEqual({ kind: 'remote_reconciled' });
-    expect(deliveryFor('ai.assistance.initialize@1')).toEqual({
-      kind: 'workspace_reconciled',
-    });
+    expect(deliveryFor('ai.assistance.initialize@1')).toBeUndefined();
   });
 
-  it('keeps generic pull-request blocks independent from company AI policy', () => {
+  it('binds company AI guidance to agent work without adding workflow blocks', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const prepare = pack.steps.find(({ reference }) => reference === 'pr.prepare@1');
     const describe = pack.steps.find(({ reference }) => reference === 'pr.describe@1');
@@ -298,6 +297,14 @@ describe('file-backed harness pack', () => {
     expect(pack.policies.map(({ id }) => id)).toEqual(['jira-lifecycle', 'review-feedback']);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
+    const implementation = pack.steps.find(({ reference }) => reference === 'code.implement@1');
+    const describe = pack.steps.find(({ reference }) => reference === 'pr.describe@1');
+    expect(implementation?.block.executor.kind).toBe('agent');
+    expect(describe?.block.executor.kind).toBe('agent');
+    if (implementation?.block.executor.kind !== 'agent') throw new Error('Expected agent block');
+    if (describe?.block.executor.kind !== 'agent') throw new Error('Expected agent block');
+    expect(implementation.block.executor.skills).not.toContain('ai-assistance');
+    expect(describe.block.executor.skills).not.toContain('ai-assistance');
     expect(references).toContain('pr.describe@1');
     expect(references).toContain('pr.prepare@1');
     expect(references).toContain('review.acknowledge@1');

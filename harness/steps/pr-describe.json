@@ -19,7 +19,7 @@
     "requiredArtifactKinds": ["pull-request-draft"]
   },
   "activityDelivery": "workspace_reconciled",
-  "allowedEffects": ["run_artifact.write"],
+  "allowedEffects": ["run_artifact.write", "policy_artifact.write"],
   "requiredCapabilities": ["repository.read", "workspace.write"],
   "resumeBoundary": "step",
   "idempotency": "key",

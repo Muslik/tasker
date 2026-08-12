@@ -1,7 +1,6 @@
 export * from './jira/index.js';
 export * from './bitbucket/index.js';
 export * from './jenkins/index.js';
-export * from './ai-assistance/index.js';
 export * from './effects.js';
 export * from './execution.js';
 export * from './pull-request-draft.js';

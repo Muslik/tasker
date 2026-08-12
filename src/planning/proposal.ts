@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { getHarnessPack } from '../harness/index.js';
+import { getHarnessPack, harnessPolicyAppliesToTask } from '../harness/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   JsonValueSchema,
@@ -251,7 +251,7 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
   ];
 
   const aiAssistancePolicy = getHarnessPack().policies.find(
-    (policy) => policy.id === 'ai-assistance',
+    (policy) => policy.id === 'ai-assistance' && harnessPolicyAppliesToTask(policy, fixture),
   );
   if (aiAssistancePolicy !== undefined) {
     decisions.push({
@@ -260,7 +260,7 @@ const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssembl
       source: `policy:${aiAssistancePolicy.id}@${aiAssistancePolicy.version}`,
       reason: aiAssistancePolicy.description,
       effect:
-        'Initialize and record the accepted plan before implementation, then finalize and validate the evidence before PR publication.',
+        'Give write-capable implementation and pull-request drafting agents the policy skill; do not add policy bookkeeping nodes to the workflow.',
     });
   }
 

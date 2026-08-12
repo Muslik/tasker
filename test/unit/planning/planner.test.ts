@@ -224,38 +224,6 @@ describe('M1 task workflow planning', () => {
     );
   });
 
-  it('rejects a PR workflow when its enabled company policy is incomplete', () => {
-    const planned = planTaskWorkflow(fixture('avia-13236-short-bug'));
-    if (!planned.ok) throw new Error('Expected the short bug fixture to produce a proposal');
-    const source = WorkflowSourceSchema.parse(planned.value.proposal.source);
-    if (source.root.kind !== 'sequence') throw new Error('Expected a sequence proposal');
-    const withoutPolicyValidation = {
-      ...planned.value.proposal,
-      source: {
-        ...source,
-        root: {
-          ...source.root,
-          children: source.root.children.filter(
-            (child) => child.kind !== 'step' || child.uses !== 'ai.assistance.validate@1',
-          ),
-        },
-      },
-    };
-
-    const result = planWorkflowProposal(withoutPolicyValidation);
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.stage).toBe('workflow_validation');
-    if (result.error.stage !== 'workflow_validation') return;
-    expect(result.error.validatorReport.issues).toContainEqual(
-      expect.objectContaining({
-        code: 'unsatisfied_workflow_obligation',
-        details: { obligationId: 'pr-requires-ai-assistance' },
-      }),
-    );
-  });
-
   it('rejects a Jira workflow that mutates the repository before tracker admission', () => {
     const planned = planTaskWorkflow(fixture('avia-12536-feature-review'));
     if (!planned.ok) throw new Error('Expected the feature fixture to produce a proposal');

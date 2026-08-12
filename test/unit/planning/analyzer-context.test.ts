@@ -19,7 +19,17 @@ describe('workflow analyzer context', () => {
         buildingBlocks: z
           .object({
             nodeKinds: z.array(z.string()),
-            steps: z.array(z.object({ reference: z.string() }).loose()),
+            steps: z.array(
+              z
+                .object({
+                  reference: z.string(),
+                  executor: z
+                    .object({ kind: z.string(), skills: z.array(z.string()).optional() })
+                    .loose()
+                    .optional(),
+                })
+                .loose(),
+            ),
           })
           .loose(),
         obligations: z.array(z.object({ id: z.string() }).loose()),
@@ -36,16 +46,29 @@ describe('workflow analyzer context', () => {
         'validate.targeted@1',
         'review.agent@1',
         'ci.observe@1',
+      ]),
+    );
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toEqual(
+      expect.arrayContaining([
         'ai.assistance.initialize@1',
+        'ai.assistance.record_plan@1',
+        'ai.assistance.finalize@1',
         'ai.assistance.validate@1',
       ]),
     );
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toContain(
       'jira.start-work@1',
     );
+    const implementationExecutor = plannerContext.buildingBlocks.steps.find(
+      ({ reference }) => reference === 'code.implement@1',
+    )?.executor;
+    expect(implementationExecutor?.kind).toBe('agent');
+    expect(implementationExecutor?.skills).toContain('ai-assistance');
     expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ci-and-review');
     expect(plannerContext.obligations.map(({ id }) => id)).toContain('write-requires-agent-review');
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ai-assistance');
+    expect(plannerContext.obligations.map(({ id }) => id)).not.toContain(
+      'pr-requires-ai-assistance',
+    );
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');
     expect(JSON.stringify(context.plannerContext)).not.toContain('workflowTemplates');
   });
