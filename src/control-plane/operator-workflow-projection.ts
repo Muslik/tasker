@@ -177,7 +177,7 @@ const createBootstrapStages = (lifecycle: TaskRunLifecycle): readonly OperatorWo
       key: 'bootstrap:planning:3',
       id: 'planning',
       label: 'Plan',
-      status: bootstrapStatus(lifecycle, ['planning', 'plan_review', 'freeze', 'execution_start']),
+      status: bootstrapStatus(lifecycle, ['planning', 'plan_review', 'freeze']),
       steps: planningSteps,
     }),
   ];
