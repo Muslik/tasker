@@ -7,7 +7,7 @@ import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
 import type { TaskRunStepEvidence } from '../execution.js';
-import { pullRequestOutputSchema } from '../../harness/step-definitions.js';
+import { pullRequestOutputSchema } from '../../harness/step-contracts.js';
 
 const RawUserSchema = z
   .object({

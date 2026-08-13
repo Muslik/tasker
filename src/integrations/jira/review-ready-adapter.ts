@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { pullRequestOutputSchema } from '../../harness/step-definitions.js';
+import { pullRequestOutputSchema } from '../../harness/step-contracts.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import type {
   IntegrationStepAdapter,

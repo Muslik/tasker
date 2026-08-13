@@ -35,6 +35,15 @@ afterEach(async () => {
 });
 
 describe('file-backed harness pack', () => {
+  it('derives the production step catalog exclusively from step manifests', async () => {
+    const root = await createTemporaryPack();
+    await rm(join(root, 'steps/bug-validate-fix.json'));
+
+    const pack = loadHarnessPack(root);
+
+    expect(pack.steps.map(({ reference }) => reference)).not.toContain('bug.validate_fix@1');
+  });
+
   it('registers a typed company step without changing the workflow compiler', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const baseStep = getHarnessStepDefinition('code.implement@1');

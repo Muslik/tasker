@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "reference": "fill-test-ops-plan@1",
+  "description": "Prepare a test-operations plan when company policy requires one.",
+  "stage": { "id": "verification", "label": "Validate" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "agent_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "verification",
+    "prompt": "prompts/steps/fill-test-ops-plan.md",
+    "skills": ["test-ops-planning"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["test-operations-plan"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "attempt",
+  "idempotency": "none",
+  "waitKinds": [],
+  "artifactContracts": ["test-operations-plan"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": []
+}

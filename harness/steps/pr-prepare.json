@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "reference": "pr.prepare@1",
+  "description": "Prepare and reconcile a Bitbucket pull request.",
+  "stage": { "id": "delivery", "label": "Deliver" },
+  "availableDuring": ["execution"],
+  "inputContract": "pull_request_input",
+  "outputContract": "pull_request_output",
+  "executor": {
+    "kind": "integration",
+    "adapter": "bitbucket.pull-request@1"
+  },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": {
+    "kind": "reconciled_effect"
+  },
+  "activityDelivery": "remote_reconciled",
+  "allowedEffects": ["git.write"],
+  "requiredCapabilities": ["git.write"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": ["code_review@1"],
+  "requiredArtifactContracts": ["pull-request-draft"],
+  "artifactContracts": ["pull-request"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

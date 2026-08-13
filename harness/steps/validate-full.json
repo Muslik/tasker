@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "reference": "validate.full@1",
+  "description": "Run the exact full validation command declared by project policy.",
+  "stage": { "id": "verification", "label": "Validate" },
+  "availableDuring": ["execution"],
+  "inputContract": "verification_full_input",
+  "outputContract": "process_output",
+  "outputPredicates": {
+    "discriminator": "exitCode",
+    "cases": {
+      "0": {
+        "validation.passed@1": true,
+        "validation.failed@1": false
+      }
+    },
+    "defaultFacts": {
+      "validation.passed@1": false,
+      "validation.failed@1": true
+    }
+  },
+  "executor": {
+    "kind": "process",
+    "executor": "validation.full@1"
+  },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": {
+    "kind": "process_receipt",
+    "acceptance": "any_exit"
+  },
+  "activityDelivery": "single_attempt",
+  "allowedEffects": ["command.run"],
+  "requiredCapabilities": ["command.run"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["validation-full-receipt"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

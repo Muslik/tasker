@@ -44,8 +44,11 @@ export const HarnessContractNameSchema = z.enum([
   'pull_request_output',
   'reproduction_input',
   'reproduction_output',
+  'verification_targeted_input',
+  'verification_full_input',
+  'verification_build_input',
+  'verification_visual_input',
   'task_input',
-  'verification_input',
 ]);
 
 const HarnessBlockExecutorManifestSchema = z.discriminatedUnion('kind', [

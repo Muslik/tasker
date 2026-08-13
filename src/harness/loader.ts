@@ -15,7 +15,7 @@ import {
   type LoadedHarnessPack,
   type LoadedPrompt,
 } from './contracts.js';
-import { stepDefinitionFromManifest, TWIKET_HARNESS_STEPS } from './step-definitions.js';
+import { stepDefinitionFromManifest } from './step-contracts.js';
 import { toContractReference } from '../workflow/index.js';
 import { validateExecutionProfileConfiguration } from './execution-profiles.js';
 
@@ -147,67 +147,64 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   }
 
   const seenSteps = new Set<string>();
-  const steps = [
-    ...TWIKET_HARNESS_STEPS,
-    ...loadStepManifests(rootPath).filter(
-      (step) => step.policy === undefined || enabledPolicies.has(step.policy),
-    ),
-  ].map((step) => {
-    parseVersionedReference(step.reference);
-    if (step.reference !== toContractReference(step.contract)) {
-      throw new Error(
-        `Harness step reference ${step.reference} does not match its contract ${toContractReference(step.contract)}`,
-      );
-    }
-    if (seenSteps.has(step.reference)) {
-      throw new Error(`Duplicate harness step definition for ${step.reference}`);
-    }
-    seenSteps.add(step.reference);
-    if (step.executor.kind === 'process') {
-      parseVersionedReference(step.executor.executor);
-    }
-    if (step.executor.kind === 'integration') {
-      parseVersionedReference(step.executor.adapter);
-    }
-    const prompt =
-      step.executor.kind === 'agent' ? loadPrompt(rootPath, step.executor.prompt) : null;
-    const executor =
-      step.executor.kind === 'agent'
-        ? {
-            kind: 'agent' as const,
-            profile: step.executor.profile,
-            prompt: prompt?.content ?? '',
-            skills: [...step.executor.skills],
-          }
-        : step.executor.kind === 'process'
-          ? { kind: 'process' as const, executor: step.executor.executor }
-          : { kind: 'effect' as const, adapter: step.executor.adapter };
-    return Object.freeze({
-      reference: step.reference,
-      ...(step.policy === undefined ? {} : { policy: step.policy }),
-      contract: step.contract,
-      block: BlockDefinitionSchema.parse({
-        schemaVersion: 3,
+  const steps = loadStepManifests(rootPath)
+    .filter((step) => step.policy === undefined || enabledPolicies.has(step.policy))
+    .map((step) => {
+      parseVersionedReference(step.reference);
+      if (step.reference !== toContractReference(step.contract)) {
+        throw new Error(
+          `Harness step reference ${step.reference} does not match its contract ${toContractReference(step.contract)}`,
+        );
+      }
+      if (seenSteps.has(step.reference)) {
+        throw new Error(`Duplicate harness step definition for ${step.reference}`);
+      }
+      seenSteps.add(step.reference);
+      if (step.executor.kind === 'process') {
+        parseVersionedReference(step.executor.executor);
+      }
+      if (step.executor.kind === 'integration') {
+        parseVersionedReference(step.executor.adapter);
+      }
+      const prompt =
+        step.executor.kind === 'agent' ? loadPrompt(rootPath, step.executor.prompt) : null;
+      const executor =
+        step.executor.kind === 'agent'
+          ? {
+              kind: 'agent' as const,
+              profile: step.executor.profile,
+              prompt: prompt?.content ?? '',
+              skills: [...step.executor.skills],
+            }
+          : step.executor.kind === 'process'
+            ? { kind: 'process' as const, executor: step.executor.executor }
+            : { kind: 'effect' as const, adapter: step.executor.adapter };
+      return Object.freeze({
         reference: step.reference,
-        description: step.description,
-        stage: step.stage,
-        availableDuring: step.availableDuring,
-        inputContract: step.inputContract,
-        outputContract: step.outputContract,
-        ...(step.contract.outputPredicates === undefined
-          ? {}
-          : { outputPredicates: step.contract.outputPredicates }),
-        executor,
-        allowedCapabilities: step.contract.requiredCapabilities,
-        allowedEffects: step.contract.allowedEffects,
-        outcomes: step.outcomes,
-        completion: step.completion,
-        requiredArtifacts: step.contract.requiredArtifactContracts,
-        producedArtifacts: step.contract.artifactContracts,
-      }),
-      prompt,
+        ...(step.policy === undefined ? {} : { policy: step.policy }),
+        contract: step.contract,
+        block: BlockDefinitionSchema.parse({
+          schemaVersion: 3,
+          reference: step.reference,
+          description: step.description,
+          stage: step.stage,
+          availableDuring: step.availableDuring,
+          inputContract: step.inputContract,
+          outputContract: step.outputContract,
+          ...(step.contract.outputPredicates === undefined
+            ? {}
+            : { outputPredicates: step.contract.outputPredicates }),
+          executor,
+          allowedCapabilities: step.contract.requiredCapabilities,
+          allowedEffects: step.contract.allowedEffects,
+          outcomes: step.outcomes,
+          completion: step.completion,
+          requiredArtifacts: step.contract.requiredArtifactContracts,
+          producedArtifacts: step.contract.artifactContracts,
+        }),
+        prompt,
+      });
     });
-  });
 
   validateExecutionProfileConfiguration(
     company,

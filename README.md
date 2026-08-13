@@ -32,9 +32,9 @@ Docker-only execution and project bootstrap are documented in
 
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
 Company blocks and policies are file-backed under [`harness/steps`](harness/steps) and
-[`harness/policies`](harness/policies); the small built-in catalog in
-[`src/harness/step-definitions.ts`](src/harness/step-definitions.ts) contains only the
-current generic/product blocks and shared runtime schemas.
+[`harness/policies`](harness/policies). This is the complete production block catalog;
+[`src/harness/step-contracts.ts`](src/harness/step-contracts.ts) contains only the typed
+runtime schemas referenced by those manifests.
 The versioned multi-project agent configuration copied into managed worktrees lives in
 [`harness/workspace`](harness/workspace/README.md); credentials remain outside that pack.
 

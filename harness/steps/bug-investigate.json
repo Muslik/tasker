@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "reference": "bug.investigate@1",
+  "description": "Ground the reported bug before planning and preserve observed behavior as planning evidence.",
+  "stage": { "id": "investigation", "label": "Investigate" },
+  "availableDuring": ["bootstrap_investigation"],
+  "inputContract": "investigation_input",
+  "outputContract": "investigation_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "investigation",
+    "prompt": "prompts/steps/bug-investigate.md",
+    "skills": ["playwright-demo", "jenkins"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["investigation-result"]
+  },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["command.run"],
+  "requiredCapabilities": ["command.run", "repository.read"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["investigation-result"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [
+    "cross_repository_dependency",
+    "task_scope_changed",
+    "verification_scope_changed"
+  ],
+  "reconciliation": { "strategy": "receipt" }
+}

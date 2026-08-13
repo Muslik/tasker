@@ -16,7 +16,8 @@ Workflow code.
 |---|---|---|
 | Workflow IR/compiler/validator | `src/workflow/` | generic graph syntax, hashes, ABI, deterministic invariants |
 | Temporal interpreter | `src/temporal/workflows/` | genuinely new generic control-flow semantics only |
-| Block catalog | `harness/steps/*.json` plus the small built-in catalog | versioned task capabilities and Activity bindings |
+| Block catalog | `harness/steps/*.json` | versioned task capabilities and Activity bindings |
+| Typed block ABI | `src/harness/step-contracts.ts` | runtime validation for named manifest input/output contracts |
 | Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
 | Agent prompts | `harness/prompts/` | readable analyzer/planner/step instructions |
 | Company policy | `harness/company.json` | reusable organization-wide workflow facts |
@@ -40,10 +41,10 @@ The editable source pack is [`harness/`](../../harness). Its current ownership i
 | [`projects/*/project.json`](../../harness/projects) | repository-specific bootstrap, services, CI kind, translation mode, and exact validation commands |
 | [`projects/*/workflow.md`](../../harness/projects) | short repository workflow guidance supplied as evidence to planning |
 | [`policies/*.json`](../../harness/policies) | optional company overlays, required graph ordering, and skills added to existing agent blocks |
-| [`steps/*.json`](../../harness/steps) | file-backed block contracts: stage, executor, prompt, skills, completion, effects, artifacts, and recovery boundary |
+| [`steps/*.json`](../../harness/steps) | complete block catalog: stage, executor, prompt, skills, completion, effects, artifacts, and recovery boundary |
 | [`prompts/implementation-planner.md`](../../harness/prompts/implementation-planner.md) | mandatory initial planner and workflow-composer instructions |
 | [`prompts/workflow-analyzer.md`](../../harness/prompts/workflow-analyzer.md) | continuation-workflow analyzer instructions |
-| [`prompts/steps/*.md`](../../harness/prompts/steps) | one readable prompt for each file-backed or built-in agent block |
+| [`prompts/steps/*.md`](../../harness/prompts/steps) | one readable prompt for each agent block |
 | [`workspace/manifest.json`](../../harness/workspace/manifest.json) | provider-neutral skill/profile/override pack copied and pinned into a managed worktree |
 | [`workspace/shared-skills`](../../harness/workspace/shared-skills) | reusable logical agent skills |
 | [`workspace/integration-skills`](../../harness/workspace/integration-skills) | read/write system skills available for explicit planner or step selection |
@@ -64,19 +65,12 @@ immutable catalog. The exact catalog exposed to the planner is assembled by
 - the planner selects only from this catalog and the registered graph primitives, predicates,
   and waits. It cannot invent a step, prompt, model, effect, or shell command.
 
-The current block storage is intentionally reported as it exists, not as if the migration were
-already complete:
-
-| Storage | Current references |
-|---|---|
-| File-backed `harness/steps/*.json` | `ci.observe@1`, `ci.repair@1`, `jira.start-work@1`, `jira.review-ready@1`, `pr.describe@1`, `review.acknowledge@1`, `review.revise@1` |
-| Built-in `src/harness/step-definitions.ts` | `bug.investigate@1`, `bug.validate_fix@1`, `code.implement@1`, `code.repair@1`, `validate.targeted@1`, `validate.full@1`, `validate.build@1`, `validate.visual@1`, `review.agent@1`, `fill-test-ops-plan@1`, `translations.extract@1`, `translations.pull@1`, `component.dev_publish@1`, `component.consume_published@1`, `pr.prepare@1` |
-| Registered waits/predicates in `src/planning/contracts.ts` | human review/guidance, CI recovery, translation/final-publish waits, and deterministic output facts |
-
-The split is current migration debt. A block expressible with the existing manifest vocabulary
-should move from `step-definitions.ts` to `harness/steps/*.json`; only genuinely new typed data
-contracts, completion evaluators, or adapter implementations require TypeScript. Test-only invalid
-blocks and fixture tasks are not loaded into the production catalog or operator queue.
+`harness/steps/*.json` is the only production block catalog. There is no built-in fallback in
+TypeScript: removing a manifest removes that capability from future run snapshots. Named Zod
+schemas in [`src/harness/step-contracts.ts`](../../src/harness/step-contracts.ts) are the typed ABI
+used to reject invalid runtime input and output; they do not register steps. Registered waits and
+predicates remain generic graph contracts in `src/planning/contracts.ts`. Test-only invalid blocks
+and fixture tasks are not loaded into the production catalog or operator queue.
 
 ### 1.2 What an agent actually receives
 
@@ -157,8 +151,9 @@ To add `fill-test-ops-plan`:
 
 1. add a `schemaVersion: 2` manifest under `harness/steps/*.json` with a stable
    reference, macro stage, allowed outcomes, completion evaluator, and executor profile
-   or adapter (use code only when introducing a genuinely new input/output contract);
-2. define Zod input/output schemas;
+   or adapter;
+2. reuse a named input/output contract; add a Zod schema to `step-contracts.ts` only when
+   the step introduces a genuinely new typed payload;
 3. declare capabilities, effects, artifacts, timeout, heartbeat, retry, cancellation,
    idempotency/reconciliation, and allowed outcomes;
 4. add/reuse a readable prompt for an agent block, or bind a registered

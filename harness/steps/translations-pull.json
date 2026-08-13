@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "reference": "translations.pull@1",
+  "description": "Pull completed translations with the project-defined command.",
+  "stage": { "id": "implementation", "label": "Implement" },
+  "availableDuring": ["execution"],
+  "inputContract": "process_input",
+  "outputContract": "process_output",
+  "executor": {
+    "kind": "process",
+    "executor": "translations.pull@1"
+  },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": {
+    "kind": "process_receipt",
+    "acceptance": "zero"
+  },
+  "activityDelivery": "single_attempt",
+  "allowedEffects": ["command.run"],
+  "requiredCapabilities": ["command.run"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["translated-resources"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

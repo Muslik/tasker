@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "reference": "translations.extract@1",
+  "description": "Extract translation keys with the project-defined command.",
+  "stage": { "id": "implementation", "label": "Implement" },
+  "availableDuring": ["execution"],
+  "inputContract": "process_input",
+  "outputContract": "process_output",
+  "executor": {
+    "kind": "process",
+    "executor": "translations.extract@1"
+  },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": {
+    "kind": "process_receipt",
+    "acceptance": "zero"
+  },
+  "activityDelivery": "single_attempt",
+  "allowedEffects": ["command.run"],
+  "requiredCapabilities": ["command.run"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": ["translation_complete@1"],
+  "artifactContracts": ["translation-keys"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": ["external_process_required"],
+  "reconciliation": { "strategy": "probe" }
+}

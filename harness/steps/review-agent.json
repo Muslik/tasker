@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "reference": "review.agent@1",
+  "description": "Independently review the accepted plan, actual diff, and validation evidence.",
+  "stage": { "id": "agent_review", "label": "Agent review" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "agent_review_output",
+  "outputPredicates": {
+    "discriminator": "decision",
+    "cases": {
+      "accepted": {
+        "agent_review.accepted@1": true,
+        "agent_review.changes_requested@1": false
+      },
+      "changes_requested": {
+        "agent_review.accepted@1": false,
+        "agent_review.changes_requested@1": true
+      }
+    }
+  },
+  "executor": {
+    "kind": "agent",
+    "profile": "review",
+    "prompt": "prompts/steps/agent-review.md",
+    "skills": ["typescript-design", "test-design"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["agent-review"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "attempt",
+  "idempotency": "none",
+  "waitKinds": [],
+  "artifactContracts": ["agent-review"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": []
+}

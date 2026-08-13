@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "reference": "component.dev_publish@1",
+  "description": "Publish a development build of a shared component.",
+  "stage": { "id": "delivery", "label": "Deliver" },
+  "availableDuring": ["execution"],
+  "inputContract": "process_input",
+  "outputContract": "process_output",
+  "executor": {
+    "kind": "process",
+    "executor": "component.dev-publish@1"
+  },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": {
+    "kind": "process_receipt",
+    "acceptance": "zero"
+  },
+  "activityDelivery": "single_attempt",
+  "allowedEffects": ["package.publish"],
+  "requiredCapabilities": ["command.run", "package.publish"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": ["final_publish@1"],
+  "artifactContracts": ["development-package"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": ["external_process_required"],
+  "reconciliation": { "strategy": "probe" }
+}
