@@ -270,7 +270,6 @@ describe('Bootstrap investigation recovery', () => {
           evidenceBundle: ready.evidenceBundle,
           requestedStrategy: ready.requestedStrategy,
           selectedStrategy: ready.selectedStrategy,
-          receipt: ready.receipt,
         };
         return {
           ...base,

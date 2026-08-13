@@ -94,9 +94,12 @@ The boundary itself is
   when no source owns the reference.
 
 [`src/control-plane/persisted-generation-subject.ts`](../../src/control-plane/persisted-generation-subject.ts)
-resolves the exact already-persisted subject before consulting a remote source. That
-keeps one run stable even if Jira changes later. Adding GitLab Issues means adding a
-second resolver that produces the same neutral contract.
+provides two distinct persistence roles. Continuation tasks can have an explicitly
+persisted source subject; every bootstrap run also captures its resolved subject under
+the exact Temporal `runId`. Retries and process restarts read that run capture first,
+while a later run of the same Jira task resolves and captures a fresh source revision.
+Adding GitLab Issues means adding a second resolver that produces the same neutral
+contract.
 
 ### 3.2 Starting the durable lifecycle
 
@@ -132,6 +135,11 @@ and messages in
 [`src/temporal/bootstrap-kernel/messages.ts`](../../src/temporal/bootstrap-kernel/messages.ts).
 Failures open durable waits and retry only the pending boundary; completed work and the
 worktree are preserved.
+
+Preparation Activities persist their detailed worktree, harness, Docker, and provider
+receipts outside Event History. The Workflow receives only neutral handles and bounded
+artifact references. This keeps environment variables, command output, vendor response
+shapes, and large manifests out of the durable protocol.
 
 ### 3.4 Context and planning
 
@@ -256,15 +264,21 @@ changes are needed only for a new payload ABI, executor kind, or external adapte
 |---|---|---|
 | current node, retry, loop, timer, wait | Temporal history | `src/temporal/workflows/*` |
 | operator resume/approval command | Temporal Update scoped to expected run | `src/temporal/*-kernel/messages.ts`, `src/temporal/client.ts` |
-| task snapshot, evidence, plan, graph, receipts, transcripts | SQLite product store | `src/ledger`, `src/control-plane/*-store.ts`, Activity stores |
+| run-scoped task snapshot, evidence, plan, graph, receipts, transcripts | SQLite product store | `src/ledger`, `src/control-plane/*-store.ts`, Activity stores |
 | task list/activity/workflow rail | disposable projection | `src/control-plane/operator-*-projection.ts` |
 | managed checkout and runtime | reconciled Activity resource | `src/workspaces`, workspace Activities |
-| external mutation outcome | reconciled effect receipt plus remote observation | `src/integrations`, `src/control-plane/external-effect-store.ts` |
+| external mutation outcome | reconciled effect receipt plus remote observation | `src/integrations/effects.ts`, concrete integration adapters |
 
 The API first reads the current Temporal lifecycle and then resolves only artifacts
-whose identifiers belong to that exact run. There is no “latest artifact by Jira key”
-fallback. A missing current artifact fails closed instead of leaking state from an old
-run.
+whose identifiers belong to that exact run. Bootstrap task-source resolution follows
+the same rule: the immutable subject is captured by `taskReference + runId`, never by
+Jira key alone. There is no “latest artifact by Jira key” fallback. A missing current
+artifact fails closed instead of leaking state from an old run.
+
+Detailed provider and runtime receipts remain owned by Activities and product stores.
+Temporal history carries a neutral workspace handle plus artifact IDs, hashes, bounded
+status, and decisions; it does not duplicate Docker receipts, provider payloads, or
+transcripts.
 
 ## 6. Replaceability test
 

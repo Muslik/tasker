@@ -11,6 +11,7 @@ const baseSnapshot = () => {
   return {
     schemaVersion: 8 as const,
     taskReference: 'jira:AVIA-12045',
+    workflowRunId: 'run-test',
     task: {
       schemaVersion: 1 as const,
       origin: 'jira',

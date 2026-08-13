@@ -977,12 +977,13 @@ export class ImplementationPlanningCoordinator {
 
   public createPlanningContextSnapshot(
     taskReference: string,
+    workflowRunId: string,
     workspace: PlanningSnapshotWorkspace,
   ): Outcome<
     { readonly reference: PlanningSnapshotReference; readonly contextHash: string },
     ImplementationPlanningError
   > {
-    const subject = this.subjects.resolve(taskReference);
+    const subject = this.subjects.resolve(taskReference, workflowRunId);
     if (!subject.ok) return err({ kind: 'subject', error: subject.error });
     if (subject.value.task.repository !== workspace.reference) {
       return err({
@@ -1010,6 +1011,7 @@ export class ImplementationPlanningCoordinator {
       schemaVersion: 8,
       kind: 'planning_context',
       taskReference,
+      workflowRunId,
       contextHash,
       task: subject.value.task,
       taskSnapshot: subject.value.taskSnapshot,
@@ -1036,16 +1038,6 @@ export class ImplementationPlanningCoordinator {
     workspace: PlanningSnapshotWorkspace,
     planningContextReference: PlanningSnapshotReference,
   ): Outcome<PlanningSnapshotReference, ImplementationPlanningError> {
-    const subject = this.subjects.resolve(taskReference);
-    if (!subject.ok) return err({ kind: 'subject', error: subject.error });
-    if (subject.value.task.repository !== workspace.reference) {
-      return err({
-        kind: 'workspace_repository_mismatch',
-        taskReference,
-        expectedReference: subject.value.task.repository,
-        actualReference: workspace.reference,
-      });
-    }
     const workflow = this.workflows.readPlanningOperation(taskReference, workflowOperationId);
     if (!workflow.ok) return err({ kind: 'subject', error: workflow.error });
     if (workflow.value?.status !== 'ready') {
@@ -1077,15 +1069,16 @@ export class ImplementationPlanningCoordinator {
       schemaVersion: 8,
       kind: 'execution',
       taskReference,
+      workflowRunId: planningContext.value.workflowRunId,
       workflowHash: expectedWorkflowHash,
-      task: subject.value.task,
-      taskSnapshot: subject.value.taskSnapshot,
+      task: planningContext.value.task,
+      taskSnapshot: planningContext.value.taskSnapshot,
       workflow: JsonValueSchema.parse(workflow.value.view.workflow),
       acceptedPlan,
       evidenceBundle,
       repository: {
         workspaceId: workspace.workspaceId,
-        reference: subject.value.task.repository,
+        reference: planningContext.value.task.repository,
         path: workspace.path,
       },
       harness: {

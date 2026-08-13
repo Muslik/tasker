@@ -9,6 +9,7 @@ import {
   createOperatorWorkflowService,
   OPERATOR_WORKFLOW_OPERATION_PROJECTION,
   PersistedGenerationSubjectResolver,
+  PersistedGenerationSubjectRunStore,
 } from '../../src/control-plane/index.js';
 import { openSqliteLedger } from '../../src/ledger/index.js';
 import { WorkflowAnalyzerOutputSchema } from '../../src/planning/index.js';
@@ -196,10 +197,14 @@ describe('operation-scoped workflow persistence', () => {
 
     const restartedLedger = openSqliteLedger({ filename, clock });
     const restartedService = createOperatorWorkflowService(restartedLedger.repository, clock);
-    const source = new WorkflowGenerationSubjectSource([
-      new PersistedGenerationSubjectResolver(restartedService),
-    ]);
-    expect(source.resolve(taskReference)).toEqual({ ok: true, value: subject });
+    const source = new WorkflowGenerationSubjectSource(
+      [new PersistedGenerationSubjectResolver(restartedService)],
+      new PersistedGenerationSubjectRunStore(restartedService),
+    );
+    expect(source.resolve(taskReference, 'continuation-run-1')).toEqual({
+      ok: true,
+      value: subject,
+    });
     expect(
       restartedService.saveGenerationSubject(taskReference, {
         ...subject,
@@ -208,6 +213,51 @@ describe('operation-scoped workflow persistence', () => {
     ).toMatchObject({
       ok: false,
       error: { kind: 'store_failure', error: { kind: 'generation_subject_conflict' } },
+    });
+    restartedLedger.close();
+  });
+
+  it('captures independent task-source snapshots for two runs of one task', () => {
+    const filename = databasePath();
+    const clock = makeAdjustableClock('2026-08-03T12:00:00.000Z');
+    const taskReference = 'jira:AVIA-12045';
+    const subject = (description: string) => ({
+      schemaVersion: 1 as const,
+      repositoryPath: '/managed/front-avia',
+      task: makePlanningTaskSnapshot('avia-13236-short-bug', {
+        origin: 'jira',
+        reference: taskReference,
+        description,
+      }),
+      taskSnapshot: { origin: 'jira', description },
+    });
+    let current = subject('first Jira revision');
+    const remote = { resolve: () => ({ ok: true as const, value: current }) };
+    const firstLedger = openSqliteLedger({ filename, clock });
+    const firstService = createOperatorWorkflowService(firstLedger.repository, clock);
+    const firstSource = new WorkflowGenerationSubjectSource(
+      [remote],
+      new PersistedGenerationSubjectRunStore(firstService),
+    );
+
+    expect(firstSource.resolve(taskReference, 'run-a')).toEqual({ ok: true, value: current });
+    current = subject('second Jira revision');
+    expect(firstSource.resolve(taskReference, 'run-b')).toEqual({ ok: true, value: current });
+    firstLedger.close();
+
+    const restartedLedger = openSqliteLedger({ filename, clock });
+    const restartedService = createOperatorWorkflowService(restartedLedger.repository, clock);
+    const restartedSource = new WorkflowGenerationSubjectSource(
+      [remote],
+      new PersistedGenerationSubjectRunStore(restartedService),
+    );
+    expect(restartedSource.resolve(taskReference, 'run-a')).toMatchObject({
+      ok: true,
+      value: { task: { description: 'first Jira revision' } },
+    });
+    expect(restartedSource.resolve(taskReference, 'run-b')).toMatchObject({
+      ok: true,
+      value: { task: { description: 'second Jira revision' } },
     });
     restartedLedger.close();
   });

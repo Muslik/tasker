@@ -499,7 +499,7 @@ export async function bootstrapWorkflowV3(
           {
             kind: 'workspace',
             reference: acceptedWorkspaceContext.workspace.workspaceId,
-            hash: acceptedWorkspaceContext.workspace.repository.baseCommit,
+            hash: acceptedWorkspaceContext.workspace.revision,
           },
           {
             kind: 'planning_snapshot',

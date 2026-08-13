@@ -354,7 +354,7 @@ export class WorkflowContinuationCoordinator {
       return err({ kind: 'parent_workflow_not_ready', parentTaskReference });
     }
     const parentGraph = CompiledWorkflowSchema.parse(parentWorkflow.value.view.workflow.graph);
-    const subject = this.subjects.resolve(parentTaskReference);
+    const subject = this.subjects.resolve(parentTaskReference, parentRunId);
     if (!subject.ok) return err({ kind: 'subject', error: subject.error });
 
     const attempt = (current.value?.attempt ?? 0) + 1;

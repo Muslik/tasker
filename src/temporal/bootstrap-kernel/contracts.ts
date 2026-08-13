@@ -12,14 +12,8 @@ import {
   type PlanningSnapshotReference,
 } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
-import { ImplementationPlannerReceiptSchema } from '../../providers/contracts.js';
 import { ImplementationPlanningFailureSchema } from '../../planning/planning-failure.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/schema.js';
-import { DockerWorkspaceRuntimeReceiptSchema } from '../../workspaces/docker-runtime-contracts.js';
-import {
-  WorkspaceBootstrapReceiptSchema,
-  WorkspaceLocatorSchema,
-} from '../../workspaces/contracts.js';
 import {
   WorkflowFreezeReceiptSchema,
   type FreezeTaskWorkflowInput,
@@ -57,7 +51,6 @@ const BootstrapPlanningAttemptSchema = z.object({
 const BootstrapPlanningBaseSchema = BootstrapPlanningAttemptSchema.extend({
   transcriptId: z.string().min(1),
   artifactId: z.string().min(1),
-  receipt: ImplementationPlannerReceiptSchema,
 });
 
 export const BootstrapPlanningStateSchema = z.discriminatedUnion('status', [
@@ -80,15 +73,22 @@ export const BootstrapPlanningStateSchema = z.discriminatedUnion('status', [
     failure: ImplementationPlanningFailureSchema,
     validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),
     validationRevision: z.number().int().nonnegative().max(3),
-    receipt: ImplementationPlannerReceiptSchema.nullable(),
   }).strict(),
 ]);
 
+export const BootstrapWorkspaceHandleSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    repositoryReference: z.string().min(1),
+    revision: z.string().min(1),
+    path: z.string().min(1),
+  })
+  .strict()
+  .readonly();
+
 export const BootstrapWorkspaceContextSchema = z
   .object({
-    workspace: WorkspaceLocatorSchema,
-    bootstrap: WorkspaceBootstrapReceiptSchema,
-    runtime: DockerWorkspaceRuntimeReceiptSchema,
+    workspace: BootstrapWorkspaceHandleSchema,
   })
   .strict()
   .readonly();
@@ -252,9 +252,7 @@ export const PrepareTaskWorkspaceInputSchema = z
 
 export const PrepareTaskWorkspaceResultSchema = z
   .object({
-    workspace: WorkspaceLocatorSchema,
-    bootstrap: WorkspaceBootstrapReceiptSchema,
-    runtime: DockerWorkspaceRuntimeReceiptSchema,
+    workspace: BootstrapWorkspaceHandleSchema,
   })
   .strict()
   .readonly();
@@ -265,7 +263,7 @@ export const AssembleTaskPlanningContextInputSchema = z
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
     operationId: z.string().min(1),
-    workspace: WorkspaceLocatorSchema,
+    workspace: BootstrapWorkspaceHandleSchema,
   })
   .strict()
   .readonly();
@@ -280,7 +278,7 @@ export const RunBootstrapInvestigationInputSchema = z
     contextHash: z.string().regex(/^[a-f0-9]{64}$/u),
     planningSnapshot: PlanningSnapshotReferenceSchema,
     evidenceBundle: EvidenceBundleReferenceSchema,
-    workspace: WorkspaceLocatorSchema,
+    workspace: BootstrapWorkspaceHandleSchema,
     step: PrePlanInvestigationRequestSchema.shape.steps.element,
     blockRun: z.number().int().positive(),
     operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),

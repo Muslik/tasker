@@ -10,7 +10,10 @@ import { BlockReceiptStore } from '../blocks/index.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
 import { createOperatorWorkflowService } from '../control-plane/operator-service.js';
-import { PersistedGenerationSubjectResolver } from '../control-plane/persisted-generation-subject.js';
+import {
+  PersistedGenerationSubjectResolver,
+  PersistedGenerationSubjectRunStore,
+} from '../control-plane/persisted-generation-subject.js';
 import { BootstrapContextAssembler } from '../control-plane/bootstrap-context-assembly.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
@@ -187,10 +190,13 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jiraIssueService = createJiraIssueService(ledger.repository, systemClock, jiraClient, {
     repositoryCatalog,
   });
-  const subjects = new WorkflowGenerationSubjectSource([
-    new PersistedGenerationSubjectResolver(workflowService),
-    new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
-  ]);
+  const subjects = new WorkflowGenerationSubjectSource(
+    [
+      new PersistedGenerationSubjectResolver(workflowService),
+      new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+    ],
+    new PersistedGenerationSubjectRunStore(workflowService),
+  );
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);

@@ -147,6 +147,7 @@ const makeSnapshot = (
     schemaVersion: 8,
     kind: 'execution',
     taskReference: 'task-ref',
+    workflowRunId: 'run-test',
     workflowHash: WORKFLOW_HASH,
     task,
     taskSnapshot: task,

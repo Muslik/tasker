@@ -8,7 +8,6 @@ import type {
   PlanningSnapshotSource,
 } from '../planning/run-planning-snapshot.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import type { WorkspaceLocator } from '../workspaces/contracts.js';
 import type { EvidenceBundleStoreError } from './evidence-bundle.js';
 import type { OperatorServiceError } from './operator-service.js';
 import type { WorkflowContextDiscovery } from './workflow-generator.js';
@@ -17,6 +16,13 @@ export interface TaskPlanningContext {
   readonly contextHash: string;
   readonly planningSnapshot: PlanningSnapshotReference;
   readonly evidenceBundle: EvidenceBundleReference;
+}
+
+interface PlanningWorkspaceHandle {
+  readonly workspaceId: string;
+  readonly repositoryReference: string;
+  readonly revision: string;
+  readonly path: string;
 }
 
 export type BootstrapContextAssemblyError =
@@ -34,16 +40,17 @@ export class BootstrapContextAssembler {
 
   public async assemble(input: {
     readonly taskReference: string;
+    readonly workflowRunId: string;
     readonly operationId: string;
-    readonly workspace: WorkspaceLocator;
+    readonly workspace: PlanningWorkspaceHandle;
   }): Promise<Outcome<TaskPlanningContext, BootstrapContextAssemblyError>> {
-    const subject = this.subjects.resolve(input.taskReference);
+    const subject = this.subjects.resolve(input.taskReference, input.workflowRunId);
     if (!subject.ok) return err({ kind: 'subject_unavailable', error: subject.error });
-    if (subject.value.task.repository !== input.workspace.repository.reference) {
+    if (subject.value.task.repository !== input.workspace.repositoryReference) {
       return err({
         kind: 'workspace_mismatch',
         expected: subject.value.task.repository,
-        actual: input.workspace.repository.reference,
+        actual: input.workspace.repositoryReference,
       });
     }
 
@@ -61,11 +68,15 @@ export class BootstrapContextAssembler {
     });
     if (!evidence.ok) return err({ kind: 'context_discovery_failed', error: evidence.error });
 
-    const snapshot = this.snapshots.createPlanningContextSnapshot(input.taskReference, {
-      workspaceId: input.workspace.workspaceId,
-      reference: input.workspace.repository.reference,
-      path: input.workspace.path,
-    });
+    const snapshot = this.snapshots.createPlanningContextSnapshot(
+      input.taskReference,
+      input.workflowRunId,
+      {
+        workspaceId: input.workspace.workspaceId,
+        reference: input.workspace.repositoryReference,
+        path: input.workspace.path,
+      },
+    );
     if (!snapshot.ok) return err({ kind: 'snapshot_failed', reason: snapshot.error.kind });
 
     return ok({

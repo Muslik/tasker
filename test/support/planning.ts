@@ -17,6 +17,7 @@ import {
   WorkflowGenerationSubjectSource,
   type PlanningTaskSnapshot,
   type WorkflowGenerationSubjectResolver,
+  type WorkflowGenerationSubjectRunStore,
 } from '../../src/planning/index.js';
 import { ok } from '../../src/shared/outcome.js';
 
@@ -629,5 +630,16 @@ export const makeTestGenerationSubjectSource = (
           : null,
       ),
   };
-  return new WorkflowGenerationSubjectSource([resolver]);
+  const captures = new Map<string, ReturnType<typeof resolver.resolve>>();
+  const runStore: WorkflowGenerationSubjectRunStore = {
+    readRunGenerationSubject: (taskReference, workflowRunId) => {
+      const captured = captures.get(`${taskReference}:${workflowRunId}`);
+      return captured?.ok === true ? ok(captured.value) : ok(null);
+    },
+    captureRunGenerationSubject: (taskReference, workflowRunId, subject) => {
+      captures.set(`${taskReference}:${workflowRunId}`, ok(subject));
+      return ok(subject);
+    },
+  };
+  return new WorkflowGenerationSubjectSource([resolver], runStore);
 };

@@ -87,7 +87,6 @@ const planningResult = (
       failure: record.failure,
       validationFeedback: record.validationFeedback,
       validationRevision: record.validationRevision,
-      receipt: record.receipt,
     });
   }
   if (record.transcriptId === null) {
@@ -104,7 +103,6 @@ const planningResult = (
     evidenceBundle: record.evidenceBundle,
     requestedStrategy: record.requestedStrategy,
     selectedStrategy: record.selectedStrategy,
-    receipt: record.receipt,
   } as const;
 
   switch (record.status) {

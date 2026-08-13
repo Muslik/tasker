@@ -45,7 +45,10 @@ import { createImplementationPlanningCoordinator } from './implementation-planni
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { PlanReviewStore } from './plan-review.js';
 import { createOperatorWorkflowService } from './operator-service.js';
-import { PersistedGenerationSubjectResolver } from './persisted-generation-subject.js';
+import {
+  PersistedGenerationSubjectResolver,
+  PersistedGenerationSubjectRunStore,
+} from './persisted-generation-subject.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
@@ -107,10 +110,13 @@ export const startOperatorServer = async (): Promise<void> => {
       );
     },
   );
-  const subjects = new WorkflowGenerationSubjectSource([
-    new PersistedGenerationSubjectResolver(service),
-    new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
-  ]);
+  const subjects = new WorkflowGenerationSubjectSource(
+    [
+      new PersistedGenerationSubjectResolver(service),
+      new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+    ],
+    new PersistedGenerationSubjectRunStore(service),
+  );
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
   const evidenceReaders = new PlanningEvidenceReaderRegistry([
     new JiraPlanningEvidenceReader(jiraClient, systemClock),

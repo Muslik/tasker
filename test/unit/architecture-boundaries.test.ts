@@ -52,6 +52,22 @@ describe('production architecture boundaries', () => {
     ).toEqual([]);
   });
 
+  it('keeps adapter and runtime receipts out of durable workflow state', () => {
+    expect(
+      offenders(
+        'src/{temporal/bootstrap-kernel,temporal/execution-kernel,temporal/workflows}/**/*.ts',
+        [
+          'ImplementationPlannerReceipt',
+          'WorkspaceBootstrapReceipt',
+          'DockerWorkspaceRuntimeReceipt',
+          'WorkspaceLocatorSchema',
+          '../../providers/',
+          '../../workspaces/',
+        ],
+      ),
+    ).toEqual([]);
+  });
+
   it('keeps task-source policy out of the neutral planning task contract', () => {
     expect(
       offenders('src/planning/task-snapshot.ts', [

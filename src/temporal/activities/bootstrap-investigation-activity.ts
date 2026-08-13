@@ -90,7 +90,7 @@ export const createBootstrapInvestigationActivity = (
         {
           kind: 'workspace',
           reference: input.workspace.workspaceId,
-          hash: input.workspace.repository.baseCommit,
+          hash: input.workspace.revision,
         },
         {
           kind: 'planning_snapshot',

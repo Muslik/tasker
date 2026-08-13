@@ -22,7 +22,10 @@ interface WorkspaceSubject {
 }
 
 export interface TemporalWorkspaceSubjectSource {
-  resolve(taskReference: string): Outcome<WorkspaceSubject, { readonly kind: string }>;
+  resolve(
+    taskReference: string,
+    workflowRunId: string,
+  ): Outcome<WorkspaceSubject, { readonly kind: string }>;
 }
 
 export interface TemporalManagedWorkspacePreparer {
@@ -96,7 +99,7 @@ export const createWorkspaceActivity = (
       const context = Context.current();
       context.heartbeat({ phase: 'resolve_repository' });
 
-      const subject = subjects.resolve(input.taskReference);
+      const subject = subjects.resolve(input.taskReference, input.workflowRunId);
       if (!subject.ok) throw failure('repository resolution', subject.error);
 
       context.heartbeat({ phase: 'prepare_worktree' });
@@ -114,12 +117,15 @@ export const createWorkspaceActivity = (
       const bootstrapped = await bootstrap.prepare(prepared.value);
       if (!bootstrapped.ok) throw failure('bootstrap', bootstrapped.error);
 
-      const runtime = await prepareDockerRuntime(prepared.value);
+      await prepareDockerRuntime(prepared.value);
 
       return PrepareTaskWorkspaceResultSchema.parse({
-        workspace: prepared.value,
-        bootstrap: bootstrapped.value,
-        runtime,
+        workspace: {
+          workspaceId: prepared.value.workspaceId,
+          repositoryReference: prepared.value.repository.reference,
+          revision: prepared.value.repository.baseCommit,
+          path: prepared.value.path,
+        },
       });
     },
   };

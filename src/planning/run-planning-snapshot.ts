@@ -70,6 +70,7 @@ const SnapshottedHarnessSchema = z
 const RunSnapshotBaseSchema = z.object({
   schemaVersion: z.literal(8),
   taskReference: z.string().min(1),
+  workflowRunId: z.string().min(1),
   task: PlanningTaskSnapshotSchema,
   taskSnapshot: JsonValueSchema,
   repository: z
@@ -119,6 +120,7 @@ export interface PlanningSnapshotWorkspace {
 export interface PlanningSnapshotSource {
   createPlanningContextSnapshot(
     taskReference: string,
+    workflowRunId: string,
     workspace: PlanningSnapshotWorkspace,
   ): Outcome<
     { readonly reference: PlanningSnapshotReference; readonly contextHash: string },

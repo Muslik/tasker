@@ -439,6 +439,23 @@ export class OperatorWorkflowService {
     return saved.ok ? ok(saved.value.subject) : err({ kind: 'store_failure', error: saved.error });
   }
 
+  public readRunGenerationSubject(
+    taskReference: string,
+    workflowRunId: string,
+  ): Outcome<WorkflowGenerationSubject | null, OperatorServiceError> {
+    const subject = this.store.readRunGenerationSubject(taskReference, workflowRunId);
+    return subject.ok ? subject : err({ kind: 'store_failure', error: subject.error });
+  }
+
+  public captureRunGenerationSubject(
+    taskReference: string,
+    workflowRunId: string,
+    subject: WorkflowGenerationSubject,
+  ): Outcome<WorkflowGenerationSubject, OperatorServiceError> {
+    const saved = this.store.captureRunGenerationSubject(taskReference, workflowRunId, subject);
+    return saved.ok ? ok(saved.value.subject) : err({ kind: 'store_failure', error: saved.error });
+  }
+
   public assembleFromAnalyzerOutputAtOperation(
     task: PlanningTaskSnapshot,
     output: WorkflowAnalyzerOutput,

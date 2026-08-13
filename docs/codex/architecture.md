@@ -103,15 +103,21 @@ Repositories are cloned into Tasker's application-data directory, never into
 `~/Projects/work`. Existing operator clones may be discovered for naming help but are
 not mutated. Before implementation planning, Tasker creates a managed branch/worktree,
 materializes the pinned harness profile, and prepares its Docker runtime. Its locator,
-harness receipt, and Docker receipt are product
-artifacts recorded by the preparation Activity and referenced by durable Workflow
-state. The API request contains only the task reference and immutable run settings. It
-does not contain a graph/hash and does not perform runner-local filesystem work before
-Temporal starts.
+harness receipt, and Docker receipt are product artifacts recorded by the preparation
+Activity. Durable Workflow state receives only a bounded workspace handle: workspace
+ID, repository reference, revision, and path. It does not contain bootstrap manifests,
+Docker environment, command output, or provider receipts. The API request contains only
+the task reference and immutable run settings. It does not contain a graph/hash and does
+not perform runner-local filesystem work before Temporal starts.
 
 Repeated Jira synchronization updates the cached snapshot and `syncedAt`; it does not
 append activity-log noise. A VPN/403/network failure changes sync health only. It does
 not invalidate the cached task, delete a workflow, or restart completed work.
+
+At bootstrap, the normalized task-source subject is captured under the exact Temporal
+`runId`. Retries and process restarts of that run reuse the capture. A later run of the
+same Jira task resolves and captures a fresh source revision instead of inheriting the
+previous run's task snapshot.
 
 ## 5. Context, planning, candidate validation, and freeze
 

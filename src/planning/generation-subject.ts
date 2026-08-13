@@ -29,17 +29,55 @@ export interface WorkflowGenerationSubjectResolver {
   ): Outcome<WorkflowGenerationSubject | null, WorkflowGenerationSubjectError>;
 }
 
+export interface WorkflowGenerationSubjectRunStore {
+  readRunGenerationSubject(
+    taskReference: string,
+    workflowRunId: string,
+  ): Outcome<WorkflowGenerationSubject | null, { readonly kind: string }>;
+  captureRunGenerationSubject(
+    taskReference: string,
+    workflowRunId: string,
+    subject: WorkflowGenerationSubject,
+  ): Outcome<WorkflowGenerationSubject, { readonly kind: string }>;
+}
+
 export class WorkflowGenerationSubjectSource {
-  public constructor(private readonly resolvers: readonly WorkflowGenerationSubjectResolver[]) {}
+  public constructor(
+    private readonly resolvers: readonly WorkflowGenerationSubjectResolver[],
+    private readonly runStore: WorkflowGenerationSubjectRunStore,
+  ) {}
 
   public resolve(
     taskReference: string,
+    workflowRunId: string,
   ): Outcome<WorkflowGenerationSubject, WorkflowGenerationSubjectError> {
+    const persisted = this.runStore.readRunGenerationSubject(taskReference, workflowRunId);
+    if (!persisted.ok) {
+      return err({
+        kind: 'generation_blocked',
+        taskReference,
+        reason: `Run-scoped planning subject is unavailable: ${persisted.error.kind}`,
+      });
+    }
+    if (persisted.value !== null) return ok(persisted.value);
+
     for (const resolver of this.resolvers) {
       const resolved = resolver.resolve(taskReference);
       if (!resolved.ok) return resolved;
       if (resolved.value !== null) {
-        return ok(WorkflowGenerationSubjectSchema.parse(resolved.value));
+        const subject = WorkflowGenerationSubjectSchema.parse(resolved.value);
+        const captured = this.runStore.captureRunGenerationSubject(
+          taskReference,
+          workflowRunId,
+          subject,
+        );
+        return captured.ok
+          ? ok(captured.value)
+          : err({
+              kind: 'generation_blocked',
+              taskReference,
+              reason: `Run-scoped planning subject could not be captured: ${captured.error.kind}`,
+            });
       }
     }
     return err({ kind: 'task_not_found', taskReference });

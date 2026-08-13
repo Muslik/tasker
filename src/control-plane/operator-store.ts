@@ -20,6 +20,7 @@ import { WorkflowViewSchema, type WorkflowView } from './operator-contracts.js';
 
 export const OPERATOR_WORKFLOW_OPERATION_PROJECTION = 'operator_workflow_by_operation';
 export const OPERATOR_GENERATION_SUBJECT_PROJECTION = 'operator_generation_subject';
+export const OPERATOR_RUN_GENERATION_SUBJECT_PROJECTION = 'operator_run_generation_subject';
 
 export interface OperatorWorkflowArtifacts {
   readonly analyzerVersion: string;
@@ -149,6 +150,85 @@ export class OperatorWorkflowStore {
       }
     }
 
+    return err({ kind: 'ledger_conflict', conflict: saved.error });
+  }
+
+  public readRunGenerationSubject(
+    taskReference: string,
+    workflowRunId: string,
+  ): Outcome<WorkflowGenerationSubject | null, OperatorStoreError> {
+    const projectionId = `${taskReference}:${workflowRunId}`;
+    const projection = this.ledger.readProjection(
+      OPERATOR_RUN_GENERATION_SUBJECT_PROJECTION,
+      projectionId,
+    );
+    if (projection === null) return ok(null);
+    const parsed = WorkflowGenerationSubjectSchema.safeParse(projection.payload);
+    return parsed.success
+      ? ok(parsed.data)
+      : err({
+          kind: 'projection_corrupt',
+          taskReference,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  public captureRunGenerationSubject(
+    taskReference: string,
+    workflowRunId: string,
+    subjectInput: WorkflowGenerationSubject,
+  ): Outcome<OperatorGenerationSubjectSaveResult, OperatorStoreError> {
+    const subject = WorkflowGenerationSubjectSchema.parse(subjectInput);
+    const existing = this.readRunGenerationSubject(taskReference, workflowRunId);
+    if (!existing.ok) return existing;
+    if (existing.value !== null) {
+      return JSON.stringify(existing.value) === JSON.stringify(subject)
+        ? ok({ disposition: 'already_exists', subject: existing.value })
+        : err({ kind: 'generation_subject_conflict', taskReference });
+    }
+
+    const subjectId = `${taskReference}:${workflowRunId}`;
+    const saved = this.ledger.transact({
+      aggregate: {
+        aggregateId: `workflow-run-subject:${subjectId}`,
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: `event:workflow-run-subject:${subjectId}`,
+            eventType: 'WorkflowRunGenerationSubjectCaptured',
+            eventSchemaVersion: 1,
+            payload: asJson({ taskReference, workflowRunId, repository: subject.task.repository }),
+            actor: 'temporal_bootstrap',
+          },
+        ],
+      },
+      projections: [
+        {
+          kind: 'upsert',
+          projectionType: OPERATOR_RUN_GENERATION_SUBJECT_PROJECTION,
+          projectionId: subjectId,
+          payload: asJson(subject),
+        },
+      ],
+      timestamp: this.clock.now(),
+    });
+    if (saved.ok) return ok({ disposition: 'saved', subject });
+
+    if (saved.error.kind === 'version_conflict') {
+      const concurrent = this.readRunGenerationSubject(taskReference, workflowRunId);
+      if (
+        concurrent.ok &&
+        concurrent.value !== null &&
+        JSON.stringify(concurrent.value) === JSON.stringify(subject)
+      ) {
+        return ok({ disposition: 'already_exists', subject: concurrent.value });
+      }
+      if (concurrent.ok && concurrent.value !== null) {
+        return err({ kind: 'generation_subject_conflict', taskReference });
+      }
+    }
     return err({ kind: 'ledger_conflict', conflict: saved.error });
   }
 

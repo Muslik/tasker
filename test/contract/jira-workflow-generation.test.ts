@@ -10,6 +10,7 @@ import {
   createOperatorWorkflowService,
   EvidenceBundleStore,
   ImplementationPlanningStore,
+  PersistedGenerationSubjectRunStore,
 } from '../../src/control-plane/index.js';
 import type { JiraIssuePort } from '../../src/integrations/index.js';
 import {
@@ -54,10 +55,11 @@ describe('Jira bootstrap context assembly', () => {
     writeFileSync(join(workspacePath, 'README.md'), '# Managed task worktree\n', 'utf8');
 
     const taskReference = 'jira:AVIA-13235';
-    const subjects = new WorkflowGenerationSubjectSource([
-      new JiraWorkflowGenerationSubjectResolver(jiraService),
-    ]);
     const workflows = createOperatorWorkflowService(ledger.repository, clock);
+    const subjects = new WorkflowGenerationSubjectSource(
+      [new JiraWorkflowGenerationSubjectResolver(jiraService)],
+      new PersistedGenerationSubjectRunStore(workflows),
+    );
     const evidenceBundles = new EvidenceBundleStore(ledger.repository, clock);
     const planning = createImplementationPlanningCoordinator({
       ledger: ledger.repository,
@@ -75,22 +77,13 @@ describe('Jira bootstrap context assembly', () => {
 
     const assembled = await assembler.assemble({
       taskReference,
+      workflowRunId: 'run-1',
       operationId: 'bootstrap:context:1',
       workspace: {
-        schemaVersion: 1,
         workspaceId: 'a'.repeat(24),
-        taskReference,
-        workflowId: 'tasker:v3:jira:AVIA-13235',
-        workflowRunId: 'run-1',
-        repository: {
-          reference: 'onetwotrip/front-avia',
-          sourcePath: '/managed/repositories/front-avia',
-          baseCommit: 'b'.repeat(40),
-        },
-        runnerId: 'test',
+        repositoryReference: 'onetwotrip/front-avia',
+        revision: 'b'.repeat(40),
         path: workspacePath,
-        branch: 'tasker/avia-13235',
-        preparedAt: '2026-08-02T00:00:00.000Z',
       },
     });
 

@@ -15,6 +15,7 @@ import {
   WorkflowGenerationSubjectSource,
   type EvidenceBundleReference,
   type PlanningSnapshotReference,
+  type WorkflowGenerationSubjectRunStore,
 } from '../../src/planning/index.js';
 import { type ImplementationPlanner } from '../../src/providers/index.js';
 import { makeAdjustableClock, type Clock } from '../../src/shared/clock.js';
@@ -56,7 +57,7 @@ const planningFixture = (
     evidenceBundles,
     planner,
   });
-  const snapshot = coordinator.createPlanningContextSnapshot(TASK_REFERENCE, {
+  const snapshot = coordinator.createPlanningContextSnapshot(TASK_REFERENCE, 'run-planning', {
     workspaceId: 'a'.repeat(24),
     reference: REPOSITORY,
     path: directory,
@@ -74,9 +75,10 @@ class InterruptibleSubjectSource extends WorkflowGenerationSubjectSource {
 
   public override resolve(
     taskReference: string,
+    workflowRunId: string,
   ): ReturnType<WorkflowGenerationSubjectSource['resolve']> {
     return this.available
-      ? super.resolve(taskReference)
+      ? super.resolve(taskReference, workflowRunId)
       : err({ kind: 'task_not_found', taskReference });
   }
 }
@@ -310,17 +312,24 @@ describe('implementation planning recovery', () => {
     });
   });
 
-  it('resumes snapshot materialization from the validated candidate without rerunning the planner', async () => {
+  it('materializes the execution snapshot without rereading the mutable task source', async () => {
     await withPlanningFixture(
       'tasker-plan-materialization-recovery-',
       async ({ directory, clock, ledger }) => {
         const fallback = makeTestImplementationPlanner();
         const stableSubjects = makeTestGenerationSubjectSource(directory);
-        const subjects = new InterruptibleSubjectSource([
-          {
-            resolve: (taskReference) => stableSubjects.resolve(taskReference),
-          },
-        ]);
+        const runStore: WorkflowGenerationSubjectRunStore = {
+          readRunGenerationSubject: () => ok(null),
+          captureRunGenerationSubject: (_taskReference, _workflowRunId, subject) => ok(subject),
+        };
+        const subjects = new InterruptibleSubjectSource(
+          [
+            {
+              resolve: (taskReference) => stableSubjects.resolve(taskReference, 'stable-source'),
+            },
+          ],
+          runStore,
+        );
         let calls = 0;
         const fixture = planningFixture(
           ledger,
@@ -337,7 +346,7 @@ describe('implementation planning recovery', () => {
         const commandId = 'tasker:test:planning:materialization-recovery';
 
         subjects.available = false;
-        const interrupted = await fixture.coordinator.prepare(
+        const prepared = await fixture.coordinator.prepare(
           TASK_REFERENCE,
           'fast',
           commandId,
@@ -346,25 +355,7 @@ describe('implementation planning recovery', () => {
           fixture.evidence,
         );
 
-        expect(interrupted).toMatchObject({ ok: false, error: { kind: 'subject' } });
-        const checkpoint = fixture.coordinator.read(PLANNING_EPISODE_ID);
-        if (!checkpoint.ok || checkpoint.value?.status !== 'planning') {
-          throw new Error('Validated planning candidate was not checkpointed');
-        }
-        expect(checkpoint.value.validatedCandidate?.workflowHash).toMatch(/^[a-f0-9]{64}$/u);
-        expect(calls).toBe(1);
-
-        subjects.available = true;
-        const resumed = await fixture.coordinator.prepare(
-          TASK_REFERENCE,
-          'fast',
-          commandId,
-          PLANNING_EPISODE_ID,
-          fixture.snapshot,
-          fixture.evidence,
-        );
-
-        expect(resumed).toMatchObject({ ok: true, value: { status: 'ready', attempt: 1 } });
+        expect(prepared).toMatchObject({ ok: true, value: { status: 'ready', attempt: 1 } });
         expect(calls).toBe(1);
         expect(
           ledger.repository
