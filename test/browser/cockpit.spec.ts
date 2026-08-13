@@ -78,6 +78,32 @@ const requireTask = <T>(value: T | null | undefined, message: string): T => {
   return value;
 };
 
+test('an empty queue stays live without opening task-specific surfaces', async ({ page }) => {
+  const taskSpecificRequests: string[] = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/workflows/') || /^\/api\/operator\/tasks\/.+/.test(path)) {
+      taskSpecificRequests.push(path);
+    }
+  });
+  await page.route(
+    (url) => url.pathname === '/api/operator/tasks',
+    async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ tasks: [], streamCursor: 0 }),
+      });
+    },
+  );
+
+  await page.goto('/');
+
+  await expect(page.getByText('No tasks', { exact: true })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Current workflow' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Live', exact: true })).toBeVisible();
+  expect(taskSpecificRequests).toEqual([]);
+});
+
 test('the operator console renders the queue and lets me inspect a task', async ({ page }) => {
   const tasks = await loadTasks(page);
 

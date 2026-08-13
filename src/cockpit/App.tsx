@@ -2765,6 +2765,7 @@ export const App = () => {
           : chooseInitialTask(nextTasks, readStoredSelection());
 
       if (nextSelectedId !== selectedIdRef.current) {
+        selectedIdRef.current = nextSelectedId;
         setSelectedId(nextSelectedId);
       }
 
@@ -3061,7 +3062,9 @@ export const App = () => {
         return;
       }
 
-      await refreshSelection(nextSelectedId);
+      if (nextSelectedId.length > 0) {
+        await refreshSelection(nextSelectedId);
+      }
       setBootstrapStatus('ready');
     };
 
@@ -3136,7 +3139,7 @@ export const App = () => {
   }, [runtimeWatchTaskId, selectedId, selectedTask?.status]);
 
   useEffect(() => {
-    if (bootstrapStatus !== 'ready' || selectedId.length === 0) {
+    if (bootstrapStatus !== 'ready') {
       return;
     }
 
@@ -3175,7 +3178,7 @@ export const App = () => {
       source.close();
       setStreamStatus('offline');
     };
-  }, [bootstrapStatus, selectedId.length]);
+  }, [bootstrapStatus]);
 
   const handleSelectTask = (taskId: string): void => {
     setRestartConfirmationTaskId(null);
@@ -3657,9 +3660,13 @@ export const App = () => {
         <div
           className={cn(
             'grid min-h-0 flex-1',
-            tasksCollapsed
-              ? 'grid-cols-[minmax(0,1fr)_340px]'
-              : 'grid-cols-[260px_minmax(0,1fr)_340px]',
+            selectedTask === null
+              ? tasksCollapsed
+                ? 'grid-cols-[minmax(0,1fr)]'
+                : 'grid-cols-[260px_minmax(0,1fr)]'
+              : tasksCollapsed
+                ? 'grid-cols-[minmax(0,1fr)_340px]'
+                : 'grid-cols-[260px_minmax(0,1fr)_340px]',
           )}
           data-tasks-collapsed={String(tasksCollapsed)}
           data-testid="operator-layout"
@@ -3678,9 +3685,7 @@ export const App = () => {
 
           <main className="flex min-h-0 flex-col border-r border-border">
             {selectedTask === null ? (
-              <EmptyState>
-                {tasksStatus === 'loading' ? 'Loading tasks…' : 'Select a task'}
-              </EmptyState>
+              <EmptyState>{tasksStatus === 'loading' ? 'Loading tasks…' : 'No tasks'}</EmptyState>
             ) : (
               <>
                 <SelectedTaskHeader
@@ -3876,11 +3881,13 @@ export const App = () => {
             )}
           </main>
 
-          <WorkflowSidebar
-            workflow={workflowState}
-            projection={operatorProjectionState}
-            task={selectedTask}
-          />
+          {selectedTask === null ? null : (
+            <WorkflowSidebar
+              workflow={workflowState}
+              projection={operatorProjectionState}
+              task={selectedTask}
+            />
+          )}
         </div>
       </div>
     </TooltipProvider>
