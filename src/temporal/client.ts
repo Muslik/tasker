@@ -38,13 +38,22 @@ export type TaskRunError =
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
   | { readonly kind: 'run_input_conflict'; readonly taskReference: string }
   | { readonly kind: 'run_not_restartable'; readonly taskReference: string }
+  | {
+      readonly kind: 'stale_run';
+      readonly taskReference: string;
+      readonly providedRunId: string;
+      readonly activeRunId: string;
+    }
   | { readonly kind: 'runtime_unavailable'; readonly message: string };
 
 export interface TaskRunService {
   start(input: BootstrapWorkflowInput): Promise<Outcome<TaskRunPublicState, TaskRunError>>;
   read(taskReference: string): Promise<Outcome<TaskRunPublicState | null, TaskRunError>>;
   readLifecycle(taskReference: string): Promise<Outcome<TaskRunLifecycle | null, TaskRunError>>;
-  restart(taskReference: string): Promise<Outcome<TaskRunPublicState, TaskRunError>>;
+  restart(
+    taskReference: string,
+    expectedRunId: string,
+  ): Promise<Outcome<TaskRunPublicState, TaskRunError>>;
   resolveWait(
     taskReference: string,
     command: ResolveBootstrapWaitCommand,
@@ -95,8 +104,7 @@ const sameImmutableInput = (
   input: BootstrapWorkflowInput,
 ): boolean =>
   state.settings.planReview === input.settings.planReview &&
-  state.settings.planningStrategy === input.settings.planningStrategy &&
-  state.settings.executionStart === input.settings.executionStart;
+  state.settings.planningStrategy === input.settings.planningStrategy;
 
 export class TemporalTaskRunService implements TaskRunService {
   public constructor(
@@ -141,18 +149,26 @@ export class TemporalTaskRunService implements TaskRunService {
     }
   }
 
-  public async restart(taskReference: string): Promise<Outcome<TaskRunPublicState, TaskRunError>> {
-    const current = await this.readBootstrap(taskReference);
-    if (!current.ok) return current;
-    if (current.value === null) return err({ kind: 'run_not_found', taskReference });
-    if (current.value.status === 'completed') {
+  public async restart(
+    taskReference: string,
+    expectedRunId: string,
+  ): Promise<Outcome<TaskRunPublicState, TaskRunError>> {
+    const lifecycle = await this.readLifecycle(taskReference);
+    if (!lifecycle.ok) return err(lifecycle.error);
+    if (lifecycle.value === null) return err({ kind: 'run_not_found', taskReference });
+    const active = lifecycle.value.execution ?? lifecycle.value.bootstrap;
+    const activeRunId = active.runId;
+    if (expectedRunId !== activeRunId) {
+      return err({ kind: 'stale_run', taskReference, providedRunId: expectedRunId, activeRunId });
+    }
+    if (active.status === 'completed') {
       return err({ kind: 'run_not_restartable', taskReference });
     }
 
     const input = BootstrapWorkflowInputSchema.parse({
       schemaVersion: 3,
       taskReference,
-      settings: current.value.settings,
+      settings: lifecycle.value.bootstrap.settings,
     });
 
     try {
@@ -226,14 +242,24 @@ export class TemporalTaskRunService implements TaskRunService {
     commandValue: ResolveBootstrapWaitCommand,
   ): Promise<Outcome<TaskRunPublicState, TaskRunError>> {
     const command = ResolveBootstrapWaitCommandSchema.parse(commandValue);
-    const bootstrap = await this.readBootstrap(taskReference);
-    if (!bootstrap.ok) return bootstrap;
-    if (bootstrap.value === null) return err({ kind: 'run_not_found', taskReference });
+    const lifecycle = await this.readLifecycle(taskReference);
+    if (!lifecycle.ok) return err(lifecycle.error);
+    if (lifecycle.value === null) return err({ kind: 'run_not_found', taskReference });
+    const activeRunId = (lifecycle.value.execution ?? lifecycle.value.bootstrap).runId;
+    if (command.runId !== activeRunId) {
+      return err({
+        kind: 'stale_run',
+        taskReference,
+        providedRunId: command.runId,
+        activeRunId,
+      });
+    }
 
     try {
-      if (bootstrap.value.executionWorkflowId === null) {
+      if (lifecycle.value.execution === null) {
         const handle = this.client.workflow.getHandle<typeof bootstrapWorkflowV3>(
           bootstrapWorkflowIdFor(taskReference),
+          lifecycle.value.bootstrap.runId,
         );
         await this.client.withDeadline(Date.now() + this.configuration.updateTimeoutMs, () =>
           handle.executeUpdate(resolveBootstrapWaitUpdate, { args: [command] }),
@@ -241,7 +267,8 @@ export class TemporalTaskRunService implements TaskRunService {
       } else {
         const executionCommand = ResolveExecutionWaitCommandSchema.parse(command);
         const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(
-          bootstrap.value.executionWorkflowId,
+          lifecycle.value.execution.workflowId,
+          lifecycle.value.execution.runId,
         );
         await this.client.withDeadline(Date.now() + this.configuration.updateTimeoutMs, () =>
           handle.executeUpdate(resolveExecutionWaitUpdate, { args: [executionCommand] }),

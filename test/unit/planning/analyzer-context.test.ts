@@ -1,16 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import {
-  createWorkflowAnalyzerContext,
-  findTaskFixture,
-  TaskFixtureSchema,
-} from '../../../src/planning/index.js';
+import { createWorkflowAnalyzerContext } from '../../../src/planning/index.js';
+import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
 describe('workflow analyzer context', () => {
   it('gives the analyzer building blocks and policies without a base workflow', () => {
-    const fixture = findTaskFixture('avia-13236-short-bug');
-    if (fixture === undefined) throw new Error('Expected workflow fixture');
+    const fixture = makePlanningTaskSnapshot('avia-13236-short-bug');
 
     const context = createWorkflowAnalyzerContext(fixture);
 
@@ -64,19 +60,15 @@ describe('workflow analyzer context', () => {
     )?.executor;
     expect(implementationExecutor?.kind).toBe('agent');
     expect(implementationExecutor?.skills).toContain('ai-assistance');
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain('pr-requires-ci-and-review');
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain('write-requires-agent-review');
-    expect(plannerContext.obligations.map(({ id }) => id)).not.toContain(
-      'pr-requires-ai-assistance',
-    );
+    expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
+      'publish-and-acknowledge-review-revision',
+    ]);
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');
     expect(JSON.stringify(context.plannerContext)).not.toContain('workflowTemplates');
   });
 
   it('exposes Jira lifecycle policy only to Jira-origin task analysis', () => {
-    const source = findTaskFixture('avia-13236-short-bug');
-    if (source === undefined) throw new Error('Expected workflow fixture');
-    const fixture = TaskFixtureSchema.parse({ ...source, origin: 'jira' });
+    const fixture = makePlanningTaskSnapshot('avia-13236-short-bug', { origin: 'jira' });
 
     const context = createWorkflowAnalyzerContext(fixture);
     const plannerContext = z
@@ -104,9 +96,7 @@ describe('workflow analyzer context', () => {
   });
 
   it('does not expose bug reproduction policy to a Jira feature task', () => {
-    const source = findTaskFixture('avia-12536-feature-review');
-    if (source === undefined) throw new Error('Expected workflow fixture');
-    const fixture = TaskFixtureSchema.parse({ ...source, origin: 'jira' });
+    const fixture = makePlanningTaskSnapshot('avia-12536-feature-review', { origin: 'jira' });
 
     const context = createWorkflowAnalyzerContext(fixture);
     const plannerContext = z

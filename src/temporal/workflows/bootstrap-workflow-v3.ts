@@ -2,7 +2,6 @@ import {
   ApplicationFailure,
   condition,
   isCancellation,
-  patched,
   proxyActivities,
   rootCause,
   setHandler,
@@ -49,7 +48,6 @@ const STAGES = [
   'planning',
   'plan_review',
   'freeze',
-  'execution_start',
 ] as const;
 const MAX_INVESTIGATION_ROUNDS = 3;
 
@@ -488,22 +486,7 @@ export async function bootstrapWorkflowV3(
     }
   }
 
-  if (
-    !patched('bootstrap-auto-execution-after-freeze') &&
-    input.settings.executionStart === 'manual'
-  ) {
-    await openWait(
-      'execution_start',
-      'execution.start@1',
-      'Workflow and plan are ready for execution',
-    );
-  } else {
-    nodeStates.execution_start = 'skipped';
-  }
-
-  const executionWorkflowId = patched('bootstrap-execution-id-by-bootstrap-run')
-    ? `tasker:execution:v2:${input.taskReference}:${execution.runId}`
-    : `tasker:execution:v2:${input.taskReference}`;
+  const executionWorkflowId = `tasker:execution:v2:${input.taskReference}:${execution.runId}`;
   const child = await startChild(executionWorkflowV2, {
     workflowId: executionWorkflowId,
     args: [

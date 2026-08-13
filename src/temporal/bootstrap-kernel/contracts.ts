@@ -13,7 +13,7 @@ import {
 } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { ImplementationPlannerReceiptSchema } from '../../providers/contracts.js';
-import { PlanningFailureViewSchema } from '../../control-plane/implementation-planning-contracts.js';
+import { ImplementationPlanningFailureSchema } from '../../planning/planning-failure.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/schema.js';
 import { DockerWorkspaceRuntimeReceiptSchema } from '../../workspaces/docker-runtime-contracts.js';
 import {
@@ -32,7 +32,6 @@ export const TaskRunSettingsSchema = z
   .object({
     planReview: z.enum(['required', 'automatic']),
     planningStrategy: PlanningStrategyRequestSchema,
-    executionStart: z.enum(['manual', 'automatic']),
   })
   .strict()
   .readonly();
@@ -78,7 +77,7 @@ export const BootstrapPlanningStateSchema = z.discriminatedUnion('status', [
   BootstrapPlanningAttemptSchema.extend({
     status: z.literal('blocked'),
     transcriptId: z.string().min(1).nullable(),
-    failure: PlanningFailureViewSchema,
+    failure: ImplementationPlanningFailureSchema,
     validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),
     validationRevision: z.number().int().nonnegative().max(3),
     receipt: ImplementationPlannerReceiptSchema.nullable(),
@@ -150,7 +149,6 @@ const BootstrapWorkflowStateBaseSchema = z
       'planning',
       'plan_review',
       'freezing',
-      'execution_start',
       'execution',
     ]),
     workspaceContext: BootstrapWorkspaceContextSchema.nullable(),
@@ -189,6 +187,7 @@ export const BootstrapWorkflowPublicStateSchema = z.discriminatedUnion('status',
 
 export const ResolveBootstrapWaitCommandSchema = z
   .object({
+    runId: z.string().min(1),
     nodeId: z.string().min(1),
     waitKind: z.string().min(1),
     resolution: JsonValueSchema,

@@ -1,5 +1,5 @@
 import { blockReceiptId, type BlockReceipt, type BlockReceiptStore } from '../blocks/index.js';
-import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from '../planning/index.js';
+import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from '../planning/index.js';
 import type { RunPlanningSnapshot } from '../planning/run-planning-snapshot.js';
 import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../temporal/index.js';
 import type { PlanningTranscriptView } from './planning-transcript.js';
@@ -18,7 +18,7 @@ import {
   type OperatorWorkflowStage,
   type OperatorWorkflowStep,
   type WorkflowNodeStatus,
-} from './m1-contracts.js';
+} from './operator-contracts.js';
 
 type BlockReceiptReader = Pick<BlockReceiptStore, 'read'>;
 type ExecutionSnapshotReader = (lifecycle: TaskRunLifecycle) => RunPlanningSnapshot | null;
@@ -213,7 +213,7 @@ const executionStageDescriptor = (
     return definition.block.stage;
   }
   if (node.kind === 'wait') {
-    const contract = M1_WORKFLOW_CONTRACTS.waits.get(node.for);
+    const contract = HARNESS_WORKFLOW_CONTRACTS.waits.get(node.for);
     if (contract === undefined)
       throw new Error(`Compiled workflow references unregistered wait ${node.for}`);
     return contract.stage;
@@ -353,10 +353,11 @@ export const createOperatorWorkflowProjection = (
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 4,
+      schemaVersion: 5,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
+      activeRunId: null,
       graphHash: null,
       current: null,
       stages: [],
@@ -401,10 +402,11 @@ export const createOperatorWorkflowProjection = (
           transcript: execution === null ? null : readExecutionTranscript(execution),
         };
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 4,
+    schemaVersion: 5,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',
+    activeRunId: active.runId,
     graphHash: lifecycle.bootstrap.workflowHash,
     current,
     stages: [

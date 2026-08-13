@@ -2,40 +2,23 @@ import { z } from 'zod';
 
 import { CompletionEvidenceSchema } from '../blocks/contracts.js';
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
-import { TaskFixtureSchema } from '../planning/fixtures.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
-import { PlanningStrategyRequestSchema } from '../planning/implementation-plan.js';
+import {
+  PlanningClarificationAnswerCommandSchema,
+  PlanningStrategyRequestSchema,
+} from '../planning/implementation-plan.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 
-export const M1_VIEW_SCHEMA_VERSION = 6;
+export const OPERATOR_VIEW_SCHEMA_VERSION = 6;
 
-export const WorkflowGenerationSubjectSchema = z
+export const PlanningTaskSummarySchema = z
   .object({
-    schemaVersion: z.literal(1),
-    repositoryPath: z.string().min(1),
-    task: TaskFixtureSchema,
-    taskSnapshot: JsonValueSchema,
-  })
-  .strict();
-
-export type WorkflowGenerationSubject = z.infer<typeof WorkflowGenerationSubjectSchema>;
-
-export const FixtureFamilySchema = z.enum([
-  'short_bugfix',
-  'feature_with_review',
-  'shared_component',
-  'invalid_workflow',
-]);
-
-export const FixtureSummarySchema = z
-  .object({
-    id: z.string().min(1),
+    reference: z.string().min(1),
     title: z.string().min(1),
-    family: FixtureFamilySchema,
-    purpose: z.string().min(1),
+    kind: z.enum(['bug', 'feature', 'task', 'other']),
   })
   .strict();
 
@@ -133,10 +116,11 @@ export const OperatorWorkflowStageSchema = z
 
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(4),
+    schemaVersion: z.literal(5),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
+    activeRunId: z.string().min(1).nullable(),
     graphHash: z
       .string()
       .regex(/^[a-f0-9]{64}$/u)
@@ -161,8 +145,8 @@ export const OperatorWorkflowProjectionSchema = z
 
 export const WorkflowViewSchema = z
   .object({
-    schemaVersion: z.literal(M1_VIEW_SCHEMA_VERSION),
-    fixture: FixtureSummarySchema,
+    schemaVersion: z.literal(OPERATOR_VIEW_SCHEMA_VERSION),
+    taskSummary: PlanningTaskSummarySchema,
     intake: z
       .object({
         id: z.string().min(1),
@@ -256,15 +240,28 @@ export const DEFAULT_RUN_START_COMMAND = {
 
 export const ResumeRunCommandSchema = z
   .object({
+    expectedRunId: z.string().min(1),
     guidance: z.string().trim().min(1).max(10_000).optional(),
   })
   .strict();
 
 export const RestartRunCommandSchema = z
   .object({
+    expectedRunId: z.string().min(1),
     confirmation: z.literal('restart_from_scratch'),
   })
   .strict();
+
+export const ExpectedRunCommandSchema = z
+  .object({
+    expectedRunId: z.string().min(1),
+  })
+  .strict();
+
+export const PlanningClarificationSubmissionSchema =
+  PlanningClarificationAnswerCommandSchema.extend({
+    expectedRunId: z.string().min(1),
+  }).strict();
 
 export const CodeReviewSyncResponseSchema = z
   .object({
@@ -290,13 +287,6 @@ export const OperatorTaskStatusSchema = z.enum([
 ]);
 
 export const OperatorTaskOriginSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('fixture'),
-      fixtureId: z.string().min(1),
-      family: FixtureFamilySchema,
-    })
-    .strict(),
   z
     .object({
       kind: z.literal('jira'),
@@ -354,12 +344,12 @@ export const OperatorActivityEntrySchema = z
 
 export const OperatorActivityResponseSchema = z
   .object({
-    fixtureId: z.string().min(1),
+    taskReference: z.string().min(1),
     providerSession: z.union([
       z
         .object({
           status: z.literal('not_started'),
-          reason: z.literal('m1_planning_only'),
+          reason: z.literal('planning_only'),
         })
         .strict(),
       WorkflowAnalyzerReceiptSchema,
@@ -371,13 +361,12 @@ export const OperatorActivityResponseSchema = z
 export const OperatorStreamEventSchema = z
   .object({
     sequence: z.number().int().positive(),
-    fixtureId: z.string().min(1),
+    taskReference: z.string().min(1),
     eventType: z.string().min(1),
   })
   .strict();
 
-export type FixtureFamily = z.infer<typeof FixtureFamilySchema>;
-export type FixtureSummary = z.infer<typeof FixtureSummarySchema>;
+export type PlanningTaskSummary = z.infer<typeof PlanningTaskSummarySchema>;
 export type WorkflowNodeStatus = z.infer<typeof WorkflowNodeStatusSchema>;
 export type BlockReceiptSummary = z.infer<typeof BlockReceiptSummarySchema>;
 export type OperatorWorkflowStep = z.infer<typeof OperatorWorkflowStepSchema>;
@@ -389,6 +378,8 @@ export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
 export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
 export type RestartRunCommand = z.infer<typeof RestartRunCommandSchema>;
+export type ExpectedRunCommand = z.infer<typeof ExpectedRunCommandSchema>;
+export type PlanningClarificationSubmission = z.infer<typeof PlanningClarificationSubmissionSchema>;
 export type CodeReviewSyncResponse = z.infer<typeof CodeReviewSyncResponseSchema>;
 export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
 export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;

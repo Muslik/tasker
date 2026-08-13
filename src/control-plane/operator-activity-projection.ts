@@ -1,4 +1,7 @@
-import { OperatorActivityEntrySchema, type OperatorActivityResponse } from './m1-contracts.js';
+import {
+  OperatorActivityEntrySchema,
+  type OperatorActivityResponse,
+} from './operator-contracts.js';
 
 type OperatorActivityEntry = OperatorActivityResponse['entries'][number];
 

@@ -7,19 +7,22 @@ import {
   BootstrapContextAssembler,
   ContextDiscoveryService,
   createImplementationPlanningCoordinator,
-  createM1WorkflowService,
+  createOperatorWorkflowService,
   EvidenceBundleStore,
   ImplementationPlanningStore,
-  WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import type { JiraIssuePort } from '../../src/integrations/index.js';
-import { createJiraIssueService } from '../../src/integrations/index.js';
+import {
+  createJiraIssueService,
+  JiraWorkflowGenerationSubjectResolver,
+} from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { DeterministicImplementationPlanner } from '../../src/providers/index.js';
+import { WorkflowGenerationSubjectSource } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
 import { makeRepositoryCatalog } from '../helpers/repositories.js';
+import { makeTestImplementationPlanner } from '../support/planning.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
@@ -51,8 +54,10 @@ describe('Jira bootstrap context assembly', () => {
     writeFileSync(join(workspacePath, 'README.md'), '# Managed task worktree\n', 'utf8');
 
     const taskReference = 'jira:AVIA-13235';
-    const subjects = new WorkflowGenerationSubjectSource(directory, jiraService);
-    const workflows = createM1WorkflowService(ledger.repository, clock);
+    const subjects = new WorkflowGenerationSubjectSource([
+      new JiraWorkflowGenerationSubjectResolver(jiraService),
+    ]);
+    const workflows = createOperatorWorkflowService(ledger.repository, clock);
     const evidenceBundles = new EvidenceBundleStore(ledger.repository, clock);
     const planning = createImplementationPlanningCoordinator({
       ledger: ledger.repository,
@@ -60,7 +65,7 @@ describe('Jira bootstrap context assembly', () => {
       workflows,
       subjects,
       evidenceBundles,
-      planner: new DeterministicImplementationPlanner(),
+      planner: makeTestImplementationPlanner(),
     });
     const assembler = new BootstrapContextAssembler(
       subjects,

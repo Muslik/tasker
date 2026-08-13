@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { JsonValueSchema, NodeIdSchema, type WorkflowNodeSource } from '../workflow/schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
-import { TaskFixtureSchema } from './fixtures.js';
+import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import { BlockDefinitionSchema } from '../blocks/contracts.js';
 
 export const PlanningStrategyRequestSchema = z.enum(['auto', 'fast', 'ralplan']);
@@ -228,7 +228,7 @@ export const ImplementationPlanningDecisionSchema = z.discriminatedUnion('status
 
 export const ImplementationPlannerContextSchema = z
   .object({
-    task: TaskFixtureSchema,
+    task: PlanningTaskSnapshotSchema,
     taskSnapshot: JsonValueSchema,
     blocks: z.array(BlockDefinitionSchema).min(1),
     evidenceBundle: EvidenceBundleSchema,

@@ -1,6 +1,6 @@
 # Technology decisions
 
-Status: canonical target stack, Temporal revision, 2026-08-03
+Status: canonical stack, 2026-08-13
 
 This document selects concrete implementation surfaces. Product semantics and
 invariants live in [`architecture.md`](architecture.md); sequencing lives in
@@ -132,7 +132,7 @@ Activities are grouped by domain boundary rather than one enormous executor:
 |---|---|
 | intake/repository | sync task, resolve repo, clone/fetch, allocate worktree, bootstrap harness |
 | planning | analyze task/repo, assemble graph revision, create/revise implementation plan |
-| agent | execute versioned prompt/skills with Codex, Claude, or Antigravity |
+| agent | execute versioned prompt/skills with a registered provider profile (Codex and Claude today) |
 | process | run registered build/test/reproduction commands, capture media |
 | SCM/tracker | branch/push/PR/thread/Jira comment operations |
 | CI | start/observe Jenkins, fetch Allure evidence, classify failure |
@@ -260,7 +260,7 @@ Provider selection is configuration, not workflow structure. Named company profi
 contain the subscription CLI, model, effort, timeout, and provider-specific options;
 company routes and project redirects select among them. Codex and Claude implement the
 same structured Activity contract. Unknown profiles fail pack loading, and the resolved
-profile is frozen into the run snapshot. Antigravity requires its own adapter and a
+profile is frozen into the run snapshot. Any additional provider requires its own adapter and a
 registered profile before it can be selected.
 
 A logical skill in graph data maps to provider-specific instructions in the Activity

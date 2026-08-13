@@ -160,7 +160,6 @@ export const HarnessPolicyManifestSchema = z
     appliesTo: z
       .object({
         taskOrigins: z.array(z.string().min(1)).min(1),
-        taskFamilies: z.array(z.string().min(1)).min(1).optional(),
       })
       .strict()
       .optional(),
@@ -329,12 +328,8 @@ export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 
 export const harnessPolicyAppliesToTask = (
   policy: HarnessPolicyManifest,
-  task: { readonly origin: string; readonly family: string },
-): boolean =>
-  policy.appliesTo === undefined ||
-  (policy.appliesTo.taskOrigins.includes(task.origin) &&
-    (policy.appliesTo.taskFamilies === undefined ||
-      policy.appliesTo.taskFamilies.includes(task.family)));
+  task: { readonly origin: string },
+): boolean => policy.appliesTo === undefined || policy.appliesTo.taskOrigins.includes(task.origin);
 
 const matchesJson = (actual: JsonValue | undefined, expected: JsonValue): boolean => {
   if (expected === null || typeof expected !== 'object') return actual === expected;

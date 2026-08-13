@@ -10,33 +10,32 @@ import {
   WorkflowAnalyzerReceiptSchema,
   type WorkflowAnalyzerReceipt,
 } from '../providers/contracts.js';
-import type { Clock } from '../shared/clock.js';
-import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   WorkflowGenerationSubjectSchema,
-  WorkflowViewSchema,
   type WorkflowGenerationSubject,
-  type WorkflowView,
-} from './m1-contracts.js';
+} from '../planning/index.js';
+import type { Clock } from '../shared/clock.js';
+import { err, ok, type Outcome } from '../shared/outcome.js';
+import { WorkflowViewSchema, type WorkflowView } from './operator-contracts.js';
 
-export const M1_WORKFLOW_OPERATION_PROJECTION = 'm1_workflow_by_operation';
-export const M1_GENERATION_SUBJECT_PROJECTION = 'm1_generation_subject';
+export const OPERATOR_WORKFLOW_OPERATION_PROJECTION = 'operator_workflow_by_operation';
+export const OPERATOR_GENERATION_SUBJECT_PROJECTION = 'operator_generation_subject';
 
-export interface M1WorkflowArtifacts {
+export interface OperatorWorkflowArtifacts {
   readonly analyzerVersion: string;
   readonly proposal: JsonValue;
   readonly validatorReport: JsonValue;
   readonly compiledGraph?: JsonValue | undefined;
 }
 
-export type M1StoreError =
+export type OperatorStoreError =
   | {
       readonly kind: 'ledger_conflict';
       readonly conflict: LedgerConflict;
     }
   | {
       readonly kind: 'projection_corrupt';
-      readonly fixtureId: string;
+      readonly taskReference: string;
       readonly issues: readonly string[];
     }
   | {
@@ -44,12 +43,12 @@ export type M1StoreError =
       readonly taskReference: string;
     };
 
-export interface M1StoreResult {
+export interface OperatorStoreResult {
   readonly disposition: 'already_exists' | 'saved';
   readonly view: WorkflowView;
 }
 
-export interface M1GenerationSubjectSaveResult {
+export interface OperatorGenerationSubjectSaveResult {
   readonly disposition: 'already_exists' | 'saved';
   readonly subject: WorkflowGenerationSubject;
 }
@@ -61,15 +60,15 @@ const workflowAggregateId = (operationId: string): string => `workflow-operation
 const isRecord = (value: JsonValue): value is Readonly<Record<string, JsonValue>> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-const eventBelongsToFixture = (event: EventRecord, fixtureId: string): boolean =>
-  isRecord(event.payload) && event.payload.fixtureId === fixtureId;
+const eventBelongsToTask = (event: EventRecord, taskReference: string): boolean =>
+  isRecord(event.payload) && event.payload.taskReference === taskReference;
 
 const candidateAttempt = (operationId: string): number => {
   const match = /:workflow-candidate:(\d+)$/u.exec(operationId);
   return match?.[1] === undefined ? 1 : Number(match[1]);
 };
 
-export class M1WorkflowStore {
+export class OperatorWorkflowStore {
   public constructor(
     private readonly ledger: LedgerRepository,
     private readonly clock: Clock,
@@ -77,8 +76,11 @@ export class M1WorkflowStore {
 
   public readGenerationSubject(
     taskReference: string,
-  ): Outcome<WorkflowGenerationSubject | null, M1StoreError> {
-    const projection = this.ledger.readProjection(M1_GENERATION_SUBJECT_PROJECTION, taskReference);
+  ): Outcome<WorkflowGenerationSubject | null, OperatorStoreError> {
+    const projection = this.ledger.readProjection(
+      OPERATOR_GENERATION_SUBJECT_PROJECTION,
+      taskReference,
+    );
     if (projection === null) return ok(null);
 
     const parsed = WorkflowGenerationSubjectSchema.safeParse(projection.payload);
@@ -86,7 +88,7 @@ export class M1WorkflowStore {
       ? ok(parsed.data)
       : err({
           kind: 'projection_corrupt',
-          fixtureId: taskReference,
+          taskReference,
           issues: parsed.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
@@ -96,7 +98,7 @@ export class M1WorkflowStore {
   public saveGenerationSubject(
     taskReference: string,
     subjectInput: WorkflowGenerationSubject,
-  ): Outcome<M1GenerationSubjectSaveResult, M1StoreError> {
+  ): Outcome<OperatorGenerationSubjectSaveResult, OperatorStoreError> {
     const subject = WorkflowGenerationSubjectSchema.parse(subjectInput);
     const existing = this.readGenerationSubject(taskReference);
     if (!existing.ok) return existing;
@@ -124,7 +126,7 @@ export class M1WorkflowStore {
       projections: [
         {
           kind: 'upsert',
-          projectionType: M1_GENERATION_SUBJECT_PROJECTION,
+          projectionType: OPERATOR_GENERATION_SUBJECT_PROJECTION,
           projectionId: taskReference,
           payload: asJson(subject),
         },
@@ -150,20 +152,20 @@ export class M1WorkflowStore {
     return err({ kind: 'ledger_conflict', conflict: saved.error });
   }
 
-  public listEvents(fixtureId?: string): readonly EventRecord[] {
+  public listEvents(taskReference?: string): readonly EventRecord[] {
     const events = this.ledger
       .listEvents()
       .filter((event) => event.aggregateId.startsWith('workflow-operation:'));
-    return fixtureId === undefined
+    return taskReference === undefined
       ? events
-      : events.filter((event) => eventBelongsToFixture(event, fixtureId));
+      : events.filter((event) => eventBelongsToTask(event, taskReference));
   }
 
   public readAnalyzerSessionForEpisode(
-    fixtureId: string,
+    taskReference: string,
     planningEpisodeId: string,
-  ): Outcome<WorkflowAnalyzerReceipt | null, M1StoreError> {
-    const event = this.listEvents(fixtureId).findLast(
+  ): Outcome<WorkflowAnalyzerReceipt | null, OperatorStoreError> {
+    const event = this.listEvents(taskReference).findLast(
       (candidate) =>
         candidate.eventType === 'WorkflowAnalyzed' &&
         isRecord(candidate.payload) &&
@@ -175,7 +177,7 @@ export class M1WorkflowStore {
     if (typeof operationId !== 'string') {
       return err({
         kind: 'projection_corrupt',
-        fixtureId,
+        taskReference,
         issues: [`Planning episode ${planningEpisodeId} has no workflow operation`],
       });
     }
@@ -183,7 +185,7 @@ export class M1WorkflowStore {
     if (artifact === null) {
       return err({
         kind: 'projection_corrupt',
-        fixtureId,
+        taskReference,
         issues: [`Planning operation ${operationId} has no analyzer receipt`],
       });
     }
@@ -192,7 +194,7 @@ export class M1WorkflowStore {
       ? ok(parsed.data)
       : err({
           kind: 'projection_corrupt',
-          fixtureId,
+          taskReference,
           issues: parsed.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
@@ -200,38 +202,41 @@ export class M1WorkflowStore {
   }
 
   public readPlanningOperation(
-    fixtureId: string,
+    taskReference: string,
     operationId: string,
-  ): Outcome<WorkflowView | null, M1StoreError> {
-    const projection = this.ledger.readProjection(M1_WORKFLOW_OPERATION_PROJECTION, operationId);
+  ): Outcome<WorkflowView | null, OperatorStoreError> {
+    const projection = this.ledger.readProjection(
+      OPERATOR_WORKFLOW_OPERATION_PROJECTION,
+      operationId,
+    );
     if (projection === null) return ok(null);
     const parsed = WorkflowViewSchema.safeParse(projection.payload);
     if (!parsed.success) {
       return err({
         kind: 'projection_corrupt',
-        fixtureId,
+        taskReference,
         issues: parsed.error.issues.map(
           (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
         ),
       });
     }
-    return parsed.data.fixture.id === fixtureId ? ok(parsed.data) : ok(null);
+    return parsed.data.taskSummary.reference === taskReference ? ok(parsed.data) : ok(null);
   }
 
   public save(
     viewInput: WorkflowView,
-    artifacts: M1WorkflowArtifacts,
+    artifacts: OperatorWorkflowArtifacts,
     operationId: string,
     analyzerReceipt?: WorkflowAnalyzerReceipt,
-  ): Outcome<M1StoreResult, M1StoreError> {
+  ): Outcome<OperatorStoreResult, OperatorStoreError> {
     const candidateView = WorkflowViewSchema.parse(viewInput);
-    const completed = this.readPlanningOperation(candidateView.fixture.id, operationId);
+    const completed = this.readPlanningOperation(candidateView.taskSummary.reference, operationId);
     if (!completed.ok) return completed;
     if (completed.value !== null) {
       return ok({ disposition: 'already_exists', view: completed.value });
     }
 
-    const fixtureId = candidateView.fixture.id;
+    const taskReference = candidateView.taskSummary.reference;
     const aggregateId = workflowAggregateId(operationId);
     const proposalArtifactId = `proposal:${operationId}`;
     const view = WorkflowViewSchema.parse({
@@ -291,7 +296,7 @@ export class M1WorkflowStore {
         payload: asJson({
           analyzerVersion: analyzerReceipt.analyzerVersion,
           durationMs: analyzerReceipt.durationMs,
-          fixtureId,
+          taskReference,
           attempt,
           operationId,
           sessionId: analyzerReceipt.sessionId,
@@ -305,16 +310,13 @@ export class M1WorkflowStore {
       eventType: view.workflow.status === 'valid' ? 'WorkflowPlanned' : 'WorkflowRejected',
       eventSchemaVersion: 1,
       payload: asJson({
-        fixtureId,
+        taskReference,
         attempt,
         graphHash: view.workflow.graphHash,
         operationId,
         status: view.workflow.status,
       }),
-      actor:
-        artifacts.analyzerVersion === 'm1-deterministic@1'
-          ? 'm1_deterministic_planner'
-          : 'm1_planner',
+      actor: 'workflow_planner',
     });
 
     const result = this.ledger.transact({
@@ -335,7 +337,7 @@ export class M1WorkflowStore {
       projections: [
         {
           kind: 'upsert',
-          projectionType: M1_WORKFLOW_OPERATION_PROJECTION,
+          projectionType: OPERATOR_WORKFLOW_OPERATION_PROJECTION,
           projectionId: operationId,
           payload: asJson(view),
         },
@@ -346,7 +348,7 @@ export class M1WorkflowStore {
 
     if (!result.ok) {
       if (result.error.kind === 'version_conflict') {
-        const concurrent = this.readPlanningOperation(fixtureId, operationId);
+        const concurrent = this.readPlanningOperation(taskReference, operationId);
         if (!concurrent.ok) return concurrent;
         if (concurrent.value !== null) {
           return ok({ disposition: 'already_exists', view: concurrent.value });

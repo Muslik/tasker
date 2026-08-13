@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BlockReceiptSchema } from '../../src/blocks/contracts.js';
-import { createM1WorkflowService } from '../../src/control-plane/m1-service.js';
 import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { findTaskFixture } from '../../src/planning/index.js';
+import { planWorkflowProposal } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
 import { CompiledWorkflowSchema } from '../../src/workflow/schema.js';
+import { makeWorkflowProposal } from '../support/planning.js';
 
 const resources: SqliteLedger[] = [];
 
@@ -21,23 +21,11 @@ describe('operator workflow projection', () => {
     const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
     const ledger = openSqliteLedger({ filename: ':memory:', clock });
     resources.push(ledger);
-    const fixture = findTaskFixture('avia-13236-short-bug');
-    if (fixture === undefined) throw new Error('Expected workflow fixture');
-    const generated = createM1WorkflowService(ledger.repository, clock).assembleTaskAtOperation(
-      fixture,
-      'tasker:test:projection:workflow-candidate:1',
-    );
-    if (!generated.ok) {
-      throw new Error(`Expected a compiled workflow fixture: ${JSON.stringify(generated.error)}`);
-    }
-    if (generated.value.view.workflow.graphHash === null) {
-      throw new Error(
-        `Expected a compiled workflow fixture: ${JSON.stringify(generated.value.view.workflow.validatorReport)}`,
-      );
-    }
-
-    const graph = CompiledWorkflowSchema.parse(generated.value.view.workflow.graph);
-    const workflowHash = generated.value.view.workflow.graphHash;
+    const generated = planWorkflowProposal(makeWorkflowProposal());
+    if (!generated.ok)
+      throw new Error(`Expected compiled workflow: ${JSON.stringify(generated.error)}`);
+    const graph = generated.value.compiled.graph;
+    const workflowHash = generated.value.compiled.hash;
     const lifecycle = TaskRunLifecycleSchema.parse({
       bootstrap: {
         runtime: 'bootstrap',
@@ -49,7 +37,6 @@ describe('operator workflow projection', () => {
         settings: {
           planReview: 'automatic',
           planningStrategy: 'fast',
-          executionStart: 'automatic',
         },
         phase: 'execution',
         workspaceContext: null,
@@ -157,7 +144,7 @@ describe('operator workflow projection', () => {
     const graph = CompiledWorkflowSchema.parse({
       metadata: {
         compilerVersion: 4,
-        irVersion: 'm2',
+        irVersion: 'workflow-ir-v1',
         workflowId: 'future-steps',
         workflowVersion: 1,
         references: {
@@ -200,7 +187,6 @@ describe('operator workflow projection', () => {
         settings: {
           planReview: 'automatic',
           planningStrategy: 'fast',
-          executionStart: 'automatic',
         },
         phase: 'execution',
         workspaceContext: null,
@@ -272,7 +258,7 @@ describe('operator workflow projection', () => {
     const graph = CompiledWorkflowSchema.parse({
       metadata: {
         compilerVersion: 4,
-        irVersion: 'm2',
+        irVersion: 'workflow-ir-v1',
         workflowId: 'workflow-with-repair-loop',
         workflowVersion: 1,
         references: {
@@ -346,7 +332,6 @@ describe('operator workflow projection', () => {
         settings: {
           planReview: 'automatic',
           planningStrategy: 'fast',
-          executionStart: 'automatic',
         },
         phase: 'execution',
         workspaceContext: null,

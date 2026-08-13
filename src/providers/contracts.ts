@@ -33,7 +33,7 @@ export type WorkflowAnalyzerReceipt = z.infer<typeof WorkflowAnalyzerReceiptSche
 export const ImplementationPlannerReceiptSchema = z
   .object({
     status: z.literal('completed'),
-    provider: z.enum(['codex_cli', 'claude_cli', 'deterministic']),
+    provider: z.enum(['codex_cli', 'claude_cli']),
     plannerVersion: z.literal('implementation-planner@3'),
     profile: z.string().min(1),
     profileSha256: z.string().regex(/^[a-f0-9]{64}$/u),

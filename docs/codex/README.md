@@ -1,6 +1,6 @@
 # Tasker design package
 
-Status: canonical v4 architecture, 2026-08-09
+Status: canonical architecture, 2026-08-13
 
 Tasker has one supported runtime model: a Temporal Bootstrap Workflow prepares and
 freezes one task-specific graph, then a small Temporal Execution Workflow interprets
@@ -13,19 +13,21 @@ Read these in order:
 
 1. [`architecture.md`](architecture.md) — ownership boundaries, lifecycle, block
    semantics, recovery, operator projection, and invariants.
-2. [`planning-lifecycle.md`](planning-lifecycle.md) — context discovery, mandatory
+2. [`technical-architecture.md`](technical-architecture.md) — exact runtime path,
+   module dependency map, composition roots, adapter ports, and persistence authorities.
+3. [`planning-lifecycle.md`](planning-lifecycle.md) — context discovery, mandatory
    planning, optional plan review, candidate revision, validation, and freeze.
-3. [`implementation-plan.md`](implementation-plan.md) — phased route from the current
+4. [`implementation-plan.md`](implementation-plan.md) — phased route from the current
    kernel cutover to the pilot release.
-4. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
+5. [`test-spec.md`](test-spec.md) — domain, Temporal, recovery, effect, UI, and pilot
    acceptance gates.
-5. [`customization-guide.md`](customization-guide.md) — adding blocks, prompts, skills,
+6. [`customization-guide.md`](customization-guide.md) — adding blocks, prompts, skills,
    policies, providers, trackers, repositories, and company packs.
-6. [`docker-execution.md`](docker-execution.md) — Docker-only agent/process execution,
+7. [`docker-execution.md`](docker-execution.md) — Docker-only agent/process execution,
    task-scoped services, caches, and project bootstrap.
-7. [`technology-decisions.md`](technology-decisions.md) — concrete implementation
+8. [`technology-decisions.md`](technology-decisions.md) — concrete implementation
    choices that remain below the architecture boundary.
-8. [`research-index.md`](research-index.md) — external evidence and decision trail.
+9. [`research-index.md`](research-index.md) — external evidence and decision trail.
 
 The deleted M0–M2 and T1–T4 documents described superseded implementations. Git
 history is the audit trail; they are not inputs to new work.

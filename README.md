@@ -52,7 +52,7 @@ dedicated recovery tests have been deleted. Current development data is disposab
 only the current run-snapshot schema is accepted. Reproduction evidence is private run
 evidence and is not attached to Jira automatically.
 
-Block Contract v2 is authoritative: an agent may return a candidate claim, but only
+Block Contract v3 is authoritative: an agent may return a candidate claim, but only
 independently collected process, artifact, workspace, or reconciled-effect evidence can
 produce the immutable receipt that advances the graph. Provider/model selection is a
 strict versioned execution-profile decision resolved before freeze. See
@@ -83,5 +83,5 @@ endpoint has priority; `JENKINS_USER` and `JENKINS_TOKEN` remain the shared cred
 An authorization failure pauses the CI step without losing the pushed branch or PR.
 
 The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:cockpit` commands remain
-available for diagnosing one process in isolation. `demo:m1` starts the same complete
-`pnpm dev` stack; it is not a second runtime.
+available for diagnosing one process in isolation. They are components of the same
+runtime, not alternative execution paths.

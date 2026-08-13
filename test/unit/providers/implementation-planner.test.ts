@@ -10,16 +10,14 @@ import {
   type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
 import { getHarnessPack } from '../../../src/harness/index.js';
-import { analyzeTaskFixture, findTaskFixture } from '../../../src/planning/index.js';
 import { WorkflowSourceSchema, type WorkflowNodeSource } from '../../../src/workflow/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
+import { makePlanningTaskSnapshot, makeWorkflowProposal } from '../../support/planning.js';
 
-const task = findTaskFixture('avia-13236-short-bug');
-if (task === undefined) throw new Error('Missing planner test fixture');
-const proposal = analyzeTaskFixture(task);
-if (!proposal.ok) throw new Error('Invalid planner test fixture');
-const workflowSource = WorkflowSourceSchema.parse(proposal.value.source);
+const task = makePlanningTaskSnapshot('avia-13236-short-bug');
+const proposal = makeWorkflowProposal();
+const workflowSource = WorkflowSourceSchema.parse(proposal.source);
 const workflowStepIds: string[] = [];
 const collectWorkflowStepIds = (node: WorkflowNodeSource): void => {
   switch (node.kind) {
@@ -82,9 +80,9 @@ const readyDecision = {
   },
   followUps: [],
   workflow: {
-    assemblyDecisions: proposal.value.assemblyDecisions,
+    assemblyDecisions: proposal.assemblyDecisions,
     source: workflowSource,
-    verificationPlan: proposal.value.verificationPlan,
+    verificationPlan: proposal.verificationPlan,
   },
 } as const;
 

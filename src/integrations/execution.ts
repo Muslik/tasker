@@ -1,4 +1,4 @@
-import type { TaskFixture } from '../planning/fixtures.js';
+import type { PlanningTaskSnapshot } from '../planning/task-snapshot.js';
 import type { HarnessPolicyManifest, HarnessProjectManifest } from '../harness/index.js';
 import type { JsonValue } from '../workflow/schema.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
@@ -31,7 +31,7 @@ export interface IntegrationStepExecutionRequest {
   readonly operationId: string;
   readonly stepReference: string;
   readonly taskReference: string;
-  readonly task: TaskFixture;
+  readonly task: PlanningTaskSnapshot;
   readonly taskSnapshot: JsonValue;
   readonly stepInput: JsonValue;
   readonly workspace: WorkspaceLocator;

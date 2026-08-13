@@ -11,13 +11,12 @@ import {
   type JenkinsFinishedBuild,
   type JenkinsObserverTime,
 } from '../../../src/integrations/index.js';
-import { findTaskFixture } from '../../../src/planning/index.js';
 import type { CommandRunner } from '../../../src/providers/command-runner.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
+import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
 const revision = 'a'.repeat(40);
-const task = findTaskFixture('avia-13236-short-bug');
-if (task === undefined) throw new Error('Missing fixture');
+const task = makePlanningTaskSnapshot('avia-13236-short-bug');
 const pack = loadHarnessPack();
 const project = pack.projects.find(({ repository }) => repository === task.repository);
 if (project === undefined) throw new Error('Missing project profile');
@@ -47,7 +46,7 @@ const commands: CommandRunner = {
 const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
   operationId: 'tasker:test:observe-ci:attempt-1',
   stepReference: 'ci.observe@1',
-  taskReference: task.fixtureId,
+  taskReference: task.reference,
   task,
   taskSnapshot: task,
   stepInput: {
@@ -58,8 +57,8 @@ const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
   workspace: {
     schemaVersion: 1,
     workspaceId: 'b'.repeat(24),
-    taskReference: task.fixtureId,
-    workflowId: `tasker:${task.fixtureId}`,
+    taskReference: task.reference,
+    workflowId: `tasker:${task.reference}`,
     workflowRunId: 'run-1',
     repository: {
       reference: task.repository,

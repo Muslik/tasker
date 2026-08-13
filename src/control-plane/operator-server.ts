@@ -15,15 +15,16 @@ import {
   loadJiraConfiguration,
   loadLoopPlanningEvidenceConfiguration,
   LoopPlanningEvidenceReader,
+  JiraWorkflowGenerationSubjectResolver,
   PullRequestReviewEvidenceStore,
 } from '../integrations/index.js';
 import {
   SubscriptionCliImplementationPlanner,
   SubscriptionCliWorkflowAnalyzer,
-  DeterministicImplementationPlanner,
   nodeCommandRunner,
 } from '../providers/index.js';
 import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
+import { WorkflowGenerationSubjectSource } from '../planning/index.js';
 import {
   BitbucketRepositoryClient,
   createManagedRepositoryStore,
@@ -37,14 +38,14 @@ import {
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
-import { buildM1Api } from './m1-api.js';
+import { buildOperatorApi } from './operator-api.js';
 import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { PlanReviewStore } from './plan-review.js';
-import { createM1WorkflowService } from './m1-service.js';
-import { WorkflowGenerationSubjectSource } from './workflow-generator.js';
+import { createOperatorWorkflowService } from './operator-service.js';
+import { PersistedGenerationSubjectResolver } from './persisted-generation-subject.js';
 import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
@@ -61,12 +62,12 @@ const parsePort = (input: string | undefined): number => {
   return port;
 };
 
-export const startM1Server = async (): Promise<void> => {
-  const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/m1-operator.sqlite');
+export const startOperatorServer = async (): Promise<void> => {
+  const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/operator.sqlite');
   mkdirSync(dirname(databasePath), { recursive: true });
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
-  const service = createM1WorkflowService(ledger.repository, systemClock);
+  const service = createOperatorWorkflowService(ledger.repository, systemClock);
   const temporalConfiguration: TemporalClientConfiguration = {
     ...DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
     address: process.env.TASKER_TEMPORAL_ADDRESS ?? DEFAULT_TEMPORAL_CLIENT_CONFIGURATION.address,
@@ -87,7 +88,6 @@ export const startM1Server = async (): Promise<void> => {
   const jiraIssueService = createJiraIssueService(ledger.repository, systemClock, jiraClient, {
     repositoryCatalog,
   });
-  const deterministicProviders = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
   const harnessPack = loadHarnessPack();
   const dockerConfiguration = loadDockerWorkspaceConfiguration();
   const dockerCommands = new DockerWorkspaceCommandRunner(
@@ -95,22 +95,22 @@ export const startM1Server = async (): Promise<void> => {
     nodeCommandRunner,
     new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
   );
-  const continuationAnalyzer = deterministicProviders
-    ? undefined
-    : new SubscriptionCliWorkflowAnalyzer(dockerCommands, (repositoryReference) => {
-        const project = harnessPack.projects.find(
-          (candidate) => candidate.repository === repositoryReference,
-        );
-        return resolveWorkflowAnalyzerProfile(
-          harnessPack.company,
-          project?.executionProfileOverrides ?? null,
-        );
-      });
-  const subjects = new WorkflowGenerationSubjectSource(
-    resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
-    jiraIssueService,
-    service,
+  const continuationAnalyzer = new SubscriptionCliWorkflowAnalyzer(
+    dockerCommands,
+    (repositoryReference) => {
+      const project = harnessPack.projects.find(
+        (candidate) => candidate.repository === repositoryReference,
+      );
+      return resolveWorkflowAnalyzerProfile(
+        harnessPack.company,
+        project?.executionProfileOverrides ?? null,
+      );
+    },
   );
+  const subjects = new WorkflowGenerationSubjectSource([
+    new PersistedGenerationSubjectResolver(service),
+    new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+  ]);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
   const evidenceReaders = new PlanningEvidenceReaderRegistry([
     new JiraPlanningEvidenceReader(jiraClient, systemClock),
@@ -124,9 +124,7 @@ export const startM1Server = async (): Promise<void> => {
     subjects,
     evidenceBundles,
     evidenceReaders,
-    planner: deterministicProviders
-      ? new DeterministicImplementationPlanner()
-      : new SubscriptionCliImplementationPlanner(dockerCommands),
+    planner: new SubscriptionCliImplementationPlanner(dockerCommands),
     harnessPack,
   });
   const workflowContinuation = createWorkflowContinuationCoordinator({
@@ -134,7 +132,7 @@ export const startM1Server = async (): Promise<void> => {
     clock: systemClock,
     workflows: service,
     subjects,
-    ...(continuationAnalyzer === undefined ? {} : { analyzer: continuationAnalyzer }),
+    analyzer: continuationAnalyzer,
     repositories: repositoryCatalog,
   });
   const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
@@ -147,7 +145,7 @@ export const startM1Server = async (): Promise<void> => {
           new PullRequestReviewEvidenceStore(ledger.repository, systemClock),
         );
   const cockpitDirectory = resolve('dist/cockpit');
-  const api = buildM1Api({
+  const api = buildOperatorApi({
     service,
     jiraIssueService,
     logger: true,
@@ -175,5 +173,5 @@ export const startM1Server = async (): Promise<void> => {
 
 const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url);
 if (isEntrypoint) {
-  await startM1Server();
+  await startOperatorServer();
 }

@@ -3,7 +3,7 @@ import {
   OperatorTaskSummarySchema,
   type OperatorActivityResponse,
   type OperatorTaskSummary,
-} from '../../control-plane/m1-contracts.js';
+} from '../../control-plane/operator-contracts.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
 import { StaticRepositoryCatalog, type RepositoryCatalog } from '../../repositories/catalog.js';
 import {
@@ -273,8 +273,8 @@ export class JiraIssueService {
 
     return ok(
       OperatorActivityResponseSchema.parse({
-        fixtureId: taskReference,
-        providerSession: { status: 'not_started', reason: 'm1_planning_only' },
+        taskReference: taskReference,
+        providerSession: { status: 'not_started', reason: 'planning_only' },
         entries: [],
       }),
     );

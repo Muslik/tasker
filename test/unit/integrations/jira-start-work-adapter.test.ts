@@ -15,15 +15,12 @@ import {
 } from '../../../src/integrations/index.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
 import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
-import { findTaskFixture, TaskFixtureSchema } from '../../../src/planning/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
+import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
-const sourceTask = findTaskFixture('avia-12536-feature-review');
-if (sourceTask === undefined) throw new Error('Missing feature test fixture');
-const task = TaskFixtureSchema.parse({
-  ...sourceTask,
+const task = makePlanningTaskSnapshot('avia-12536-feature-review', {
   origin: 'jira',
-  fixtureId: 'jira:AVIA-12536',
+  reference: 'jira:AVIA-12536',
 });
 const jiraPolicy = loadHarnessPack().policies.find(({ id }) => id === 'jira-lifecycle');
 if (jiraPolicy === undefined) throw new Error('Missing Jira lifecycle policy');
@@ -31,7 +28,7 @@ if (jiraPolicy === undefined) throw new Error('Missing Jira lifecycle policy');
 const requestFor = (operationId: string): IntegrationStepExecutionRequest => ({
   operationId,
   stepReference: 'jira.start-work@1',
-  taskReference: task.fixtureId,
+  taskReference: task.reference,
   task,
   taskSnapshot: {
     origin: 'jira',
@@ -41,8 +38,8 @@ const requestFor = (operationId: string): IntegrationStepExecutionRequest => ({
   workspace: {
     schemaVersion: 1,
     workspaceId: 'a'.repeat(24),
-    taskReference: task.fixtureId,
-    workflowId: `tasker:${task.fixtureId}`,
+    taskReference: task.reference,
+    workflowId: `tasker:${task.reference}`,
     workflowRunId: 'run-1',
     repository: {
       reference: task.repository,

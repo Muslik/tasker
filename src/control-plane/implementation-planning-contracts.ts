@@ -10,6 +10,7 @@ import { PlanningSnapshotReferenceSchema } from '../planning/run-planning-snapsh
 import { EvidenceBundleReferenceSchema } from '../planning/evidence-bundle.js';
 import { ImplementationPlannerReceiptSchema } from '../providers/contracts.js';
 import { PlanningEvidenceRequestSchema } from '../planning/planning-evidence.js';
+import { ImplementationPlanningFailureSchema } from '../planning/planning-failure.js';
 
 const PlanningEvidencePendingObjectSchema = z
   .object({
@@ -39,24 +40,6 @@ export const ValidatedPlanningCandidateSchema = z
   })
   .strict()
   .readonly();
-
-export const PlanningFailureViewSchema = z
-  .object({
-    kind: z.enum([
-      'invalid_skill_selection',
-      'invalid_skill_package',
-      'skill_unavailable',
-      'skill_materialization_failed',
-      'provider_unavailable',
-      'provider_timed_out',
-      'provider_failed',
-      'invalid_event_stream',
-      'invalid_planner_output',
-    ]),
-    message: z.string().min(1),
-    retryable: z.boolean(),
-  })
-  .strict();
 
 const PlanningRecordBaseSchema = z.object({
   schemaVersion: z.literal(2),
@@ -115,7 +98,7 @@ export const ImplementationPlanningRecordSchema = z.discriminatedUnion('status',
   PlanningRecordBaseSchema.extend({
     status: z.literal('failed'),
     completedAt: z.iso.datetime(),
-    failure: PlanningFailureViewSchema,
+    failure: ImplementationPlanningFailureSchema,
     receipt: ImplementationPlannerReceiptSchema.nullable(),
   }).strict(),
 ]);

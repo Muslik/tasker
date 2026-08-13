@@ -7,7 +7,7 @@ import {
   HarnessProjectManifestSchema,
 } from '../harness/contracts.js';
 import { ResolvedExecutionProfileSchema } from '../harness/execution-profile-contracts.js';
-import { TaskFixtureSchema } from './fixtures.js';
+import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import type { Outcome } from '../shared/outcome.js';
 import { JsonValueSchema, StepActivityDeliverySchema } from '../workflow/schema.js';
 import { EvidenceBundleReferenceSchema } from './evidence-bundle.js';
@@ -70,7 +70,7 @@ const SnapshottedHarnessSchema = z
 const RunSnapshotBaseSchema = z.object({
   schemaVersion: z.literal(8),
   taskReference: z.string().min(1),
-  task: TaskFixtureSchema,
+  task: PlanningTaskSnapshotSchema,
   taskSnapshot: JsonValueSchema,
   repository: z
     .object({

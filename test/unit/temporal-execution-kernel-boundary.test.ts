@@ -8,7 +8,7 @@ import { ExecutionWorkflowInputSchema } from '../../src/temporal/execution-kerne
 const graph = {
   metadata: {
     compilerVersion: 4,
-    irVersion: 'm2',
+    irVersion: 'workflow-ir-v1',
     references: { predicates: [], stepTypes: [], waits: [] },
     workflowId: 'boundary-fixture',
     workflowVersion: 1,

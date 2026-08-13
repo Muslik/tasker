@@ -9,7 +9,10 @@ import {
 } from '../temporal/activities/block-execution.js';
 import { systemClock } from '../shared/clock.js';
 import type { PlanningTranscriptView } from './planning-transcript.js';
-import { OperatorActivityEntrySchema, type OperatorActivityResponse } from './m1-contracts.js';
+import {
+  OperatorActivityEntrySchema,
+  type OperatorActivityResponse,
+} from './operator-contracts.js';
 
 const ArtifactPointerSchema = z.object({ artifactId: z.string().min(1) }).strict();
 

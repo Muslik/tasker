@@ -8,7 +8,6 @@ import {
 } from '../../src/harness/index.js';
 import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { findTaskFixture } from '../../src/planning/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
 import type { CommandRunner, WorkspaceCommandRunner } from '../../src/providers/command-runner.js';
 import { err, ok } from '../../src/shared/outcome.js';
@@ -24,6 +23,7 @@ import type {
   DockerWorkspaceRuntimePreparer,
   DockerWorkspaceRuntimeReceipt,
 } from '../../src/workspaces/index.js';
+import { makePlanningTaskSnapshot } from '../support/planning.js';
 
 const workspaceCommands = (run: CommandRunner['run'] = vi.fn()): WorkspaceCommandRunner => ({
   executionEnvironment: 'docker_workspace',
@@ -31,12 +31,8 @@ const workspaceCommands = (run: CommandRunner['run'] = vi.fn()): WorkspaceComman
 });
 
 const pack = loadHarnessPack();
-const fixture = findTaskFixture('avia-13236-short-bug');
-if (fixture === undefined) throw new Error('Missing avia-13236-short-bug fixture');
-const translationFixture = findTaskFixture('avia-14001-translation-component');
-if (translationFixture === undefined) {
-  throw new Error('Missing avia-14001-translation-component fixture');
-}
+const fixture = makePlanningTaskSnapshot('avia-13236-short-bug');
+const translationFixture = makePlanningTaskSnapshot('avia-14001-translation-component');
 
 const project = pack.projects.find((candidate) => candidate.repository === fixture.repository);
 if (project === undefined) throw new Error('Missing harness project for fixture repository');

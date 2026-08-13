@@ -26,7 +26,7 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   graph: {
     metadata: {
       compilerVersion: 4,
-      irVersion: 'm2',
+      irVersion: 'workflow-ir-v1',
       references: {
         predicates: ['investigation.ready@1', 'repair.done@1', 'review.accepted@1'],
         stepTypes: ['fixture.inspect@1', 'fixture.repair@1'],
@@ -103,7 +103,7 @@ const ciWorkflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   graph: {
     metadata: {
       compilerVersion: 4,
-      irVersion: 'm2',
+      irVersion: 'workflow-ir-v1',
       references: {
         predicates: ['ci.change_failure@1', 'ci.passed@1'],
         stepTypes: ['fixture.ci-observe@1', 'fixture.ci-repair@1'],
@@ -320,6 +320,7 @@ describe('Execution Workflow v2 recovery', () => {
 
     expect(
       await runs.resolveWait(workflowIdFor('fixture:first'), {
+        runId: firstApproval.runId,
         nodeId: 'approval',
         waitKind: 'review.accepted@1',
         resolution: { approved: true },
@@ -336,6 +337,7 @@ describe('Execution Workflow v2 recovery', () => {
 
     expect(
       await runs.resolveWait(workflowIdFor('fixture:second'), {
+        runId: secondApproval.runId,
         nodeId: 'approval',
         waitKind: 'review.accepted@1',
         resolution: { approved: true },
@@ -345,6 +347,7 @@ describe('Execution Workflow v2 recovery', () => {
 
     expect(
       await runs.resolveWait(workflowIdFor('fixture:first'), {
+        runId: firstApproval.runId,
         nodeId: 'human-review',
         waitKind: 'human.review@1',
         resolution: { decision: 'approved' },
@@ -374,13 +377,14 @@ describe('Execution Workflow v2 recovery', () => {
 
     expect(await runs.start(firstWorkflowId, input)).toMatchObject({ ok: true });
     expect(await runs.start(secondWorkflowId, input)).toMatchObject({ ok: true });
-    await Promise.all([
+    const [firstApproval] = await Promise.all([
       waitFor(taskReference, 'review.accepted@1', firstWorkflowId),
       waitFor(taskReference, 'review.accepted@1', secondWorkflowId),
     ]);
 
     expect(
       await runs.resolveWait(firstWorkflowId, {
+        runId: firstApproval.runId,
         nodeId: 'approval',
         waitKind: 'review.accepted@1',
         resolution: { approved: true },
@@ -407,7 +411,8 @@ describe('Execution Workflow v2 recovery', () => {
       await runs.start(workflowIdFor(taskReference), workflowInput(taskReference)),
     ).toMatchObject({ ok: true });
 
-    expect(await waitFor(taskReference, 'fixture.inspect@1.activity-failed@1')).toMatchObject({
+    const failed = await waitFor(taskReference, 'fixture.inspect@1.activity-failed@1');
+    expect(failed).toMatchObject({
       status: 'waiting',
       currentNodeId: 'inspect',
       blockRuns: { inspect: 1 },
@@ -415,6 +420,7 @@ describe('Execution Workflow v2 recovery', () => {
 
     expect(
       await runs.resolveWait(workflowIdFor(taskReference), {
+        runId: failed.runId,
         nodeId: 'inspect',
         waitKind: 'fixture.inspect@1.activity-failed@1',
         resolution: { decision: 'resume', guidance: 'Retry the preserved execution.' },
@@ -465,7 +471,8 @@ describe('Execution Workflow v2 recovery', () => {
     expect(
       await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
     ).toMatchObject({ ok: true });
-    expect(await waitFor(taskReference, 'ci.manual@1')).toMatchObject({
+    const waiting = await waitFor(taskReference, 'ci.manual@1');
+    expect(waiting).toMatchObject({
       status: 'waiting',
       blockRuns: { 'observe-ci': 1 },
       loopIterations: { 'ci-recovery-loop': 1 },
@@ -473,6 +480,7 @@ describe('Execution Workflow v2 recovery', () => {
 
     expect(
       await runs.resolveWait(workflowIdFor(taskReference), {
+        runId: waiting.runId,
         nodeId: 'wait-for-ci',
         waitKind: 'ci.manual@1',
         resolution: { decision: 'resume' },

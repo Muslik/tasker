@@ -16,13 +16,12 @@ import {
   loadGitCommitIdentity,
 } from '../../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
-import { findTaskFixture } from '../../../src/planning/index.js';
 import { nodeCommandRunner, type WorkspaceCommandRunner } from '../../../src/providers/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
+import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
-const task = findTaskFixture('avia-13236-short-bug');
-if (task === undefined) throw new Error('Missing test task fixture');
+const task = makePlanningTaskSnapshot('avia-13236-short-bug');
 
 const git = (cwd: string, args: readonly string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -129,7 +128,7 @@ const requestFor = (
 ): IntegrationStepExecutionRequest => ({
   operationId,
   stepReference: 'pr.prepare@1',
-  taskReference: task.fixtureId,
+  taskReference: task.reference,
   task,
   taskSnapshot: task,
   stepInput: {
@@ -141,8 +140,8 @@ const requestFor = (
   workspace: {
     schemaVersion: 1,
     workspaceId: 'a'.repeat(24),
-    taskReference: task.fixtureId,
-    workflowId: `tasker:${task.fixtureId}`,
+    taskReference: task.reference,
+    workflowId: `tasker:${task.reference}`,
     workflowRunId: 'run-1',
     repository: {
       reference: task.repository,

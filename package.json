@@ -35,13 +35,11 @@
     "test:integration": "pnpm test:repository && pnpm test:contract",
     "test:coverage": "vitest run --coverage.enabled",
     "dev": "pnpm build && node scripts/start-local.mjs",
-    "demo:m1": "pnpm dev",
-    "dev:api:m1": "pnpm build:server && node dist/control-plane/m1-server.js",
+    "dev:api:operator": "pnpm build:server && node dist/control-plane/operator-server.js",
     "dev:cockpit": "vite",
     "temporal:dev": "temporal server start-dev --namespace tasker-dev --db-filename .tasker/temporal.sqlite",
-    "temporal:api": "pnpm dev:api:m1",
+    "temporal:api": "pnpm dev:api:operator",
     "temporal:worker": "pnpm build:server && node dist/temporal/worker-main.js",
-    "e2e:api": "pnpm build:server && exec node scripts/start-m1-e2e.mjs",
     "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {

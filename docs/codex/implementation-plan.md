@@ -1,12 +1,11 @@
 # Tasker v4 delivery plan
 
-Status: canonical execution plan, 2026-08-10
+Status: canonical execution plan, 2026-08-13
 
-The detailed implementation-ready plan is
+The detailed historical execution plan is
 [`../../.omx/plans/implementation-plan-task-adaptive-agent-harness-v4.md`](../../.omx/plans/implementation-plan-task-adaptive-agent-harness-v4.md).
-It supersedes the T0-T7 milestone plan and the task-family-oriented T4 graph as the
-target architecture. Superseded milestone documents are deleted rather than parsed,
-indexed, or preserved as compatibility guidance; Git history remains the audit trail.
+This file is the current phase map; canonical architecture and tests live beside it in
+`docs/codex`. Superseded milestone documents remain only in Git history.
 
 ## Goal
 
@@ -55,7 +54,7 @@ Each phase follows this order:
 | Phase | Result | Operator checkpoint |
 |---|---|---|
 | 0. Canonical reset | docs and tests describe the v4 boundaries | current guarantees inventoried |
-| 1. Temporal kernel v2 | frozen graphs run through a vendor-free interpreter | A: fixture graph survives restart |
+| 1. Temporal kernel | frozen graphs run through a vendor-free interpreter | A: independent graphs survive restart |
 | 2. Block contract v3 | claims require evidence; receipts own predicate facts | B: claim, evaluator, and evidence are inspectable |
 | 3. Execution profiles | Codex/Claude profiles and actual models are configurable | actual profile visible |
 | 4. Honest bootstrap | context, investigation, plan, validation, then freeze | C: real task becomes a task-specific graph |
@@ -74,6 +73,13 @@ Bootstrap v3 plus Execution v2 is the only runtime path. Bootstrap owns preparat
 planning, review, validation, and freeze; Execution owns deterministic traversal of the
 frozen graph. The old Workflow type, compatibility parser, registry, state adapter,
 tests, and Jira before-evidence policy are deleted.
+
+The cleanup cut also removes production fixture composers, task-family inference,
+deterministic planner fallbacks, M0/M1 control-plane naming, and incremental schema
+migrations. Production planning now starts from a neutral `WorkflowGenerationSubject`
+resolved by registered task-source adapters, and a new installation creates the one
+current SQLite baseline. Repository architecture tests prevent the workflow domain and
+Temporal kernels from importing the operator control plane or external integrations.
 
 An accepted plan starts Execution immediately after freeze. There is no separate
 operator launch gate or passive planned state. During an active run the operator

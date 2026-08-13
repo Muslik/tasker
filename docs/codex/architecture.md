@@ -1,6 +1,6 @@
 # Tasker architecture
 
-Status: canonical target architecture, v4 Temporal revision, 2026-08-10
+Status: canonical architecture, 2026-08-13
 
 ## 1. Product boundary
 
@@ -77,7 +77,7 @@ flowchart LR
   BW --> FW["Frozen task workflow"]
   FW --> WF["Execution Workflow kernel"]
   WF --> ACT["Block runner + effect Activities"]
-  ACT --> AG["Codex / Claude / Antigravity adapters"]
+  ACT --> AG["Codex / Claude adapters"]
   ACT --> WT["Managed worktrees + Docker task runtimes"]
   ACT --> EXT["Jira / Bitbucket / Jenkins / Confluence"]
   ACT --> DB
@@ -185,6 +185,11 @@ silently.
 Bootstrap v3 is the only bootstrap runtime. The previous bootstrap implementation,
 precompiled-graph generation path, workflow IDs, and tests are deleted rather than
 supported in parallel.
+
+The exact module and dependency map is documented in
+[`technical-architecture.md`](technical-architecture.md). In particular, the durable
+core imports neither the control plane nor tracker/SCM/CI adapters; only the API and
+worker composition roots choose concrete external systems.
 After the plan fits and optional operator review succeeds, the accepted compiled graph,
 run policy, and hashes become the frozen execution input only after Tasker persists an
 immutable receipt containing the task/run identity, graph hash, planning artifact and

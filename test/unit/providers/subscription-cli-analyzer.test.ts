@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { findTaskFixture, planTaskWorkflow } from '../../../src/planning/index.js';
 import {
   SubscriptionCliWorkflowAnalyzer,
   type CommandRequest,
@@ -10,27 +9,14 @@ import {
 } from '../../../src/providers/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
+import {
+  makeAnalyzerOutput,
+  makePlanningTaskSnapshot,
+  makeTaskFixture,
+} from '../../support/planning.js';
 
-const fixture = () => {
-  const value = findTaskFixture('avia-13236-short-bug');
-  if (value === undefined) {
-    throw new Error('Expected short bug fixture');
-  }
-  return value;
-};
-
-const validAnalyzerOutput = () => {
-  const planned = planTaskWorkflow(fixture());
-  if (!planned.ok) {
-    throw new Error('Expected deterministic proposal fixture to compile');
-  }
-
-  return {
-    assemblyDecisions: planned.value.proposal.assemblyDecisions,
-    source: planned.value.proposal.source,
-    verificationPlan: planned.value.proposal.verificationPlan,
-  };
-};
+const fixture = () => makePlanningTaskSnapshot('avia-13236-short-bug');
+const validAnalyzerOutput = () => makeAnalyzerOutput(makeTaskFixture());
 
 const codexJsonl = (finalMessage: string): string =>
   [

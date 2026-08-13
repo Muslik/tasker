@@ -83,6 +83,7 @@ export const ExecutionWorkflowPublicStateSchema = z.discriminatedUnion('status',
 
 export const ResolveExecutionWaitCommandSchema = z
   .object({
+    runId: z.string().min(1),
     nodeId: z.string().min(1),
     waitKind: z.string().min(1),
     resolution: JsonValueSchema,

@@ -5,9 +5,11 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import { z } from 'zod';
 import {
   createWorkflowAnalyzerContext,
-  TaskFixtureSchema,
+  PlanningTaskSnapshotSchema,
   type WorkflowChangeRequest,
-  type TaskFixture,
+  type PlanningTaskSnapshot,
+  type WorkflowGenerationSubject,
+  type WorkflowGenerationSubjectSource,
 } from '../planning/index.js';
 import type { RepositoryCatalog, RepositoryResolution } from '../repositories/catalog.js';
 import type { Clock } from '../shared/clock.js';
@@ -20,14 +22,9 @@ import {
   type OperatorStreamEvent,
   type OperatorTaskSummary,
   type WorkflowResponse,
-} from './m1-contracts.js';
-import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
-import type {
-  WorkflowAnalyzer,
-  WorkflowContextDiscovery,
-  WorkflowGenerationSubject,
-  WorkflowGenerationSubjectSource,
-} from './workflow-generator.js';
+} from './operator-contracts.js';
+import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
+import type { WorkflowAnalyzer, WorkflowContextDiscovery } from './workflow-generator.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from './evidence-bundle.js';
 import {
   WorkflowContinuationIssueSchema,
@@ -65,7 +62,7 @@ type WorkflowContinuationStoreError =
 
 export type WorkflowContinuationError =
   | { readonly kind: 'store'; readonly error: WorkflowContinuationStoreError }
-  | { readonly kind: 'subject'; readonly error: M1ServiceError }
+  | { readonly kind: 'subject'; readonly error: OperatorServiceError }
   | { readonly kind: 'parent_workflow_not_ready'; readonly parentTaskReference: string };
 
 const aggregateIdFor = (parentRunId: string): string => `workflow-continuation:${parentRunId}`;
@@ -275,39 +272,31 @@ const continuationTaskReference = (
   return `continuation-${normalized}-${runScope}-${String(attempt)}`;
 };
 
-const targetRepositoryFor = (subject: WorkflowGenerationSubject): string =>
-  subject.task.family === 'shared_component'
-    ? subject.task.componentRepository
-    : subject.task.repository;
+const targetRepositoryFor = (subject: WorkflowGenerationSubject): string => subject.task.repository;
 
 const qualifiedAlias = (resolution: Extract<RepositoryResolution, { readonly status: 'found' }>) =>
   resolution.repository.aliases.find((alias) => alias.includes('/')) ?? null;
 
-const continuationFixture = (
+const continuationTask = (
   subject: WorkflowGenerationSubject,
-  fixtureId: string,
+  reference: string,
   repositoryReference: string,
   reason: string,
-): TaskFixture => {
-  const common = {
+): PlanningTaskSnapshot =>
+  PlanningTaskSnapshotSchema.parse({
     ...subject.task,
-    fixtureId,
+    reference,
+    taskId: reference,
     title: `Continuation: ${subject.task.title}`,
     description: `${subject.task.description}\n\nWorkflow continuation: ${reason}`,
-  };
-  return TaskFixtureSchema.parse(
-    subject.task.family === 'shared_component'
-      ? { ...common, componentRepository: repositoryReference }
-      : { ...common, repository: repositoryReference },
-  );
-};
+    repository: repositoryReference,
+  });
 
 const providerFailureIssue = (message: string) =>
   WorkflowContinuationIssueSchema.parse({ code: 'generation_failed', message, retryable: true });
 
-const generationFailureMessage = (error: M1ServiceError): string => {
+const generationFailureMessage = (error: OperatorServiceError): string => {
   switch (error.kind) {
-    case 'fixture_not_found':
     case 'task_not_found':
       return `Continuation task was not available: ${error.kind}`;
     case 'generation_blocked':
@@ -329,9 +318,9 @@ export class WorkflowContinuationCoordinator {
   public constructor(
     private readonly store: WorkflowContinuationStore,
     private readonly clock: Clock,
-    private readonly workflows: M1WorkflowService,
+    private readonly workflows: OperatorWorkflowService,
     private readonly subjects: WorkflowGenerationSubjectSource,
-    private readonly analyzer: WorkflowAnalyzer | undefined,
+    private readonly analyzer: WorkflowAnalyzer,
     private readonly repositories: RepositoryCatalog | undefined,
     private readonly contextDiscovery: WorkflowContextDiscovery,
   ) {}
@@ -427,7 +416,7 @@ export class WorkflowContinuationCoordinator {
       );
     }
 
-    const fixture = continuationFixture(
+    const task = continuationTask(
       subject.value,
       candidateTaskReference,
       repository.reference,
@@ -446,7 +435,7 @@ export class WorkflowContinuationCoordinator {
     const savedSubject = this.workflows.saveGenerationSubject(candidateTaskReference, {
       schemaVersion: 1,
       repositoryPath: repository.path,
-      task: fixture,
+      task,
       taskSnapshot,
     });
     if (!savedSubject.ok) {
@@ -459,7 +448,7 @@ export class WorkflowContinuationCoordinator {
       );
     }
     const generated = await this.generateContinuation(
-      fixture,
+      task,
       repository.path,
       taskSnapshot,
       continuationId,
@@ -664,7 +653,7 @@ export class WorkflowContinuationCoordinator {
           ? [
               OperatorStreamEventSchema.parse({
                 sequence: event.sequence,
-                fixtureId: payload.data.parentTaskReference,
+                taskReference: payload.data.parentTaskReference,
                 eventType: event.eventType,
               }),
             ]
@@ -761,40 +750,37 @@ export class WorkflowContinuationCoordinator {
   }
 
   private async generateContinuation(
-    fixture: TaskFixture,
+    task: PlanningTaskSnapshot,
     repositoryPath: string,
     taskSnapshot: JsonValue,
     continuationId: string,
-  ): Promise<Outcome<WorkflowResponse, M1ServiceError>> {
-    const analyzerContext = createWorkflowAnalyzerContext(fixture, taskSnapshot);
+  ): Promise<Outcome<WorkflowResponse, OperatorServiceError>> {
+    const analyzerContext = createWorkflowAnalyzerContext(task, taskSnapshot);
     const evidence = await this.contextDiscovery.discover({
-      taskReference: fixture.fixtureId,
+      taskReference: task.reference,
       operationId: `${continuationId}:context`,
       taskSnapshot,
       plannerContext: analyzerContext.plannerContext,
-      repositoryReference: fixture.repository,
+      repositoryReference: task.repository,
       repositoryPath,
     });
     if (!evidence.ok) {
       return err({
         kind: 'generation_blocked',
-        taskReference: fixture.fixtureId,
+        taskReference: task.reference,
         reason: `Continuation context discovery failed: ${evidence.error.kind}`,
       });
     }
     const workflowOperationId = `${continuationId}:workflow-candidate:1`;
-    if (this.analyzer === undefined) {
-      return this.workflows.assembleTaskAtOperation(fixture, workflowOperationId);
-    }
     const analyzed = await this.analyzer.analyze({
       ...analyzerContext,
       repositoryPath,
-      repositoryReference: fixture.repository,
+      repositoryReference: task.repository,
       evidenceBundle: evidence.value.bundle,
     });
     return analyzed.ok
       ? this.workflows.assembleContinuationFromAnalyzerOutputAtOperation(
-          fixture,
+          task,
           analyzed.value.output,
           analyzed.value.receipt,
           workflowOperationId,
@@ -858,9 +844,9 @@ export class WorkflowContinuationCoordinator {
 export const createWorkflowContinuationCoordinator = (input: {
   readonly ledger: LedgerRepository;
   readonly clock: Clock;
-  readonly workflows: M1WorkflowService;
+  readonly workflows: OperatorWorkflowService;
   readonly subjects: WorkflowGenerationSubjectSource;
-  readonly analyzer?: WorkflowAnalyzer;
+  readonly analyzer: WorkflowAnalyzer;
   readonly repositories?: RepositoryCatalog;
   readonly contextDiscovery?: WorkflowContextDiscovery;
 }): WorkflowContinuationCoordinator =>

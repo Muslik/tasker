@@ -1,6 +1,6 @@
 # Customizing Tasker
 
-Status: canonical extension guide, Block Contract v3 revision, 2026-08-10
+Status: canonical extension guide, Block Contract v3 revision, 2026-08-13
 
 Tasker has no reusable workflow templates. Every initial workflow is assembled from an
 empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
@@ -19,7 +19,7 @@ Workflow code.
 | Block catalog | `harness/steps/<step>/step.json` | versioned task capabilities and Activity bindings |
 | Typed block ABI | `src/harness/step-contracts.ts` | runtime validation for named manifest input/output contracts |
 | Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
-| Agent prompts | `harness/prompts/` | readable analyzer/planner/step instructions |
+| Agent prompts | `harness/prompts/` and `harness/steps/*/prompt.md` | global planner/analyzer prompts and colocated step instructions |
 | Company policy | `harness/company.json` | reusable organization-wide workflow facts |
 | Project workflow policy | `harness/projects/*/project.json` | repository-specific translation/test/publication facts |
 | Project guidance | `harness/projects/*/workflow.md` | short human-readable workflow context, never effect authority |
@@ -56,7 +56,7 @@ content and hashes, resolves enabled policies, merges project overrides, and pro
 immutable catalog. The exact catalog exposed to the planner is assembled by
 [`src/planning/analyzer-context.ts`](../../src/planning/analyzer-context.ts):
 
-- policy-owned blocks are absent when their policy does not apply to the task origin/family;
+- policy-owned blocks are absent when their policy does not apply to the task origin;
 - process blocks are absent when neither company nor project policy binds their executor to a
   command;
 - each remaining block includes its description, stage, input/output contract, effects,
@@ -69,9 +69,10 @@ immutable catalog. The exact catalog exposed to the planner is assembled by
 paths inside the same atomic step package. There is no built-in fallback in TypeScript: removing
 a step directory removes that capability from future run snapshots. Named Zod schemas in
 [`src/harness/step-contracts.ts`](../../src/harness/step-contracts.ts) are the typed ABI used to
-reject invalid runtime input and output; they do not register steps. Registered waits and
-predicates remain generic graph contracts in `src/planning/contracts.ts`. Test-only invalid
-blocks and fixture tasks are not loaded into the production catalog or operator queue.
+reject invalid runtime input and output; they do not register steps. Wait contracts live in
+[`src/harness/wait-contracts.ts`](../../src/harness/wait-contracts.ts); predicate contracts are
+derived from loaded step manifests. Test builders and invalid test blocks stay under `test/`
+and cannot enter the production catalog or operator queue.
 
 ### 1.2 What an agent actually receives
 
@@ -263,10 +264,11 @@ it combines several remote effects and approval points which Temporal must persi
 reconcile separately. Conversely, `playwright-demo` is a valid reusable skill but does
 not itself make visual verification part of every graph.
 
-Use prompts for judgment and implementation guidance. Use deterministic obligations
-for requirements that must always hold, such as validation after a write or CI before
-human PR review. Whether a bug needs visual, automated, or manual reproduction is
-selected from task/project evidence rather than a universal before/after recipe.
+Use prompts for judgment and implementation guidance. Use generic compiler obligations
+for structural safety, and file-backed company policies for company requirements such
+as validation after a write or CI before human PR review. Whether a bug needs visual,
+automated, or manual reproduction is selected from task/project evidence rather than a
+universal before/after recipe.
 
 Policy `path_sequence` obligations accept `direction: "before"` and
 `direction: "after"`. Use `before` for prerequisites such as evidence required before
@@ -275,7 +277,7 @@ thread acknowledgement -> review. This validates a dynamically assembled graph w
 turning the sequence into a Temporal branch.
 
 A policy may declare `appliesTo.taskOrigins` and task-evidence selectors, so Jira-only
-blocks are absent from local fixtures or a future GitLab Issue analyzer context, while
+blocks are absent from test inputs or a future GitLab Issue analyzer context, while
 bug investigation blocks are absent when task evidence does not require them. A marker with `kind: "effect"`
 matches any registered step declaring that effect. The Jira admission policy therefore
 protects new `workspace.write` and `command.run` blocks without listing every step name.

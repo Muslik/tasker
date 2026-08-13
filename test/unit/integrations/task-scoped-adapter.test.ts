@@ -8,10 +8,9 @@ import {
   type IntegrationStepExecutionRequest,
   type IntegrationStepExecutionResult,
 } from '../../../src/integrations/index.js';
-import { findTaskFixture } from '../../../src/planning/index.js';
+import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
-const task = findTaskFixture('avia-12536-feature-review');
-if (task === undefined) throw new Error('Missing feature test fixture');
+const task = makePlanningTaskSnapshot('avia-12536-feature-review');
 
 const requestFor = (taskReference: string): IntegrationStepExecutionRequest => ({
   operationId: `tasker:test:${taskReference}:publish`,

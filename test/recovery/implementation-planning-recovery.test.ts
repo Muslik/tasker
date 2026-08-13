@@ -5,24 +5,25 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createImplementationPlanningCoordinator,
-  createM1WorkflowService,
+  createOperatorWorkflowService,
   EvidenceBundleStore,
   type ImplementationPlanningCoordinator,
-  WorkflowGenerationSubjectSource,
 } from '../../src/control-plane/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import {
   ImplementationPlanningDecisionSchema,
+  WorkflowGenerationSubjectSource,
   type EvidenceBundleReference,
   type PlanningSnapshotReference,
 } from '../../src/planning/index.js';
-import {
-  DeterministicImplementationPlanner,
-  type ImplementationPlanner,
-} from '../../src/providers/index.js';
+import { type ImplementationPlanner } from '../../src/providers/index.js';
 import { makeAdjustableClock, type Clock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';
+import {
+  makeTestGenerationSubjectSource,
+  makeTestImplementationPlanner,
+} from '../support/planning.js';
 
 const TASK_REFERENCE = 'avia-13236-short-bug';
 const REPOSITORY = 'onetwotrip/front-avia';
@@ -40,14 +41,9 @@ const planningFixture = (
   clock: Clock,
   directory: string,
   planner: ImplementationPlanner,
-  subjects: WorkflowGenerationSubjectSource = new WorkflowGenerationSubjectSource(
-    directory,
-    undefined,
-    undefined,
-    { includeTestFixtures: true },
-  ),
+  subjects: WorkflowGenerationSubjectSource = makeTestGenerationSubjectSource(directory),
 ): PlanningFixture => {
-  const workflows = createM1WorkflowService(ledger.repository, clock);
+  const workflows = createOperatorWorkflowService(ledger.repository, clock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, clock);
   recordTestEvidenceBundle(ledger.repository, clock, TASK_REFERENCE);
   const evidence = evidenceBundles.readLatest(EVIDENCE_SCOPE_ID);
@@ -111,7 +107,7 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-run-isolation-',
       async ({ directory, clock, ledger }) => {
-        const fallback = new DeterministicImplementationPlanner();
+        const fallback = makeTestImplementationPlanner();
         const previousDecisions: unknown[] = [];
         const fixture = planningFixture(ledger, clock, directory, {
           plan: (request) => {
@@ -148,12 +144,7 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-recovery-',
       async ({ directory, databasePath, clock, ledger }) => {
-        const first = planningFixture(
-          ledger,
-          clock,
-          directory,
-          new DeterministicImplementationPlanner(),
-        );
+        const first = planningFixture(ledger, clock, directory, makeTestImplementationPlanner());
         const commandId = 'tasker:test:planning:1';
         const planned = await first.coordinator.prepare(
           TASK_REFERENCE,
@@ -182,10 +173,8 @@ describe('implementation planning recovery', () => {
           const restarted = createImplementationPlanningCoordinator({
             ledger: restartedLedger.repository,
             clock,
-            workflows: createM1WorkflowService(restartedLedger.repository, clock),
-            subjects: new WorkflowGenerationSubjectSource(directory, undefined, undefined, {
-              includeTestFixtures: true,
-            }),
+            workflows: createOperatorWorkflowService(restartedLedger.repository, clock),
+            subjects: makeTestGenerationSubjectSource(directory),
             planner: {
               plan: () => {
                 calls += 1;
@@ -212,7 +201,7 @@ describe('implementation planning recovery', () => {
 
   it('retries a failed provider command without creating a provisional workflow', async () => {
     await withPlanningFixture('tasker-plan-retry-', async ({ directory, clock, ledger }) => {
-      const fallback = new DeterministicImplementationPlanner();
+      const fallback = makeTestImplementationPlanner();
       let calls = 0;
       const planner: ImplementationPlanner = {
         plan: (request) => {
@@ -225,12 +214,12 @@ describe('implementation planning recovery', () => {
                   stderr: '403',
                   receipt: {
                     status: 'completed',
-                    provider: 'deterministic',
+                    provider: 'codex_cli',
                     plannerVersion: 'implementation-planner@3',
-                    profile: 'deterministic',
+                    profile: 'test-planner',
                     profileSha256: '0'.repeat(64),
-                    cliVersion: 'deterministic@1',
-                    model: 'deterministic',
+                    cliVersion: 'test@1',
+                    model: 'test-model',
                     effort: 'low',
                     serviceTier: null,
                     strategy: request.strategy,
@@ -269,7 +258,7 @@ describe('implementation planning recovery', () => {
         },
       });
       expect(
-        createM1WorkflowService(ledger.repository, clock).readPlanningOperation(
+        createOperatorWorkflowService(ledger.repository, clock).readPlanningOperation(
           TASK_REFERENCE,
           `${PLANNING_EPISODE_ID}:workflow-candidate:1`,
         ),
@@ -290,7 +279,7 @@ describe('implementation planning recovery', () => {
 
   it('deduplicates a completed Temporal planning command', async () => {
     await withPlanningFixture('tasker-plan-idempotent-', async ({ directory, clock, ledger }) => {
-      const fallback = new DeterministicImplementationPlanner();
+      const fallback = makeTestImplementationPlanner();
       let calls = 0;
       const fixture = planningFixture(ledger, clock, directory, {
         plan: (request) => {
@@ -325,10 +314,13 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-materialization-recovery-',
       async ({ directory, clock, ledger }) => {
-        const fallback = new DeterministicImplementationPlanner();
-        const subjects = new InterruptibleSubjectSource(directory, undefined, undefined, {
-          includeTestFixtures: true,
-        });
+        const fallback = makeTestImplementationPlanner();
+        const stableSubjects = makeTestGenerationSubjectSource(directory);
+        const subjects = new InterruptibleSubjectSource([
+          {
+            resolve: (taskReference) => stableSubjects.resolve(taskReference),
+          },
+        ]);
         let calls = 0;
         const fixture = planningFixture(
           ledger,
@@ -385,7 +377,7 @@ describe('implementation planning recovery', () => {
 
   it('persists blocking questions and resumes the same task from typed operator answers', async () => {
     await withPlanningFixture('tasker-plan-questions-', async ({ directory, clock, ledger }) => {
-      const fallback = new DeterministicImplementationPlanner();
+      const fallback = makeTestImplementationPlanner();
       let calls = 0;
       let observedGuidance: string | null = null;
       const fixture = planningFixture(ledger, clock, directory, {
@@ -446,7 +438,7 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-investigation-',
       async ({ directory, clock, ledger }) => {
-        const fallback = new DeterministicImplementationPlanner();
+        const fallback = makeTestImplementationPlanner();
         const fixture = planningFixture(ledger, clock, directory, {
           plan: async (request) => {
             const base = await fallback.plan(request);
@@ -497,7 +489,7 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-validator-loop-',
       async ({ directory, clock, ledger }) => {
-        const fallback = new DeterministicImplementationPlanner();
+        const fallback = makeTestImplementationPlanner();
         let calls = 0;
         let feedback: readonly string[] = [];
         let previousStatus: string | null = null;
@@ -576,7 +568,7 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-validator-guided-revision-',
       async ({ directory, clock, ledger }) => {
-        const fallback = new DeterministicImplementationPlanner();
+        const fallback = makeTestImplementationPlanner();
         const firstCommand = 'tasker:test:planning:validator-exhausted';
         const revisionCommand = 'tasker:test:planning:validator-guided-revision';
         let inheritedFeedback: readonly string[] = [];
@@ -660,7 +652,7 @@ describe('implementation planning recovery', () => {
     await withPlanningFixture(
       'tasker-plan-acceptance-link-loop-',
       async ({ directory, clock, ledger }) => {
-        const fallback = new DeterministicImplementationPlanner();
+        const fallback = makeTestImplementationPlanner();
         let calls = 0;
         let feedback: readonly string[] = [];
         const fixture = planningFixture(ledger, clock, directory, {
@@ -712,7 +704,7 @@ describe('implementation planning recovery', () => {
           value: { status: 'ready', validationRevision: 1 },
         });
         expect(feedback).toContain(
-          'Acceptance criterion requested-behavior references missing workflow step missing-verification-step.',
+          'Acceptance criterion reported-behavior-fixed references missing workflow step missing-verification-step.',
         );
         expect(calls).toBe(2);
       },

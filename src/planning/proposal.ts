@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { getHarnessPack, harnessPolicyAppliesToTask } from '../harness/index.js';
+import { getHarnessPack } from '../harness/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   JsonValueSchema,
@@ -9,24 +9,12 @@ import {
   type WorkflowNodeSource,
   type WorkflowSource,
 } from '../workflow/index.js';
-import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
-import {
-  FixtureInputFailureSchema,
-  parseTaskFixture,
-  TaskFixtureSchema,
-  type FixtureInputFailure,
-  type TaskFixture,
-} from './fixtures.js';
-import { assembleFixtureWorkflow } from './fixture-assembly.js';
-import {
-  resolvePackagePublicationPolicy,
-  resolveProjectWorkflowProfile,
-} from './project-policies.js';
+import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
+import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import {
   VerificationPlanSchema,
   WorkflowAnalyzerOutputSchema,
   WorkflowAssemblyDecisionSchema,
-  type WorkflowAssemblyDecision,
 } from './workflow-proposal-contracts.js';
 
 export {
@@ -41,10 +29,7 @@ export type {
 } from './workflow-proposal-contracts.js';
 
 export const ExpectedArtifactSchema = z
-  .object({
-    kind: z.string().min(1),
-    nodeId: z.string().min(1),
-  })
+  .object({ kind: z.string().min(1), nodeId: z.string().min(1) })
   .strict();
 
 export const WaitMetadataSchema = z
@@ -70,8 +55,8 @@ export const WorkflowProposalArtifactSchema = z
     assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
     capabilities: CapabilityMetadataSchema,
     expectedArtifacts: z.array(ExpectedArtifactSchema),
-    fixture: TaskFixtureSchema,
-    proposalSchemaVersion: z.literal(2),
+    task: PlanningTaskSnapshotSchema,
+    proposalSchemaVersion: z.literal(3),
     source: z.unknown(),
     verificationPlan: VerificationPlanSchema,
     waits: z.array(WaitMetadataSchema),
@@ -97,385 +82,60 @@ export const ProposalInputFailureSchema = z
   .strict();
 
 export type ProposalInputFailure = z.infer<typeof ProposalInputFailureSchema>;
-export type AnalyzeTaskFailure = FixtureInputFailure | ProposalInputFailure;
+export type AnalyzeTaskFailure = ProposalInputFailure;
 
-export const M1_AVAILABLE_CAPABILITIES = Object.freeze([
+export const HARNESS_AVAILABLE_CAPABILITIES = Object.freeze([
   ...getHarnessPack().company.availableCapabilities,
 ]);
 
 const sortedUnique = (values: readonly string[]): string[] =>
   [...new Set(values)].sort((left, right) => left.localeCompare(right));
 
-interface ProposalMetadata {
-  readonly expectedArtifacts: readonly ExpectedArtifact[];
-  readonly requiredCapabilities: readonly string[];
-  readonly waits: readonly WaitMetadata[];
-}
-
-const collectProposalMetadata = (source: WorkflowSource): ProposalMetadata => {
+const collectProposalMetadata = (source: WorkflowSource) => {
   const expectedArtifacts: ExpectedArtifact[] = [];
   const requiredCapabilities: string[] = [];
   const waits: WaitMetadata[] = [];
-
   const visit = (node: WorkflowNodeSource): void => {
     switch (node.kind) {
       case 'sequence':
         node.children.forEach(visit);
         return;
-
       case 'branch':
         visit(node.then);
         visit(node.otherwise);
         return;
-
       case 'bounded_loop':
         visit(node.body);
         return;
-
       case 'step': {
-        const contract = M1_WORKFLOW_CONTRACTS.stepTypes.get(node.uses);
-
+        const contract = HARNESS_WORKFLOW_CONTRACTS.stepTypes.get(node.uses);
         if (contract !== undefined) {
           requiredCapabilities.push(...contract.requiredCapabilities);
           expectedArtifacts.push(
             ...contract.artifactContracts.map((kind) => ({ kind, nodeId: node.id })),
           );
         }
-
         return;
       }
-
-      case 'wait': {
+      case 'wait':
         waits.push({
           nodeId: node.id,
           ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
           waitKind: node.for,
         });
         return;
-      }
-
       case 'finalize':
       case 'gate':
         return;
     }
   };
-
   visit(source.root);
-
-  const byNodeAndKind = <T extends { readonly kind?: string; readonly nodeId: string }>(
-    left: T,
-    right: T,
-  ): number => {
-    const nodeOrder = left.nodeId.localeCompare(right.nodeId);
-    return nodeOrder === 0 ? (left.kind ?? '').localeCompare(right.kind ?? '') : nodeOrder;
-  };
-
   return {
-    expectedArtifacts: expectedArtifacts.sort(byNodeAndKind),
+    expectedArtifacts: expectedArtifacts.sort((left, right) =>
+      `${left.nodeId}:${left.kind}`.localeCompare(`${right.nodeId}:${right.kind}`),
+    ),
     requiredCapabilities: sortedUnique(requiredCapabilities),
     waits: waits.sort((left, right) => left.nodeId.localeCompare(right.nodeId)),
-  };
-};
-
-const createVerificationPlan = (fixture: TaskFixture): z.infer<typeof VerificationPlanSchema> => {
-  switch (fixture.family) {
-    case 'short_bugfix':
-      return {
-        checks: ['reproduction evidence', 'targeted tests for changed behavior'],
-        profile: 'targeted',
-        rationale:
-          'A localized bug fix needs proof of reproduction and focused regression coverage.',
-      };
-
-    case 'feature_with_review':
-      return fixture.verification === 'full_with_visual'
-        ? {
-            checks: ['full test suite', 'visual comparison of affected screens'],
-            profile: 'full_with_visual',
-            rationale: 'The feature spans a booking flow and changes visible frontend behavior.',
-          }
-        : {
-            checks: ['full test suite'],
-            profile: 'full',
-            rationale: 'The feature spans multiple behaviors, so targeted checks are insufficient.',
-          };
-
-    case 'shared_component': {
-      const profile = resolveProjectWorkflowProfile(fixture.componentRepository);
-      const includesExternalTranslation =
-        fixture.translationIntent === 'copy_change' && profile.translations.kind === 'external';
-
-      return includesExternalTranslation
-        ? {
-            checks: ['translation resources pulled', 'targeted consumer tests'],
-            profile: 'translation_and_targeted',
-            rationale:
-              'The component project uses external translation, which must resolve before consumer checks.',
-          }
-        : {
-            checks: ['targeted component and consumer tests'],
-            profile: 'targeted',
-            rationale:
-              'The shared-component change needs focused checks in the component and its consumer.',
-          };
-    }
-  }
-};
-
-const createAssemblyDecisions = (fixture: TaskFixture): readonly WorkflowAssemblyDecision[] => {
-  const decisions: WorkflowAssemblyDecision[] = [
-    {
-      id: 'task-family',
-      title: 'Workflow family selected',
-      source: 'task-snapshot',
-      reason: `The intake classified this task as ${fixture.family}.`,
-      effect:
-        fixture.family === 'short_bugfix'
-          ? 'Use bootstrap investigation evidence, then add bounded repair, post-fix proof, CI, and review blocks.'
-          : 'Compose the required implementation, verification, CI, and review blocks.',
-    },
-    {
-      id: 'bounded-repair',
-      title: 'Repair work is bounded',
-      source: 'global:bounded-repair',
-      reason: 'An unsuccessful implementation attempt must not loop forever.',
-      effect: 'The implementation loop is capped at three attempts before intervention.',
-    },
-    {
-      id: 'planning-boundary',
-      title: 'Implementation plan required',
-      source: 'global:planning-boundary',
-      reason: 'Every task must produce a validated plan before write-capable execution.',
-      effect: 'Add the universal plan boundary; immutable run settings control human review.',
-    },
-  ];
-
-  const aiAssistancePolicy = getHarnessPack().policies.find(
-    (policy) => policy.id === 'ai-assistance' && harnessPolicyAppliesToTask(policy, fixture),
-  );
-  if (aiAssistancePolicy !== undefined) {
-    decisions.push({
-      id: 'ai-assistance-policy',
-      title: 'AI-assistance evidence required',
-      source: `policy:${aiAssistancePolicy.id}@${aiAssistancePolicy.version}`,
-      reason: aiAssistancePolicy.description,
-      effect:
-        'Give write-capable implementation and pull-request drafting agents the policy skill; do not add policy bookkeeping nodes to the workflow.',
-    });
-  }
-
-  for (const policy of getHarnessPack().policies.filter(
-    (candidate) =>
-      candidate.appliesTo !== undefined && candidate.appliesTo.taskOrigins.includes(fixture.origin),
-  )) {
-    decisions.push({
-      id: `origin-policy-${policy.id}`,
-      title: `${policy.id} policy applied`,
-      source: `policy:${policy.id}@${policy.version}`,
-      reason: policy.description,
-      effect: 'Add the policy-owned boundary steps required for this task origin.',
-    });
-  }
-
-  switch (fixture.family) {
-    case 'short_bugfix':
-      decisions.push({
-        id: 'reproduction-required',
-        title: 'Reproduction required',
-        source: 'task-snapshot',
-        reason:
-          'The task is a bug and bootstrap must ground the reported behavior before planning.',
-        effect: 'Use investigation evidence to plan the repair and require post-fix reproduction.',
-      });
-      break;
-
-    case 'feature_with_review':
-      break;
-
-    case 'shared_component':
-      decisions.push({
-        id: 'cross-repository-component',
-        title: 'Shared component work detected',
-        source: 'task-snapshot',
-        reason: `The change belongs partly to ${fixture.componentRepository}.`,
-        effect: 'Implement the component in its repository before updating the consumer.',
-      });
-      break;
-  }
-
-  if (fixture.translationIntent === 'copy_change') {
-    const targetRepository =
-      fixture.family === 'shared_component' ? fixture.componentRepository : fixture.repository;
-    const profile = resolveProjectWorkflowProfile(targetRepository);
-
-    decisions.push(
-      profile.translations.kind === 'external'
-        ? {
-            id: 'translation-policy',
-            title: 'External translation policy applied',
-            source: `project:${targetRepository}`,
-            reason: `${targetRepository} is configured to synchronize copy through an external translator.`,
-            effect: 'Add extract and pull commands with a durable Temporal translation wait.',
-          }
-        : {
-            id: 'translation-policy',
-            title: 'Inline translation policy applied',
-            source:
-              profile.source === 'configured' ? `project:${targetRepository}` : 'project:default',
-            reason:
-              profile.source === 'configured'
-                ? `${targetRepository} is configured to keep copy directly in source or locale JSON.`
-                : `${targetRepository} has no project-specific translation flow, so the safe default keeps copy in source or locale JSON.`,
-            effect: 'Keep copy changes inside implementation; add no translation commands or wait.',
-          },
-    );
-  }
-
-  if (fixture.family === 'shared_component') {
-    const publication = resolvePackagePublicationPolicy(
-      fixture.componentRepository,
-      fixture.componentPath,
-    );
-    decisions.push(
-      publication.kind === 'human_final'
-        ? {
-            id: 'publication-policy',
-            title: 'Global package publication policy applied',
-            source: `global:${publication.policyId}`,
-            reason: `${publication.policyId} matched ${fixture.componentPath} in ${fixture.componentRepository}.`,
-            effect:
-              'Create a development publish, then persist a final-publish wait before consuming the supplied version.',
-          }
-        : {
-            id: 'publication-policy',
-            title: 'No package publication required',
-            source: 'global:default',
-            reason: `No global package rule matched ${fixture.componentPath} in ${fixture.componentRepository}.`,
-            effect: 'Add no publish commands or publication wait.',
-          },
-    );
-  }
-
-  decisions.push({
-    id: 'verification-profile',
-    title: 'Verification profile selected',
-    source: 'task-snapshot',
-    reason: createVerificationPlan(fixture).rationale,
-    effect: `Use the ${createVerificationPlan(fixture).profile} verification profile.`,
-  });
-  decisions.push({
-    id: 'pr-readiness',
-    title: 'CI and human code review retained',
-    source: 'global:pr-readiness',
-    reason: 'Every task that prepares a PR must expose CI classification and operator review.',
-    effect: 'Observe CI, then end the autonomous delivery phase at the code-review wait.',
-  });
-
-  return decisions;
-};
-
-const replaceRootChildren = (
-  source: WorkflowSource,
-  update: (children: readonly WorkflowNodeSource[]) => unknown,
-): unknown => {
-  if (source.root.kind !== 'sequence') {
-    return source;
-  }
-
-  return {
-    ...source,
-    root: {
-      ...source.root,
-      children: update(source.root.children),
-    },
-  };
-};
-
-const applyRejectedVariant = (fixture: TaskFixture, source: WorkflowSource): unknown => {
-  if (fixture.expected === 'accepted') {
-    return source;
-  }
-
-  switch (fixture.proposalVariant) {
-    case 'unknown_step':
-      return replaceRootChildren(source, (children) => [
-        {
-          id: 'unknown-step',
-          kind: 'step',
-          uses: 'provider.does_not_exist@1',
-          with: {},
-        },
-        ...children.slice(1),
-      ]);
-
-    case 'missing_terminal':
-      return replaceRootChildren(source, (children) =>
-        children.filter((child) => child.kind !== 'finalize'),
-      );
-
-    case 'unbounded_loop':
-      return replaceRootChildren(source, (children) =>
-        children.map((child) =>
-          child.kind === 'bounded_loop'
-            ? {
-                body: child.body,
-                id: child.id,
-                kind: child.kind,
-                until: child.until,
-              }
-            : child,
-        ),
-      );
-
-    case 'unmet_capability':
-      return source;
-  }
-};
-
-const toProposalCandidate = (fixture: TaskFixture): unknown => {
-  const validSource = assembleFixtureWorkflow(fixture);
-  return proposalCandidateFromParts(fixture, 'm1-deterministic@1', {
-    assemblyDecisions: createAssemblyDecisions(fixture),
-    source: applyRejectedVariant(fixture, validSource),
-    verificationPlan: createVerificationPlan(fixture),
-  });
-};
-
-const proposalCandidateFromParts = (
-  fixture: TaskFixture,
-  analyzerVersion: string,
-  parts: {
-    readonly assemblyDecisions: readonly WorkflowAssemblyDecision[];
-    readonly source: unknown;
-    readonly verificationPlan: z.infer<typeof VerificationPlanSchema>;
-  },
-): unknown => {
-  const parsedSource = WorkflowSourceSchema.safeParse(parts.source);
-  const metadata = parsedSource.success
-    ? collectProposalMetadata(parsedSource.data)
-    : {
-        expectedArtifacts: [],
-        requiredCapabilities: [],
-        waits: [],
-      };
-  const available =
-    fixture.expected === 'rejected' && fixture.proposalVariant === 'unmet_capability'
-      ? M1_AVAILABLE_CAPABILITIES.filter((capability) => capability !== 'repository.read')
-      : M1_AVAILABLE_CAPABILITIES;
-
-  return {
-    analyzerVersion,
-    assemblyDecisions: parts.assemblyDecisions,
-    capabilities: {
-      available: [...available],
-      required: [...metadata.requiredCapabilities],
-    },
-    expectedArtifacts: metadata.expectedArtifacts,
-    fixture,
-    proposalSchemaVersion: 2,
-    source: parts.source,
-    verificationPlan: parts.verificationPlan,
-    waits: metadata.waits,
   };
 };
 
@@ -494,42 +154,37 @@ export const parseWorkflowProposal = (
   input: unknown,
 ): Outcome<WorkflowProposalArtifact, ProposalInputFailure> => {
   const result = WorkflowProposalArtifactSchema.safeParse(input);
-
   return result.success ? ok(result.data) : err(toProposalInputFailure(result.error.issues));
 };
 
-export const analyzeTaskFixture = (
-  input: unknown,
-): Outcome<WorkflowProposalArtifact, AnalyzeTaskFailure> => {
-  const fixtureResult = parseTaskFixture(input);
-
-  if (!fixtureResult.ok) {
-    return err(FixtureInputFailureSchema.parse(fixtureResult.error));
-  }
-
-  // The analyzer is an untrusted boundary even while M1 uses a deterministic local implementation.
-  const untrustedProposal: unknown = toProposalCandidate(fixtureResult.value);
-  return parseWorkflowProposal(untrustedProposal);
-};
-
 export const createWorkflowProposalFromAnalyzerOutput = (
-  fixtureInput: unknown,
+  taskInput: unknown,
   analyzerVersion: string,
   outputInput: unknown,
-): Outcome<WorkflowProposalArtifact, AnalyzeTaskFailure> => {
-  const fixtureResult = parseTaskFixture(fixtureInput);
-  if (!fixtureResult.ok) {
-    return err(FixtureInputFailureSchema.parse(fixtureResult.error));
-  }
-
+): Outcome<WorkflowProposalArtifact, ProposalInputFailure> => {
+  const task = PlanningTaskSnapshotSchema.safeParse(taskInput);
+  if (!task.success) return err(toProposalInputFailure(task.error.issues));
   const output = WorkflowAnalyzerOutputSchema.safeParse(outputInput);
-  if (!output.success) {
-    return err(toProposalInputFailure(output.error.issues));
-  }
+  if (!output.success) return err(toProposalInputFailure(output.error.issues));
+  const source = WorkflowSourceSchema.safeParse(output.data.source);
+  const metadata = source.success
+    ? collectProposalMetadata(source.data)
+    : { expectedArtifacts: [], requiredCapabilities: [], waits: [] };
 
-  return parseWorkflowProposal(
-    proposalCandidateFromParts(fixtureResult.value, analyzerVersion, output.data),
-  );
+  return parseWorkflowProposal({
+    analyzerVersion,
+    assemblyDecisions: output.data.assemblyDecisions,
+    capabilities: {
+      available: [...HARNESS_AVAILABLE_CAPABILITIES],
+      required: metadata.requiredCapabilities,
+    },
+    expectedArtifacts: metadata.expectedArtifacts,
+    task: task.data,
+    proposalSchemaVersion: 3,
+    source: output.data.source,
+    verificationPlan: output.data.verificationPlan,
+    waits: metadata.waits,
+  });
 };
 
 export const proposalSourceAsJson = (proposal: WorkflowProposalArtifact): JsonValue | undefined => {

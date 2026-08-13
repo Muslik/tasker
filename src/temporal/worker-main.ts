@@ -9,8 +9,8 @@ import {
 import { BlockReceiptStore } from '../blocks/index.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
-import { createM1WorkflowService } from '../control-plane/m1-service.js';
-import { WorkflowGenerationSubjectSource } from '../control-plane/workflow-generator.js';
+import { createOperatorWorkflowService } from '../control-plane/operator-service.js';
+import { PersistedGenerationSubjectResolver } from '../control-plane/persisted-generation-subject.js';
 import { BootstrapContextAssembler } from '../control-plane/bootstrap-context-assembly.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
@@ -33,6 +33,7 @@ import {
   JiraReviewReadyAdapter,
   JiraServerClient,
   JiraStartWorkAdapter,
+  JiraWorkflowGenerationSubjectResolver,
   LoopPlanningEvidenceReader,
   loadConfluencePlanningEvidenceConfiguration,
   loadJenkinsBuildConfiguration,
@@ -43,11 +44,8 @@ import {
   TaskScopedIntegrationAdapter,
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
-import {
-  SubscriptionCliImplementationPlanner,
-  DeterministicImplementationPlanner,
-  nodeCommandRunner,
-} from '../providers/index.js';
+import { WorkflowGenerationSubjectSource } from '../planning/index.js';
+import { SubscriptionCliImplementationPlanner, nodeCommandRunner } from '../providers/index.js';
 import {
   BitbucketRepositoryClient,
   createManagedRepositoryStore,
@@ -102,10 +100,10 @@ const configuration = {
 };
 
 export const startTaskerTemporalWorker = async (): Promise<void> => {
-  const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/m1-operator.sqlite');
+  const databasePath = resolve(process.env.TASKER_DB_PATH ?? '.tasker/operator.sqlite');
   mkdirSync(dirname(databasePath), { recursive: true });
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
-  const workflowService = createM1WorkflowService(ledger.repository, systemClock);
+  const workflowService = createOperatorWorkflowService(ledger.repository, systemClock);
   const harnessPack = loadHarnessPack();
   const dockerConfiguration = loadDockerWorkspaceConfiguration();
   const dockerRuntimeStore = new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath);
@@ -189,12 +187,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jiraIssueService = createJiraIssueService(ledger.repository, systemClock, jiraClient, {
     repositoryCatalog,
   });
-  const subjects = new WorkflowGenerationSubjectSource(
-    resolve(process.env.TASKER_REPOSITORY_PATH ?? '.'),
-    jiraIssueService,
-    workflowService,
-  );
-  const deterministicProvider = process.env.TASKER_WORKFLOW_PROVIDER === 'deterministic';
+  const subjects = new WorkflowGenerationSubjectSource([
+    new PersistedGenerationSubjectResolver(workflowService),
+    new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+  ]);
   const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
   const planningStore = new ImplementationPlanningStore(ledger.repository, systemClock);
   const evidenceBundles = new EvidenceBundleStore(ledger.repository, systemClock);
@@ -217,9 +213,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     evidenceBundles,
     evidenceReaders,
     harnessPack,
-    planner: deterministicProvider
-      ? new DeterministicImplementationPlanner()
-      : new SubscriptionCliImplementationPlanner(temporalCommandRunner),
+    planner: new SubscriptionCliImplementationPlanner(temporalCommandRunner),
   });
   const planningContexts = new BootstrapContextAssembler(subjects, contextDiscovery, planning);
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

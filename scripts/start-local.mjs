@@ -123,7 +123,7 @@ const temporalAddressValue = process.env.TASKER_TEMPORAL_ADDRESS ?? '127.0.0.1:7
 const temporalAddress = parseTemporalAddress(temporalAddressValue);
 const temporalNamespace = process.env.TASKER_TEMPORAL_NAMESPACE ?? 'tasker-dev';
 const temporalDatabasePath = process.env.TASKER_TEMPORAL_DB_PATH ?? '.tasker/temporal.sqlite';
-const taskerDatabasePath = process.env.TASKER_DB_PATH ?? '.tasker/m1-operator.sqlite';
+const taskerDatabasePath = process.env.TASKER_DB_PATH ?? '.tasker/operator.sqlite';
 const taskerPort = parsePort(process.env.TASKER_PORT, 'TASKER_PORT', '4311');
 const taskerUrl = `http://127.0.0.1:${String(taskerPort)}`;
 const temporalIsLocal =
@@ -235,7 +235,9 @@ try {
     { ipc: true },
   );
   await waitForWorkerReady(workerChild);
-  const apiChild = startChild('Tasker API', process.execPath, ['dist/control-plane/m1-server.js']);
+  const apiChild = startChild('Tasker API', process.execPath, [
+    'dist/control-plane/operator-server.js',
+  ]);
   await waitUntil('Tasker API', () => taskerHealthy(taskerUrl), apiChild);
 
   console.log(`[tasker] Operator console: ${taskerUrl}`);

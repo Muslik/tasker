@@ -33,7 +33,7 @@ import type {
   OperatorWorkflowProjection,
   WorkflowResponse,
   WorkflowView,
-} from '../control-plane/m1-contracts.js';
+} from '../control-plane/operator-contracts.js';
 import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning-contracts.js';
 import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
 import {
@@ -176,7 +176,7 @@ const formatProviderSession = (activity: ActivityLoadState): string => {
   if (activity.status === 'failed') return 'provider session unavailable';
 
   const session = activity.response.providerSession;
-  if (session.status === 'not_started') return 'no provider session · deterministic fixture';
+  if (session.status === 'not_started') return 'no provider session';
 
   const seconds = Math.max(0.1, session.durationMs / 1000).toFixed(1);
   const measuredTokens = session.usage.inputTokens + session.usage.outputTokens;
@@ -629,52 +629,46 @@ const SelectedTaskHeader = ({
               </Button>
             </>
           ) : null}
-          {task.origin.kind === 'jira' ? (
-            <>
-              {task.origin.browseUrl === null ? null : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <a
-                        className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                        href={task.origin.browseUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label="Open in Jira"
-                      />
-                    }
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </TooltipTrigger>
-                  <TooltipContent>Open in Jira</TooltipContent>
-                </Tooltip>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                disabled={jiraSync.status === 'syncing'}
-                onClick={() => {
-                  onSyncJira(task.taskId);
-                }}
-                title={
-                  task.status === 'backlog' || task.status === 'workflow_rejected'
-                    ? 'Reload Jira fields, comments, links, and attachments before the next plan.'
-                    : 'Refresh the operator snapshot. A frozen execution keeps its original context.'
-                }
-              >
-                <RefreshCw
-                  data-icon="inline-start"
-                  className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
-                />
-                Refresh Jira
-              </Button>
-            </>
-          ) : workflow.status === 'ready' && workflow.response.status === 'ready' ? (
-            <StateBadge className="bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
-              Workflow ready
-            </StateBadge>
-          ) : null}
+          <>
+            {task.origin.browseUrl === null ? null : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <a
+                      className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                      href={task.origin.browseUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open in Jira"
+                    />
+                  }
+                >
+                  <ExternalLink className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent>Open in Jira</TooltipContent>
+              </Tooltip>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              disabled={jiraSync.status === 'syncing'}
+              onClick={() => {
+                onSyncJira(task.taskId);
+              }}
+              title={
+                task.status === 'backlog' || task.status === 'workflow_rejected'
+                  ? 'Reload Jira fields, comments, links, and attachments before the next plan.'
+                  : 'Refresh the operator snapshot. A frozen execution keeps its original context.'
+              }
+            >
+              <RefreshCw
+                data-icon="inline-start"
+                className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
+              />
+              Refresh Jira
+            </Button>
+          </>
         </div>
       </div>
       {workflow.status === 'failed' ? <InlineError>{workflow.message}</InlineError> : null}
@@ -952,7 +946,7 @@ const ValidationSurface = ({ view }: { readonly view: WorkflowView }) => {
 };
 
 const JiraPlanningSurface = ({ task }: { readonly task: OperatorTaskSummary }) => {
-  if (task.origin.kind !== 'jira' || task.planning.status !== 'blocked') return null;
+  if (task.planning.status !== 'blocked') return null;
   const binding = task.origin.repositoryBinding;
   const repositoryResolved = binding.status === 'resolved';
 
@@ -2604,7 +2598,7 @@ const WorkflowSidebar = ({
   }
 
   const view = workflow.status === 'ready' ? workflow.response.view : null;
-  const title = view?.fixture.title ?? task?.title ?? 'Task workflow';
+  const title = view?.taskSummary.title ?? task?.title ?? 'Task workflow';
   return (
     <aside
       className="flex min-h-0 flex-col"
@@ -2636,7 +2630,7 @@ const WorkflowSidebar = ({
                 render={
                   <a
                     className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    href={graphDownloadUrl(view.fixture.id)}
+                    href={graphDownloadUrl(view.taskSummary.reference)}
                     download
                     aria-label="Download graph JSON"
                   />
@@ -2733,6 +2727,10 @@ export const App = () => {
     () => tasks.find((task) => task.id === selectedId) ?? null,
     [tasks, selectedId],
   );
+  const selectedRunId =
+    operatorProjectionState.status === 'ready'
+      ? operatorProjectionState.projection.activeRunId
+      : null;
 
   const selectedIdRef = useRef(selectedId);
   useEffect(() => {
@@ -2779,12 +2777,12 @@ export const App = () => {
   };
 
   const refreshSelectedWorkflow = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
   ): Promise<void> => {
     setWorkflowState({ status: 'loading' });
     try {
-      const response = await loadWorkflow(fixtureId);
+      const response = await loadWorkflow(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setWorkflowState(
         response.status === 'found'
@@ -2801,12 +2799,12 @@ export const App = () => {
   };
 
   const refreshSelectedActivity = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
   ): Promise<void> => {
     setActivityState({ status: 'loading' });
     try {
-      const response = await loadOperatorActivity(fixtureId);
+      const response = await loadOperatorActivity(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setActivityState({ status: 'ready', response });
     } catch (error) {
@@ -2819,12 +2817,12 @@ export const App = () => {
   };
 
   const refreshSelectedOperatorProjection = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
   ): Promise<void> => {
     setOperatorProjectionState({ status: 'loading' });
     try {
-      const projection = await loadOperatorWorkflowProjection(fixtureId);
+      const projection = await loadOperatorWorkflowProjection(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setOperatorProjectionState({ status: 'ready', projection });
     } catch (error) {
@@ -2837,12 +2835,12 @@ export const App = () => {
   };
 
   const refreshSelectedImplementationPlan = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
   ): Promise<void> => {
     setImplementationPlanState({ status: 'loading' });
     try {
-      const response = await loadImplementationPlan(fixtureId);
+      const response = await loadImplementationPlan(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setImplementationPlanState(
         response.status === 'found'
@@ -2859,13 +2857,13 @@ export const App = () => {
   };
 
   const refreshSelectedPlanningTranscript = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
     showLoading = true,
   ): Promise<void> => {
     if (showLoading) setPlanningTranscriptState({ status: 'loading' });
     try {
-      const response = await loadPlanningTranscript(fixtureId);
+      const response = await loadPlanningTranscript(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setPlanningTranscriptState(
         response.status === 'found'
@@ -2882,12 +2880,12 @@ export const App = () => {
   };
 
   const refreshSelectedPlanReviewHistory = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
   ): Promise<void> => {
     setPlanReviewHistoryState({ status: 'loading' });
     try {
-      const rounds = await loadPlanReviewHistory(fixtureId);
+      const rounds = await loadPlanReviewHistory(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       setPlanReviewHistoryState({ status: 'ready', rounds });
     } catch (error) {
@@ -2900,14 +2898,14 @@ export const App = () => {
   };
 
   const refreshSelectedWorkflowContinuation = async (
-    fixtureId: string,
+    taskReference: string,
     refreshSequence: number,
   ): Promise<void> => {
     setWorkflowContinuationState({ status: 'loading' });
     setContinuationWorkflowState({ status: 'missing' });
     setContinuationActivityState(null);
     try {
-      const response = await loadWorkflowContinuation(fixtureId);
+      const response = await loadWorkflowContinuation(taskReference);
       if (refreshSequence !== selectionRefreshSequenceRef.current) return;
       if (response.status === 'missing') {
         setWorkflowContinuationState({ status: 'missing' });
@@ -2964,31 +2962,31 @@ export const App = () => {
     }
   };
 
-  const refreshSelection = async (fixtureId: string): Promise<void> => {
+  const refreshSelection = async (taskReference: string): Promise<void> => {
     const refreshSequence = selectionRefreshSequenceRef.current + 1;
     selectionRefreshSequenceRef.current = refreshSequence;
     await Promise.all([
-      refreshSelectedWorkflow(fixtureId, refreshSequence),
-      refreshSelectedOperatorProjection(fixtureId, refreshSequence),
-      refreshSelectedActivity(fixtureId, refreshSequence),
-      refreshSelectedImplementationPlan(fixtureId, refreshSequence),
-      refreshSelectedPlanningTranscript(fixtureId, refreshSequence),
-      refreshSelectedPlanReviewHistory(fixtureId, refreshSequence),
-      refreshSelectedWorkflowContinuation(fixtureId, refreshSequence),
-      refreshSelectedJiraIssue(fixtureId, refreshSequence),
+      refreshSelectedWorkflow(taskReference, refreshSequence),
+      refreshSelectedOperatorProjection(taskReference, refreshSequence),
+      refreshSelectedActivity(taskReference, refreshSequence),
+      refreshSelectedImplementationPlan(taskReference, refreshSequence),
+      refreshSelectedPlanningTranscript(taskReference, refreshSequence),
+      refreshSelectedPlanReviewHistory(taskReference, refreshSequence),
+      refreshSelectedWorkflowContinuation(taskReference, refreshSequence),
+      refreshSelectedJiraIssue(taskReference, refreshSequence),
     ]);
   };
 
   const refreshRuntimeSurfaces = async (
-    fixtureId: string,
+    taskReference: string,
   ): Promise<OperatorWorkflowProjection | null> => {
     const sequence = runtimeRefreshSequenceRef.current + 1;
     runtimeRefreshSequenceRef.current = sequence;
     const [projection, activity] = await Promise.allSettled([
-      loadOperatorWorkflowProjection(fixtureId),
-      loadOperatorActivity(fixtureId),
+      loadOperatorWorkflowProjection(taskReference),
+      loadOperatorActivity(taskReference),
     ]);
-    if (sequence !== runtimeRefreshSequenceRef.current || selectedIdRef.current !== fixtureId) {
+    if (sequence !== runtimeRefreshSequenceRef.current || selectedIdRef.current !== taskReference) {
       return null;
     }
     setOperatorProjectionState(
@@ -3017,12 +3015,12 @@ export const App = () => {
   };
 
   const applyRuntimeProjectionToSelectedTask = (
-    fixtureId: string,
+    taskReference: string,
     projection: OperatorWorkflowProjection,
   ): void => {
     setTasks((current) =>
       current.map((task) => {
-        if (task.id !== fixtureId) return task;
+        if (task.id !== taskReference) return task;
         if (projection.status === 'completed') {
           return { ...task, status: 'done', attention: 'none' };
         }
@@ -3146,12 +3144,12 @@ export const App = () => {
     const source = connectOperatorStream(streamCursorRef.current, {
       onEvent: (event) => {
         if (
-          event.fixtureId === selectedIdRef.current &&
+          event.taskReference === selectedIdRef.current &&
           (event.eventType === 'WorkflowAnalyzed' ||
             event.eventType === 'WorkflowPlanned' ||
             event.eventType === 'WorkflowRejected')
         ) {
-          setRuntimeWatchTaskId(event.fixtureId);
+          setRuntimeWatchTaskId(event.taskReference);
         }
 
         void (async () => {
@@ -3160,8 +3158,8 @@ export const App = () => {
             return;
           }
 
-          if (event.fixtureId === selectedIdRef.current) {
-            await refreshSelection(event.fixtureId);
+          if (event.taskReference === selectedIdRef.current) {
+            await refreshSelection(event.taskReference);
           }
         })();
       },
@@ -3255,6 +3253,7 @@ export const App = () => {
 
   const handlePlanReview = (decision: 'approve' | 'request_changes'): void => {
     if (selectedTask === null || selectedTask.status !== 'plan_review') return;
+    if (selectedRunId === null) return;
     const taskReference = selectedTask.id;
     const guidance = planGuidanceDrafts.get(taskReference)?.trim() ?? '';
     if (
@@ -3283,12 +3282,14 @@ export const App = () => {
       decision === 'approve'
         ? {
             decision,
+            expectedRunId: selectedRunId,
             reviewId,
             planArtifactId: planningRecord.artifactId,
             planAttempt: planningRecord.attempt,
           }
         : {
             decision,
+            expectedRunId: selectedRunId,
             reviewId,
             planArtifactId: planningRecord.artifactId,
             planAttempt: planningRecord.attempt,
@@ -3330,11 +3331,14 @@ export const App = () => {
 
   const handleCodeReview = (action: 'sync' | 'complete'): void => {
     if (selectedTask === null || selectedTask.status !== 'code_review') return;
+    if (selectedRunId === null) return;
     const taskReference = selectedTask.id;
     const operation = action === 'sync' ? 'syncing_review' : 'completing_review';
     setPendingOperations((current) => new Map(current).set(taskReference, operation));
     const request =
-      action === 'sync' ? syncCodeReview(taskReference) : completeCodeReview(taskReference);
+      action === 'sync'
+        ? syncCodeReview(taskReference, { expectedRunId: selectedRunId })
+        : completeCodeReview(taskReference, { expectedRunId: selectedRunId });
     void request
       .then(async (result) => {
         setCodeReviewNotices((current) => {
@@ -3373,6 +3377,7 @@ export const App = () => {
   const handlePlanningClarification = (): void => {
     if (
       selectedTask === null ||
+      selectedRunId === null ||
       implementationPlanState.status !== 'ready' ||
       implementationPlanState.record.status !== 'needs_clarification'
     ) {
@@ -3388,7 +3393,7 @@ export const App = () => {
 
     setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'answering_questions'));
-    void answerPlanningClarification(taskReference, { answers })
+    void answerPlanningClarification(taskReference, { expectedRunId: selectedRunId, answers })
       .then(async () => {
         setPlanningAnswerDrafts((current) => {
           const next = new Map(current);
@@ -3420,11 +3425,17 @@ export const App = () => {
 
   const handleResume = (): void => {
     if (selectedTask === null || selectedTask.status !== 'waiting') return;
+    if (selectedRunId === null) return;
     const taskReference = selectedTask.id;
     const guidance = interventionGuidanceDrafts.get(taskReference)?.trim() ?? '';
     setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'resuming'));
-    void resumeWorkflow(taskReference, guidance.length === 0 ? {} : { guidance })
+    void resumeWorkflow(
+      taskReference,
+      guidance.length === 0
+        ? { expectedRunId: selectedRunId }
+        : { expectedRunId: selectedRunId, guidance },
+    )
       .then(async () => {
         setInterventionGuidanceDrafts((current) => {
           const next = new Map(current);
@@ -3454,10 +3465,14 @@ export const App = () => {
 
   const handleRestart = (): void => {
     if (selectedTask === null || selectedTask.status !== 'waiting') return;
+    if (selectedRunId === null) return;
     const taskReference = selectedTask.id;
     setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'restarting'));
-    void restartWorkflow(taskReference, { confirmation: 'restart_from_scratch' })
+    void restartWorkflow(taskReference, {
+      expectedRunId: selectedRunId,
+      confirmation: 'restart_from_scratch',
+    })
       .then(async () => {
         setRestartConfirmationTaskId(null);
         setInterventionGuidanceDrafts((current) => {

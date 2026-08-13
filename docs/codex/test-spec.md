@@ -1,10 +1,10 @@
 # Tasker Temporal test specification
 
-Status: canonical acceptance and recovery specification, 2026-08-09
+Status: canonical acceptance and recovery specification, 2026-08-13
 
-Production isolation invariant: validation fixtures are opt-in test data. A normal server and
-workflow subject source expose no fixture tasks, fixture API, or invalid fixture blocks; only the
-explicit e2e/test composition may enable them.
+Production isolation invariant: test builders stay under `test/support`. The server,
+workflow subject source, harness loader, and operator API expose no fixture task source,
+fixture endpoint, deterministic planner, or invalid test block.
 
 ## 1. Test strategy
 
@@ -112,7 +112,7 @@ Required scenarios:
 - `validation_output_maps_to_registered_passed_or_failed_predicates`
 - `agent_review_output_maps_to_registered_review_predicates`
 - `receipt_redelivery_restores_identical_predicate_facts_without_reinvoking_provider`
-- `unknown_output_predicate_reference_is_rejected_when_harness_loads`
+- `output_predicate_reference_declared_by_manifest_is_registered`
 
 Property tests generate bounded valid/invalid graphs and check stable canonicalization,
 terminal-path safety, monotonic completion, and no step selection outside the graph.
@@ -351,7 +351,7 @@ Playwright acceptance scenarios:
 ### Kernel v2 gate
 
 - Bootstrap and Execution v2 are the only API/worker path;
-- two frozen fixture graphs run independently and survive worker replacement;
+- two independently built frozen graphs run concurrently and survive worker replacement;
 - separate durable waits resume only their own runs;
 - Workflow modules remain free of provider, filesystem, database, tracker, SCM, CI,
   Docker, and repository imports;

@@ -5,3 +5,4 @@ export * from './loader.js';
 export * from './prompt-template.js';
 export * from './runtime-layout.js';
 export * from './step-contracts.js';
+export * from './wait-contracts.js';

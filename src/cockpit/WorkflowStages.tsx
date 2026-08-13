@@ -5,7 +5,7 @@ import type {
   OperatorWorkflowStage,
   OperatorWorkflowStep,
   WorkflowNodeStatus,
-} from '../control-plane/m1-contracts.js';
+} from '../control-plane/operator-contracts.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from './components/ui/tooltip.js';
 
 const statusTone: Readonly<Record<WorkflowNodeStatus, string>> = {

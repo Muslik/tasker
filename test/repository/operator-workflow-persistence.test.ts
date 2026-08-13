@@ -1,0 +1,214 @@
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  createOperatorWorkflowService,
+  OPERATOR_WORKFLOW_OPERATION_PROJECTION,
+  PersistedGenerationSubjectResolver,
+} from '../../src/control-plane/index.js';
+import { openSqliteLedger } from '../../src/ledger/index.js';
+import { WorkflowAnalyzerOutputSchema } from '../../src/planning/index.js';
+import { WorkflowGenerationSubjectSource } from '../../src/planning/index.js';
+import {
+  WorkflowAnalyzerReceiptSchema,
+  type WorkflowAnalyzerReceipt,
+} from '../../src/providers/contracts.js';
+import { makeAdjustableClock } from '../../src/shared/clock.js';
+import { makeAnalyzerOutput, makePlanningTaskSnapshot } from '../support/planning.js';
+
+const directories: string[] = [];
+
+const databasePath = (): string => {
+  const directory = mkdtempSync(join(tmpdir(), 'tasker-operator-persistence-'));
+  directories.push(directory);
+  return join(directory, 'ledger.sqlite');
+};
+
+const receipt = (sessionId: string): WorkflowAnalyzerReceipt =>
+  WorkflowAnalyzerReceiptSchema.parse({
+    status: 'completed',
+    provider: 'codex_cli',
+    analyzerVersion: 'workflow-analyzer@2',
+    profile: 'test-analyzer',
+    profileSha256: 'b'.repeat(64),
+    cliVersion: 'codex-cli 0.120.0',
+    model: 'gpt-5.6-terra',
+    effort: 'medium',
+    serviceTier: 'fast',
+    sessionId,
+    promptHash: createHash('sha256').update(sessionId).digest('hex'),
+    durationMs: 1_250,
+    usage: {
+      inputTokens: 1_200,
+      cachedInputTokens: 800,
+      outputTokens: 240,
+      reasoningOutputTokens: 40,
+    },
+    hypotheticalApiCostUsd: null,
+  });
+
+afterEach(() => {
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+
+describe('operation-scoped workflow persistence', () => {
+  it('restores only the exact planning operation after process restart', () => {
+    const filename = databasePath();
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const task = makePlanningTaskSnapshot();
+    const output = makeAnalyzerOutput();
+    const operationId = 'tasker:v3:task:run-a:planning:workflow-candidate:1';
+    const firstLedger = openSqliteLedger({ filename, clock });
+    const generated = createOperatorWorkflowService(
+      firstLedger.repository,
+      clock,
+    ).assembleFromAnalyzerOutputAtOperation(task, output, receipt('session-a'), operationId);
+    expect(generated).toMatchObject({ ok: true, value: { status: 'ready' } });
+    firstLedger.close();
+
+    const restartedLedger = openSqliteLedger({ filename, clock });
+    const restarted = createOperatorWorkflowService(restartedLedger.repository, clock);
+    expect(restarted.readPlanningOperation(task.reference, operationId)).toEqual(generated);
+    expect(
+      restarted.readPlanningOperation(
+        task.reference,
+        'tasker:v3:task:run-b:planning:workflow-candidate:1',
+      ),
+    ).toEqual({ ok: true, value: null });
+    expect(restartedLedger.repository.readArtifact(`graph:${operationId}`)).not.toBeNull();
+    restartedLedger.close();
+  });
+
+  it('isolates two runs of one task including their graph and provider session', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const service = createOperatorWorkflowService(ledger.repository, clock);
+    const task = makePlanningTaskSnapshot();
+    const output = makeAnalyzerOutput();
+    const episodeA = 'tasker:v3:task:run-a:planning';
+    const episodeB = 'tasker:v3:task:run-b:planning';
+    const operationA = `${episodeA}:workflow-candidate:1`;
+    const operationB = `${episodeB}:workflow-candidate:1`;
+
+    const runA = service.assembleFromAnalyzerOutputAtOperation(
+      task,
+      output,
+      receipt('session-run-a'),
+      operationA,
+    );
+    if (output.source.root.kind !== 'sequence') throw new Error('Expected sequence proposal');
+    const invalidOutput = WorkflowAnalyzerOutputSchema.parse({
+      ...output,
+      source: {
+        ...output.source,
+        root: {
+          ...output.source.root,
+          children: [
+            { kind: 'step', id: 'unknown-step', uses: 'unknown.step@1', with: {} },
+            ...output.source.root.children,
+          ],
+        },
+      },
+    });
+    const runB = service.assembleFromAnalyzerOutputAtOperation(
+      task,
+      invalidOutput,
+      receipt('session-run-b'),
+      operationB,
+    );
+
+    expect(runA).toMatchObject({ ok: true, value: { status: 'ready' } });
+    expect(runB).toMatchObject({ ok: true, value: { status: 'rejected' } });
+    expect(service.readPlanningOperation(task.reference, operationA)).toEqual(runA);
+    expect(service.readPlanningOperation(task.reference, operationB)).toEqual(runB);
+    expect(service.readActivity(task.reference, episodeA)).toMatchObject({
+      ok: true,
+      value: { providerSession: { sessionId: 'session-run-a' } },
+    });
+    expect(service.readActivity(task.reference, episodeB)).toMatchObject({
+      ok: true,
+      value: { providerSession: { sessionId: 'session-run-b' } },
+    });
+    expect(
+      ledger.repository.readProjection(OPERATOR_WORKFLOW_OPERATION_PROJECTION, operationA)?.payload,
+    ).toMatchObject({ workflow: { status: 'valid' } });
+    expect(
+      ledger.repository.readProjection(OPERATOR_WORKFLOW_OPERATION_PROJECTION, operationB)?.payload,
+    ).toMatchObject({ workflow: { status: 'rejected' } });
+    ledger.close();
+  });
+
+  it('deduplicates one exact operation without accepting another run as its result', () => {
+    const clock = makeAdjustableClock('2026-08-01T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath(), clock });
+    const service = createOperatorWorkflowService(ledger.repository, clock);
+    const task = makePlanningTaskSnapshot();
+    const output = makeAnalyzerOutput();
+    const episode = 'tasker:v3:task:run-provider:planning';
+    const operationId = `${episode}:workflow-candidate:1`;
+    const first = service.assembleFromAnalyzerOutputAtOperation(
+      task,
+      output,
+      receipt('session-first'),
+      operationId,
+    );
+    const duplicate = service.assembleFromAnalyzerOutputAtOperation(
+      task,
+      output,
+      receipt('session-ignored'),
+      operationId,
+    );
+
+    expect(duplicate).toEqual(first);
+    expect(service.readActivity(task.reference, episode)).toMatchObject({
+      ok: true,
+      value: { providerSession: { sessionId: 'session-first' } },
+    });
+    ledger.close();
+  });
+
+  it('restores an immutable continuation subject after restart', () => {
+    const filename = databasePath();
+    const clock = makeAdjustableClock('2026-08-03T12:00:00.000Z');
+    const taskReference = 'continuation:task:run-scope-1';
+    const subject = {
+      schemaVersion: 1 as const,
+      repositoryPath: '/managed/twiket-ui-kit',
+      task: makePlanningTaskSnapshot('avia-13236-short-bug', {
+        origin: 'workflow_continuation',
+        reference: taskReference,
+        repository: 'twiket/ui-kit',
+      }),
+      taskSnapshot: { origin: 'workflow_continuation', parentTaskReference: 'jira:AVIA-13236' },
+    };
+    const firstLedger = openSqliteLedger({ filename, clock });
+    const firstService = createOperatorWorkflowService(firstLedger.repository, clock);
+    expect(firstService.saveGenerationSubject(taskReference, subject)).toEqual({
+      ok: true,
+      value: subject,
+    });
+    firstLedger.close();
+
+    const restartedLedger = openSqliteLedger({ filename, clock });
+    const restartedService = createOperatorWorkflowService(restartedLedger.repository, clock);
+    const source = new WorkflowGenerationSubjectSource([
+      new PersistedGenerationSubjectResolver(restartedService),
+    ]);
+    expect(source.resolve(taskReference)).toEqual({ ok: true, value: subject });
+    expect(
+      restartedService.saveGenerationSubject(taskReference, {
+        ...subject,
+        repositoryPath: '/different-checkout',
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { kind: 'store_failure', error: { kind: 'generation_subject_conflict' } },
+    });
+    restartedLedger.close();
+  });
+});

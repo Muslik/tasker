@@ -1,4 +1,7 @@
-import { createWorkflowAnalyzerContext } from '../planning/index.js';
+import {
+  createWorkflowAnalyzerContext,
+  type WorkflowGenerationSubjectSource,
+} from '../planning/index.js';
 import type { EvidenceBundleReference } from '../planning/evidence-bundle.js';
 import type {
   PlanningSnapshotReference,
@@ -7,11 +10,8 @@ import type {
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
 import type { EvidenceBundleStoreError } from './evidence-bundle.js';
-import type { M1ServiceError } from './m1-service.js';
-import type {
-  WorkflowContextDiscovery,
-  WorkflowGenerationSubjectSource,
-} from './workflow-generator.js';
+import type { OperatorServiceError } from './operator-service.js';
+import type { WorkflowContextDiscovery } from './workflow-generator.js';
 
 export interface TaskPlanningContext {
   readonly contextHash: string;
@@ -20,7 +20,7 @@ export interface TaskPlanningContext {
 }
 
 export type BootstrapContextAssemblyError =
-  | { readonly kind: 'subject_unavailable'; readonly error: M1ServiceError }
+  | { readonly kind: 'subject_unavailable'; readonly error: OperatorServiceError }
   | { readonly kind: 'workspace_mismatch'; readonly expected: string; readonly actual: string }
   | { readonly kind: 'context_discovery_failed'; readonly error: EvidenceBundleStoreError }
   | { readonly kind: 'snapshot_failed'; readonly reason: string };

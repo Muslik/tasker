@@ -1,6 +1,6 @@
 # Context, planning, and workflow freeze lifecycle
 
-Status: **canonical implemented architecture**, 2026-08-10.
+Status: **canonical implemented architecture**, 2026-08-13.
 
 This document defines how Tasker goes from an admitted task to one immutable execution
 workflow. No task graph exists before mandatory planning has enough evidence to propose

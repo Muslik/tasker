@@ -1,6 +1,8 @@
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
+  ExpectedRunCommandSchema,
+  PlanningClarificationSubmissionSchema,
   RestartRunCommandSchema,
   RunStartCommandSchema,
   ResumeRunCommandSchema,
@@ -10,7 +12,7 @@ import {
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
-} from '../control-plane/m1-contracts.js';
+} from '../control-plane/operator-contracts.js';
 import type {
   RunStartCommand,
   RestartRunCommand,
@@ -22,7 +24,9 @@ import type {
   WorkflowResponse,
   ExecutionRunView,
   CodeReviewSyncResponse,
-} from '../control-plane/m1-contracts.js';
+  ExpectedRunCommand,
+  PlanningClarificationSubmission,
+} from '../control-plane/operator-contracts.js';
 import {
   PlanReviewCommandSchema,
   PlanReviewHistoryResponseSchema,
@@ -44,10 +48,6 @@ import {
   type WorkflowContinuationReviewCommand,
 } from '../control-plane/workflow-continuation-contracts.js';
 import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
-import {
-  PlanningClarificationAnswerCommandSchema,
-  type PlanningClarificationAnswerCommand,
-} from '../planning/implementation-plan.js';
 import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
@@ -142,9 +142,11 @@ export const listRepositories = async (): Promise<readonly RepositoryCatalogEntr
 };
 
 export const loadOperatorActivity = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<OperatorActivityResponse> => {
-  const result = await fetchJson(`/api/operator/tasks/${encodeURIComponent(fixtureId)}/activity`);
+  const result = await fetchJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/activity`,
+  );
 
   if (!result.response.ok) {
     throw failureFrom(result);
@@ -159,9 +161,11 @@ export const loadOperatorActivity = async (
 };
 
 export const loadOperatorWorkflowProjection = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<OperatorWorkflowProjection> => {
-  const result = await fetchJson(`/api/operator/tasks/${encodeURIComponent(fixtureId)}/projection`);
+  const result = await fetchJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/projection`,
+  );
 
   if (!result.response.ok) throw failureFrom(result);
   const parsed = OperatorWorkflowProjectionSchema.safeParse(result.body);
@@ -171,8 +175,8 @@ export const loadOperatorWorkflowProjection = async (
   return parsed.data;
 };
 
-export const loadWorkflow = async (fixtureId: string): Promise<WorkflowLookup> => {
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}`);
+export const loadWorkflow = async (taskReference: string): Promise<WorkflowLookup> => {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(taskReference)}`);
 
   if (result.response.status === 404) {
     return { status: 'missing' };
@@ -191,10 +195,10 @@ export const loadWorkflow = async (fixtureId: string): Promise<WorkflowLookup> =
 };
 
 export const loadImplementationPlan = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<ImplementationPlanLookup> => {
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/implementation-plan`,
+    `/api/workflows/${encodeURIComponent(taskReference)}/implementation-plan`,
   );
   if (result.response.status === 404) return { status: 'missing' };
   if (!result.response.ok) throw failureFrom(result);
@@ -204,10 +208,10 @@ export const loadImplementationPlan = async (
 };
 
 export const loadPlanningTranscript = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<PlanningTranscriptLookup> => {
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/planning-transcript`,
+    `/api/workflows/${encodeURIComponent(taskReference)}/planning-transcript`,
   );
   if (result.response.status === 404) return { status: 'missing' };
   if (!result.response.ok) throw failureFrom(result);
@@ -217,9 +221,11 @@ export const loadPlanningTranscript = async (
 };
 
 export const loadWorkflowContinuation = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<WorkflowContinuationLookup> => {
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/continuation`);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/continuation`,
+  );
   if (result.response.status === 404) return { status: 'missing' };
   if (!result.response.ok) throw failureFrom(result);
   const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
@@ -228,12 +234,12 @@ export const loadWorkflowContinuation = async (
 };
 
 export const reviewWorkflowContinuation = async (
-  fixtureId: string,
+  taskReference: string,
   commandInput: WorkflowContinuationReviewCommand,
 ): Promise<WorkflowContinuationRecord> => {
   const command = WorkflowContinuationReviewCommandSchema.parse(commandInput);
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/continuation/review`,
+    `/api/workflows/${encodeURIComponent(taskReference)}/continuation/review`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -247,10 +253,10 @@ export const reviewWorkflowContinuation = async (
 };
 
 export const retryWorkflowContinuation = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<WorkflowContinuationRecord> => {
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/continuation/retry`,
+    `/api/workflows/${encodeURIComponent(taskReference)}/continuation/retry`,
     { method: 'POST' },
   );
   if (!result.response.ok) throw failureFrom(result);
@@ -260,11 +266,11 @@ export const retryWorkflowContinuation = async (
 };
 
 export const generateWorkflow = async (
-  fixtureId: string,
+  taskReference: string,
   commandInput: RunStartCommand,
 ): Promise<ExecutionRunView> => {
   const command = RunStartCommandSchema.parse(commandInput);
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/generate`, {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(taskReference)}/generate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(command),
@@ -282,8 +288,8 @@ export const generateWorkflow = async (
   return parsed.data;
 };
 
-export const loadExecutionRun = async (fixtureId: string): Promise<ExecutionRunView> => {
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/run`);
+export const loadExecutionRun = async (taskReference: string): Promise<ExecutionRunView> => {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(taskReference)}/run`);
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Execution run does not match the cockpit contract');
@@ -291,11 +297,11 @@ export const loadExecutionRun = async (fixtureId: string): Promise<ExecutionRunV
 };
 
 export const resumeWorkflow = async (
-  fixtureId: string,
-  commandInput: ResumeRunCommand = {},
+  taskReference: string,
+  commandInput: ResumeRunCommand,
 ): Promise<ExecutionRunView> => {
   const command = ResumeRunCommandSchema.parse(commandInput);
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/resume`, {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(taskReference)}/resume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(command),
@@ -307,11 +313,11 @@ export const resumeWorkflow = async (
 };
 
 export const restartWorkflow = async (
-  fixtureId: string,
+  taskReference: string,
   commandInput: RestartRunCommand,
 ): Promise<ExecutionRunView> => {
   const command = RestartRunCommandSchema.parse(commandInput);
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/restart`, {
+  const result = await fetchJson(`/api/workflows/${encodeURIComponent(taskReference)}/restart`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(command),
@@ -322,10 +328,18 @@ export const restartWorkflow = async (
   return parsed.data;
 };
 
-export const syncCodeReview = async (fixtureId: string): Promise<CodeReviewSyncResponse> => {
+export const syncCodeReview = async (
+  taskReference: string,
+  commandInput: ExpectedRunCommand,
+): Promise<CodeReviewSyncResponse> => {
+  const command = ExpectedRunCommandSchema.parse(commandInput);
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/code-review/sync`,
-    { method: 'POST' },
+    `/api/workflows/${encodeURIComponent(taskReference)}/code-review/sync`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
   );
   if (!result.response.ok) throw failureFrom(result);
   const parsed = CodeReviewSyncResponseSchema.safeParse(result.body);
@@ -333,10 +347,18 @@ export const syncCodeReview = async (fixtureId: string): Promise<CodeReviewSyncR
   return parsed.data;
 };
 
-export const completeCodeReview = async (fixtureId: string): Promise<CodeReviewSyncResponse> => {
+export const completeCodeReview = async (
+  taskReference: string,
+  commandInput: ExpectedRunCommand,
+): Promise<CodeReviewSyncResponse> => {
+  const command = ExpectedRunCommandSchema.parse(commandInput);
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/code-review/complete`,
-    { method: 'POST' },
+    `/api/workflows/${encodeURIComponent(taskReference)}/code-review/complete`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
   );
   if (!result.response.ok) throw failureFrom(result);
   const parsed = CodeReviewSyncResponseSchema.safeParse(result.body);
@@ -346,15 +368,18 @@ export const completeCodeReview = async (fixtureId: string): Promise<CodeReviewS
 };
 
 export const reviewPlan = async (
-  fixtureId: string,
+  taskReference: string,
   commandInput: PlanReviewCommand,
 ): Promise<ExecutionRunView> => {
   const command = PlanReviewCommandSchema.parse(commandInput);
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/plan-review`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(command),
-  });
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/plan-review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Plan review response does not match the cockpit contract');
@@ -362,20 +387,22 @@ export const reviewPlan = async (
 };
 
 export const loadPlanReviewHistory = async (
-  fixtureId: string,
+  taskReference: string,
 ): Promise<readonly PlanReviewRound[]> => {
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(fixtureId)}/plan-reviews`);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/plan-reviews`,
+  );
   if (!result.response.ok) throw failureFrom(result);
   return PlanReviewHistoryResponseSchema.parse(result.body).rounds;
 };
 
 export const answerPlanningClarification = async (
-  fixtureId: string,
-  commandInput: PlanningClarificationAnswerCommand,
+  taskReference: string,
+  commandInput: PlanningClarificationSubmission,
 ): Promise<ExecutionRunView> => {
-  const command = PlanningClarificationAnswerCommandSchema.parse(commandInput);
+  const command = PlanningClarificationSubmissionSchema.parse(commandInput);
   const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(fixtureId)}/planning-clarification`,
+    `/api/workflows/${encodeURIComponent(taskReference)}/planning-clarification`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -390,8 +417,8 @@ export const answerPlanningClarification = async (
   return parsed.data;
 };
 
-export const graphDownloadUrl = (fixtureId: string): string =>
-  `/api/workflows/${encodeURIComponent(fixtureId)}/graph.json`;
+export const graphDownloadUrl = (taskReference: string): string =>
+  `/api/workflows/${encodeURIComponent(taskReference)}/graph.json`;
 
 export const loadJiraIssue = async (issueKey: string): Promise<JiraIssueState> => {
   const result = await fetchJson(`/api/jira/issues/${encodeURIComponent(issueKey)}`);

@@ -21,18 +21,26 @@ import {
   type PlanningQuestionAnswer,
   type ImplementationPlanLink,
 } from '../planning/implementation-plan.js';
-import type { EvidenceBundleReference, PlanningEvidenceCapture } from '../planning/index.js';
+import type {
+  EvidenceBundleReference,
+  PlanningEvidenceCapture,
+  WorkflowGenerationSubject,
+  WorkflowGenerationSubjectSource,
+} from '../planning/index.js';
+import type {
+  ExecutionRunSnapshot,
+  PlanningContextSnapshot,
+  PlanningSnapshotReference,
+  PlanningSnapshotWorkspace,
+  RunPlanningSnapshot,
+} from '../planning/run-planning-snapshot.js';
 import {
   PlanningSnapshotReferenceSchema,
   PlanningContextSnapshotSchema,
   ExecutionRunSnapshotSchema,
   RunPlanningSnapshotSchema,
-  type ExecutionRunSnapshot,
-  type PlanningContextSnapshot,
-  type PlanningSnapshotReference,
-  type PlanningSnapshotWorkspace,
-  type RunPlanningSnapshot,
 } from '../planning/run-planning-snapshot.js';
+import type { ImplementationPlanningFailureSchema } from '../planning/planning-failure.js';
 import type {
   ImplementationPlanner,
   ImplementationPlannerDecisionSuccess,
@@ -47,13 +55,12 @@ import {
   type OperatorActivityResponse,
   type OperatorStreamEvent,
   type OperatorTaskSummary,
-} from './m1-contracts.js';
+} from './operator-contracts.js';
 import {
   ImplementationPlanningRecordSchema,
   ValidatedPlanningCandidateSchema,
 } from './implementation-planning-contracts.js';
 import type {
-  PlanningFailureViewSchema,
   ImplementationPlanningRecord,
   PlanningEvidencePending,
   ReadyImplementationPlanningRecord,
@@ -65,11 +72,7 @@ import {
   type PlanningTranscriptStoreError,
   type PlanningTranscriptView,
 } from './planning-transcript.js';
-import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
-import type {
-  WorkflowGenerationSubject,
-  WorkflowGenerationSubjectSource,
-} from './workflow-generator.js';
+import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
 import { EvidenceBundleStore, type EvidenceBundleStoreError } from './evidence-bundle.js';
 import type {
   PlanningEvidenceReaderRegistry,
@@ -77,10 +80,7 @@ import type {
 } from './planning-evidence.js';
 
 export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_episode';
-export {
-  ImplementationPlanningRecordSchema,
-  PlanningFailureViewSchema,
-} from './implementation-planning-contracts.js';
+export { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 export type {
   ImplementationPlanningRecord,
   ReadyImplementationPlanningRecord,
@@ -809,7 +809,7 @@ export class ImplementationPlanningStore {
 
 const planningFailureView = (
   failure: ImplementationPlannerFailure,
-): z.infer<typeof PlanningFailureViewSchema> => {
+): z.infer<typeof ImplementationPlanningFailureSchema> => {
   switch (failure.kind) {
     case 'invalid_skill_selection':
       return { kind: failure.kind, message: failure.issues.join('; '), retryable: false };
@@ -836,7 +836,7 @@ const planningFailureView = (
 };
 
 export type ImplementationPlanningError =
-  | { readonly kind: 'subject'; readonly error: M1ServiceError }
+  | { readonly kind: 'subject'; readonly error: OperatorServiceError }
   | { readonly kind: 'workflow_not_ready'; readonly taskReference: string }
   | {
       readonly kind: 'workspace_repository_mismatch';
@@ -940,21 +940,14 @@ const resolveSnapshottedProcessCommand = (
 
 const selectStrategy = (
   requested: PlanningStrategyRequest,
-  subject: WorkflowGenerationSubject,
 ): { readonly strategy: PlanningStrategy; readonly reason: string } => {
   if (requested !== 'auto') {
     return { strategy: requested, reason: `The operator explicitly selected ${requested}.` };
   }
-  if (subject.task.family === 'shared_component') {
-    return {
-      strategy: 'ralplan',
-      reason: 'The task crosses repository/publication boundaries and requires consensus planning.',
-    };
-  }
   return {
     strategy: 'fast',
     reason:
-      'The task currently stays within one repository and does not require consensus planning.',
+      'No operator override requested consensus planning; the planner may still propose a durable continuation when investigation discovers another repository.',
   };
 };
 
@@ -966,7 +959,7 @@ export class ImplementationPlanningCoordinator {
 
   public constructor(
     private readonly store: ImplementationPlanningStore,
-    private readonly workflows: M1WorkflowService,
+    private readonly workflows: OperatorWorkflowService,
     private readonly subjects: WorkflowGenerationSubjectSource,
     private readonly evidenceBundles: EvidenceBundleStore,
     private readonly planner: ImplementationPlanner,
@@ -1458,7 +1451,7 @@ export class ImplementationPlanningCoordinator {
           ? [
               OperatorStreamEventSchema.parse({
                 sequence: event.sequence,
-                fixtureId: payload.data.taskReference,
+                taskReference: payload.data.taskReference,
                 eventType: event.eventType,
               }),
             ]
@@ -1508,7 +1501,7 @@ export class ImplementationPlanningCoordinator {
       plannerProfiles: loaded.value.harness.implementationPlanner.profiles,
       workspace: loaded.value.repository,
     };
-    const selection = selectStrategy(requestedStrategy, planningInput.subject);
+    const selection = selectStrategy(requestedStrategy);
     const begun =
       existing.value?.commandId === commandId && existing.value.status === 'planning'
         ? ok(existing.value)
@@ -1858,7 +1851,7 @@ export class ImplementationPlanningCoordinator {
 export const createImplementationPlanningCoordinator = (input: {
   readonly ledger: LedgerRepository;
   readonly clock: Clock;
-  readonly workflows: M1WorkflowService;
+  readonly workflows: OperatorWorkflowService;
   readonly subjects: WorkflowGenerationSubjectSource;
   readonly planner: ImplementationPlanner;
   readonly evidenceBundles?: EvidenceBundleStore;

@@ -11,16 +11,15 @@ import {
 } from '../../../src/integrations/index.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
 import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
-import { findTaskFixture } from '../../../src/planning/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
+import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
-const task = findTaskFixture('avia-13236-short-bug');
-if (task === undefined) throw new Error('Missing test task fixture');
+const task = makePlanningTaskSnapshot('avia-13236-short-bug');
 
 const review = (threadIds: readonly number[] = [41]): PullRequestReviewEvidence => ({
   schemaVersion: 1,
-  taskReference: task.fixtureId,
-  workflowId: `tasker:${task.fixtureId}`,
+  taskReference: task.reference,
+  workflowId: `tasker:${task.reference}`,
   workflowRunId: 'run-1',
   reviewId: 'bitbucket:ONETWOTRIP/front-avia:73:review-hash',
   importedAt: '2026-08-04T10:03:00.000Z',
@@ -77,15 +76,15 @@ const requestFor = (
 ): IntegrationStepExecutionRequest => ({
   operationId,
   stepReference: 'review.acknowledge@1',
-  taskReference: task.fixtureId,
+  taskReference: task.reference,
   task,
   taskSnapshot: task,
   stepInput: { objective: task.title, repository: task.repository, taskId: task.taskId },
   workspace: {
     schemaVersion: 1,
     workspaceId: 'a'.repeat(24),
-    taskReference: task.fixtureId,
-    workflowId: `tasker:${task.fixtureId}`,
+    taskReference: task.reference,
+    workflowId: `tasker:${task.reference}`,
     workflowRunId: 'run-1',
     repository: {
       reference: task.repository,

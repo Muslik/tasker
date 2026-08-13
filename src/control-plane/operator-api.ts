@@ -18,13 +18,14 @@ import {
   RepositoryCatalogResponseSchema,
   RepositoryReferenceSchema,
 } from '../repositories/contracts.js';
-import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
   DEFAULT_RUN_START_COMMAND,
   ExecutionRunViewSchema,
+  ExpectedRunCommandSchema,
   OperatorActivityResponseSchema,
+  PlanningClarificationSubmissionSchema,
   OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
   RestartRunCommandSchema,
@@ -32,14 +33,14 @@ import {
   RunStartCommandSchema,
   WorkflowResponseSchema,
   type OperatorTaskSummary,
-} from './m1-contracts.js';
+} from './operator-contracts.js';
 import {
   PlanReviewCommandSchema,
   PlanReviewHistoryResponseSchema,
   planReviewResolution,
   type PlanReviewStore,
 } from './plan-review.js';
-import type { M1ServiceError, M1WorkflowService } from './m1-service.js';
+import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import { projectOperatorActivity } from './operator-activity-projection.js';
@@ -51,7 +52,7 @@ import {
   type TaskRunService,
 } from '../temporal/index.js';
 
-const FixtureParamsSchema = z.object({ fixtureId: z.string().min(1) }).strict();
+const TaskReferenceParamsSchema = z.object({ taskReference: z.string().min(1) }).strict();
 const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
 const JiraSyncBodySchema = z.object({ repository: RepositoryReferenceSchema.optional() }).strict();
 const JiraAttachmentParamsSchema = z
@@ -62,8 +63,8 @@ const StreamQuerySchema = z
   .object({ after: z.coerce.number().int().nonnegative().optional() })
   .strict();
 
-export interface BuildM1ApiOptions {
-  readonly service: M1WorkflowService;
+export interface BuildOperatorApiOptions {
+  readonly service: OperatorWorkflowService;
   readonly cockpitDirectory?: string | undefined;
   readonly logger?: boolean | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
@@ -79,12 +80,8 @@ export interface BuildM1ApiOptions {
 const apiError = (error: string, message: string) =>
   ApiErrorResponseSchema.parse({ error, message });
 
-const sendServiceError = (reply: FastifyReply, error: M1ServiceError): FastifyReply => {
+const sendServiceError = (reply: FastifyReply, error: OperatorServiceError): FastifyReply => {
   switch (error.kind) {
-    case 'fixture_not_found':
-      return reply
-        .code(404)
-        .send(apiError('fixture_not_found', `Fixture ${error.fixtureId} does not exist`));
     case 'task_not_found':
       return reply
         .code(404)
@@ -147,6 +144,10 @@ const sendTemporalRunError = (reply: FastifyReply, error: TaskRunError): Fastify
       return reply
         .code(409)
         .send(apiError(error.kind, 'Completed workflows cannot be restarted from scratch'));
+    case 'stale_run':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, 'This command targets an obsolete workflow run; refresh first'));
     case 'runtime_unavailable':
       return reply.code(503).send(apiError(error.kind, error.message));
   }
@@ -233,7 +234,7 @@ const resolveCockpitAsset = (directory: string, asset: string): string | null =>
   return pathFromRoot.startsWith('..') || pathFromRoot.length === 0 ? null : filename;
 };
 
-export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
+export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInstance => {
   const api = Fastify({ logger: options.logger ?? false });
   const temporalRunService = options.temporalRunService;
 
@@ -260,7 +261,6 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
 
   api.get('/api/health', () => ({
     status: 'ok',
-    milestone: 'm1',
     executionRuntime: 'temporal',
   }));
 
@@ -310,22 +310,25 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     });
   });
 
-  api.get('/api/operator/tasks/:fixtureId/activity', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/operator/tasks/:taskReference/activity', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
     const bootstrapRunId = currentRunId(lifecycle);
     const executionWorkflowId = lifecycle?.execution?.workflowId ?? null;
 
-    if (params.data.fixtureId.startsWith('jira:') && options.jiraIssueService !== undefined) {
-      const jiraResult = options.jiraIssueService.readActivity(params.data.fixtureId);
+    if (params.data.taskReference.startsWith('jira:') && options.jiraIssueService !== undefined) {
+      const jiraResult = options.jiraIssueService.readActivity(params.data.taskReference);
       if (!jiraResult.ok) return sendJiraServiceError(reply, jiraResult.error);
-      const workflowResult = options.service.readActivity(params.data.fixtureId, planningEpisodeId);
+      const workflowResult = options.service.readActivity(
+        params.data.taskReference,
+        planningEpisodeId,
+      );
       if (!workflowResult.ok) return sendServiceError(reply, workflowResult.error);
       const entries = projectOperatorActivity({
         jira: jiraResult.value.entries,
@@ -345,7 +348,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       });
       return reply.send(
         OperatorActivityResponseSchema.parse({
-          fixtureId: params.data.fixtureId,
+          taskReference: params.data.taskReference,
           providerSession:
             workflowResult.value.providerSession.status === 'completed'
               ? workflowResult.value.providerSession
@@ -355,7 +358,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       );
     }
 
-    const result = options.service.readActivity(params.data.fixtureId, planningEpisodeId);
+    const result = options.service.readActivity(params.data.taskReference, planningEpisodeId);
     if (!result.ok) {
       return sendServiceError(reply, result.error);
     }
@@ -383,18 +386,18 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     );
   });
 
-  api.get('/api/operator/tasks/:fixtureId/projection', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/operator/tasks/:taskReference/projection', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
-    const lifecycle = await temporalRunService.readLifecycle(params.data.fixtureId);
+    const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
     if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
     return reply.send(
       OperatorWorkflowProjectionSchema.parse(
         createOperatorWorkflowProjection(
-          params.data.fixtureId,
+          params.data.taskReference,
           lifecycle.value,
           options.blockReceipts,
           (run) => {
@@ -512,13 +515,13 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     return reply;
   });
 
-  api.get('/api/workflows/:fixtureId', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/workflows/:taskReference', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const operationId =
       lifecycle?.bootstrap.planning?.status === 'ready'
@@ -527,7 +530,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     const result =
       operationId === null
         ? { ok: true as const, value: null }
-        : options.service.readPlanningOperation(params.data.fixtureId, operationId);
+        : options.service.readPlanningOperation(params.data.taskReference, operationId);
     if (!result.ok) return sendServiceError(reply, result.error);
     if (result.value === null) {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
@@ -536,29 +539,29 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     return reply.send(WorkflowResponseSchema.parse(result.value));
   });
 
-  api.get('/api/workflows/:fixtureId/run', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/workflows/:taskReference/run', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const result = await temporalRunService.read(params.data.fixtureId);
+    const result = await temporalRunService.read(params.data.taskReference);
     if (!result.ok) return sendTemporalRunError(reply, result.error);
     return result.value === null
       ? reply.code(404).send(apiError('run_not_found', 'This workflow has not started'))
       : reply.send(ExecutionRunViewSchema.parse(result.value));
   });
 
-  api.get('/api/workflows/:fixtureId/implementation-plan', async (request, reply) => {
+  api.get('/api/workflows/:taskReference/implementation-plan', async (request, reply) => {
     if (options.implementationPlanning === undefined) {
       return reply
         .code(404)
         .send(apiError('implementation_plan_not_found', 'No implementation plan exists'));
     }
-    const params = FixtureParamsSchema.safeParse(request.params);
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
     if (planningEpisodeId === null) {
@@ -579,17 +582,17 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(ImplementationPlanningRecordSchema.parse(result.value));
   });
 
-  api.get('/api/workflows/:fixtureId/planning-transcript', async (request, reply) => {
+  api.get('/api/workflows/:taskReference/planning-transcript', async (request, reply) => {
     if (options.implementationPlanning === undefined) {
       return reply
         .code(404)
         .send(apiError('planning_transcript_not_found', 'No planning transcript exists'));
     }
-    const params = FixtureParamsSchema.safeParse(request.params);
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
     if (planningEpisodeId === null) {
@@ -612,17 +615,21 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.send(PlanningTranscriptViewSchema.parse(result.value));
   });
 
-  api.post('/api/workflows/:fixtureId/code-review/sync', async (request, reply) => {
+  api.post('/api/workflows/:taskReference/code-review/sync', async (request, reply) => {
     if (options.bitbucketReview === undefined) {
       return reply
         .code(503)
         .send(apiError('bitbucket_review_not_configured', 'Bitbucket review intake is disabled'));
     }
-    const params = FixtureParamsSchema.safeParse(request.params);
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const current = await temporalRunService.read(params.data.fixtureId);
+    const command = ExpectedRunCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply.code(400).send(apiError('invalid_request', 'expectedRunId is required'));
+    }
+    const current = await temporalRunService.read(params.data.taskReference);
     if (!current.ok) return sendTemporalRunError(reply, current.error);
     if (
       current.value === null ||
@@ -634,8 +641,11 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(409)
         .send(apiError('run_not_at_code_review', 'The run is not waiting for code review'));
     }
+    if (command.data.expectedRunId !== current.value.runId) {
+      return reply.code(409).send(apiError('stale_run', 'Refresh before syncing code review'));
+    }
     const synced = await options.bitbucketReview.sync({
-      taskReference: params.data.fixtureId,
+      taskReference: params.data.taskReference,
       workflowId: current.value.workflowId,
       workflowRunId: current.value.runId,
     });
@@ -650,7 +660,8 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         }),
       );
     }
-    const resumed = await temporalRunService.resolveWait(params.data.fixtureId, {
+    const resumed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
       resolution: {
@@ -669,12 +680,16 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     );
   });
 
-  api.post('/api/workflows/:fixtureId/code-review/complete', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.post('/api/workflows/:taskReference/code-review/complete', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const current = await temporalRunService.read(params.data.fixtureId);
+    const command = ExpectedRunCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply.code(400).send(apiError('invalid_request', 'expectedRunId is required'));
+    }
+    const current = await temporalRunService.read(params.data.taskReference);
     if (!current.ok) return sendTemporalRunError(reply, current.error);
     if (
       current.value === null ||
@@ -687,7 +702,8 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .send(apiError('run_not_at_code_review', 'The run is not waiting for code review'));
     }
     const reviewId = `operator:${current.value.runId}:${current.value.wait.nodeId}`;
-    const completed = await temporalRunService.resolveWait(params.data.fixtureId, {
+    const completed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
       resolution: { decision: 'approved', reviewId },
@@ -703,10 +719,10 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     );
   });
 
-  api.post('/api/workflows/:fixtureId/resume', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.post('/api/workflows/:taskReference/resume', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
     const command = ResumeRunCommandSchema.safeParse(request.body ?? {});
     if (!command.success) {
@@ -714,12 +730,12 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(400)
         .send(apiError('invalid_resume_guidance', 'Guidance must be non-empty when provided'));
     }
-    const current = await temporalRunService.read(params.data.fixtureId);
+    const current = await temporalRunService.read(params.data.taskReference);
     if (!current.ok) return sendTemporalRunError(reply, current.error);
     if (current.value === null) {
       return sendTemporalRunError(reply, {
         kind: 'run_not_found',
-        taskReference: params.data.fixtureId,
+        taskReference: params.data.taskReference,
       });
     }
     if (current.value.status !== 'waiting') {
@@ -742,7 +758,8 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           ),
         );
     }
-    const resumed = await temporalRunService.resolveWait(params.data.fixtureId, {
+    const resumed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
       resolution: {
@@ -751,14 +768,14 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       },
     });
     return resumed.ok
-      ? sendTemporalState(reply, params.data.fixtureId, resumed.value)
+      ? sendTemporalState(reply, params.data.taskReference, resumed.value)
       : sendTemporalRunError(reply, resumed.error);
   });
 
-  api.post('/api/workflows/:fixtureId/plan-review', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.post('/api/workflows/:taskReference/plan-review', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
     const command = PlanReviewCommandSchema.safeParse(request.body);
     if (!command.success) {
@@ -766,7 +783,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(400)
         .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan guidance'));
     }
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
     const planning =
@@ -784,7 +801,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(409)
         .send(apiError('stale_plan_review', 'Refresh and review the current planning attempt'));
     }
-    const current = await temporalRunService.read(params.data.fixtureId);
+    const current = await temporalRunService.read(params.data.taskReference);
     if (!current.ok) return sendTemporalRunError(reply, current.error);
     if (
       current.value === null ||
@@ -796,6 +813,9 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(409)
         .send(apiError('run_not_at_plan_review', 'The run is not waiting for plan review'));
     }
+    if (command.data.expectedRunId !== current.value.runId) {
+      return reply.code(409).send(apiError('stale_run', 'Refresh before reviewing the plan'));
+    }
     if (planningEpisodeId === null) {
       return reply
         .code(409)
@@ -803,7 +823,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     }
     const submitted = options.planReviews?.submit(
       planningEpisodeId,
-      params.data.fixtureId,
+      params.data.taskReference,
       command.data,
     );
     if (submitted !== undefined && !submitted.ok) {
@@ -811,7 +831,8 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(409)
         .send(apiError(submitted.error.kind, 'Plan review could not be stored'));
     }
-    const reviewed = await temporalRunService.resolveWait(params.data.fixtureId, {
+    const reviewed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
       resolution: planReviewResolution(command.data),
@@ -823,18 +844,18 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
         .code(500)
         .send(apiError('plan_review_store_failed', 'Plan review was accepted but not projected'));
     }
-    return sendTemporalState(reply, params.data.fixtureId, reviewed.value);
+    return sendTemporalState(reply, params.data.taskReference, reviewed.value);
   });
 
-  api.get('/api/workflows/:fixtureId/plan-reviews', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/workflows/:taskReference/plan-reviews', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
     if (options.planReviews === undefined) {
       return PlanReviewHistoryResponseSchema.parse({ rounds: [] });
     }
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
     if (planningEpisodeId === null) {
@@ -846,18 +867,18 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
       : reply.code(500).send(apiError(history.error.kind, 'Plan review history is unavailable'));
   });
 
-  api.post('/api/workflows/:fixtureId/planning-clarification', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.post('/api/workflows/:taskReference/planning-clarification', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const command = PlanningClarificationAnswerCommandSchema.safeParse(request.body);
+    const command = PlanningClarificationSubmissionSchema.safeParse(request.body);
     if (!command.success) {
       return reply
         .code(400)
         .send(apiError('invalid_clarification_answers', 'Provide a non-empty answer per question'));
     }
-    const current = await temporalRunService.read(params.data.fixtureId);
+    const current = await temporalRunService.read(params.data.taskReference);
     if (!current.ok) return sendTemporalRunError(reply, current.error);
     if (
       current.value === null ||
@@ -891,20 +912,21 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           ),
         );
     }
-    const answered = await temporalRunService.resolveWait(params.data.fixtureId, {
+    const answered = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
-      resolution: command.data,
+      resolution: { answers: command.data.answers },
     });
     return answered.ok
-      ? sendTemporalState(reply, params.data.fixtureId, answered.value)
+      ? sendTemporalState(reply, params.data.taskReference, answered.value)
       : sendTemporalRunError(reply, answered.error);
   });
 
-  api.post('/api/workflows/:fixtureId/generate', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.post('/api/workflows/:taskReference/generate', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
     const command = RunStartCommandSchema.safeParse(
@@ -917,18 +939,18 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     }
     const started = await temporalRunService.start({
       schemaVersion: 3,
-      taskReference: params.data.fixtureId,
-      settings: { ...command.data.settings, executionStart: 'automatic' },
+      taskReference: params.data.taskReference,
+      settings: command.data.settings,
     });
     return started.ok
-      ? sendTemporalState(reply, params.data.fixtureId, started.value)
+      ? sendTemporalState(reply, params.data.taskReference, started.value)
       : sendTemporalRunError(reply, started.error);
   });
 
-  api.post('/api/workflows/:fixtureId/restart', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.post('/api/workflows/:taskReference/restart', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
     const command = RestartRunCommandSchema.safeParse(request.body);
     if (!command.success) {
@@ -938,19 +960,22 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
           apiError('restart_confirmation_required', 'Explicit restart confirmation is required'),
         );
     }
-    const restarted = await temporalRunService.restart(params.data.fixtureId);
+    const restarted = await temporalRunService.restart(
+      params.data.taskReference,
+      command.data.expectedRunId,
+    );
     return restarted.ok
-      ? sendTemporalState(reply, params.data.fixtureId, restarted.value)
+      ? sendTemporalState(reply, params.data.taskReference, restarted.value)
       : sendTemporalRunError(reply, restarted.error);
   });
 
-  api.get('/api/workflows/:fixtureId/graph.json', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/workflows/:taskReference/graph.json', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const operationId =
       lifecycle?.bootstrap.planning?.status === 'ready'
@@ -959,7 +984,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     const result =
       operationId === null
         ? { ok: true as const, value: null }
-        : options.service.readPlanningOperation(params.data.fixtureId, operationId);
+        : options.service.readPlanningOperation(params.data.taskReference, operationId);
     if (!result.ok) return sendServiceError(reply, result.error);
     if (result.value === null) {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
@@ -971,18 +996,21 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     }
 
     return reply
-      .header('content-disposition', `attachment; filename="${params.data.fixtureId}-graph.json"`)
+      .header(
+        'content-disposition',
+        `attachment; filename="${params.data.taskReference}-graph.json"`,
+      )
       .type('application/json; charset=utf-8')
       .send(result.value.view.workflow.graph);
   });
 
-  api.get('/api/graphs/:fixtureId', async (request, reply) => {
-    const params = FixtureParamsSchema.safeParse(request.params);
+  api.get('/api/graphs/:taskReference', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'fixtureId is required'));
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
-    const lifecycle = await readCurrentLifecycle(params.data.fixtureId, reply);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const operationId =
       lifecycle?.bootstrap.planning?.status === 'ready'
@@ -991,7 +1019,7 @@ export const buildM1Api = (options: BuildM1ApiOptions): FastifyInstance => {
     const result =
       operationId === null
         ? { ok: true as const, value: null }
-        : options.service.readPlanningOperation(params.data.fixtureId, operationId);
+        : options.service.readPlanningOperation(params.data.taskReference, operationId);
     if (!result.ok) return sendServiceError(reply, result.error);
     if (result.value === null) {
       return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));

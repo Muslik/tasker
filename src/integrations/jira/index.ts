@@ -4,4 +4,5 @@ export * from './lifecycle.js';
 export * from './review-ready-adapter.js';
 export * from './repository-reference.js';
 export * from './service.js';
+export * from './workflow-generation-subject.js';
 export * from './store.js';

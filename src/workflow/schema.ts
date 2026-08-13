@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const WORKFLOW_IR_VERSION = 'm2';
+export const WORKFLOW_IR_VERSION = 'workflow-ir-v1';
 export const WORKFLOW_COMPILER_VERSION = 4;
 
 export type JsonPrimitive = boolean | null | number | string;

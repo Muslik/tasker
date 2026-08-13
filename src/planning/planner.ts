@@ -6,21 +6,15 @@ import {
   CompiledWorkflowArtifactSchema,
   ValidationReportSchema,
 } from '../workflow/index.js';
-import { M1_WORKFLOW_CONTRACTS } from './contracts.js';
-import { FixtureInputFailureSchema } from './fixtures.js';
+import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import { validateWorkflowObligations } from './obligations.js';
 import {
-  analyzeTaskFixture,
   parseWorkflowProposal,
   ProposalInputFailureSchema,
   WorkflowProposalArtifactSchema,
   type WorkflowProposalArtifact,
 } from './proposal.js';
 import { createWorkflowPresentation, WorkflowPresentationTreeSchema } from './presentation.js';
-
-const FixturePlanningFailureSchema = FixtureInputFailureSchema.extend({
-  stage: z.literal('fixture'),
-}).strict();
 
 const ProposalPlanningFailureSchema = ProposalInputFailureSchema.extend({
   stage: z.literal('proposal'),
@@ -46,7 +40,6 @@ const CapabilityValidationFailureSchema = z
 
 export const PlanningFailureSchema = z.discriminatedUnion('stage', [
   CapabilityValidationFailureSchema,
-  FixturePlanningFailureSchema,
   ProposalPlanningFailureSchema,
   WorkflowValidationFailureSchema,
 ]);
@@ -54,12 +47,6 @@ export const PlanningFailureSchema = z.discriminatedUnion('stage', [
 export const PlannedWorkflowSchema = z
   .object({
     compiled: CompiledWorkflowArtifactSchema,
-    executionEligibility: z
-      .object({
-        reason: z.literal('m1_read_only'),
-        status: z.literal('disabled'),
-      })
-      .strict(),
     presentation: WorkflowPresentationTreeSchema,
     proposal: WorkflowProposalArtifactSchema,
     status: z.literal('accepted'),
@@ -74,7 +61,7 @@ const requiredCapabilitiesFromCompiledGraph = (
   references: readonly string[],
 ): readonly string[] => {
   const capabilities = references.flatMap(
-    (reference) => M1_WORKFLOW_CONTRACTS.stepTypes.get(reference)?.requiredCapabilities ?? [],
+    (reference) => HARNESS_WORKFLOW_CONTRACTS.stepTypes.get(reference)?.requiredCapabilities ?? [],
   );
 
   return [...new Set([...capabilities, ...proposal.capabilities.required])].sort((left, right) =>
@@ -82,25 +69,11 @@ const requiredCapabilitiesFromCompiledGraph = (
   );
 };
 
-export const planTaskWorkflow = (
-  fixtureInput: unknown,
-): Outcome<PlannedWorkflow, PlanningFailure> => {
-  const proposalResult = analyzeTaskFixture(fixtureInput);
-
-  if (!proposalResult.ok) {
-    return proposalResult.error.code === 'invalid_fixture'
-      ? err({ ...proposalResult.error, stage: 'fixture' })
-      : err({ ...proposalResult.error, stage: 'proposal' });
-  }
-
-  return planParsedWorkflowProposal(proposalResult.value);
-};
-
 const planParsedWorkflowProposal = (
   proposal: WorkflowProposalArtifact,
 ): Outcome<PlannedWorkflow, PlanningFailure> => {
   const compiledResult = compileWorkflow({
-    contracts: M1_WORKFLOW_CONTRACTS,
+    contracts: HARNESS_WORKFLOW_CONTRACTS,
     source: proposal.source,
   });
 
@@ -113,10 +86,7 @@ const planParsedWorkflowProposal = (
     });
   }
 
-  const obligationReport = validateWorkflowObligations(
-    compiledResult.value.graph,
-    proposal.fixture,
-  );
+  const obligationReport = validateWorkflowObligations(compiledResult.value.graph, proposal.task);
   const policyIssues = [...obligationReport.issues];
   if (policyIssues.length > 0) {
     return err({
@@ -151,10 +121,6 @@ const planParsedWorkflowProposal = (
   return ok(
     PlannedWorkflowSchema.parse({
       compiled: compiledResult.value,
-      executionEligibility: {
-        reason: 'm1_read_only',
-        status: 'disabled',
-      },
       presentation: createWorkflowPresentation(compiledResult.value, proposal),
       proposal,
       status: 'accepted',

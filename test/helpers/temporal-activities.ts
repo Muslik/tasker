@@ -100,7 +100,7 @@ export const testTemporalActivities = {
         graph: {
           metadata: {
             compilerVersion: 4 as const,
-            irVersion: 'm2' as const,
+            irVersion: 'workflow-ir-v1' as const,
             workflowId: 'bootstrap-v3-fixture',
             workflowVersion: 1,
             references: {
@@ -145,12 +145,12 @@ export const testTemporalActivities = {
       },
       receipt: {
         status: 'completed' as const,
-        provider: 'deterministic' as const,
+        provider: 'codex_cli' as const,
         plannerVersion: 'implementation-planner@3',
-        profile: 'deterministic',
+        profile: 'test-planner',
         profileSha256: HASH,
         cliVersion: 'temporal-test@1',
-        model: 'deterministic',
+        model: 'test-model',
         effort: 'low' as const,
         serviceTier: null,
         strategy: input.requestedStrategy === 'ralplan' ? ('ralplan' as const) : ('fast' as const),

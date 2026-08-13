@@ -22,6 +22,7 @@ afterEach(() => {
 });
 
 const changeRequest = {
+  expectedRunId: 'run-1',
   decision: 'request_changes',
   reviewId: 'review-1',
   planArtifactId: 'implementation-plan:task:attempt-1',

@@ -40,6 +40,7 @@ const combinedReviewFeedback = (command: {
 
 const PlanReviewContextSchema = z
   .object({
+    expectedRunId: z.string().min(1),
     reviewId: z.string().min(1).max(200),
     planArtifactId: z.string().min(1),
     planAttempt: z.number().int().positive(),

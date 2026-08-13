@@ -6,14 +6,10 @@ import {
   harnessPolicyAppliesToTask,
   type HarnessPolicyManifest,
 } from '../harness/index.js';
-import { M1_AVAILABLE_CAPABILITIES } from './proposal.js';
-import { getHarnessStepDefinition, M1_WORKFLOW_CONTRACTS } from './contracts.js';
-import type { TaskFixture } from './fixtures.js';
-import {
-  resolvePackagePublicationPolicy,
-  resolveProjectWorkflowProfile,
-} from './project-policies.js';
-import { WORKFLOW_OBLIGATIONS } from './obligations.js';
+import { HARNESS_AVAILABLE_CAPABILITIES } from './proposal.js';
+import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
+import type { PlanningTaskSnapshot } from './task-snapshot.js';
+import { resolveProjectWorkflowProfile } from './project-policies.js';
 import { resolveWorkspaceRuntimePolicy } from '../workspaces/runtime-policy.js';
 
 export interface WorkflowAnalyzerContext {
@@ -53,18 +49,14 @@ const stepHarnessMetadata = (reference: string, policies: readonly HarnessPolicy
 };
 
 export const createWorkflowAnalyzerContext = (
-  fixture: TaskFixture,
-  taskSnapshot: JsonValue = JsonValueSchema.parse(fixture),
+  task: PlanningTaskSnapshot,
+  taskSnapshot: JsonValue = JsonValueSchema.parse(task),
 ): WorkflowAnalyzerContext => {
-  const targetRepository =
-    fixture.family === 'shared_component' ? fixture.componentRepository : fixture.repository;
-  const publication =
-    fixture.family === 'shared_component'
-      ? resolvePackagePublicationPolicy(fixture.componentRepository, fixture.componentPath)
-      : { kind: 'none' as const };
+  const targetRepository = task.repository;
+  const publication = { kind: 'none' as const };
 
   const pack = getHarnessPack();
-  const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, fixture));
+  const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task));
   const harnessProject = pack.projects.find(
     (candidate) => candidate.repository === targetRepository,
   );
@@ -73,7 +65,7 @@ export const createWorkflowAnalyzerContext = (
       .filter((step) => {
         if (step.policy !== undefined) {
           const owner = pack.policies.find((policy) => policy.id === step.policy);
-          if (owner === undefined || !harnessPolicyAppliesToTask(owner, fixture)) return false;
+          if (owner === undefined || !harnessPolicyAppliesToTask(owner, task)) return false;
         }
         if (step.block.executor.kind !== 'process') return true;
         return (
@@ -88,7 +80,7 @@ export const createWorkflowAnalyzerContext = (
   return {
     taskSnapshot,
     plannerContext: JsonValueSchema.parse({
-      availableCapabilities: M1_AVAILABLE_CAPABILITIES,
+      availableCapabilities: HARNESS_AVAILABLE_CAPABILITIES,
       harness: {
         companyId: pack.company.id,
         companyVersion: pack.company.version,
@@ -113,23 +105,20 @@ export const createWorkflowAnalyzerContext = (
         projectHarnessVersion: harnessProject?.version ?? null,
         publication,
       },
-      obligations: [
-        ...WORKFLOW_OBLIGATIONS,
-        ...policies.flatMap((policy) =>
-          policy.obligations.map((obligation) => ({
-            ...obligation,
-            source: `policy:${policy.id}@${policy.version}`,
-          })),
-        ),
-      ],
+      obligations: policies.flatMap((policy) =>
+        policy.obligations.map((obligation) => ({
+          ...obligation,
+          source: `policy:${policy.id}@${policy.version}`,
+        })),
+      ),
       buildingBlocks: {
         nodeKinds: ['sequence', 'step', 'branch', 'bounded_loop', 'wait', 'gate', 'finalize'],
-        predicates: M1_WORKFLOW_CONTRACTS.predicates.entries.map((contract) => ({
+        predicates: HARNESS_WORKFLOW_CONTRACTS.predicates.entries.map((contract) => ({
           reference: toContractReference(contract),
           inputSchema: inputContract(contract.inputSchema),
           ...(contract.description === undefined ? {} : { description: contract.description }),
         })),
-        steps: M1_WORKFLOW_CONTRACTS.stepTypes.entries
+        steps: HARNESS_WORKFLOW_CONTRACTS.stepTypes.entries
           .filter((contract) => availableSteps.has(toContractReference(contract)))
           .map((contract) => ({
             reference: toContractReference(contract),
@@ -145,7 +134,7 @@ export const createWorkflowAnalyzerContext = (
               : { outputPredicates: contract.outputPredicates }),
             ...stepHarnessMetadata(toContractReference(contract), policies),
           })),
-        waits: M1_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
+        waits: HARNESS_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
           reference: toContractReference(contract),
           artifactContracts: contract.artifactContracts ?? [],
           ...(contract.resolutionSchema === undefined

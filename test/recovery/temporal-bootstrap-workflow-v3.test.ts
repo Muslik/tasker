@@ -29,7 +29,7 @@ const inputFor = (
 ): BootstrapWorkflowInput => ({
   schemaVersion: 3,
   taskReference,
-  settings: { planReview, planningStrategy: 'fast', executionStart: 'automatic' },
+  settings: { planReview, planningStrategy: 'fast' },
 });
 
 describe('Bootstrap Workflow v3 recovery', () => {
@@ -100,7 +100,6 @@ describe('Bootstrap Workflow v3 recovery', () => {
         settings: {
           planReview: 'automatic',
           planningStrategy: 'fast',
-          executionStart: 'automatic',
         },
       }),
     ).toEqual({
@@ -119,6 +118,7 @@ describe('Bootstrap Workflow v3 recovery', () => {
 
     expect(
       await runs.resolveWait('fixture:reviewed', {
+        runId: planReview.runId,
         nodeId: 'plan_review',
         waitKind: 'plan.approved@1',
         resolution: { decision: 'approve' },
@@ -128,6 +128,7 @@ describe('Bootstrap Workflow v3 recovery', () => {
 
     expect(
       await runs.resolveWait('fixture:automatic', {
+        runId: automaticReview.runId,
         nodeId: 'code-review',
         waitKind: 'code_review@1',
         resolution: { decision: 'approved' },
@@ -165,7 +166,7 @@ describe('Bootstrap Workflow v3 recovery', () => {
       throw new Error('Expected the original bootstrap workspace');
     }
 
-    const restarted = await runs.restart(taskReference);
+    const restarted = await runs.restart(taskReference, original.runId);
     if (!restarted.ok) throw new Error(JSON.stringify(restarted.error));
     const fresh = await waitFor(taskReference, 'plan.approved@1');
     if (fresh.runtime !== 'bootstrap' || fresh.workspaceContext === null) {
@@ -220,7 +221,6 @@ describe('Bootstrap infrastructure failure visibility', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
-            executionStart: 'automatic',
           },
         }),
       ).toMatchObject({ ok: true });
@@ -322,7 +322,6 @@ describe('Bootstrap investigation recovery', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
-            executionStart: 'automatic',
           },
         }),
       ).toMatchObject({ ok: true });
@@ -349,6 +348,7 @@ describe('Bootstrap investigation recovery', () => {
 
       expect(
         await runs.resolveWait('fixture:investigation-retry', {
+          runId: waitingForRetry.runId,
           nodeId: waitingForRetry.wait.nodeId,
           waitKind: waitingForRetry.wait.waitKind,
           resolution: { decision: 'resume' },
@@ -460,7 +460,6 @@ describe('Bootstrap planning failure recovery', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
-            executionStart: 'automatic',
           },
         }),
       ).toMatchObject({ ok: true });

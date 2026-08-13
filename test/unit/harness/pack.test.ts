@@ -100,29 +100,27 @@ describe('file-backed harness pack', () => {
     });
   });
 
-  it('rejects a block output mapping to an unregistered workflow predicate', () => {
+  it('registers predicates declared by a block output mapping', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const baseStep = getHarnessStepDefinition('review.agent@1');
     if (baseStep === undefined) throw new Error('Expected review definition');
 
-    expect(() =>
-      createHarnessWorkflowContracts([
-        ...pack.steps,
-        {
-          reference: 'company.invalid-output@1',
-          contract: {
-            ...baseStep.contract,
-            id: 'company.invalid-output',
-            outputPredicates: {
-              discriminator: 'decision',
-              cases: { accepted: { 'company.unknown@1': true } },
-            },
+    const contracts = createHarnessWorkflowContracts([
+      ...pack.steps,
+      {
+        reference: 'company.custom-output@1',
+        contract: {
+          ...baseStep.contract,
+          id: 'company.custom-output',
+          outputPredicates: {
+            discriminator: 'decision',
+            cases: { accepted: { 'company.accepted@1': true } },
           },
         },
-      ]),
-    ).toThrow(
-      'Harness step company.invalid-output@1 maps output to unknown predicate company.unknown@1',
-    );
+      },
+    ]);
+
+    expect(contracts.predicates.has('company.accepted@1')).toBe(true);
   });
 
   it('loads readable prompts with content hashes and exposes fill-test-ops-plan', () => {

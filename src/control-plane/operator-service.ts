@@ -3,38 +3,36 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import { z } from 'zod';
 import {
   createWorkflowProposalFromAnalyzerOutput,
-  listTaskFixtures,
-  planTaskWorkflow,
   planWorkflowProposal,
+  type PlanningTaskSnapshot,
   type PlanningFailure,
-  type TaskFixture,
   type WorkflowProposalArtifact,
   type WorkflowAnalyzerOutput,
+  type WorkflowGenerationSubject,
 } from '../planning/index.js';
 import type { WorkflowAnalyzerFailure, WorkflowAnalyzerReceipt } from '../providers/index.js';
 import { JsonValueSchema, type JsonValue, type ValidationReport } from '../workflow/index.js';
 import {
-  FixtureSummarySchema,
-  M1_VIEW_SCHEMA_VERSION,
+  PlanningTaskSummarySchema,
+  OPERATOR_VIEW_SCHEMA_VERSION,
   OperatorActivityResponseSchema,
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
   WorkflowViewSchema,
-  type FixtureSummary,
+  type PlanningTaskSummary,
   type OperatorActivityResponse,
   type OperatorStreamEvent,
   type WorkflowResponse,
-  type WorkflowGenerationSubject,
   type WorkflowView,
-} from './m1-contracts.js';
-import { M1WorkflowStore, type M1StoreError, type M1WorkflowArtifacts } from './m1-store.js';
+} from './operator-contracts.js';
+import {
+  OperatorWorkflowStore,
+  type OperatorStoreError,
+  type OperatorWorkflowArtifacts,
+} from './operator-store.js';
 
-export type M1ServiceError =
-  | {
-      readonly kind: 'fixture_not_found';
-      readonly fixtureId: string;
-    }
+export type OperatorServiceError =
   | {
       readonly kind: 'task_not_found';
       readonly taskReference: string;
@@ -54,7 +52,7 @@ export type M1ServiceError =
     }
   | {
       readonly kind: 'store_failure';
-      readonly error: M1StoreError;
+      readonly error: OperatorStoreError;
     }
   | {
       readonly kind: 'provider_failure';
@@ -67,7 +65,7 @@ export type M1ServiceError =
     };
 
 interface BuiltView {
-  readonly artifacts: M1WorkflowArtifacts;
+  readonly artifacts: OperatorWorkflowArtifacts;
   readonly view: WorkflowView;
 }
 
@@ -86,33 +84,17 @@ const WorkflowAnalyzedEventPayloadSchema = z
   })
   .loose();
 
-const fixturePurpose = (fixture: TaskFixture): string => {
-  if (fixture.expected === 'rejected') {
-    return `Validator example: ${fixture.proposalVariant.replaceAll('_', ' ')}`;
-  }
-
-  switch (fixture.family) {
-    case 'short_bugfix':
-      return 'Short bugfix with reproduction, bounded repair, verification, and review wait';
-    case 'feature_with_review':
-      return 'Feature with optional plan gate, full verification, and review wait';
-    case 'shared_component':
-      return 'Cross-repository component work with policy-selected coordination';
-  }
-};
-
-const toFixtureSummary = (fixture: TaskFixture): FixtureSummary =>
-  FixtureSummarySchema.parse({
-    id: fixture.fixtureId,
-    title: fixture.title,
-    family: fixture.expected === 'rejected' ? 'invalid_workflow' : fixture.family,
-    purpose: fixturePurpose(fixture),
+const toTaskSummary = (task: PlanningTaskSnapshot): PlanningTaskSummary =>
+  PlanningTaskSummarySchema.parse({
+    reference: task.reference,
+    title: task.title,
+    kind: task.kind,
   });
 
 const toJson = (
   value: unknown,
   artifact: 'compiled_graph' | 'proposal' | 'validator_report',
-): Outcome<JsonValue, M1ServiceError> => {
+): Outcome<JsonValue, OperatorServiceError> => {
   const result = JsonValueSchema.safeParse(value);
   return result.success ? ok(result.data) : err({ kind: 'non_json_artifact', artifact });
 };
@@ -132,27 +114,26 @@ const verificationProfile = (
 };
 
 const baseWorkflowView = (
-  fixture: TaskFixture,
+  task: PlanningTaskSnapshot,
   proposal: WorkflowProposalArtifact,
   persistedAt: string,
 ) => ({
-  schemaVersion: M1_VIEW_SCHEMA_VERSION,
-  fixture: toFixtureSummary(fixture),
+  schemaVersion: OPERATOR_VIEW_SCHEMA_VERSION,
+  taskSummary: toTaskSummary(task),
   intake: {
-    id: `intake:${fixture.fixtureId}`,
+    id: `intake:${task.reference}`,
     status: 'accepted' as const,
     eligibility: {
       eligible: true,
-      reason: fixture.fixtureId.startsWith('jira:')
-        ? 'The current Jira snapshot and managed repository checkout are ready for workflow planning.'
-        : 'The local fixture is eligible for workflow planning.',
+      reason:
+        'The current task snapshot and managed repository checkout are ready for workflow planning.',
     },
   },
   task: {
-    id: fixture.taskId,
+    id: task.taskId,
   },
   workflow: {
-    proposalId: `proposal:${fixture.fixtureId}`,
+    proposalId: `proposal:${task.reference}`,
     assemblyDecisions: proposal.assemblyDecisions,
     capabilities: proposal.capabilities,
     waits: proposal.waits.map((wait) => ({
@@ -177,7 +158,7 @@ const rejectedValidatorReport = (failure: PlanningFailure): ValidationReport => 
       return failure.validatorReport;
     case 'capability_validation':
       return {
-        workflowId: `${failure.proposal.fixture.fixtureId}-workflow`,
+        workflowId: `${failure.proposal.task.reference}-workflow`,
         issues: [
           {
             code: 'unknown_reference',
@@ -190,7 +171,6 @@ const rejectedValidatorReport = (failure: PlanningFailure): ValidationReport => 
           },
         ],
       };
-    case 'fixture':
     case 'proposal':
       throw new Error(`Planning failed before a proposal existed at ${failure.stage}`);
   }
@@ -201,17 +181,16 @@ const rejectedProposal = (failure: PlanningFailure): WorkflowProposalArtifact | 
     case 'workflow_validation':
     case 'capability_validation':
       return failure.proposal;
-    case 'fixture':
     case 'proposal':
       return null;
   }
 };
 
 const buildAcceptedView = (
-  fixture: TaskFixture,
-  planned: Extract<ReturnType<typeof planTaskWorkflow>, { readonly ok: true }>['value'],
+  task: PlanningTaskSnapshot,
+  planned: Extract<ReturnType<typeof planWorkflowProposal>, { readonly ok: true }>['value'],
   persistedAt: string,
-): Outcome<BuiltView, M1ServiceError> => {
+): Outcome<BuiltView, OperatorServiceError> => {
   const graph = toJson(planned.compiled.graph, 'compiled_graph');
   const proposal = toJson(planned.proposal, 'proposal');
   const validatorReport = toJson(planned.compiled.validatorReport, 'validator_report');
@@ -220,7 +199,7 @@ const buildAcceptedView = (
   if (!proposal.ok) return proposal;
   if (!validatorReport.ok) return validatorReport;
 
-  const common = baseWorkflowView(fixture, planned.proposal, persistedAt);
+  const common = baseWorkflowView(task, planned.proposal, persistedAt);
   const view = WorkflowViewSchema.parse({
     ...common,
     task: { ...common.task, status: 'planned' },
@@ -245,10 +224,10 @@ const buildAcceptedView = (
 };
 
 const buildRejectedView = (
-  fixture: TaskFixture,
+  task: PlanningTaskSnapshot,
   failure: PlanningFailure,
   persistedAt: string,
-): Outcome<BuiltView, M1ServiceError> => {
+): Outcome<BuiltView, OperatorServiceError> => {
   const proposalValue = rejectedProposal(failure);
   if (proposalValue === null) {
     return err({ kind: 'planner_contract_failure', stage: failure.stage });
@@ -261,7 +240,7 @@ const buildRejectedView = (
   if (!proposal.ok) return proposal;
   if (!validatorReport.ok) return validatorReport;
 
-  const common = baseWorkflowView(fixture, proposalValue, persistedAt);
+  const common = baseWorkflowView(task, proposalValue, persistedAt);
   const view = WorkflowViewSchema.parse({
     ...common,
     task: { ...common.task, status: 'workflow_rejected' },
@@ -284,52 +263,33 @@ const buildRejectedView = (
   });
 };
 
-export class M1WorkflowService {
+export class OperatorWorkflowService {
   public constructor(
-    private readonly store: M1WorkflowStore,
+    private readonly store: OperatorWorkflowStore,
     private readonly clock: Clock,
-    private readonly includeTestFixtures: boolean,
   ) {}
 
   public listOperatorTasks(): Outcome<
     ReturnType<typeof OperatorTaskListResponseSchema.parse>,
-    M1ServiceError
+    OperatorServiceError
   > {
-    const tasks = this.includeTestFixtures
-      ? listTaskFixtures().map((fixture) => ({
-          id: fixture.fixtureId,
-          taskId: fixture.taskId,
-          title: fixture.title,
-          origin: {
-            kind: 'fixture' as const,
-            fixtureId: fixture.fixtureId,
-            family: toFixtureSummary(fixture).family,
-          },
-          planning: { status: 'available' as const },
-          status: 'backlog' as const,
-          attention: 'none' as const,
-          currentStage: 'Awaiting workflow generation',
-          updatedAt: null,
-        }))
-      : [];
-
     const streamCursor = this.store.listEvents().at(-1)?.sequence ?? 0;
-    return ok(OperatorTaskListResponseSchema.parse({ tasks, streamCursor }));
+    return ok(OperatorTaskListResponseSchema.parse({ tasks: [], streamCursor }));
   }
 
   public readActivity(
-    fixtureId: string,
+    taskReference: string,
     planningEpisodeId: string | null = null,
-  ): Outcome<OperatorActivityResponse, M1ServiceError> {
+  ): Outcome<OperatorActivityResponse, OperatorServiceError> {
     const analyzerSession =
       planningEpisodeId === null
         ? ok(null)
-        : this.store.readAnalyzerSessionForEpisode(fixtureId, planningEpisodeId);
+        : this.store.readAnalyzerSessionForEpisode(taskReference, planningEpisodeId);
     if (!analyzerSession.ok) {
       return err({ kind: 'store_failure', error: analyzerSession.error });
     }
 
-    const taskEvents = this.store.listEvents(fixtureId).filter((event) => {
+    const taskEvents = this.store.listEvents(taskReference).filter((event) => {
       if (planningEpisodeId === null) return false;
       if (
         event.eventType !== 'WorkflowAnalyzed' &&
@@ -348,7 +308,7 @@ export class M1WorkflowService {
       const source =
         event.actor === 'subscription_cli_analyzer'
           ? ('agent' as const)
-          : event.actor === 'm1_deterministic_planner' || event.actor === 'm1_planner'
+          : event.actor === 'workflow_planner'
             ? ('planner' as const)
             : ('kernel' as const);
 
@@ -360,7 +320,7 @@ export class M1WorkflowService {
             source,
             level: 'info' as const,
             title: 'Intake accepted',
-            detail: 'The local task fixture passed the intake boundary.',
+            detail: 'The task snapshot passed the intake boundary.',
           };
         case 'TaskCreated':
           return {
@@ -423,9 +383,9 @@ export class M1WorkflowService {
 
     return ok(
       OperatorActivityResponseSchema.parse({
-        fixtureId,
+        taskReference: taskReference,
         providerSession:
-          analyzerSession.value ?? ({ status: 'not_started', reason: 'm1_planning_only' } as const),
+          analyzerSession.value ?? ({ status: 'not_started', reason: 'planning_only' } as const),
         entries,
       }),
     );
@@ -436,11 +396,12 @@ export class M1WorkflowService {
       .listEvents()
       .filter((event) => event.sequence > sequence)
       .flatMap((event) => {
-        if (!isJsonRecord(event.payload) || typeof event.payload.fixtureId !== 'string') return [];
+        if (!isJsonRecord(event.payload) || typeof event.payload.taskReference !== 'string')
+          return [];
         return [
           OperatorStreamEventSchema.parse({
             sequence: event.sequence,
-            fixtureId: event.payload.fixtureId,
+            taskReference: event.payload.taskReference,
             eventType: event.eventType,
           }),
         ];
@@ -448,10 +409,10 @@ export class M1WorkflowService {
   }
 
   public readPlanningOperation(
-    fixtureId: string,
+    taskReference: string,
     operationId: string,
-  ): Outcome<WorkflowResponse | null, M1ServiceError> {
-    const stored = this.store.readPlanningOperation(fixtureId, operationId);
+  ): Outcome<WorkflowResponse | null, OperatorServiceError> {
+    const stored = this.store.readPlanningOperation(taskReference, operationId);
     if (!stored.ok) return err({ kind: 'store_failure', error: stored.error });
     return stored.value === null
       ? ok(null)
@@ -465,7 +426,7 @@ export class M1WorkflowService {
 
   public readGenerationSubject(
     taskReference: string,
-  ): Outcome<WorkflowGenerationSubject | null, M1ServiceError> {
+  ): Outcome<WorkflowGenerationSubject | null, OperatorServiceError> {
     const subject = this.store.readGenerationSubject(taskReference);
     return subject.ok ? subject : err({ kind: 'store_failure', error: subject.error });
   }
@@ -473,141 +434,115 @@ export class M1WorkflowService {
   public saveGenerationSubject(
     taskReference: string,
     subject: WorkflowGenerationSubject,
-  ): Outcome<WorkflowGenerationSubject, M1ServiceError> {
+  ): Outcome<WorkflowGenerationSubject, OperatorServiceError> {
     const saved = this.store.saveGenerationSubject(taskReference, subject);
     return saved.ok ? ok(saved.value.subject) : err({ kind: 'store_failure', error: saved.error });
   }
 
-  public assembleTaskAtOperation(
-    fixture: TaskFixture,
-    operationId: string,
-  ): Outcome<WorkflowResponse, M1ServiceError> {
-    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
-    if (!completed.ok) return completed;
-    if (completed.value !== null) return ok(completed.value);
-
-    return this.persistPlanning(fixture, planTaskWorkflow(fixture), operationId);
-  }
-
   public assembleFromAnalyzerOutputAtOperation(
-    fixture: TaskFixture,
+    task: PlanningTaskSnapshot,
     output: WorkflowAnalyzerOutput,
     receipt: WorkflowAnalyzerReceipt,
     operationId: string,
-  ): Outcome<WorkflowResponse, M1ServiceError> {
-    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
+  ): Outcome<WorkflowResponse, OperatorServiceError> {
+    const completed = this.readPlanningOperation(task.reference, operationId);
     if (!completed.ok) return completed;
     if (completed.value !== null) return ok(completed.value);
 
     const proposal = createWorkflowProposalFromAnalyzerOutput(
-      fixture,
+      task,
       receipt.analyzerVersion,
       output,
     );
     if (!proposal.ok) {
       return err({
         kind: 'planner_contract_failure',
-        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+        stage: 'proposal',
       });
     }
 
-    return this.persistPlanning(
-      fixture,
-      planWorkflowProposal(proposal.value),
-      operationId,
-      receipt,
-    );
+    return this.persistPlanning(task, planWorkflowProposal(proposal.value), operationId, receipt);
   }
 
   public assembleFromImplementationPlanAtOperation(
-    fixture: TaskFixture,
+    task: PlanningTaskSnapshot,
     output: WorkflowAnalyzerOutput,
     operationId: string,
-  ): Outcome<WorkflowResponse, M1ServiceError> {
-    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
+  ): Outcome<WorkflowResponse, OperatorServiceError> {
+    const completed = this.readPlanningOperation(task.reference, operationId);
     if (!completed.ok) return completed;
     if (completed.value !== null) return ok(completed.value);
 
     const proposal = createWorkflowProposalFromAnalyzerOutput(
-      fixture,
+      task,
       'implementation-planner@3',
       output,
     );
     if (!proposal.ok) {
       return err({
         kind: 'planner_contract_failure',
-        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+        stage: 'proposal',
       });
     }
 
-    return this.persistPlanning(fixture, planWorkflowProposal(proposal.value), operationId);
+    return this.persistPlanning(task, planWorkflowProposal(proposal.value), operationId);
   }
 
   public reviseFromAnalyzerOutputForTask(
-    fixture: TaskFixture,
+    task: PlanningTaskSnapshot,
     output: WorkflowAnalyzerOutput,
     receipt: WorkflowAnalyzerReceipt,
     operationId: string,
-  ): Outcome<WorkflowResponse, M1ServiceError> {
+  ): Outcome<WorkflowResponse, OperatorServiceError> {
     const proposal = createWorkflowProposalFromAnalyzerOutput(
-      fixture,
+      task,
       receipt.analyzerVersion,
       output,
     );
     if (!proposal.ok) {
       return err({
         kind: 'planner_contract_failure',
-        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+        stage: 'proposal',
       });
     }
 
-    return this.persistPlanning(
-      fixture,
-      planWorkflowProposal(proposal.value),
-      operationId,
-      receipt,
-    );
+    return this.persistPlanning(task, planWorkflowProposal(proposal.value), operationId, receipt);
   }
 
   public assembleContinuationFromAnalyzerOutputAtOperation(
-    fixture: TaskFixture,
+    task: PlanningTaskSnapshot,
     output: WorkflowAnalyzerOutput,
     receipt: WorkflowAnalyzerReceipt,
     operationId: string,
-  ): Outcome<WorkflowResponse, M1ServiceError> {
-    const completed = this.readPlanningOperation(fixture.fixtureId, operationId);
+  ): Outcome<WorkflowResponse, OperatorServiceError> {
+    const completed = this.readPlanningOperation(task.reference, operationId);
     if (!completed.ok) return completed;
     if (completed.value !== null) return ok(completed.value);
 
     const proposal = createWorkflowProposalFromAnalyzerOutput(
-      fixture,
+      task,
       receipt.analyzerVersion,
       output,
     );
     if (!proposal.ok) {
       return err({
         kind: 'planner_contract_failure',
-        stage: proposal.error.code === 'invalid_fixture' ? 'fixture' : 'proposal',
+        stage: 'proposal',
       });
     }
 
-    return this.persistPlanning(
-      fixture,
-      planWorkflowProposal(proposal.value),
-      operationId,
-      receipt,
-    );
+    return this.persistPlanning(task, planWorkflowProposal(proposal.value), operationId, receipt);
   }
 
   private persistPlanning(
-    fixture: TaskFixture,
-    planning: ReturnType<typeof planTaskWorkflow>,
+    task: PlanningTaskSnapshot,
+    planning: ReturnType<typeof planWorkflowProposal>,
     operationId: string,
     receipt?: WorkflowAnalyzerReceipt,
-  ): Outcome<WorkflowResponse, M1ServiceError> {
+  ): Outcome<WorkflowResponse, OperatorServiceError> {
     const built = planning.ok
-      ? buildAcceptedView(fixture, planning.value, this.clock.now())
-      : buildRejectedView(fixture, planning.error, this.clock.now());
+      ? buildAcceptedView(task, planning.value, this.clock.now())
+      : buildRejectedView(task, planning.error, this.clock.now());
 
     if (!built.ok) return built;
 
@@ -625,13 +560,8 @@ export class M1WorkflowService {
   }
 }
 
-export const createM1WorkflowService = (
-  ledger: ConstructorParameters<typeof M1WorkflowStore>[0],
+export const createOperatorWorkflowService = (
+  ledger: ConstructorParameters<typeof OperatorWorkflowStore>[0],
   clock: Clock,
-  options: { readonly includeTestFixtures?: boolean } = {},
-): M1WorkflowService =>
-  new M1WorkflowService(
-    new M1WorkflowStore(ledger, clock),
-    clock,
-    options.includeTestFixtures ?? false,
-  );
+): OperatorWorkflowService =>
+  new OperatorWorkflowService(new OperatorWorkflowStore(ledger, clock), clock);
