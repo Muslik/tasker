@@ -1,16 +1,16 @@
 {
   "schemaVersion": 2,
-  "reference": "review.revise@1",
-  "description": "Apply actionable human pull-request feedback with exact imported provenance.",
+  "reference": "code.repair@1",
+  "description": "Repair actionable validation or independent-review findings in the same worktree.",
+  "stage": { "id": "implementation", "label": "Implement" },
   "availableDuring": ["execution"],
-  "stage": { "id": "review", "label": "Review" },
   "inputContract": "task_input",
   "outputContract": "agent_output",
   "executor": {
     "kind": "agent",
-    "profile": "review",
-    "prompt": "prompts/steps/review-revise.md",
-    "skills": ["bitbucket", "typescript-design", "test-design"]
+    "profile": "implementation",
+    "prompt": "prompt.md",
+    "skills": ["typescript-design", "test-design"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": { "kind": "workspace_mutation" },
@@ -20,8 +20,8 @@
   "resumeBoundary": "step",
   "idempotency": "key",
   "waitKinds": [],
-  "artifactContracts": ["review-revision-diff"],
-  "requiredArtifactContracts": ["pull-request-review"],
+  "artifactContracts": ["source-diff"],
+  "requiredArtifactContracts": [],
   "workflowChanges": [
     "cross_repository_dependency",
     "external_process_required",

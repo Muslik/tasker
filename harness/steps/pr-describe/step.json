@@ -9,7 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "documentation",
-    "prompt": "prompts/steps/pr-describe.md",
+    "prompt": "prompt.md",
     "skills": []
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],

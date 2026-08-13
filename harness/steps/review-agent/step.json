@@ -22,7 +22,7 @@
   "executor": {
     "kind": "agent",
     "profile": "review",
-    "prompt": "prompts/steps/agent-review.md",
+    "prompt": "prompt.md",
     "skills": ["typescript-design", "test-design"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],

@@ -1,22 +1,22 @@
 {
   "schemaVersion": 2,
-  "reference": "bug.investigate@1",
-  "description": "Ground the reported bug before planning and preserve observed behavior as planning evidence.",
-  "stage": { "id": "investigation", "label": "Investigate" },
-  "availableDuring": ["bootstrap_investigation"],
-  "inputContract": "investigation_input",
-  "outputContract": "investigation_output",
+  "reference": "bug.validate_fix@1",
+  "description": "Repeat the investigated scenario after implementation and preserve final demo evidence.",
+  "stage": { "id": "verification", "label": "Validate" },
+  "availableDuring": ["execution"],
+  "inputContract": "reproduction_input",
+  "outputContract": "reproduction_output",
   "executor": {
     "kind": "agent",
     "profile": "investigation",
-    "prompt": "prompts/steps/bug-investigate.md",
+    "prompt": "prompt.md",
     "skills": ["playwright-demo", "jenkins"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": {
     "kind": "structured_evidence",
-    "source": "task_output",
-    "requiredArtifactKinds": ["investigation-result"]
+    "source": "workspace_files",
+    "requiredArtifactKinds": ["reproduction-media"]
   },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["command.run"],
@@ -24,7 +24,7 @@
   "resumeBoundary": "step",
   "idempotency": "key",
   "waitKinds": [],
-  "artifactContracts": ["investigation-result"],
+  "artifactContracts": ["reproduction-report", "reproduction-media"],
   "requiredArtifactContracts": [],
   "workflowChanges": [
     "cross_repository_dependency",

@@ -31,7 +31,7 @@ Docker-only execution and project bootstrap are documented in
 [`docs/codex/docker-execution.md`](docs/codex/docker-execution.md).
 
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
-Company blocks and policies are file-backed under [`harness/steps`](harness/steps) and
+Company step packages and policies are file-backed under [`harness/steps`](harness/steps) and
 [`harness/policies`](harness/policies). This is the complete production block catalog;
 [`src/harness/step-contracts.ts`](src/harness/step-contracts.ts) contains only the typed
 runtime schemas referenced by those manifests.

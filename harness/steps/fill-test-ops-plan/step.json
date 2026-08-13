@@ -9,7 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "verification",
-    "prompt": "prompts/steps/fill-test-ops-plan.md",
+    "prompt": "prompt.md",
     "skills": ["test-ops-planning"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],

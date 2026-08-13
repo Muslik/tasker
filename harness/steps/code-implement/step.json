@@ -9,7 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "implementation",
-    "prompt": "prompts/steps/code-implement.md",
+    "prompt": "prompt.md",
     "skills": ["typescript-design", "test-design"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],

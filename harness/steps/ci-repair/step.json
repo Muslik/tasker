@@ -9,7 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "implementation",
-    "prompt": "prompts/steps/ci-repair.md",
+    "prompt": "prompt.md",
     "skills": ["jenkins", "typescript-design", "test-design"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],

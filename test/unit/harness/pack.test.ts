@@ -37,11 +37,20 @@ afterEach(async () => {
 describe('file-backed harness pack', () => {
   it('derives the production step catalog exclusively from step manifests', async () => {
     const root = await createTemporaryPack();
-    await rm(join(root, 'steps/bug-validate-fix.json'));
+    await rm(join(root, 'steps/bug-validate-fix'), { recursive: true });
 
     const pack = loadHarnessPack(root);
 
     expect(pack.steps.map(({ reference }) => reference)).not.toContain('bug.validate_fix@1');
+  });
+
+  it('rejects flat step manifests outside an atomic step package', async () => {
+    const root = await createTemporaryPack();
+    await writeFile(join(root, 'steps/legacy.json'), '{}', 'utf8');
+
+    expect(() => loadHarnessPack(root)).toThrow(
+      'Harness step manifests must use steps/<step>/step.json packages',
+    );
   });
 
   it('registers a typed company step without changing the workflow compiler', () => {
@@ -126,7 +135,7 @@ describe('file-backed harness pack', () => {
       block: {
         executor: { kind: 'agent', profile: 'verification', skills: ['test-ops-planning'] },
       },
-      prompt: { relativePath: 'prompts/steps/fill-test-ops-plan.md' },
+      prompt: { relativePath: 'steps/fill-test-ops-plan/prompt.md' },
     });
     expect(stepDefinition?.prompt?.content).toContain('test-operations plan');
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
@@ -162,7 +171,7 @@ describe('file-backed harness pack', () => {
 
   it('rejects obsolete step manifests instead of upcasting them', async () => {
     const root = await createTemporaryPack();
-    const manifestPath = join(root, 'steps/ci-observe.json');
+    const manifestPath = join(root, 'steps/ci-observe/step.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
       schemaVersion: number;
     };

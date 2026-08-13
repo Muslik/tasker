@@ -56,13 +56,13 @@ Tasker must not rebuild Temporal's ready set, runner leases, fence tokens, execu
 cursor, wait table, retry timer, or scheduler. SQLite remains a product store, not a
 second execution authority.
 
-The production block catalog has one owner: `harness/steps/*.json`. A manifest declares
-the step identity, operator stage, executor, prompt and skills, terminal condition,
-effects, artifacts, and recovery boundary. `src/harness/step-contracts.ts` is only the
-typed runtime ABI for the named input/output contracts used by those manifests; it
-cannot register an executable step. Activities and integration adapters implement the
-executor names selected by manifests, while the generic Workflow interpreter only
-moves through the frozen graph.
+The production block catalog has one owner: `harness/steps/<step>/step.json`. An agent
+step keeps its `prompt.md` in the same directory. A manifest declares the step identity,
+operator stage, executor, prompt and skills, terminal condition, effects, artifacts, and
+recovery boundary. `src/harness/step-contracts.ts` is only the typed runtime ABI for the
+named input/output contracts used by those manifests; it cannot register an executable
+step. Activities and integration adapters implement the executor names selected by
+manifests, while the generic Workflow interpreter only moves through the frozen graph.
 
 ## 3. System shape
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "reference": "code.repair@1",
-  "description": "Repair actionable validation or independent-review findings in the same worktree.",
+  "reference": "component.consume_published@1",
+  "description": "Consume an exact published component version in the target repository.",
   "stage": { "id": "implementation", "label": "Implement" },
   "availableDuring": ["execution"],
   "inputContract": "task_input",
@@ -9,24 +9,21 @@
   "executor": {
     "kind": "agent",
     "profile": "implementation",
-    "prompt": "prompts/steps/code-repair.md",
-    "skills": ["typescript-design", "test-design"]
+    "prompt": "prompt.md",
+    "skills": ["typescript-design"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
-  "completion": { "kind": "workspace_mutation" },
+  "completion": {
+    "kind": "workspace_mutation"
+  },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["workspace.write"],
   "requiredCapabilities": ["repository.read", "workspace.write"],
   "resumeBoundary": "step",
   "idempotency": "key",
   "waitKinds": [],
-  "artifactContracts": ["source-diff"],
+  "artifactContracts": ["consumer-version-diff"],
   "requiredArtifactContracts": [],
-  "workflowChanges": [
-    "cross_repository_dependency",
-    "external_process_required",
-    "task_scope_changed",
-    "verification_scope_changed"
-  ],
+  "workflowChanges": ["cross_repository_dependency", "verification_scope_changed"],
   "reconciliation": { "strategy": "receipt" }
 }

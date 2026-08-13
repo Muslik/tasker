@@ -96,16 +96,32 @@ const loadProjects = (root: string) => {
     });
 };
 
-const loadStepManifests = (root: string) => {
+const loadStepPackages = (root: string) => {
   const stepsRoot = join(root, 'steps');
   if (!existsSync(stepsRoot)) return [];
 
-  return readdirSync(stepsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((entry) =>
-      stepDefinitionFromManifest(parseFile(HarnessStepManifestSchema, join(stepsRoot, entry.name))),
+  const entries = readdirSync(stepsRoot, { withFileTypes: true });
+  const flatManifest = entries.find((entry) => entry.isFile() && entry.name.endsWith('.json'));
+  if (flatManifest !== undefined) {
+    throw new Error(
+      `Harness step manifests must use steps/<step>/step.json packages: steps/${flatManifest.name}`,
     );
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => {
+      const packageRoot = join(stepsRoot, entry.name);
+      const manifestPath = join(packageRoot, 'step.json');
+      if (!existsSync(manifestPath)) {
+        throw new Error(`Harness step package steps/${entry.name} is missing step.json`);
+      }
+      return Object.freeze({
+        packageRoot,
+        step: stepDefinitionFromManifest(parseFile(HarnessStepManifestSchema, manifestPath)),
+      });
+    });
 };
 
 const loadPolicies = (root: string) => {
@@ -147,9 +163,9 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   }
 
   const seenSteps = new Set<string>();
-  const steps = loadStepManifests(rootPath)
-    .filter((step) => step.policy === undefined || enabledPolicies.has(step.policy))
-    .map((step) => {
+  const steps = loadStepPackages(rootPath)
+    .filter(({ step }) => step.policy === undefined || enabledPolicies.has(step.policy))
+    .map(({ packageRoot, step }) => {
       parseVersionedReference(step.reference);
       if (step.reference !== toContractReference(step.contract)) {
         throw new Error(
@@ -167,7 +183,14 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
         parseVersionedReference(step.executor.adapter);
       }
       const prompt =
-        step.executor.kind === 'agent' ? loadPrompt(rootPath, step.executor.prompt) : null;
+        step.executor.kind === 'agent'
+          ? loadPrompt(
+              rootPath,
+              relative(rootPath, resolvePackPath(packageRoot, step.executor.prompt, 'file'))
+                .split(sep)
+                .join('/'),
+            )
+          : null;
       const executor =
         step.executor.kind === 'agent'
           ? {
