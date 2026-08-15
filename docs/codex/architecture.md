@@ -341,7 +341,7 @@ profile skills remain ambient guidance for both providers; shared/integration pa
 remain undiscoverable until a step selects them.
 
 Process commands are policy data, not interpreter branches. Company-wide commands live
-in `harness/company.json`; repository-specific overrides live in
+in `harness/company.json`; repository-specific bindings live in
 `harness/projects/*/project.json`. The resolved command, executor, and harness checksum
 are copied into the immutable planning snapshot before execution. Adding translations,
 a build, or `fill-test-ops-plan` does not add a `switch` to Temporal Workflow code.

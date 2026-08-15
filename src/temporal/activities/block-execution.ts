@@ -878,19 +878,6 @@ const withRecoveryArtifact = (
 ): readonly string[] =>
   recovery.kind === 'single_attempt' ? artifactIds : [recovery.intentArtifactId, ...artifactIds];
 
-const commandLineToInvocation = (
-  commandLine: string,
-): Outcome<
-  { readonly command: string; readonly args: readonly string[] },
-  { readonly kind: string }
-> => {
-  const trimmed = commandLine.trim();
-  if (trimmed.length === 0) return err({ kind: 'empty_command' });
-  if (/["'`\\]/u.test(trimmed)) return err({ kind: 'unsupported_shell_syntax' });
-  const parts = trimmed.split(/\s+/u);
-  return ok({ command: parts[0] ?? trimmed, args: parts.slice(1) });
-};
-
 const registryFrom = (pack: LoadedHarnessPack): ReadonlyMap<string, LoadedHarnessStep> =>
   new Map(pack.steps.map((step) => [step.reference, step] as const));
 
@@ -1219,7 +1206,7 @@ export const executeRegisteredTaskStep = async (
       operatorGuidance: input.operatorGuidance,
       evidence,
       policies: snapshot.harness.policies,
-      project: snapshot.harness.project?.manifest ?? null,
+      project: snapshot.harness.project,
       runtime,
     });
     if (execution.status === 'blocked') {
@@ -1542,7 +1529,7 @@ export const executeRegisteredTaskStep = async (
       artifactIds,
     );
   }
-  if (snapshottedStep.resolvedCommand === null) {
+  if (snapshottedStep.resolvedProcess === null) {
     const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
       kind: 'process_command_missing',
     });
@@ -1552,42 +1539,56 @@ export const executeRegisteredTaskStep = async (
       artifactIds,
     );
   }
-  const invocation = commandLineToInvocation(snapshottedStep.resolvedCommand);
-  if (!invocation.ok) {
-    const artifactIds = persistBlockedArtifact(
-      dependencies.traces,
-      input,
-      'system',
-      invocation.error,
-    );
-    return block(
-      `Process command for ${input.uses} uses unsupported shell syntax`,
-      blockingWaitKindFor(input.uses),
-      artifactIds,
-    );
-  }
-  runtime.heartbeat({ phase: 'process', nodeId: input.nodeId });
-  const processResult = await dependencies.commands.run({
-    command: invocation.value.command,
-    args: [...invocation.value.args],
-    cwd: input.workspace.path,
-    stdin: '',
-    timeoutMs: 35 * 60_000,
-    cancellationSignal: runtime.cancellationSignal,
-    onOutput: (stream, chunk) => {
-      const appended = dependencies.traces.append(
-        executionOperationId(input),
-        runtime.attempt,
-        stream,
-        chunk,
-      );
-      if (!appended.ok) {
-        throw new Error(`Task step transcript persistence failed: ${appended.error.kind}`);
-      }
-      runtime.heartbeat({ phase: 'process_output', stream });
-    },
-  });
   const acceptsAnyExit = acceptsAnyProcessExit(snapshottedStep.block.completion);
+  const commandReceipts: Array<{
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly exitCode: number;
+  }> = [];
+  let stdout = '';
+  let stderr = '';
+  let processResult: CommandResult | null = null;
+  let failedCommand: (typeof snapshottedStep.resolvedProcess.commands)[number] | null = null;
+  for (const command of snapshottedStep.resolvedProcess.commands) {
+    runtime.heartbeat({ phase: 'process', nodeId: input.nodeId, command: command.command });
+    const result = await dependencies.commands.run({
+      command: command.command,
+      args: command.args,
+      cwd: input.workspace.path,
+      stdin: '',
+      timeoutMs: snapshottedStep.resolvedProcess.timeoutMs,
+      cancellationSignal: runtime.cancellationSignal,
+      onOutput: (stream, chunk) => {
+        const appended = dependencies.traces.append(
+          executionOperationId(input),
+          runtime.attempt,
+          stream,
+          chunk,
+        );
+        if (!appended.ok) {
+          throw new Error(`Task step transcript persistence failed: ${appended.error.kind}`);
+        }
+        runtime.heartbeat({ phase: 'process_output', stream });
+      },
+    });
+    processResult = result;
+    stdout += result.status === 'spawn_failed' ? '' : result.stdout;
+    stderr += result.status === 'spawn_failed' ? result.message : result.stderr;
+    if (result.status === 'exited') {
+      commandReceipts.push({
+        command: command.command,
+        args: command.args,
+        exitCode: result.exitCode,
+      });
+    }
+    if (result.status !== 'exited' || result.exitCode !== 0) {
+      failedCommand = command;
+      break;
+    }
+  }
+  if (processResult === null || failedCommand === null) {
+    processResult ??= { status: 'spawn_failed', message: 'Process plan was empty', durationMs: 0 };
+  }
   if (processResult.status !== 'exited' || (processResult.exitCode !== 0 && !acceptsAnyExit)) {
     const stdout = processResult.status === 'spawn_failed' ? '' : processResult.stdout;
     const stderr =
@@ -1605,8 +1606,8 @@ export const executeRegisteredTaskStep = async (
       },
       stdout,
       stderr,
-      invocation.value.command,
-      invocation.value.args,
+      failedCommand?.command ?? null,
+      failedCommand?.args ?? [],
       exitCode,
     );
     return block(
@@ -1630,10 +1631,10 @@ export const executeRegisteredTaskStep = async (
           (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
         ),
       },
-      processResult.stdout,
-      processResult.stderr,
-      invocation.value.command,
-      invocation.value.args,
+      stdout,
+      stderr,
+      failedCommand?.command ?? snapshottedStep.resolvedProcess.commands[0]?.command ?? null,
+      failedCommand?.args ?? snapshottedStep.resolvedProcess.commands[0]?.args ?? [],
       processResult.exitCode,
     );
     return block(
@@ -1650,14 +1651,14 @@ export const executeRegisteredTaskStep = async (
     stepReference: input.uses,
     stepAttempt: input.stepAttempt,
     runner: 'process',
-    command: invocation.value.command,
-    args: invocation.value.args,
+    command: snapshottedStep.resolvedProcess.commands.map(({ command }) => command).join(' → '),
+    args: [],
     cwd: input.workspace.path,
     exitCode: processResult.exitCode,
     status: 'completed',
-    stdout: processResult.stdout,
-    stderr: processResult.stderr,
-    details: { output: processOutput.data },
+    stdout,
+    stderr,
+    details: { output: processOutput.data, commands: commandReceipts },
   });
   return ExecuteTaskStepResultSchema.parse({
     status: 'completed',
@@ -1874,7 +1875,7 @@ export const createTaskExecutionActivity = (
           preparedWorkspace,
           resolveWorkspaceRuntimePolicy(
             loadedSnapshot.value.harness.company,
-            loadedSnapshot.value.harness.project?.manifest ?? null,
+            loadedSnapshot.value.harness.project,
           ),
           {
             cancellationSignal: runtime.cancellationSignal,

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "version": "1",
+  "repository": "onetwotrip/front-components",
+  "repositoryKind": "frontend",
+  "translations": { "kind": "none" },
+  "ci": { "kind": "jenkins", "job": "front-components" },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "services": []
+  },
+  "processCommands": {
+    "validation.targeted@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "lint-no-fix"] }]
+    },
+    "validation.full@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--", "--runInBand"] }]
+    },
+    "validation.build@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "build-packages"] }]
+    }
+  }
+}

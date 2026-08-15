@@ -252,6 +252,34 @@ describe('file-backed harness pack', () => {
     });
   });
 
+  it('exposes only the reviewed validation surface for the six frontend repositories', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+
+    expect(pack.projects.map(({ repository }) => repository).sort()).toEqual([
+      'onetwotrip/front-avia',
+      'onetwotrip/front-backoffice',
+      'onetwotrip/front-bus',
+      'onetwotrip/front-components',
+      'onetwotrip/front-core-packages',
+      'onetwotrip/front-railways',
+    ]);
+    for (const project of pack.projects) {
+      expect(project.processCommands['validation.visual@1']).toBeUndefined();
+      expect(
+        Object.values(project.processCommands).flatMap(({ commands }) =>
+          commands.flatMap(({ command, args }) => [command, ...args]),
+        ),
+      ).not.toContain('test:ui');
+    }
+    const backoffice = pack.projects.find(
+      ({ repository }) => repository === 'onetwotrip/front-backoffice',
+    );
+    expect(backoffice?.processCommands['validation.targeted@1']).toEqual({
+      commands: [{ command: 'pnpm', args: ['run', 'agent:typecheck'] }],
+      timeoutMs: 2_100_000,
+    });
+  });
+
   it('admits the company Jira issue types used for frontend work', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const policy = pack.policies.find(({ id }) => id === 'jira-lifecycle');
@@ -424,11 +452,22 @@ describe('file-backed harness pack', () => {
       ]),
     );
     expect(project?.processCommands).toMatchObject({
-      'validation.targeted@1': 'pnpm typecheck',
-      'validation.full@1': 'pnpm test --runInBand',
-      'validation.build@1': 'pnpm build',
-      'validation.visual@1': 'pnpm test:ui',
+      'validation.targeted@1': {
+        commands: [
+          { command: 'pnpm', args: ['run', 'typecheck'] },
+          { command: 'pnpm', args: ['run', 'lint:eslint'] },
+          { command: 'pnpm', args: ['run', 'lint:stylelint'] },
+          { command: 'pnpm', args: ['run', 'lint:circular'] },
+        ],
+      },
+      'validation.full@1': {
+        commands: [{ command: 'pnpm', args: ['run', 'test:unit', '--', '--runInBand'] }],
+      },
+      'validation.build@1': {
+        commands: [{ command: 'pnpm', args: ['run', 'build'] }],
+      },
     });
+    expect(project?.processCommands).not.toHaveProperty('validation.visual@1');
     expect(
       review?.contract.outputSchema.safeParse({
         decision: 'changes_requested',

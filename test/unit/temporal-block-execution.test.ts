@@ -5,6 +5,7 @@ import {
   loadHarnessPack,
   resolveAgentExecutionProfile,
   resolveImplementationPlannerProfile,
+  type ProcessExecutionPlan,
 } from '../../src/harness/index.js';
 import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
@@ -101,6 +102,7 @@ const makeSnapshot = (
     readonly repositoryReference?: string;
     readonly workspacePath?: string;
     readonly workspaceId?: string;
+    readonly resolvedProcess?: ProcessExecutionPlan;
   } = {},
 ) => {
   const promptContent = options.promptContent ?? 'SNAPSHOT PROMPT';
@@ -116,7 +118,6 @@ const makeSnapshot = (
   if (snapshotProject === undefined) {
     throw new Error(`Missing harness project for ${repositoryReference}`);
   }
-  const { guidance, ...projectManifest } = snapshotProject;
   const block =
     current.block.executor.kind === 'agent'
       ? {
@@ -128,11 +129,14 @@ const makeSnapshot = (
     reference: current.reference,
     block,
     activityDelivery: current.contract.activityDelivery,
-    resolvedCommand:
+    resolvedProcess:
       current.block.executor.kind === 'process'
-        ? (snapshotProject.processCommands[current.block.executor.executor] ??
-          pack.company.processCommands[current.block.executor.executor] ??
-          'unconfigured process executor')
+        ? (options.resolvedProcess ??
+          snapshotProject.processCommands[current.block.executor.executor] ??
+          pack.company.processCommands[current.block.executor.executor] ?? {
+            commands: [{ command: 'false', args: [] }],
+            timeoutMs: 35 * 60_000,
+          })
         : null,
     executionProfile:
       current.block.executor.kind === 'agent'
@@ -144,7 +148,7 @@ const makeSnapshot = (
         : null,
   };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 8,
+    schemaVersion: 9,
     kind: 'execution',
     taskReference: 'task-ref',
     workflowRunId: 'run-test',
@@ -165,10 +169,7 @@ const makeSnapshot = (
     },
     harness: {
       company: pack.company,
-      project: {
-        manifest: projectManifest,
-        guidance,
-      },
+      project: snapshotProject,
       implementationPlanner: {
         prompt: pack.prompts.implementationPlanner,
         skills: ['jira', 'confluence', 'loop'],
@@ -499,6 +500,10 @@ describe('temporal block execution activity', () => {
       }),
     );
 
+    const componentTask = {
+      ...translationFixture,
+      repository: 'onetwotrip/front-components',
+    };
     const componentWorkspace = {
       ...stubWorkspace,
       workspaceId: 'e'.repeat(24),
@@ -506,7 +511,7 @@ describe('temporal block execution activity', () => {
       workflowRunId: 'run-2',
       repository: {
         ...stubWorkspace.repository,
-        reference: 'twiket/ui-kit',
+        reference: componentTask.repository,
       },
     };
 
@@ -527,7 +532,7 @@ describe('temporal block execution activity', () => {
         },
         operatorGuidance: null,
         input: {
-          repository: 'twiket/ui-kit',
+          repository: componentTask.repository,
           taskId: translationFixture.taskId,
         },
       },
@@ -536,10 +541,14 @@ describe('temporal block execution activity', () => {
           readRunSnapshot: () =>
             ok(
               makeSnapshot('translations.extract@1', {
-                task: translationFixture,
-                repositoryReference: 'twiket/ui-kit',
+                task: componentTask,
+                repositoryReference: componentTask.repository,
                 workspacePath: componentWorkspace.path,
                 workspaceId: componentWorkspace.workspaceId,
+                resolvedProcess: {
+                  commands: [{ command: 'pnpm', args: ['translations:extract'] }],
+                  timeoutMs: 35 * 60_000,
+                },
               }),
             ),
         },
@@ -582,6 +591,10 @@ describe('temporal block execution activity', () => {
       }),
     );
 
+    const componentTask = {
+      ...translationFixture,
+      repository: 'onetwotrip/front-components',
+    };
     const componentWorkspace = {
       ...stubWorkspace,
       workspaceId: 'f'.repeat(24),
@@ -589,7 +602,7 @@ describe('temporal block execution activity', () => {
       workflowRunId: 'run-3',
       repository: {
         ...stubWorkspace.repository,
-        reference: 'twiket/ui-kit',
+        reference: componentTask.repository,
       },
     };
 
@@ -610,7 +623,7 @@ describe('temporal block execution activity', () => {
         },
         operatorGuidance: null,
         input: {
-          repository: 'twiket/ui-kit',
+          repository: componentTask.repository,
           taskId: translationFixture.taskId,
         },
       },
@@ -619,8 +632,8 @@ describe('temporal block execution activity', () => {
           readRunSnapshot: () =>
             ok(
               makeSnapshot('component.dev_publish@1', {
-                task: translationFixture,
-                repositoryReference: 'twiket/ui-kit',
+                task: componentTask,
+                repositoryReference: componentTask.repository,
                 workspacePath: componentWorkspace.path,
                 workspaceId: componentWorkspace.workspaceId,
               }),
@@ -1145,15 +1158,22 @@ describe('temporal block execution activity', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const receipts = new BlockReceiptStore(ledger.repository, systemClock);
-    const command = vi.fn<CommandRunner['run']>(() =>
-      Promise.resolve({
+    const command = vi
+      .fn<CommandRunner['run']>()
+      .mockResolvedValueOnce({
+        status: 'exited',
+        exitCode: 0,
+        stdout: 'typecheck passed',
+        stderr: '',
+        durationMs: 8,
+      })
+      .mockResolvedValue({
         status: 'exited',
         exitCode: 1,
         stdout: '',
-        stderr: 'typecheck failed',
+        stderr: 'eslint failed',
         durationMs: 8,
-      }),
-    );
+      });
     const activity = createTaskExecutionActivity(
       {
         snapshots: { readRunSnapshot: () => ok(makeSnapshot('validate.targeted@1')) },
@@ -1202,9 +1222,10 @@ describe('temporal block execution activity', () => {
         'validation.failed@1': true,
       },
     });
-    expect(command).toHaveBeenCalledWith(
-      expect.objectContaining({ command: 'pnpm', args: ['typecheck'] }),
-    );
+    expect(command.mock.calls.map(([request]) => [request.command, request.args])).toEqual([
+      ['pnpm', ['run', 'typecheck']],
+      ['pnpm', ['run', 'lint:eslint']],
+    ]);
   });
 
   it('opens a durable wait when an agent claims completion without proving a mutation', async () => {

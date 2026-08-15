@@ -888,7 +888,7 @@ const snapshotHarness = (
     .filter(
       (step) =>
         step.block.executor.kind !== 'process' ||
-        resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project) !== null,
+        resolveSnapshottedProcess(step.block.executor.executor, pack, project) !== null,
     )
     .map((step) => {
       const block = applyHarnessPolicySkills(step.block, step.reference, policies);
@@ -896,9 +896,9 @@ const snapshotHarness = (
         reference: step.reference,
         block,
         activityDelivery: step.contract.activityDelivery,
-        resolvedCommand:
+        resolvedProcess:
           step.block.executor.kind === 'process'
-            ? resolveSnapshottedProcessCommand(step.block.executor.executor, pack, project)
+            ? resolveSnapshottedProcess(step.block.executor.executor, pack, project)
             : null,
         executionProfile:
           block.executor.kind === 'agent'
@@ -906,18 +906,9 @@ const snapshotHarness = (
             : null,
       };
     });
-  const snapshottedProject = (() => {
-    if (project === undefined) return null;
-    const { guidance, ...manifest } = project;
-    return {
-      manifest,
-      guidance: guidance === null ? null : snapshotPrompt(guidance),
-    };
-  })();
-
   return {
     company: pack.company,
-    project: snapshottedProject,
+    project: project ?? null,
     implementationPlanner: {
       prompt: snapshotPrompt(pack.prompts.implementationPlanner),
       skills: implementationPlannerSkills,
@@ -931,11 +922,11 @@ const snapshotHarness = (
   };
 };
 
-const resolveSnapshottedProcessCommand = (
+const resolveSnapshottedProcess = (
   executor: string,
   pack: LoadedHarnessPack,
   project: LoadedHarnessPack['projects'][number] | undefined,
-): string | null =>
+): LoadedHarnessPack['company']['processCommands'][string] | null =>
   project?.processCommands[executor] ?? pack.company.processCommands[executor] ?? null;
 
 const selectStrategy = (
@@ -1008,7 +999,7 @@ export class ImplementationPlanningCoordinator {
       }),
     );
     const snapshot: PlanningContextSnapshot = PlanningContextSnapshotSchema.parse({
-      schemaVersion: 8,
+      schemaVersion: 9,
       kind: 'planning_context',
       taskReference,
       workflowRunId,
@@ -1066,7 +1057,7 @@ export class ImplementationPlanningCoordinator {
       CompiledWorkflowSchema.parse(graph.data).metadata.references.stepTypes,
     );
     const snapshot: ExecutionRunSnapshot = ExecutionRunSnapshotSchema.parse({
-      schemaVersion: 8,
+      schemaVersion: 9,
       kind: 'execution',
       taskReference,
       workflowRunId: planningContext.value.workflowRunId,

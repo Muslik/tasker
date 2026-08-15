@@ -288,7 +288,10 @@ const createExecutionStages = (
               label: titleCaseIdentifier(node.id),
               status,
               reference: node.uses,
-              executor: snapshotted?.resolvedCommand ?? block.executor.executor,
+              executor:
+                snapshotted?.resolvedProcess?.commands
+                  .map(({ command, args }) => [command, ...args].join(' '))
+                  .join(' → ') ?? block.executor.executor,
               attempts,
               receipts:
                 execution === null ? [] : receiptsFor(node.id, attempts, execution, receipts),

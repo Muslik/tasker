@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "1",
+  "version": "2",
   "availableCapabilities": [
     "ci.read",
     "command.run",
@@ -13,7 +13,10 @@
     "workspace.write"
   ],
   "processCommands": {
-    "component.dev-publish@1": "pnpm component:publish-dev"
+    "component.dev-publish@1": {
+      "commands": [{ "command": "pnpm", "args": ["component:publish-dev"] }],
+      "timeoutMs": 2100000
+    }
   },
   "workspaceRuntime": {
     "engine": "docker",

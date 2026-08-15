@@ -13,28 +13,53 @@ bootstrap program.
 | `work/shared/*`              | `shared-skills/*`                | pinned `.tasker/harness/skills/*`; selected per Activity                |
 | `work/<profile>/skills/*`    | `profiles/<profile>/skills/*`    | effective catalog plus ambient `.codex/skills/*` and `.claude/skills/*` |
 | profile operational skills   | `profiles/<profile>/step-skills` | effective catalog only; selected per Activity                           |
-| `work/<profile>/overrides/*` | `profiles/<profile>/overrides/*` | repository-relative files                                               |
+| `work/<profile>/overrides/*` | `profiles/<profile>/guidance/*`  | pinned `.ai/**`, `AGENTS.md`, `CLAUDE.md` rules                         |
 | `work/lib/*`                 | `lib/*`                          | `.tasker/harness/lib/*` for integration skill scripts                   |
 | `work/bin/with-env`          | portable `bin/with-env`          | `.tasker/harness/bin/with-env`                                          |
 
-The initial manifest declares seven repositories: `front-avia`, `front-backoffice`,
-`front-bus`, `front-core-packages`, `front-index`, `front-railways`, and
-`notifications`. Empty profiles are intentional: they receive common skills today and
-can gain project rules without changing TypeScript application code.
+The initial manifest declares six repositories: `front-avia`, `front-backoffice`,
+`front-bus`, `front-components`, `front-core-packages`, and `front-railways`.
 
-Project-owned `.ai` files already committed to a repository are not copied into this
-pack. They arrive naturally with the managed clone and remain that repository's source
-of truth. Only harness-owned replacements belong under `profiles/<id>/overrides/.ai`.
-The imported override set is currently:
+Project-owned `.ai` files arrive with the managed clone and remain the repository's
+source of truth. Tasker adds only `.ai/tasker.md`; it does not duplicate a repository's
+architecture documents into this pack. Every profile also declares an `AGENTS.md` and
+`CLAUDE.md` managed-run delta so Codex and Claude receive equivalent boundaries.
 
-- `front-avia`: `REVIEW.md`, `app-runbook.md`, `index.md`, and three documents under
-  `.ai/docs`;
-- `front-bus`: `REVIEW.md` and `index.md`;
-- `front-railways`: `REVIEW.md`, `index.md`, and four documents under `.ai/docs`.
+When the repository already tracks one of those root files, bootstrap composes
+`repository file at the pinned base commit + Tasker delta` between explicit markers,
+hashes the result, and marks it `skip-worktree`. When the file does not exist, the delta
+is materialized as the complete file. This keeps repository rules and Tasker rules
+simultaneously, without adding either to the task diff. `front-components` has no
+repository architecture guidance, so its profile states that fact instead of borrowing
+rules from another project.
 
-The other imported profiles had no `.ai` overrides in the source harness. Their existing
-repository `.ai` trees must not be duplicated here; doing so would create competing
-copies which drift independently.
+## Initial project validation
+
+Commands below were resolved from the current `package.json` files. They are stored as
+ordered `{ command, args }` invocations; Tasker does not parse shell strings. A sequence
+stops at its first non-zero result.
+
+| Project               | Targeted validation                                              | Full validation                     | Build                     | Visual      |
+| --------------------- | ---------------------------------------------------------------- | ----------------------------------- | ------------------------- | ----------- |
+| `front-railways`      | `pnpm run typecheck`                                             | unavailable                         | `pnpm run build`          | unavailable |
+| `front-bus`           | unavailable                                                      | `pnpm run test -- --runInBand`      | `pnpm run build`          | unavailable |
+| `front-avia`          | `typecheck` → `lint:eslint` → `lint:stylelint` → `lint:circular` | `pnpm run test:unit -- --runInBand` | `pnpm run build`          | unavailable |
+| `front-core-packages` | `node type-check.mjs` → `pnpm run linters`                       | `pnpm run test:unit -- --runInBand` | `pnpm run build-packages` | unavailable |
+| `front-components`    | `pnpm run lint-no-fix`                                           | `pnpm run test:unit -- --runInBand` | `pnpm run build-packages` | unavailable |
+| `front-backoffice`    | `pnpm run agent:typecheck`                                       | unavailable                         | `pnpm run build`          | unavailable |
+
+`test:ui` is deliberately not registered for any project. Today the process ABI has no
+typed Playwright selector, so exposing it would let an ordinary validation node launch
+the complete visual suite. Likewise `front-backoffice`'s
+`agent:eslint-for-changed` is excluded because it runs `eslint --fix` and mutates the
+workspace. Missing categories stay unavailable to the planner instead of falling back
+to an expensive or mutating command.
+
+All six profiles currently use `translations.kind = none`. This does not say that the
+repository has no localized text; it says Tasker has no special human translation
+handoff for that project. Ordinary locale-file edits remain implementation work. A
+future proven extract → human wait → pull process uses `human_handoff` plus explicit
+`translations.extract@1` and `translations.pull@1` process bindings.
 
 The old `bootstrap`, `config`, `harness-wt-hook`, generated Loop output, `.DS_Store`,
 and `.env` did not move. They are operator-machine mechanics or runtime data, not
@@ -54,10 +79,10 @@ a worktree or content snapshot.
    `.tasker/harness/skills`. Profile ambient and step skills replace common packages of
    the same name in that catalog. Only ambient profile skills are additionally exposed
    in both `.codex/skills` and `.claude/skills`; operational profile skills stay hidden
-   until selected by a step. Profile overrides are copied to repository paths. No
-   symlink points back here.
+   until selected by a step. Profile guidance is composed with repository rules and
+   copied to repository paths. No symlink points back here.
 5. Generated untracked files are placed in the managed clone's Git exclude file;
-   tracked overrides use that worktree's `skip-worktree` bit. The task branch therefore
+   tracked guidance uses that worktree's `skip-worktree` bit. The task branch therefore
    contains code and task artifacts, not operator configuration.
 6. The durable receipt records the profile, pack hash, and hash of every materialized
    file. `inspect` can reconcile a lost Activity response without redoing completed
@@ -117,7 +142,7 @@ For a new task the durable order is:
 2. Tasker prepares its application-data clone, branch, and managed worktree.
 3. The bootstrap Activity resolves the repository alias in `manifest.json`.
 4. The complete pack is content-addressed and pinned for the run.
-5. Repository overrides and the hidden effective skill catalog are materialized;
+5. Repository guidance and the hidden effective skill catalog are materialized;
    credentials stay in the external environment file.
 6. Only then do repository analysis, workflow assembly, optional plan review, and block
    execution begin.
@@ -127,13 +152,18 @@ changes. Planning reads the same configured filesystem that later execution uses
 
 ## Maintenance
 
-- Edit a prompt/skill/override here and bump the human-readable `version` in
+- Edit a prompt, skill, or guidance file here and bump the human-readable `version` in
   `manifest.json` for a semantic change. The content hash is computed automatically.
 - The change affects newly bootstrapped runs only. Existing worktrees keep their pinned
   snapshot until their run finishes.
-- Add a project by creating `profiles/<id>/skills` and `profiles/<id>/overrides`, then
+- Add a project by creating `profiles/<id>/skills`, `profiles/<id>/step-skills`, and
+  `profiles/<id>/guidance`, then
   add its repository aliases to `manifest.json`. No orchestrator or Temporal code
   changes are required.
+- Put Tasker-only operational rules in `.ai/tasker.md`. Keep repository architecture in
+  the repository's own `.ai`. Use profile `AGENTS.md`/`CLAUDE.md` as managed-run deltas;
+  bootstrap composes them with tracked repository files instead of replacing their
+  content.
 - Add a common skill under `shared-skills`; add an API/tool skill under
   `integration-skills`; add repository-specific implementation knowledge under that
   profile's `skills` directory.
@@ -167,5 +197,5 @@ changes. Planning reads the same configured filesystem that later execution uses
 
 Run `pnpm verify` after a change. The workspace bootstrap unit suite loads the real pack,
 materializes it into a disposable Git repository, checks Git cleanliness, and proves
-that every hidden `.ai` override is materialized, repository-owned `.ai` remains intact,
+that every declared guidance file is materialized, repository-owned `.ai` remains intact,
 and subsequent source edits cannot alter the active worktree.

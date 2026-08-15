@@ -98,7 +98,7 @@ describe('Jira bootstrap context assembly', () => {
     expect(snapshot.ok).toBe(true);
     if (!snapshot.ok) throw new Error(`Expected planning snapshot: ${snapshot.error.kind}`);
     expect(snapshot.value).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: 9,
       kind: 'planning_context',
       taskReference,
       repository: { path: workspacePath, reference: 'onetwotrip/front-avia' },

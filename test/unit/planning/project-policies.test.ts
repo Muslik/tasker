@@ -13,12 +13,15 @@ describe('project workflow policies', () => {
       repository: 'twiket/unconfigured-frontend',
       repositoryKind: 'generic',
       source: 'default',
-      translations: { kind: 'inline_json' },
+      translations: { kind: 'none' },
     });
   });
 
   it('applies the global frontend publication process to an @ott package', () => {
-    const policy = resolvePackagePublicationPolicy('twiket/ui-kit', 'packages/@ott/booking-copy');
+    const policy = resolvePackagePublicationPolicy(
+      'onetwotrip/front-components',
+      'packages/@ott/booking-copy',
+    );
 
     expect(policy).toEqual({
       kind: 'human_final',
@@ -30,7 +33,10 @@ describe('project workflow policies', () => {
   });
 
   it('does not apply the @ott publication process outside its package path', () => {
-    const policy = resolvePackagePublicationPolicy('twiket/ui-kit', 'src/components/booking-copy');
+    const policy = resolvePackagePublicationPolicy(
+      'onetwotrip/front-components',
+      'src/components/booking-copy',
+    );
 
     expect(policy).toEqual({ kind: 'none', source: 'default' });
   });

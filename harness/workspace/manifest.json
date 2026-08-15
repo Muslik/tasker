@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "twiket-workspace",
-  "version": "2",
+  "version": "3",
   "engines": ["codex", "claude"],
   "integrationSkills": "integration-skills",
   "sharedSkills": "shared-skills",
@@ -13,49 +13,42 @@
       "repositoryAliases": ["front-avia", "onetwotrip/front-avia"],
       "skills": "profiles/front-avia/skills",
       "stepSkills": "profiles/front-avia/step-skills",
-      "overrides": "profiles/front-avia/overrides"
+      "guidance": "profiles/front-avia/guidance"
     },
     {
       "id": "front-backoffice",
       "repositoryAliases": ["front-backoffice", "onetwotrip/front-backoffice"],
       "skills": "profiles/front-backoffice/skills",
       "stepSkills": "profiles/front-backoffice/step-skills",
-      "overrides": "profiles/front-backoffice/overrides"
+      "guidance": "profiles/front-backoffice/guidance"
     },
     {
       "id": "front-bus",
       "repositoryAliases": ["front-bus", "onetwotrip/front-bus"],
       "skills": "profiles/front-bus/skills",
       "stepSkills": "profiles/front-bus/step-skills",
-      "overrides": "profiles/front-bus/overrides"
+      "guidance": "profiles/front-bus/guidance"
     },
     {
       "id": "front-core-packages",
       "repositoryAliases": ["front-core-packages", "onetwotrip/front-core-packages"],
       "skills": "profiles/front-core-packages/skills",
       "stepSkills": "profiles/front-core-packages/step-skills",
-      "overrides": "profiles/front-core-packages/overrides"
+      "guidance": "profiles/front-core-packages/guidance"
     },
     {
-      "id": "front-index",
-      "repositoryAliases": ["front-index", "onetwotrip/front-index"],
-      "skills": "profiles/front-index/skills",
-      "stepSkills": "profiles/front-index/step-skills",
-      "overrides": "profiles/front-index/overrides"
+      "id": "front-components",
+      "repositoryAliases": ["front-components", "onetwotrip/front-components"],
+      "skills": "profiles/front-components/skills",
+      "stepSkills": "profiles/front-components/step-skills",
+      "guidance": "profiles/front-components/guidance"
     },
     {
       "id": "front-railways",
       "repositoryAliases": ["front-railways", "onetwotrip/front-railways"],
       "skills": "profiles/front-railways/skills",
       "stepSkills": "profiles/front-railways/step-skills",
-      "overrides": "profiles/front-railways/overrides"
-    },
-    {
-      "id": "notifications",
-      "repositoryAliases": ["notifications", "onetwotrip/notifications"],
-      "skills": "profiles/notifications/skills",
-      "stepSkills": "profiles/notifications/step-skills",
-      "overrides": "profiles/notifications/overrides"
+      "guidance": "profiles/front-railways/guidance"
     }
   ]
 }

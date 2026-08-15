@@ -85,14 +85,7 @@ const loadProjects = (root: string) => {
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((entry) => {
       const manifestPath = join(projectsRoot, entry.name, 'project.json');
-      const project = parseFile(HarnessProjectManifestSchema, manifestPath);
-      return Object.freeze({
-        ...project,
-        guidance:
-          project.workflowGuidance === undefined
-            ? null
-            : loadPrompt(root, project.workflowGuidance),
-      });
+      return Object.freeze(parseFile(HarnessProjectManifestSchema, manifestPath));
     });
 };
 

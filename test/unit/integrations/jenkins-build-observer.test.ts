@@ -20,8 +20,6 @@ const task = makePlanningTaskSnapshot('avia-13236-short-bug');
 const pack = loadHarnessPack();
 const project = pack.projects.find(({ repository }) => repository === task.repository);
 if (project === undefined) throw new Error('Missing project profile');
-const { guidance, ...projectManifest } = project;
-void guidance;
 
 const configuration: JenkinsBuildConfiguration = {
   baseUrl: 'https://jenkins.example',
@@ -73,7 +71,7 @@ const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
   operatorGuidance: null,
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [],
-  project: projectManifest,
+  project,
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,

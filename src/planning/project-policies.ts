@@ -3,14 +3,8 @@ import { z } from 'zod';
 import { getHarnessPack, type LoadedHarnessPack } from '../harness/index.js';
 
 const TranslationPolicySchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('inline_json') }).strict(),
-  z
-    .object({
-      kind: z.literal('external'),
-      extractCommand: z.string().min(1),
-      pullCommand: z.string().min(1),
-    })
-    .strict(),
+  z.object({ kind: z.literal('none') }).strict(),
+  z.object({ kind: z.literal('human_handoff') }).strict(),
 ]);
 
 export const ProjectWorkflowProfileSchema = z
@@ -90,7 +84,7 @@ export const createProjectPolicyResolver = (pack: LoadedHarnessPack): ProjectPol
       repository,
       repositoryKind: 'generic',
       source: 'default',
-      translations: { kind: 'inline_json' },
+      translations: { kind: 'none' },
     });
 
   const resolvePackagePublicationPolicy = (

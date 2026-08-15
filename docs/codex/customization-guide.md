@@ -21,8 +21,8 @@ Workflow code.
 | Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
 | Agent prompts | `harness/prompts/` and `harness/steps/*/prompt.md` | global planner/analyzer prompts and colocated step instructions |
 | Company policy | `harness/company.json` | reusable organization-wide workflow facts |
-| Project workflow policy | `harness/projects/*/project.json` | repository-specific translation/test/publication facts |
-| Project guidance | `harness/projects/*/workflow.md` | short human-readable workflow context, never effect authority |
+| Project workflow policy | `harness/projects/*/project.json` | repository-specific runtime, CI, translation, and validation facts |
+| Workspace guidance | `harness/workspace/profiles/*/guidance` | pinned `.ai`, `AGENTS.md`, and `CLAUDE.md` rules for agent work |
 | Mandatory obligations | `src/planning/obligations.ts` | safety/semantic rules an analyzer cannot waive |
 | Integrations/repositories | `src/integrations/`, `src/repositories/` | Jira/Bitbucket/Jenkins today, alternatives later |
 | Operator UI/API | `src/control-plane/` and UI modules | presentation and operator commands |
@@ -38,21 +38,20 @@ The editable source pack is [`harness/`](../../harness). Its current ownership i
 | Path | Authority |
 |---|---|
 | [`company.json`](../../harness/company.json) | company capabilities, Docker runtime, provider/model profiles, planner routing, global process and package rules |
-| [`projects/*/project.json`](../../harness/projects) | repository-specific bootstrap, services, CI kind, translation mode, and exact validation commands |
-| [`projects/*/workflow.md`](../../harness/projects) | short repository workflow guidance supplied as evidence to planning |
+| [`projects/*/project.json`](../../harness/projects) | repository-specific bootstrap, services, CI kind, translation mode, and typed validation processes |
 | [`policies/*.json`](../../harness/policies) | optional company overlays, required graph ordering, and skills added to existing agent blocks |
 | [`steps/*/step.json`](../../harness/steps) | complete block catalog: stage, executor, skills, completion, effects, artifacts, and recovery boundary |
 | [`steps/*/prompt.md`](../../harness/steps) | readable instruction colocated with each agent block |
 | [`prompts/implementation-planner.md`](../../harness/prompts/implementation-planner.md) | mandatory initial planner and workflow-composer instructions |
 | [`prompts/workflow-analyzer.md`](../../harness/prompts/workflow-analyzer.md) | continuation-workflow analyzer instructions |
-| [`workspace/manifest.json`](../../harness/workspace/manifest.json) | provider-neutral skill/profile/override pack copied and pinned into a managed worktree |
+| [`workspace/manifest.json`](../../harness/workspace/manifest.json) | provider-neutral skill/profile/guidance pack copied and pinned into a managed worktree |
 | [`workspace/shared-skills`](../../harness/workspace/shared-skills) | reusable logical agent skills |
 | [`workspace/integration-skills`](../../harness/workspace/integration-skills) | read/write system skills available for explicit planner or step selection |
-| [`workspace/profiles`](../../harness/workspace/profiles) | repository-specific ambient skills, step-only skills, and file overrides |
+| [`workspace/profiles`](../../harness/workspace/profiles) | repository-specific ambient skills, step-only skills, and pinned guidance files |
 
 `loadHarnessPack` in
 [`src/harness/loader.ts`](../../src/harness/loader.ts) validates these files, loads prompt
-content and hashes, resolves enabled policies, merges project overrides, and produces one
+content and hashes, resolves enabled policies, applies project configuration, and produces one
 immutable catalog. The exact catalog exposed to the planner is assembled by
 [`src/planning/analyzer-context.ts`](../../src/planning/analyzer-context.ts):
 
@@ -84,8 +83,8 @@ There is no ambient access to the whole harness:
 2. A selected agent block receives the full snapshotted step prompt, typed step input, current
    run evidence, operator guidance when resuming, the resolved provider/model profile, and only
    that block's logical skills plus applicable policy bindings.
-3. A process block receives an exact command already bound by company/project policy. No LLM is
-   invoked.
+3. A process block receives a typed sequence of `{ command, args }` invocations already bound by
+   company/project policy. No shell string is parsed and no LLM is invoked.
 4. An integration block receives a typed adapter and durable effect/reconciliation boundary. No
    LLM is allowed to perform the remote mutation directly.
 
@@ -168,16 +167,21 @@ This must not require changes to the generic interpreter, task queue, Temporal C
 operator layout, or another block. If it does, first prove that the behavior is a new
 generic control-flow concept rather than an ordinary task step.
 
-For a `process` block, add its executor key and command to the relevant versioned
-`processCommands` map in company or project policy. The analyzer sees the available
-block; execution uses the command captured in that run's immutable snapshot. Do not add
-step-name branching to an Activity.
+For a `process` block, add its executor key and typed execution plan to the relevant
+`processCommands` map in company or project policy. A plan contains one or more ordered
+`{ command, args }` invocations and an optional timeout. The analyzer sees the available
+block; execution uses the whole plan captured in that run's immutable snapshot and stops
+at the first failing invocation. Do not add shell composition or step-name branching to
+an Activity.
 
 Project validation is a concrete example. `validate.targeted@1`, `validate.full@1`,
 `validate.build@1`, and `validate.visual@1` are reusable process contracts. Each project binds
 only the supported executor keys to exact commands in its `processCommands` map. The planner
 selects a registered block; it never emits shell. A non-zero command exit remains a completed,
 receipted diagnostic result so the frozen graph can decide whether to run `code.repair@1`.
+`validation.visual@1` is deliberately absent from the initial six profiles: their
+repository scripts run broad Playwright suites. It becomes available only after the
+contract can carry and validate a task-specific selector.
 
 ### Block completion contract
 
@@ -291,7 +295,10 @@ generated graph interprets differently.
 
 Project policy describes workflow peculiarities, not source architecture. Good facts:
 
-- translations are inline JSON, or require extract -> external translation wait -> pull;
+- `translations.kind = none`: Tasker adds no special translation workflow; locale files and
+  ordinary repository commands remain implementation details;
+- `translations.kind = human_handoff`: the repository has a proven extract -> human wait -> pull
+  process and explicitly binds the corresponding process steps;
 - changed CSS/visual surfaces require screenshot verification;
 - changes in a specific package require build A and tests B/C;
 - final publication is human-owned;
@@ -354,6 +361,25 @@ The built-in pack lives in `harness/workspace`. It contains portable integration
 skills and repository profiles imported from the personal harness, but excludes its
 symlink machinery and secrets. `manifest.json` maps repository aliases to profiles, so
 adding another repository does not require an application-code branch.
+
+Repository rules and Tasker rules have different owners:
+
+- tracked repository `.ai/**` remains unchanged and is read from the managed clone;
+- Tasker may add only Markdown under `.ai/`, `AGENTS.md`, or `CLAUDE.md`; another
+  destination makes the workspace pack invalid;
+- `.ai/tasker.md` contains the managed-run boundary and is an ignored worktree file;
+- when the repository already tracks `AGENTS.md` or `CLAUDE.md`, Tasker reads that file
+  from the run's pinned base commit and appends the profile delta between explicit
+  `tasker managed guidance` markers;
+- when a root guidance file does not exist, the profile file becomes its complete
+  ignored content;
+- composed tracked guidance is marked `skip-worktree`, so it guides the agent but cannot
+  enter the product diff.
+
+This is composition, not replacement. A Tasker profile must not copy the repository's
+architecture documents: otherwise a later repository update would silently leave the
+managed agent on a stale fork of its own rules. Only Tasker-specific operational delta
+belongs in `workspace/profiles/<id>/guidance`.
 
 The repository preparation Activity:
 

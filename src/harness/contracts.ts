@@ -29,7 +29,29 @@ const RelativePathSchema = z
   .refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), {
     message: 'Expected a path relative to the harness pack',
   });
-const ProcessCommandsSchema = z.record(VersionedReferenceSchema, z.string().trim().min(1));
+export const ProcessInvocationSchema = z
+  .object({
+    command: z
+      .string()
+      .trim()
+      .regex(/^[^\s]+$/u),
+    args: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export const ProcessExecutionPlanSchema = z
+  .object({
+    commands: z.array(ProcessInvocationSchema).min(1).max(12),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(1_000)
+      .max(60 * 60_000)
+      .default(35 * 60_000),
+  })
+  .strict();
+
+const ProcessCommandsSchema = z.record(VersionedReferenceSchema, ProcessExecutionPlanSchema);
 
 export const HarnessContractNameSchema = z.enum([
   'agent_output',
@@ -209,14 +231,8 @@ export interface HarnessStepSource {
 }
 
 const TranslationPolicySchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('inline_json') }).strict(),
-  z
-    .object({
-      kind: z.literal('external'),
-      extractCommand: z.string().min(1),
-      pullCommand: z.string().min(1),
-    })
-    .strict(),
+  z.object({ kind: z.literal('none') }).strict(),
+  z.object({ kind: z.literal('human_handoff') }).strict(),
 ]);
 
 const CiPolicySchema = z.discriminatedUnion('kind', [
@@ -275,7 +291,6 @@ export const HarnessProjectManifestSchema = z
     ci: CiPolicySchema.default({ kind: 'none' }),
     processCommands: ProcessCommandsSchema,
     workspaceRuntime: WorkspaceRuntimeSchema.partial().optional(),
-    workflowGuidance: RelativePathSchema.optional(),
     executionProfileOverrides: ProjectExecutionProfileOverridesSchema.optional(),
   })
   .strict();
@@ -323,6 +338,7 @@ export type HarnessProjectManifest = z.infer<typeof HarnessProjectManifestSchema
 export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema>;
 export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
 export type WorkspaceRuntime = z.infer<typeof WorkspaceRuntimeSchema>;
+export type ProcessExecutionPlan = z.infer<typeof ProcessExecutionPlanSchema>;
 export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
 export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 
@@ -365,9 +381,7 @@ export interface LoadedHarnessStep {
   readonly prompt: LoadedPrompt | null;
 }
 
-export interface LoadedHarnessProject extends HarnessProjectManifest {
-  readonly guidance: LoadedPrompt | null;
-}
+export type LoadedHarnessProject = HarnessProjectManifest;
 
 export interface LoadedHarnessPack {
   readonly rootPath: string;

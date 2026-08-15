@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "version": "1",
+  "repository": "onetwotrip/front-railways",
+  "repositoryKind": "frontend",
+  "translations": { "kind": "none" },
+  "ci": { "kind": "jenkins", "job": "front-railways" },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "services": []
+  },
+  "processCommands": {
+    "validation.targeted@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "typecheck"] }]
+    },
+    "validation.build@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "build"] }]
+    }
+  }
+}

@@ -94,14 +94,6 @@ export const createWorkflowAnalyzerContext = (
       policies: {
         workspaceRuntime,
         project: resolveProjectWorkflowProfile(targetRepository),
-        projectGuidance:
-          harnessProject?.guidance === null || harnessProject?.guidance === undefined
-            ? null
-            : {
-                content: harnessProject.guidance.content,
-                path: harnessProject.guidance.relativePath,
-                sha256: harnessProject.guidance.contentSha256,
-              },
         projectHarnessVersion: harnessProject?.version ?? null,
         publication,
       },

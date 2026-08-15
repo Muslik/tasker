@@ -63,6 +63,20 @@ const createAdapter = (sourcePackPath: string, snapshotStorePath: string) =>
   );
 
 describe('workspace harness bootstrap', () => {
+  it('rejects guidance that targets an arbitrary repository file', () => {
+    const sourcePack = mkdtempSync(join(tmpdir(), 'tasker-harness-source-'));
+    cpSync(resolve('harness/workspace'), sourcePack, { recursive: true });
+    writeFileSync(
+      join(sourcePack, 'profiles/front-avia/guidance/package.json'),
+      '{"scripts":{}}\n',
+      'utf8',
+    );
+
+    expect(() => loadWorkspaceHarnessPack(sourcePack)).toThrow(
+      'Workspace harness guidance may only target .ai/*.md, AGENTS.md, or CLAUDE.md',
+    );
+  });
+
   it('provides a portable package for every registered agent-step skill', () => {
     const workflowPack = loadHarnessPack();
     const workspacePack = loadWorkspaceHarnessPack(resolve('harness/workspace'));
@@ -90,6 +104,9 @@ describe('workspace harness bootstrap', () => {
     });
     expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
       'Руководство для AI-агентов',
+    );
+    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+      '# Repository agents',
     );
     expect(
       readFileSync(join(repository.path, '.codex/skills/localization/SKILL.md'), 'utf8'),
@@ -133,34 +150,30 @@ describe('workspace harness bootstrap', () => {
     {
       profile: 'front-avia',
       reference: 'onetwotrip/front-avia',
-      files: [
-        '.ai/REVIEW.md',
-        '.ai/app-runbook.md',
-        '.ai/docs/architecture.md',
-        '.ai/docs/conventions.md',
-        '.ai/docs/project.md',
-        '.ai/index.md',
-      ],
+      files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
     },
     {
       profile: 'front-bus',
       reference: 'onetwotrip/front-bus',
-      files: ['.ai/REVIEW.md', '.ai/index.md'],
+      files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
     },
     {
       profile: 'front-railways',
       reference: 'onetwotrip/front-railways',
-      files: [
-        '.ai/REVIEW.md',
-        '.ai/docs/architecture.md',
-        '.ai/docs/conventions.md',
-        '.ai/docs/patterns.md',
-        '.ai/docs/project.md',
-        '.ai/index.md',
-      ],
+      files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
+    },
+    {
+      profile: 'front-core-packages',
+      reference: 'onetwotrip/front-core-packages',
+      files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
+    },
+    {
+      profile: 'front-components',
+      reference: 'onetwotrip/front-components',
+      files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
     },
   ])(
-    'materializes every hidden .ai override for $profile',
+    'materializes every project guidance file for $profile',
     async ({ profile, reference, files }) => {
       const repository = createRepository();
       const workspace = locatorFor(repository, reference);
@@ -176,15 +189,26 @@ describe('workspace harness bootstrap', () => {
         value: { status: 'ready', receipt: { profile } },
       });
       for (const file of files) {
-        expect(readFileSync(join(repository.path, file), 'utf8')).toBe(
-          readFileSync(join('harness/workspace/profiles', profile, 'overrides', file), 'utf8'),
+        const actual = readFileSync(join(repository.path, file), 'utf8');
+        const managed = readFileSync(
+          join('harness/workspace/profiles', profile, 'guidance', file),
+          'utf8',
         );
+        if (file === 'AGENTS.md' || file === 'CLAUDE.md') {
+          expect(actual).toContain(
+            file === 'AGENTS.md' ? '# Repository agents' : '# Repository Claude',
+          );
+          expect(actual).toContain(managed.trim());
+          expect(actual).toContain('tasker managed guidance');
+        } else {
+          expect(actual).toBe(managed);
+        }
       }
       expect(git(repository.path, 'status', '--porcelain')).toBe('');
     },
   );
 
-  it('leaves repository-owned .ai guidance unchanged when a profile has no override', async () => {
+  it('keeps repository .ai guidance while applying the managed-run root rules', async () => {
     const repository = createRepository();
     const workspace = locatorFor(repository, 'onetwotrip/front-backoffice');
     const adapter = createAdapter(
@@ -200,6 +224,12 @@ describe('workspace harness bootstrap', () => {
     });
     expect(readFileSync(join(repository.path, '.ai/index.md'), 'utf8')).toBe(
       '# Repository AI index\n',
+    );
+    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+      'pnpm run agent:typecheck',
+    );
+    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+      'Tasker уже выбрал workflow',
     );
     expect(git(repository.path, 'status', '--porcelain')).toBe('');
   });
@@ -217,7 +247,7 @@ describe('workspace harness bootstrap', () => {
     if (!applied.ok) throw new Error(JSON.stringify(applied.error));
     const original = readFileSync(join(repository.path, 'AGENTS.md'), 'utf8');
     writeFileSync(
-      join(sourcePack, 'profiles/front-avia/overrides/AGENTS.md'),
+      join(sourcePack, 'profiles/front-avia/guidance/AGENTS.md'),
       '# Changed for future runs\n',
       'utf8',
     );

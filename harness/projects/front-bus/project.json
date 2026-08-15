@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "version": "1",
+  "repository": "onetwotrip/front-bus",
+  "repositoryKind": "frontend",
+  "translations": { "kind": "none" },
+  "ci": { "kind": "jenkins", "job": "front-bus" },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "services": []
+  },
+  "processCommands": {
+    "validation.full@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "test", "--", "--runInBand"] }]
+    },
+    "validation.build@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "build"] }]
+    }
+  }
+}

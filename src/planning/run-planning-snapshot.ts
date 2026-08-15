@@ -5,6 +5,7 @@ import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
   HarnessProjectManifestSchema,
+  ProcessExecutionPlanSchema,
 } from '../harness/contracts.js';
 import { ResolvedExecutionProfileSchema } from '../harness/execution-profile-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
@@ -35,7 +36,7 @@ const SnapshottedStepSchema = z
     reference: z.string().min(1),
     block: BlockDefinitionSchema,
     activityDelivery: StepActivityDeliverySchema,
-    resolvedCommand: z.string().min(1).nullable(),
+    resolvedProcess: ProcessExecutionPlanSchema.nullable(),
     executionProfile: ResolvedExecutionProfileSchema.nullable(),
   })
   .strict();
@@ -43,13 +44,7 @@ const SnapshottedStepSchema = z
 const SnapshottedHarnessSchema = z
   .object({
     company: HarnessCompanyManifestSchema,
-    project: z
-      .object({
-        manifest: HarnessProjectManifestSchema,
-        guidance: SnapshottedPromptSchema.nullable(),
-      })
-      .strict()
-      .nullable(),
+    project: HarnessProjectManifestSchema.nullable(),
     implementationPlanner: z
       .object({
         prompt: SnapshottedPromptSchema,
@@ -68,7 +63,7 @@ const SnapshottedHarnessSchema = z
   .strict();
 
 const RunSnapshotBaseSchema = z.object({
-  schemaVersion: z.literal(8),
+  schemaVersion: z.literal(9),
   taskReference: z.string().min(1),
   workflowRunId: z.string().min(1),
   task: PlanningTaskSnapshotSchema,

@@ -35,6 +35,8 @@ import type { WorkspaceBootstrapReceipt, WorkspaceLocator } from './contracts.js
 const SELECTION_PATH = '.tasker/harness-bootstrap.json';
 const EXCLUDE_BEGIN = '# >>> tasker workspace harness >>>';
 const EXCLUDE_END = '# <<< tasker workspace harness <<<';
+const GUIDANCE_BEGIN = '<!-- >>> tasker managed guidance >>>';
+const GUIDANCE_END = '<!-- <<< tasker managed guidance <<< -->';
 
 const SelectionSchema = z
   .object({
@@ -51,7 +53,7 @@ type Selection = z.infer<typeof SelectionSchema>;
 
 interface MaterializedFile extends WorkspaceHarnessSourceFile {
   readonly destination: string;
-  readonly kind: 'skill' | 'provider' | 'support' | 'command' | 'override';
+  readonly kind: 'skill' | 'provider' | 'support' | 'command' | 'guidance';
 }
 
 class BootstrapFailure extends Error {
@@ -83,6 +85,9 @@ const sha256File = async (path: string): Promise<string | null> => {
     throw error;
   }
 };
+
+const sha256 = (content: Buffer | string): string =>
+  createHash('sha256').update(content).digest('hex');
 
 const commandMessage = (result: CommandResult): string => {
   if (result.status === 'spawn_failed') return result.message;
@@ -157,8 +162,8 @@ const buildMaterializationPlan = (
     if (commandTail !== null) {
       add(file, `${WORKSPACE_HARNESS_BIN_DIRECTORY}/${commandTail}`, 'command');
     }
-    const overrideTail = tailUnder(file.relativePath, profile.overrides);
-    if (overrideTail !== null) add(file, overrideTail, 'override');
+    const guidanceTail = tailUnder(file.relativePath, profile.guidance);
+    if (guidanceTail !== null) add(file, guidanceTail, 'guidance');
   }
 
   return [...destinations.values()].sort((left, right) =>
@@ -183,7 +188,18 @@ const receiptFrom = async (
     profile: selection.profile,
     files: [
       { relativePath: SELECTION_PATH, sha256: selectionHash },
-      ...plan.map((file) => ({ relativePath: file.destination, sha256: file.sha256 })),
+      ...(await Promise.all(
+        plan.map(async (file) => {
+          const materializedHash = await sha256File(join(workspace.path, file.destination));
+          if (materializedHash === null) {
+            throw new BootstrapFailure(
+              `Workspace harness file disappeared: ${file.destination}`,
+              true,
+            );
+          }
+          return { relativePath: file.destination, sha256: materializedHash };
+        }),
+      )),
     ],
     completedAt: selection.completedAt,
   };
@@ -226,8 +242,17 @@ export class HarnessProfileWorkspaceBootstrapAdapter implements WorkspaceBootstr
         );
       }
       const plan = buildMaterializationPlan(pack, profile);
+      const tracked = await this.trackedPaths(
+        workspace,
+        plan.map((file) => file.destination),
+      );
       for (const file of plan) {
-        if ((await sha256File(join(workspace.path, file.destination))) !== file.sha256) {
+        const expectedHash = await this.expectedMaterializedHash(
+          workspace,
+          file,
+          tracked.has(file.destination),
+        );
+        if ((await sha256File(join(workspace.path, file.destination))) !== expectedHash) {
           return ok({ status: 'absent' });
         }
         if (
@@ -237,10 +262,6 @@ export class HarnessProfileWorkspaceBootstrapAdapter implements WorkspaceBootstr
           return ok({ status: 'absent' });
         }
       }
-      const tracked = await this.trackedPaths(
-        workspace,
-        plan.map((file) => file.destination),
-      );
       if (!(await this.gitStateIsReady(workspace, plan, tracked))) {
         return ok({ status: 'absent' });
       }
@@ -420,24 +441,67 @@ export class HarnessProfileWorkspaceBootstrapAdapter implements WorkspaceBootstr
     tracked: boolean,
   ): Promise<void> {
     const destination = join(workspace.path, file.destination);
+    const materializedContent =
+      file.kind === 'guidance' ? await this.guidanceContent(workspace, file, tracked) : null;
+    const expectedHash = materializedContent === null ? file.sha256 : sha256(materializedContent);
     const currentHash = await sha256File(destination);
-    if (currentHash !== null && currentHash !== file.sha256) {
+    if (currentHash !== null && currentHash !== expectedHash) {
       const previouslyManaged = tracked && (await this.isSkipWorktree(workspace, file.destination));
-      if (file.kind !== 'override' || !tracked || previouslyManaged) {
+      if (file.kind !== 'guidance' || !tracked || previouslyManaged) {
         throw new BootstrapFailure(
           `Refusing to overwrite workspace file ${file.destination}`,
           false,
         );
       }
     }
-    if (currentHash !== file.sha256) {
+    if (currentHash !== expectedHash) {
       await mkdir(dirname(destination), { recursive: true });
-      await copyFile(file.absolutePath, destination);
+      if (materializedContent === null) await copyFile(file.absolutePath, destination);
+      else await writeFile(destination, materializedContent);
     }
     if (file.kind === 'command') await chmod(destination, 0o700);
-    if (file.kind === 'override' && tracked) {
+    if (file.kind === 'guidance' && tracked) {
       await this.git(workspace, ['update-index', '--skip-worktree', '--', file.destination]);
     }
+  }
+
+  private async expectedMaterializedHash(
+    workspace: WorkspaceLocator,
+    file: MaterializedFile,
+    tracked: boolean,
+  ): Promise<string> {
+    return file.kind === 'guidance'
+      ? sha256(await this.guidanceContent(workspace, file, tracked))
+      : file.sha256;
+  }
+
+  private async guidanceContent(
+    workspace: WorkspaceLocator,
+    file: MaterializedFile,
+    tracked: boolean,
+  ): Promise<Buffer> {
+    const managed = await readFile(file.absolutePath);
+    if (!tracked) return managed;
+    const original = await this.gitResult(workspace, [
+      'show',
+      `${workspace.repository.baseCommit}:${file.destination}`,
+    ]);
+    if (original.status !== 'exited' || original.exitCode !== 0) {
+      throw new BootstrapFailure(
+        `Cannot read repository guidance ${file.destination} from ${workspace.repository.baseCommit}: ${commandMessage(original)}`,
+        false,
+      );
+    }
+    if (original.stdout.includes(GUIDANCE_BEGIN) || original.stdout.includes(GUIDANCE_END)) {
+      throw new BootstrapFailure(
+        `Repository guidance already contains Tasker markers: ${file.destination}`,
+        false,
+      );
+    }
+    return Buffer.from(
+      `${original.stdout.trimEnd()}\n\n${GUIDANCE_BEGIN}\n${managed.toString('utf8').trim()}\n${GUIDANCE_END}\n`,
+      'utf8',
+    );
   }
 
   private async gitStateIsReady(
@@ -449,7 +513,7 @@ export class HarnessProfileWorkspaceBootstrapAdapter implements WorkspaceBootstr
     for (const file of plan) {
       const isTracked = tracked.has(file.destination);
       if (
-        file.kind === 'override' &&
+        file.kind === 'guidance' &&
         isTracked &&
         !(await this.isSkipWorktree(workspace, file.destination))
       ) {

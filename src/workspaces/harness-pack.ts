@@ -17,7 +17,7 @@ const WorkspaceHarnessProfileSchema = z
     repositoryAliases: z.array(z.string().min(1)).min(1),
     skills: RelativePathSchema,
     stepSkills: RelativePathSchema,
-    overrides: RelativePathSchema,
+    guidance: RelativePathSchema,
   })
   .strict();
 
@@ -144,6 +144,23 @@ const validateSkillPackages = (root: string, relativeDirectory: string): Readonl
   return names;
 };
 
+const validateGuidanceFiles = (root: string, relativeDirectory: string): void => {
+  const prefix = `${relativeDirectory.replace(/\/$/u, '')}/`;
+  for (const file of listFiles(root, relativeDirectory)) {
+    const destination = file.relativePath.slice(prefix.length);
+    const allowed =
+      destination === '.gitkeep' ||
+      destination === 'AGENTS.md' ||
+      destination === 'CLAUDE.md' ||
+      (destination.startsWith('.ai/') && destination.endsWith('.md'));
+    if (!allowed) {
+      throw new Error(
+        `Workspace harness guidance may only target .ai/*.md, AGENTS.md, or CLAUDE.md: ${file.relativePath}`,
+      );
+    }
+  }
+};
+
 export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspaceHarnessPack => {
   const rootPath = realpathSync(configuredPath);
   const manifestPath = join(rootPath, 'manifest.json');
@@ -174,6 +191,7 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
   for (const profile of manifest.profiles) {
     validateSkillPackages(rootPath, profile.skills);
     validateSkillPackages(rootPath, profile.stepSkills);
+    validateGuidanceFiles(rootPath, profile.guidance);
   }
 
   const directories = [
@@ -184,7 +202,7 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
     ...manifest.profiles.flatMap((profile) => [
       profile.skills,
       profile.stepSkills,
-      profile.overrides,
+      profile.guidance,
     ]),
   ];
   const filesByPath = new Map<string, WorkspaceHarnessSourceFile>();

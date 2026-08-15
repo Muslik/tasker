@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "version": "1",
+  "repository": "onetwotrip/front-core-packages",
+  "repositoryKind": "frontend",
+  "translations": { "kind": "none" },
+  "ci": { "kind": "jenkins", "job": "front-core-packages" },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "services": []
+  },
+  "processCommands": {
+    "validation.targeted@1": {
+      "commands": [
+        { "command": "node", "args": ["type-check.mjs"] },
+        { "command": "pnpm", "args": ["run", "linters"] }
+      ]
+    },
+    "validation.full@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--", "--runInBand"] }]
+    },
+    "validation.build@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "build-packages"] }]
+    }
+  }
+}
