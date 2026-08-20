@@ -377,7 +377,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         provider: profile.provider,
         repositoryPath: request.repositoryPath,
         configurationRoot: providerConfigurationRoot,
-        skills: [...request.skills],
+        selection: { kind: 'planner', skills: [...request.skills] },
         skillOverrides: Object.fromEntries(
           request.mediatedSkills.map((skill) => [skill, mediatedSkill(skill)]),
         ),

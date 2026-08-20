@@ -12,3 +12,4 @@ test-results/
 *.sqlite-wal
 *.log
 .DS_Store
+harness/workspace/imports/

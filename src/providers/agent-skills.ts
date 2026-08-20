@@ -4,25 +4,59 @@ import { join, resolve } from 'node:path';
 
 import { z } from 'zod';
 
-import { workspaceHarnessBinPath, workspaceHarnessSkillsPath } from '../harness/runtime-layout.js';
+import {
+  WORKSPACE_HARNESS_MANIFEST_PATH,
+  workspaceHarnessBinPath,
+  workspaceHarnessSkillsPath,
+} from '../harness/runtime-layout.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import {
+  resolveWorkspaceHarnessSkillCatalog,
+  WorkspaceHarnessManifestSchema,
+} from '../workspaces/harness-pack.js';
 
 export const AgentProviderSchema = z.enum(['codex', 'claude']);
 export type AgentProvider = z.infer<typeof AgentProviderSchema>;
 
 const SkillNameSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/u);
+const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const SkillDependenciesSchema = z.array(SkillNameSchema);
+const AgentSkillSelectionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('analyzer') }).strict(),
+  z.object({ kind: z.literal('planner'), skills: z.array(SkillNameSchema) }).strict(),
+  z
+    .object({
+      kind: z.literal('step'),
+      reference: VersionedReferenceSchema,
+      skills: z.array(SkillNameSchema),
+    })
+    .strict(),
+]);
 const PrepareAgentSkillsRequestSchema = z
   .object({
     provider: AgentProviderSchema,
     repositoryPath: z.string().min(1),
     configurationRoot: z.string().min(1),
-    skills: z.array(SkillNameSchema),
+    selection: AgentSkillSelectionSchema,
     skillOverrides: z.record(SkillNameSchema, z.string().min(1)).optional(),
   })
   .strict();
 
 export type PreparedAgentSkills =
+  | {
+      readonly provider: 'codex';
+      readonly skillsRoot: string;
+      readonly skills: readonly string[];
+      readonly cliArguments: readonly [];
+    }
+  | {
+      readonly provider: 'claude';
+      readonly skillsRoot: string;
+      readonly skills: readonly string[];
+      readonly cliArguments: readonly ['--add-dir', string];
+    };
+
+type PreparedAgentSkillsLayout =
   | {
       readonly provider: 'codex';
       readonly skillsRoot: string;
@@ -51,7 +85,7 @@ export type PrepareAgentSkillsFailure =
 const preparedLayout = (
   provider: AgentProvider,
   configurationRoot: string,
-): PreparedAgentSkills => {
+): PreparedAgentSkillsLayout => {
   if (provider === 'codex') {
     return {
       provider,
@@ -65,6 +99,59 @@ const preparedLayout = (
     skillsRoot: join(configurationRoot, '.claude', 'skills'),
     cliArguments: ['--add-dir', configurationRoot],
   };
+};
+
+const SelectionProfileSchema = z.object({ profile: z.string().min(1) }).loose();
+
+const selectedSkillNames = async (
+  repositoryPath: string,
+  selection: z.infer<typeof AgentSkillSelectionSchema>,
+): Promise<Outcome<readonly string[], PrepareAgentSkillsFailure>> => {
+  try {
+    const manifest = WorkspaceHarnessManifestSchema.parse(
+      JSON.parse(
+        await readFile(join(repositoryPath, WORKSPACE_HARNESS_MANIFEST_PATH), 'utf8'),
+      ) as unknown,
+    );
+    const profileSelection = SelectionProfileSchema.parse(
+      JSON.parse(
+        await readFile(join(repositoryPath, '.tasker/harness-bootstrap.json'), 'utf8'),
+      ) as unknown,
+    );
+    const catalog = resolveWorkspaceHarnessSkillCatalog(manifest, profileSelection.profile);
+    const selected = [...catalog.globalAmbient, ...catalog.projectAmbient];
+    if (selection.kind !== 'analyzer') selected.push(...selection.skills);
+    if (selection.kind === 'step') {
+      const binding = catalog.stepBindings[selection.reference];
+      if (binding !== undefined) {
+        const removed = new Set(binding.removeSkills);
+        selected.splice(0, selected.length, ...selected.filter((skill) => !removed.has(skill)));
+        selected.push(...binding.addSkills);
+      }
+    }
+    const issues = [...new Set(selected)].flatMap((skill) => {
+      const scope = catalog.scopes[skill];
+      if (scope === undefined) return [`${skill}: skill is absent from the resolved profile`];
+      if (
+        selection.kind !== 'analyzer' &&
+        !catalog.globalAmbient.includes(skill) &&
+        !catalog.projectAmbient.includes(skill) &&
+        scope !== 'step_bound' &&
+        scope !== 'policy_bound'
+      ) {
+        return [`${skill}: ${scope} skill cannot be selected by ${selection.kind}`];
+      }
+      return [];
+    });
+    return issues.length === 0
+      ? ok([...new Set(selected)])
+      : err({ kind: 'invalid_skill_selection', issues });
+  } catch (error) {
+    return err({
+      kind: 'invalid_skill_selection',
+      issues: [error instanceof Error ? error.message : 'Workspace skill catalog is invalid'],
+    });
+  }
 };
 
 const readSkillDependencies = async (
@@ -106,7 +193,9 @@ export const prepareAgentSkills = async (
   }
 
   const request = parsed.data;
-  const prepared = preparedLayout(request.provider, request.configurationRoot);
+  const selected = await selectedSkillNames(request.repositoryPath, request.selection);
+  if (!selected.ok) return selected;
+  const layout = preparedLayout(request.provider, request.configurationRoot);
   const sourceRoot = workspaceHarnessSkillsPath(request.repositoryPath);
   const visited = new Set<string>();
   const skills: string[] = [];
@@ -138,23 +227,23 @@ export const prepareAgentSkills = async (
     return ok(null);
   };
 
-  for (const skill of request.skills) {
+  for (const skill of selected.value) {
     const resolved = await visit(skill);
     if (!resolved.ok) return resolved;
   }
 
   try {
-    await mkdir(prepared.skillsRoot, { recursive: true });
+    await mkdir(layout.skillsRoot, { recursive: true });
     for (const skill of skills) {
       const override = request.skillOverrides?.[skill];
       if (override === undefined) {
-        await cp(join(sourceRoot, skill), join(prepared.skillsRoot, skill), {
+        await cp(join(sourceRoot, skill), join(layout.skillsRoot, skill), {
           recursive: true,
           errorOnExist: true,
           force: false,
         });
       } else {
-        const target = join(prepared.skillsRoot, skill);
+        const target = join(layout.skillsRoot, skill);
         await mkdir(target, { recursive: true });
         await writeFile(join(target, 'SKILL.md'), override, 'utf8');
       }
@@ -166,7 +255,7 @@ export const prepareAgentSkills = async (
     });
   }
 
-  return ok(prepared);
+  return ok({ ...layout, skills: Object.freeze(skills) });
 };
 
 export const workspaceHarnessEnvironment = (

@@ -44,10 +44,10 @@ The editable source pack is [`harness/`](../../harness). Its current ownership i
 | [`steps/*/prompt.md`](../../harness/steps) | readable instruction colocated with each agent block |
 | [`prompts/implementation-planner.md`](../../harness/prompts/implementation-planner.md) | mandatory initial planner and workflow-composer instructions |
 | [`prompts/workflow-analyzer.md`](../../harness/prompts/workflow-analyzer.md) | continuation-workflow analyzer instructions |
-| [`workspace/manifest.json`](../../harness/workspace/manifest.json) | provider-neutral skill/profile/guidance pack copied and pinned into a managed worktree |
+| [`workspace/manifest.json`](../../harness/workspace/manifest.json) | scoped skill sources, project step bindings, profiles, and pinned guidance |
 | [`workspace/shared-skills`](../../harness/workspace/shared-skills) | reusable logical agent skills |
 | [`workspace/integration-skills`](../../harness/workspace/integration-skills) | read/write system skills available for explicit planner or step selection |
-| [`workspace/profiles`](../../harness/workspace/profiles) | repository-specific ambient skills, step-only skills, and pinned guidance files |
+| [`workspace/profiles`](../../harness/workspace/profiles) | repository-specific skill packages and pinned guidance files |
 
 `loadHarnessPack` in
 [`src/harness/loader.ts`](../../src/harness/loader.ts) validates these files, loads prompt
@@ -78,11 +78,11 @@ and cannot enter the production catalog or operator queue.
 There is no ambient access to the whole harness:
 
 1. The mandatory planner receives its own system prompt, the frozen task/Evidence Bundle,
-   repository and company/project policy, the filtered block catalog, and only the read-only
-   skills listed by `company.systemPrompts.implementationPlannerSkills`.
+   repository and company/project policy, the filtered block catalog, global/project ambient
+   skills, and the read-only skills listed by `company.systemPrompts.implementationPlannerSkills`.
 2. A selected agent block receives the full snapshotted step prompt, typed step input, current
    run evidence, operator guidance when resuming, the resolved provider/model profile, and only
-   that block's logical skills plus applicable policy bindings.
+   global/project ambient skills plus that block's base, project-step, and policy bindings.
 3. A process block receives a typed sequence of `{ command, args }` invocations already bound by
    company/project policy. No shell string is parsed and no LLM is invoked.
 4. An integration block receives a typed adapter and durable effect/reconciliation boundary. No
@@ -230,34 +230,42 @@ must not accidentally remove the planner's ability to verify the draft. External
 planner reads must pass through the evidence boundary and append provenance rather than
 existing only in provider output.
 
-The built-in workspace pack stores one portable Agent Skills package per logical name.
-Bootstrap creates an effective pinned catalog under `.tasker/harness/skills`; it does
-not expose that whole catalog to an agent. At Activity start, the provider adapter
-materializes only the names captured in the immutable step snapshot:
+The workspace manifest lists every package in an explicit `skillSources` entry with one
+scope: `global_ambient`, `project_ambient`, `step_bound`, or `policy_bound`. Directory
+placement has no authorization meaning. Bootstrap creates a pinned hidden catalog under
+`.tasker/harness/skills`; it never installs profile packages into repository
+`.codex/skills` or `.claude/skills`. At each analyzer, planner, or step attempt the
+provider adapter combines ambient scopes with the exact bound selection:
 
 - Codex: `<isolated CODEX_HOME>/skills/<name>`;
 - Claude: `<temporary directory>/.claude/skills/<name>` with `--add-dir`.
 
 Supporting scripts and assets travel with the package. `TASKER_SKILLS_ROOT` points to
 the selected provider view, so a skill must never depend on a hard-coded `.codex` or
-`.claude` path. Repository profile skills are the exception to step scope: they are
-ambient implementation guidance and are installed for both providers in the managed
-worktree. A missing step skill fails closed before provider invocation.
+`.claude` path. A missing package, duplicate logical name, invalid dependency scope, or
+unknown project binding fails closed before provider invocation.
 
-Repository-specific operational skills belong in the profile's `step-skills`, not its
-ambient `skills`. This keeps instructions such as localization conventions always
-available while a review/publish/tracker skill remains invisible until a registered
-block explicitly selects it.
+Repository-specific operational skills are connected through
+`profiles[].stepBindings`. `front-avia` adds localization, state/data, tracking, and
+UI-kit knowledge only to implementation, repair, and review steps. A review, publish,
+or tracker package remains invisible until a compatible registered block selects it.
+
+Reusable personal skills may be sourced from the interactive harness without making a
+run depend on a live symlink. `pnpm harness:setup` creates the ignored local source
+`harness/workspace/imports/global-skills`; the manifest allowlists the imported names.
+Bootstrap copies their content into the immutable run snapshot. A live edit therefore
+changes a later run, not the active run being resumed.
 
 A package that invokes another package declares logical names in `dependencies.json`.
 The provider adapter resolves that transitive set before either CLI starts. Dependencies
 do not grant graph effects: selecting a legacy macro such as `pr-finalize` is still
 invalid as a replacement for typed PR/Jira integration blocks.
 
-Keep three scopes distinct:
+Keep these boundaries distinct:
 
-- **repository guidance** is present for every agent working in that repository
-  (`localization`, state/data conventions, UI-kit rules);
+- **repository guidance** in `.ai`, `AGENTS.md`, and `CLAUDE.md` is present for every
+  agent working in that repository;
+- **ambient skills** are explicitly declared global or project scope;
 - **step skills** are selected by one immutable agent-step binding (`playwright-demo` for
   reproduction/visual verification, CI readers for CI analysis);
 - **integration effects** are performed only by typed Activities (`pr.prepare@1`, Jira

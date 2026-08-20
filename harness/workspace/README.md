@@ -7,15 +7,15 @@ bootstrap program.
 
 ## What moved
 
-| Old location                 | New form                         | Runtime destination                                                     |
-| ---------------------------- | -------------------------------- | ----------------------------------------------------------------------- |
-| `work/skills/*`              | `integration-skills/*`           | pinned `.tasker/harness/skills/*`; selected per Activity                |
-| `work/shared/*`              | `shared-skills/*`                | pinned `.tasker/harness/skills/*`; selected per Activity                |
-| `work/<profile>/skills/*`    | `profiles/<profile>/skills/*`    | effective catalog plus ambient `.codex/skills/*` and `.claude/skills/*` |
-| profile operational skills   | `profiles/<profile>/step-skills` | effective catalog only; selected per Activity                           |
-| `work/<profile>/overrides/*` | `profiles/<profile>/guidance/*`  | pinned `.ai/**`, `AGENTS.md`, `CLAUDE.md` rules                         |
-| `work/lib/*`                 | `lib/*`                          | `.tasker/harness/lib/*` for integration skill scripts                   |
-| `work/bin/with-env`          | portable `bin/with-env`          | `.tasker/harness/bin/with-env`                                          |
+| Old location                 | New form                         | Runtime destination                                      |
+| ---------------------------- | -------------------------------- | -------------------------------------------------------- |
+| `work/skills/*`              | `integration-skills/*`           | pinned hidden catalog; explicit step/planner selection   |
+| `work/shared/*`              | `shared-skills/*`                | pinned hidden catalog; scope declared in `manifest.json` |
+| `work/<profile>/skills/*`    | `profiles/<profile>/skills/*`    | pinned hidden catalog; project step binding              |
+| profile operational skills   | `profiles/<profile>/step-skills` | pinned hidden catalog; project step binding              |
+| `work/<profile>/overrides/*` | `profiles/<profile>/guidance/*`  | pinned `.ai/**`, `AGENTS.md`, `CLAUDE.md` rules          |
+| `work/lib/*`                 | `lib/*`                          | `.tasker/harness/lib/*` for integration skill scripts    |
+| `work/bin/with-env`          | portable `bin/with-env`          | `.tasker/harness/bin/with-env`                           |
 
 The initial manifest declares six repositories: `front-avia`, `front-backoffice`,
 `front-bus`, `front-components`, `front-core-packages`, and `front-railways`.
@@ -75,12 +75,12 @@ a worktree or content snapshot.
 3. The managed worktree pins that hash in `.tasker/harness-bootstrap.json` before files
    are applied. A retry after process/worker failure therefore resumes from the pinned
    snapshot even if this source directory has changed.
-4. Common and integration skills are copied into a hidden, provider-neutral catalog at
-   `.tasker/harness/skills`. Profile ambient and step skills replace common packages of
-   the same name in that catalog. Only ambient profile skills are additionally exposed
-   in both `.codex/skills` and `.claude/skills`; operational profile skills stay hidden
-   until selected by a step. Profile guidance is composed with repository rules and
-   copied to repository paths. No symlink points back here.
+4. Every declared skill package is copied into a hidden, provider-neutral catalog at
+   `.tasker/harness/skills`. The resolved manifest is pinned beside it. Nothing is
+   installed in repository `.codex/skills` or `.claude/skills`: each analyzer, planner,
+   or step attempt receives only its resolved ambient and bound packages in a temporary
+   provider home. Profile guidance is composed with repository rules and copied to
+   repository paths. No managed worktree symlink points back to a live source.
 5. Generated untracked files are placed in the managed clone's Git exclude file;
    tracked guidance uses that worktree's `skip-worktree` bit. The task branch therefore
    contains code and task artifacts, not operator configuration.
@@ -121,8 +121,8 @@ The block catalog does that. In particular:
   outward-facing capability.
 
 The hidden catalog is storage, not provider discovery and not authorization. For every
-agent Activity, Tasker reads the logical skill names from the immutable step snapshot
-and copies only those complete packages into an isolated provider view:
+agent attempt, Tasker combines explicit scopes and copies only the resulting packages
+into an isolated provider view:
 
 - Codex receives `<isolated CODEX_HOME>/skills/<name>`;
 - Claude receives `<temporary directory>/.claude/skills/<name>` and that directory is
@@ -133,6 +133,32 @@ Both views originate from the same `SKILL.md` package and supporting files. Scri
 `.codex` or `.claude` path. A missing logical package blocks before the subscription CLI
 starts. Thus `pr-finalize` can remain in the pinned migration catalog without becoming
 visible to `code.implement@1` or another unrelated step.
+
+The four scopes have distinct selection rules:
+
+- `global_ambient` is added to every analyzer, planner, and step attempt;
+- `project_ambient` is added only for the resolved repository profile;
+- `step_bound` requires a base step/planner selection or a profile `stepBindings` entry;
+- `policy_bound` can only be named by an enabled company policy.
+
+Duplicate logical names and scope-incompatible dependencies fail pack loading. A
+project binding cannot remove a global or policy skill. `front-avia` currently binds
+`localization`, `state-data`, `tracking`, and `ui-kit` to implementation, repair, and
+review steps; it does not expose them during unrelated planning operations.
+
+## Local imports from the interactive harness
+
+Run `pnpm harness:setup` once per machine. It creates the ignored symlink
+`imports/global-skills` to `../harness/global/skills` (override the source with
+`TASKER_INTERACTIVE_HARNESS_PATH`). `global-design` explicitly allowlists only
+`typescript-design` and `test-design` from that source.
+
+The symlink is an authoring input, never a run dependency. Bootstrap follows the
+allowlisted source once, rejects nested symlinks and secrets, copies ordinary files into
+the content-addressed snapshot, and materializes that snapshot into the managed
+worktree. Changing the interactive skill affects a later run but cannot change
+resume/retry of an existing run. When the local import is absent, the checked-in package
+copy remains the portable fallback.
 
 ## Setup lifecycle
 
@@ -156,21 +182,19 @@ changes. Planning reads the same configured filesystem that later execution uses
   `manifest.json` for a semantic change. The content hash is computed automatically.
 - The change affects newly bootstrapped runs only. Existing worktrees keep their pinned
   snapshot until their run finishes.
-- Add a project by creating `profiles/<id>/skills`, `profiles/<id>/step-skills`, and
-  `profiles/<id>/guidance`, then
-  add its repository aliases to `manifest.json`. No orchestrator or Temporal code
-  changes are required.
+- Add a project by creating its guidance and optional skill packages, then declare
+  repository aliases, scoped `skillSources`, and `stepBindings` in `manifest.json`. No
+  orchestrator or Temporal code changes are required.
 - Put Tasker-only operational rules in `.ai/tasker.md`. Keep repository architecture in
   the repository's own `.ai`. Use profile `AGENTS.md`/`CLAUDE.md` as managed-run deltas;
   bootstrap composes them with tracked repository files instead of replacing their
   content.
-- Add a common skill under `shared-skills`; add an API/tool skill under
-  `integration-skills`; add repository-specific implementation knowledge under that
-  profile's `skills` directory.
-- Put a repository-specific operational skill under `profiles/<id>/step-skills`. It is
-  available for explicit block binding without becoming ambient guidance for every
-  agent in that repository. `feature-review` uses this scope because it can read and
-  draft remote review data.
+- Add a package under `shared-skills`, `integration-skills`, or a profile directory and
+  explicitly list its logical name in one `skillSources` entry. Directory placement
+  alone grants no visibility.
+- Bind repository-specific operational knowledge with `profiles[].stepBindings`.
+  `feature-review` remains unbound because its current package can publish Bitbucket
+  state, which is incompatible with the read-only `review.agent@1` effect boundary.
 - Keep portable packages in the Agent Skills common subset: a directory named after
   the logical skill, a `SKILL.md` with `name` and `description`, and optional files
   referenced relative to that directory. Never put provider CLI flags or provider-home
@@ -181,9 +205,8 @@ changes. Planning reads the same configured filesystem that later execution uses
 - Prefer improving an existing skill over adding a near-duplicate. For a new reusable
   operation, add the skill package here and bind its logical name in a versioned step;
   do not encode graph order in `SKILL.md`.
-- To replace a skill for one repository, create a skill with the same name under
-  `profiles/<id>/skills`. The profile copy wins only in that repository. To change a
-  company-wide rule, edit the shared package or company policy instead.
+- Duplicate logical skill names are rejected. A future replacement mechanism must be
+  explicit in the manifest; directory precedence is not an override contract.
 - To change future workflows, edit `harness/company.json`, the relevant
   `harness/projects/*` policy, step prompt, or step definition. A pinned active run keeps
   its snapshot; new runs receive the change.

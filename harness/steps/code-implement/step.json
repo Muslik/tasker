@@ -10,7 +10,7 @@
     "kind": "agent",
     "profile": "implementation",
     "prompt": "prompt.md",
-    "skills": ["typescript-design", "test-design"]
+    "skills": []
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": { "kind": "workspace_mutation" },

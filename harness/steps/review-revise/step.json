@@ -10,7 +10,7 @@
     "kind": "agent",
     "profile": "review",
     "prompt": "prompt.md",
-    "skills": ["bitbucket", "typescript-design", "test-design"]
+    "skills": ["bitbucket"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": { "kind": "workspace_mutation" },

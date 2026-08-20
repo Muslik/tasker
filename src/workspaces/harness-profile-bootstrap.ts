@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import {
   WORKSPACE_HARNESS_BIN_DIRECTORY,
+  WORKSPACE_HARNESS_MANIFEST_PATH,
   WORKSPACE_HARNESS_SKILLS_DIRECTORY,
   WORKSPACE_HARNESS_SUPPORT_DIRECTORY,
 } from '../harness/runtime-layout.js';
@@ -53,7 +54,7 @@ type Selection = z.infer<typeof SelectionSchema>;
 
 interface MaterializedFile extends WorkspaceHarnessSourceFile {
   readonly destination: string;
-  readonly kind: 'skill' | 'provider' | 'support' | 'command' | 'guidance';
+  readonly kind: 'skill' | 'support' | 'command' | 'guidance';
 }
 
 class BootstrapFailure extends Error {
@@ -109,15 +110,6 @@ const buildMaterializationPlan = (
   pack: LoadedWorkspaceHarnessPack,
   profile: WorkspaceHarnessProfile,
 ): readonly MaterializedFile[] => {
-  const profileSkills = new Set(
-    pack.files.flatMap((file) => {
-      for (const directory of [profile.skills, profile.stepSkills]) {
-        const tail = tailUnder(file.relativePath, directory);
-        if (tail !== null && !file.relativePath.endsWith('/.gitkeep')) return [skillName(tail)];
-      }
-      return [];
-    }),
-  );
   const destinations = new Map<string, MaterializedFile>();
   const add = (
     file: WorkspaceHarnessSourceFile,
@@ -134,25 +126,16 @@ const buildMaterializationPlan = (
     destinations.set(destination, { ...file, destination, kind });
   };
 
+  const sources = [...pack.manifest.skillSources, ...profile.skillSources];
   for (const file of pack.files) {
-    const integrationTail = tailUnder(file.relativePath, pack.manifest.integrationSkills);
-    if (integrationTail !== null && !profileSkills.has(skillName(integrationTail))) {
-      add(file, `${WORKSPACE_HARNESS_SKILLS_DIRECTORY}/${integrationTail}`, 'skill');
+    if (file.relativePath === 'manifest.json') {
+      add(file, WORKSPACE_HARNESS_MANIFEST_PATH, 'support');
     }
-    const sharedTail = tailUnder(file.relativePath, pack.manifest.sharedSkills);
-    if (sharedTail !== null && !profileSkills.has(skillName(sharedTail))) {
-      add(file, `${WORKSPACE_HARNESS_SKILLS_DIRECTORY}/${sharedTail}`, 'skill');
-    }
-    const profileTail = tailUnder(file.relativePath, profile.skills);
-    if (profileTail !== null) {
-      add(file, `${WORKSPACE_HARNESS_SKILLS_DIRECTORY}/${profileTail}`, 'skill');
-      for (const engine of pack.manifest.engines) {
-        add(file, `.${engine}/skills/${profileTail}`, 'provider');
+    for (const source of sources) {
+      const tail = tailUnder(file.relativePath, source.path);
+      if (tail !== null && source.skills.includes(skillName(tail))) {
+        add(file, `${WORKSPACE_HARNESS_SKILLS_DIRECTORY}/${tail}`, 'skill');
       }
-    }
-    const profileStepTail = tailUnder(file.relativePath, profile.stepSkills);
-    if (profileStepTail !== null) {
-      add(file, `${WORKSPACE_HARNESS_SKILLS_DIRECTORY}/${profileStepTail}`, 'skill');
     }
     const supportTail = tailUnder(file.relativePath, pack.manifest.supportFiles);
     if (supportTail !== null) {

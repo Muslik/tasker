@@ -61,7 +61,7 @@ import {
   loadWorkspaceConfiguration,
   loadWorkspaceBootstrapConfiguration,
   loadDockerWorkspaceConfiguration,
-  assertWorkspaceHarnessProvidesSkills,
+  assertWorkspaceHarnessSkillBindings,
   DockerWorkspaceCommandRunner,
   DockerWorkspaceRuntimeManager,
   DockerWorkspaceRuntimeStore,
@@ -237,11 +237,19 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     nodeCommandRunner,
   );
   const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
-  assertWorkspaceHarnessProvidesSkills(
+  assertWorkspaceHarnessSkillBindings(
     loadWorkspaceHarnessPack(bootstrapConfiguration.harnessPackPath),
-    harnessPack.steps.flatMap((step) =>
-      step.block.executor.kind === 'agent' ? [...step.block.executor.skills] : [],
-    ),
+    {
+      stepBound: [
+        ...harnessPack.company.systemPrompts.implementationPlannerSkills,
+        ...harnessPack.steps.flatMap((step) =>
+          step.block.executor.kind === 'agent' ? [...step.block.executor.skills] : [],
+        ),
+      ],
+      policyBound: harnessPack.policies.flatMap((policy) =>
+        policy.agentSkills.map((binding) => binding.skill),
+      ),
+    },
   );
   const bootstrapAdapter = new HarnessProfileWorkspaceBootstrapAdapter(
     {

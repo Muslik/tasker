@@ -200,15 +200,17 @@ describe('temporal block execution activity', () => {
     ledger.close();
   });
 
-  it('uses the snapshotted prompt and skills for an agent attempt', async () => {
+  it('uses the snapshotted prompt and base step binding for an agent attempt', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const prompts: string[] = [];
     const selectedSkills: (readonly string[])[] = [];
+    const stepReferences: string[] = [];
     const agentRunner: TaskStepAgentRunner = {
       run: (request) => {
         prompts.push(request.prompt);
         selectedSkills.push(request.skills);
+        stepReferences.push(request.stepReference);
         return Promise.resolve(
           ok({
             stdout: '',
@@ -274,7 +276,8 @@ describe('temporal block execution activity', () => {
     });
     expect(prompts[0]).toContain('SNAPSHOT PROMPT');
     expect(prompts[0]).toContain('VPN is enabled; retry the same verification');
-    expect(selectedSkills).toEqual([['typescript-design', 'test-design']]);
+    expect(selectedSkills).toEqual([[]]);
+    expect(stepReferences).toEqual(['review.agent@1']);
   });
 
   it('returns the durable result without invoking the agent again after response loss', async () => {

@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   SubscriptionCliWorkflowAnalyzer,
@@ -17,6 +19,43 @@ import {
 
 const fixture = () => makePlanningTaskSnapshot('avia-13236-short-bug');
 const validAnalyzerOutput = () => makeAnalyzerOutput(makeTaskFixture());
+const analyzerRepositoryPath = mkdtempSync(join(tmpdir(), 'tasker-analyzer-workspace-'));
+mkdirSync(join(analyzerRepositoryPath, '.tasker', 'harness'), { recursive: true });
+writeFileSync(
+  join(analyzerRepositoryPath, '.tasker', 'harness', 'manifest.json'),
+  `${JSON.stringify({
+    schemaVersion: 2,
+    id: 'test-workspace',
+    version: '1',
+    engines: ['codex', 'claude'],
+    skillSources: [
+      {
+        id: 'step-skills',
+        path: 'shared-skills',
+        scope: 'step_bound',
+        skills: ['jira'],
+      },
+    ],
+    supportFiles: 'lib',
+    commands: 'bin',
+    profiles: [
+      {
+        id: 'front-avia',
+        repositoryAliases: ['onetwotrip/front-avia'],
+        guidance: 'guidance',
+      },
+    ],
+  })}\n`,
+  'utf8',
+);
+writeFileSync(
+  join(analyzerRepositoryPath, '.tasker', 'harness-bootstrap.json'),
+  '{"profile":"front-avia"}\n',
+  'utf8',
+);
+afterAll(() => {
+  rmSync(analyzerRepositoryPath, { recursive: true, force: true });
+});
 
 const codexJsonl = (finalMessage: string): string =>
   [
@@ -126,7 +165,7 @@ describe('subscription CLI workflow analyzer', () => {
     const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CODEX_PROFILE);
 
     const result = await analyzer.analyze({
-      repositoryPath: '/tmp/repository',
+      repositoryPath: analyzerRepositoryPath,
       repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },
@@ -160,7 +199,7 @@ describe('subscription CLI workflow analyzer', () => {
     });
     const executionRequest = runner.requests[1];
     expect(executionRequest?.command).toBe('codex');
-    expect(executionRequest?.cwd).toBe('/tmp/repository');
+    expect(executionRequest?.cwd).toBe(analyzerRepositoryPath);
     expect(executionRequest?.env?.CODEX_HOME).toMatch(
       /tasker-workflow-analyzer-.+\/provider-home$/u,
     );
@@ -202,7 +241,7 @@ describe('subscription CLI workflow analyzer', () => {
     const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CLAUDE_PROFILE);
 
     const result = await analyzer.analyze({
-      repositoryPath: '/tmp/repository',
+      repositoryPath: analyzerRepositoryPath,
       repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },
@@ -236,7 +275,7 @@ describe('subscription CLI workflow analyzer', () => {
     const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CODEX_PROFILE);
 
     const result = await analyzer.analyze({
-      repositoryPath: '/tmp/repository',
+      repositoryPath: analyzerRepositoryPath,
       repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
       plannerContext: { contracts: [] },

@@ -1,53 +1,112 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "3",
+  "version": "4",
   "engines": ["codex", "claude"],
-  "integrationSkills": "integration-skills",
-  "sharedSkills": "shared-skills",
+  "skillSources": [
+    {
+      "id": "global-design",
+      "path": "shared-skills",
+      "importPath": "imports/global-skills",
+      "scope": "global_ambient",
+      "skills": ["typescript-design", "test-design"]
+    },
+    {
+      "id": "shared-step",
+      "path": "shared-skills",
+      "scope": "step_bound",
+      "skills": [
+        "fix-bug",
+        "investigate-bug",
+        "playwright",
+        "playwright-demo",
+        "pr-finalize",
+        "review-process",
+        "system-analysis",
+        "test-ops-planning"
+      ]
+    },
+    {
+      "id": "company-policy",
+      "path": "shared-skills",
+      "scope": "policy_bound",
+      "skills": ["ai-assistance"]
+    },
+    {
+      "id": "integrations",
+      "path": "integration-skills",
+      "scope": "step_bound",
+      "skills": [
+        "bitbucket",
+        "confluence",
+        "confluence-edit",
+        "jenkins",
+        "jira",
+        "jira-edit",
+        "jira-issue",
+        "loop"
+      ]
+    }
+  ],
   "supportFiles": "lib",
   "commands": "bin",
   "profiles": [
     {
       "id": "front-avia",
       "repositoryAliases": ["front-avia", "onetwotrip/front-avia"],
-      "skills": "profiles/front-avia/skills",
-      "stepSkills": "profiles/front-avia/step-skills",
+      "skillSources": [
+        {
+          "id": "front-avia-implementation",
+          "path": "profiles/front-avia/skills",
+          "scope": "step_bound",
+          "skills": ["localization", "state-data", "tracking", "ui-kit"]
+        },
+        {
+          "id": "front-avia-review",
+          "path": "profiles/front-avia/step-skills",
+          "scope": "step_bound",
+          "skills": ["feature-review"]
+        }
+      ],
+      "stepBindings": {
+        "code.implement@1": {
+          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
+        },
+        "code.repair@1": {
+          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
+        },
+        "review.agent@1": {
+          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
+        },
+        "review.revise@1": {
+          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
+        }
+      },
       "guidance": "profiles/front-avia/guidance"
     },
     {
       "id": "front-backoffice",
       "repositoryAliases": ["front-backoffice", "onetwotrip/front-backoffice"],
-      "skills": "profiles/front-backoffice/skills",
-      "stepSkills": "profiles/front-backoffice/step-skills",
       "guidance": "profiles/front-backoffice/guidance"
     },
     {
       "id": "front-bus",
       "repositoryAliases": ["front-bus", "onetwotrip/front-bus"],
-      "skills": "profiles/front-bus/skills",
-      "stepSkills": "profiles/front-bus/step-skills",
       "guidance": "profiles/front-bus/guidance"
     },
     {
       "id": "front-core-packages",
       "repositoryAliases": ["front-core-packages", "onetwotrip/front-core-packages"],
-      "skills": "profiles/front-core-packages/skills",
-      "stepSkills": "profiles/front-core-packages/step-skills",
       "guidance": "profiles/front-core-packages/guidance"
     },
     {
       "id": "front-components",
       "repositoryAliases": ["front-components", "onetwotrip/front-components"],
-      "skills": "profiles/front-components/skills",
-      "stepSkills": "profiles/front-components/step-skills",
       "guidance": "profiles/front-components/guidance"
     },
     {
       "id": "front-railways",
       "repositoryAliases": ["front-railways", "onetwotrip/front-railways"],
-      "skills": "profiles/front-railways/skills",
-      "stepSkills": "profiles/front-railways/step-skills",
       "guidance": "profiles/front-railways/guidance"
     }
   ]

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   SubscriptionCliImplementationPlanner,
@@ -16,6 +16,48 @@ import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution
 import { makePlanningTaskSnapshot, makeWorkflowProposal } from '../../support/planning.js';
 
 const task = makePlanningTaskSnapshot('avia-13236-short-bug');
+const plannerRepositoryPath = mkdtempSync(join(tmpdir(), 'tasker-planner-workspace-'));
+
+const writeSkillCatalog = (repositoryPath: string): void => {
+  mkdirSync(join(repositoryPath, '.tasker', 'harness'), { recursive: true });
+  writeFileSync(
+    join(repositoryPath, '.tasker', 'harness', 'manifest.json'),
+    `${JSON.stringify({
+      schemaVersion: 2,
+      id: 'test-workspace',
+      version: '1',
+      engines: ['codex', 'claude'],
+      skillSources: [
+        {
+          id: 'planner-skills',
+          path: 'integration-skills',
+          scope: 'step_bound',
+          skills: ['jira', 'jira-helper'],
+        },
+      ],
+      supportFiles: 'lib',
+      commands: 'bin',
+      profiles: [
+        {
+          id: 'front-avia',
+          repositoryAliases: ['onetwotrip/front-avia'],
+          guidance: 'guidance',
+        },
+      ],
+    })}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    join(repositoryPath, '.tasker', 'harness-bootstrap.json'),
+    '{"profile":"front-avia"}\n',
+    'utf8',
+  );
+};
+
+writeSkillCatalog(plannerRepositoryPath);
+afterAll(() => {
+  rmSync(plannerRepositoryPath, { recursive: true, force: true });
+});
 const proposal = makeWorkflowProposal();
 const workflowSource = WorkflowSourceSchema.parse(proposal.source);
 const workflowStepIds: string[] = [];
@@ -255,7 +297,7 @@ class ClaudeRecordingRunner implements WorkspaceCommandRunner {
 
 const request = (strategy: 'fast' | 'ralplan') => ({
   operationId: 'tasker:test:planning:1',
-  repositoryPath: process.cwd(),
+  repositoryPath: plannerRepositoryPath,
   strategy,
   profile: {
     ...TEST_CODEX_PROFILE,
@@ -319,6 +361,7 @@ describe('Codex CLI implementation planner', () => {
 
   it('projects the planning block skills into the read-only provider session', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-planner-skills-'));
+    writeSkillCatalog(repositoryPath);
     const skillPath = join(repositoryPath, '.tasker', 'harness', 'skills', 'jira');
     mkdirSync(skillPath, { recursive: true });
     writeFileSync(

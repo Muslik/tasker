@@ -40,6 +40,7 @@
     "temporal:dev": "temporal server start-dev --namespace tasker-dev --db-filename .tasker/temporal.sqlite",
     "temporal:api": "pnpm dev:api:operator",
     "temporal:worker": "pnpm build:server && node dist/temporal/worker-main.js",
+    "harness:setup": "node scripts/setup-harness-imports.mjs",
     "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {

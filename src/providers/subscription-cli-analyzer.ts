@@ -27,6 +27,11 @@ import {
 } from './codex-cli-support.js';
 import { prepareIsolatedClaudeHome } from './claude-cli-support.js';
 import { parseSubscriptionCliStream } from './subscription-cli-stream.js';
+import {
+  prepareAgentSkills,
+  type PrepareAgentSkillsFailure,
+  workspaceHarnessEnvironment,
+} from './agent-skills.js';
 import { WorkflowAnalyzerReceiptSchema, type WorkflowAnalyzerReceipt } from './contracts.js';
 
 const WorkflowAnalyzerProviderOutputSchema = z
@@ -50,6 +55,7 @@ export interface WorkflowAnalyzerSuccess {
 }
 
 export type WorkflowAnalyzerFailure =
+  | PrepareAgentSkillsFailure
   | {
       readonly kind: 'provider_unavailable';
       readonly message: string;
@@ -130,6 +136,13 @@ export class SubscriptionCliWorkflowAnalyzer {
     try {
       if (profile.provider === 'codex') await prepareIsolatedCodexHome(providerConfigurationRoot);
       else await prepareIsolatedClaudeHome(providerConfigurationRoot);
+      const preparedSkills = await prepareAgentSkills({
+        provider: profile.provider,
+        repositoryPath: request.repositoryPath,
+        configurationRoot: providerConfigurationRoot,
+        selection: { kind: 'analyzer' },
+      });
+      if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
         schemaPath,
         `${JSON.stringify(codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema), null, 2)}\n`,
@@ -171,13 +184,16 @@ export class SubscriptionCliWorkflowAnalyzer {
                 '--dangerously-skip-permissions',
                 '--json-schema',
                 JSON.stringify(outputSchema),
+                ...preparedSkills.value.cliArguments,
               ],
         cwd: request.repositoryPath,
         workspaceAccess: 'read_only',
-        env:
-          profile.provider === 'codex'
+        env: {
+          ...(profile.provider === 'codex'
             ? { CODEX_HOME: providerConfigurationRoot }
-            : { HOME: providerConfigurationRoot },
+            : { HOME: providerConfigurationRoot }),
+          ...workspaceHarnessEnvironment(request.repositoryPath, preparedSkills.value.skillsRoot),
+        },
         mounts: [{ source: directory, target: directory, readOnly: false }],
         stdin: prompt,
         timeoutMs: profile.timeoutMs,

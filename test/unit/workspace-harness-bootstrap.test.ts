@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -10,7 +19,7 @@ import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { nodeCommandRunner } from '../../src/providers/command-runner.js';
 import type { WorkspaceLocator } from '../../src/workspaces/contracts.js';
 import {
-  assertWorkspaceHarnessProvidesSkills,
+  assertWorkspaceHarnessSkillBindings,
   loadWorkspaceHarnessPack,
 } from '../../src/workspaces/harness-pack.js';
 import { HarnessProfileWorkspaceBootstrapAdapter } from '../../src/workspaces/harness-profile-bootstrap.js';
@@ -80,13 +89,22 @@ describe('workspace harness bootstrap', () => {
   it('provides a portable package for every registered agent-step skill', () => {
     const workflowPack = loadHarnessPack();
     const workspacePack = loadWorkspaceHarnessPack(resolve('harness/workspace'));
-    const requiredSkills = workflowPack.steps.flatMap((step) =>
-      step.block.executor.kind === 'agent' ? [...step.block.executor.skills] : [],
+    const requiredSkills = [
+      ...workflowPack.company.systemPrompts.implementationPlannerSkills,
+      ...workflowPack.steps.flatMap((step) =>
+        step.block.executor.kind === 'agent' ? [...step.block.executor.skills] : [],
+      ),
+    ];
+    const policySkills = workflowPack.policies.flatMap((policy) =>
+      policy.agentSkills.map((binding) => binding.skill),
     );
 
     expect(workspacePack.manifest.engines).toEqual(expect.arrayContaining(['codex', 'claude']));
     expect(() => {
-      assertWorkspaceHarnessProvidesSkills(workspacePack, requiredSkills);
+      assertWorkspaceHarnessSkillBindings(workspacePack, {
+        stepBound: requiredSkills,
+        policyBound: policySkills,
+      });
     }).not.toThrow();
   });
 
@@ -108,12 +126,14 @@ describe('workspace harness bootstrap', () => {
     expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
       '# Repository agents',
     );
+    expect(existsSync(join(repository.path, '.codex/skills/localization/SKILL.md'))).toBe(false);
+    expect(existsSync(join(repository.path, '.claude/skills/localization/SKILL.md'))).toBe(false);
     expect(
-      readFileSync(join(repository.path, '.codex/skills/localization/SKILL.md'), 'utf8'),
+      readFileSync(join(repository.path, '.tasker/harness/skills/localization/SKILL.md'), 'utf8'),
     ).toContain('localization');
-    expect(
-      readFileSync(join(repository.path, '.claude/skills/localization/SKILL.md'), 'utf8'),
-    ).toContain('localization');
+    expect(readFileSync(join(repository.path, '.tasker/harness/manifest.json'), 'utf8')).toContain(
+      'global_ambient',
+    );
     expect(
       readFileSync(join(repository.path, '.tasker/harness/skills/jira/SKILL.md'), 'utf8'),
     ).toContain('Jira issue reader');
@@ -258,6 +278,51 @@ describe('workspace harness bootstrap', () => {
 
     expect(recovered).toMatchObject({ ok: true, value: { status: 'ready' } });
     expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toBe(original);
+  });
+
+  it('pins imported skill content before materializing a managed run', async () => {
+    const repository = createRepository();
+    const workspace = locatorFor(repository);
+    const sourcePack = mkdtempSync(join(tmpdir(), 'tasker-harness-source-'));
+    cpSync(resolve('harness/workspace'), sourcePack, { recursive: true });
+    rmSync(join(sourcePack, 'imports'), { recursive: true, force: true });
+    const imported = mkdtempSync(join(tmpdir(), 'tasker-imported-skills-'));
+    for (const skill of ['typescript-design', 'test-design']) {
+      const directory = join(imported, skill);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(
+        join(directory, 'SKILL.md'),
+        `---\nname: ${skill}\ndescription: Imported ${skill}.\n---\n\nImported v1\n`,
+        'utf8',
+      );
+    }
+    mkdirSync(join(sourcePack, 'imports'), { recursive: true });
+    symlinkSync(imported, join(sourcePack, 'imports', 'global-skills'), 'dir');
+    const adapter = createAdapter(
+      sourcePack,
+      mkdtempSync(join(tmpdir(), 'tasker-harness-snapshots-')),
+    );
+    const applied = await adapter.apply(workspace, operationId(workspace));
+    if (!applied.ok) throw new Error(JSON.stringify(applied.error));
+    writeFileSync(
+      join(imported, 'typescript-design', 'SKILL.md'),
+      '---\nname: typescript-design\ndescription: Imported TypeScript design.\n---\n\nImported v2\n',
+      'utf8',
+    );
+    rmSync(join(repository.path, '.tasker', 'harness', 'skills', 'typescript-design'), {
+      recursive: true,
+      force: true,
+    });
+
+    const recovered = await adapter.apply(workspace, operationId(workspace));
+
+    expect(recovered).toMatchObject({ ok: true, value: { status: 'ready' } });
+    expect(
+      readFileSync(
+        join(repository.path, '.tasker', 'harness', 'skills', 'typescript-design', 'SKILL.md'),
+        'utf8',
+      ),
+    ).toContain('Imported v1');
   });
 
   it('rejects a repository that has no declared project profile', async () => {

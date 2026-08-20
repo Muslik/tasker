@@ -228,6 +228,7 @@ export interface TaskStepActivityContext {
 
 export interface TaskStepAgentRequest {
   readonly operationId: string;
+  readonly stepReference: string;
   readonly profile: ResolvedExecutionProfile;
   readonly prompt: string;
   readonly skills: readonly string[];
@@ -312,7 +313,11 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         provider: profile.provider,
         repositoryPath: request.cwd,
         configurationRoot: isolatedConfigurationRoot,
-        skills: [...request.skills],
+        selection: {
+          kind: 'step',
+          reference: request.stepReference,
+          skills: [...request.skills],
+        },
       });
       if (!preparedSkills.ok) return err(preparedSkills.error);
       await writeFile(
@@ -1348,6 +1353,7 @@ export const executeRegisteredTaskStep = async (
     });
     const provider = await dependencies.agentRunner.run({
       operationId: executionOperationId(input),
+      stepReference: input.uses,
       profile: executionProfile,
       prompt,
       skills: snapshottedStep.block.executor.skills,

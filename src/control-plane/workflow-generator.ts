@@ -42,5 +42,11 @@ export const providerFailureSummary = (failure: WorkflowAnalyzerFailure): string
       return failure.message;
     case 'invalid_analyzer_output':
       return failure.issues.join('; ');
+    case 'invalid_skill_selection':
+      return failure.issues.join('; ');
+    case 'invalid_skill_package':
+    case 'skill_unavailable':
+    case 'skill_materialization_failed':
+      return failure.message;
   }
 };

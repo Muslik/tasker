@@ -23,7 +23,7 @@
     "kind": "agent",
     "profile": "review",
     "prompt": "prompt.md",
-    "skills": ["typescript-design", "test-design"]
+    "skills": []
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": {

@@ -58,9 +58,46 @@ const outputSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('blocked'), reason: z.string() }).strict(),
 ]);
 
+const writeSkillCatalog = (repositoryPath: string): void => {
+  mkdirSync(join(repositoryPath, '.tasker', 'harness'), { recursive: true });
+  writeFileSync(
+    join(repositoryPath, '.tasker', 'harness', 'manifest.json'),
+    `${JSON.stringify({
+      schemaVersion: 2,
+      id: 'test-workspace',
+      version: '1',
+      engines: ['codex', 'claude'],
+      skillSources: [
+        {
+          id: 'step-skills',
+          path: 'shared-skills',
+          scope: 'step_bound',
+          skills: ['jira', 'pr-finalize'],
+        },
+      ],
+      supportFiles: 'lib',
+      commands: 'bin',
+      profiles: [
+        {
+          id: 'front-avia',
+          repositoryAliases: ['onetwotrip/front-avia'],
+          guidance: 'guidance',
+        },
+      ],
+    })}\n`,
+    'utf8',
+  );
+  writeFileSync(
+    join(repositoryPath, '.tasker', 'harness-bootstrap.json'),
+    '{"profile":"front-avia"}\n',
+    'utf8',
+  );
+};
+
 describe('subscription CLI task-step runner', () => {
   it('invokes Codex with only the step-scoped skill view', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-codex-step-workspace-'));
+    writeSkillCatalog(repositoryPath);
     for (const skill of ['jira', 'pr-finalize']) {
       const directory = join(repositoryPath, '.tasker', 'harness', 'skills', skill);
       mkdirSync(directory, { recursive: true });
@@ -126,6 +163,7 @@ describe('subscription CLI task-step runner', () => {
     try {
       const result = await runner.run({
         operationId: 'workflow:step:attempt-1',
+        stepReference: 'code.implement@1',
         profile: TEST_CODEX_PROFILE,
         prompt: 'Return the result.',
         skills: ['jira'],
@@ -161,6 +199,7 @@ describe('subscription CLI task-step runner', () => {
 
   it('runs the same step contract through a selected Claude subscription profile', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-claude-step-workspace-'));
+    writeSkillCatalog(repositoryPath);
     const requests: CommandRequest[] = [];
     const commands: WorkspaceCommandRunner = {
       executionEnvironment: 'docker_workspace',
@@ -191,6 +230,7 @@ describe('subscription CLI task-step runner', () => {
     try {
       const result = await runner.run({
         operationId: 'workflow:claude-step:attempt-1',
+        stepReference: 'code.implement@1',
         profile: TEST_CLAUDE_PROFILE,
         prompt: 'Return the result.',
         skills: [],
