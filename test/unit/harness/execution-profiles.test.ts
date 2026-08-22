@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveAgentExecutionProfile,
   resolveImplementationPlannerProfile,
+  resolveTaskExecutionProfile,
   resolveWorkflowAnalyzerProfile,
   validateExecutionProfileConfiguration,
   type ExecutionProfileConfiguration,
@@ -49,6 +50,26 @@ const company = {
       fast: 'company-fast',
       ralplan: 'company-deep',
     },
+    taskStrategies: {
+      simple: {
+        context: 'company-fast',
+        implementation: 'company-fast',
+        verification: 'company-fast',
+        review: 'company-deep',
+      },
+      standard: {
+        context: 'company-fast',
+        implementation: 'company-deep',
+        verification: 'company-fast',
+        review: 'company-deep',
+      },
+      complex: {
+        context: 'company-deep',
+        implementation: 'company-deep',
+        verification: 'company-deep',
+        review: 'company-deep',
+      },
+    },
   },
   apiPricing: {
     version: 'test-pricing-v1',
@@ -72,6 +93,7 @@ const project = {
   workflowAnalyzer: 'project-deep',
   implementationPlanner: { ralplan: 'project-deep' },
   agents: { implementation: 'project-deep' },
+  taskStrategies: { simple: { implementation: 'project-deep' } },
 } as const satisfies ProjectExecutionProfileOverrides;
 
 describe('execution profile resolution', () => {
@@ -97,6 +119,15 @@ describe('execution profile resolution', () => {
     expect(
       resolveAgentExecutionProfile(company, project, 'implementation', 'company-deep').name,
     ).toBe('company-deep');
+    expect(resolveTaskExecutionProfile(company, null, 'simple', 'implementation').name).toBe(
+      'company-fast',
+    );
+    expect(resolveTaskExecutionProfile(company, project, 'simple', 'implementation').name).toBe(
+      'project-deep',
+    );
+    expect(resolveTaskExecutionProfile(company, project, 'simple', 'review').name).toBe(
+      'company-deep',
+    );
   });
 
   it('derives profile identity from the complete resolved configuration', () => {

@@ -8,6 +8,8 @@ import {
   type ExecutionProfileRouting,
   type ProjectExecutionProfileOverrides,
   type ResolvedExecutionProfile,
+  type TaskExecutionRole,
+  type TaskExecutionStrategy,
 } from './execution-profile-contracts.js';
 
 export interface ExecutionProfileConfiguration {
@@ -82,6 +84,18 @@ export const resolveAgentExecutionProfile = (
 ): ResolvedExecutionProfile =>
   resolveNamedProfile(company, override ?? project?.agents?.[requestedProfile] ?? requestedProfile);
 
+export const resolveTaskExecutionProfile = (
+  company: ExecutionProfileConfiguration,
+  project: ProjectExecutionProfileOverrides | null,
+  strategy: TaskExecutionStrategy,
+  role: TaskExecutionRole,
+): ResolvedExecutionProfile =>
+  resolveNamedProfile(
+    company,
+    project?.taskStrategies?.[strategy]?.[role] ??
+      company.executionProfileRouting.taskStrategies[strategy][role],
+  );
+
 export const validateExecutionProfileConfiguration = (
   company: ExecutionProfileConfiguration,
   projects: readonly {
@@ -92,6 +106,11 @@ export const validateExecutionProfileConfiguration = (
   resolveWorkflowAnalyzerProfile(company, null);
   resolveImplementationPlannerProfile(company, null, 'fast');
   resolveImplementationPlannerProfile(company, null, 'ralplan');
+  for (const strategy of ['simple', 'standard', 'complex'] as const) {
+    for (const role of ['context', 'implementation', 'verification', 'review'] as const) {
+      resolveTaskExecutionProfile(company, null, strategy, role);
+    }
+  }
   for (const profile of new Set(agentProfiles))
     resolveAgentExecutionProfile(company, null, profile);
   for (const project of projects) {
@@ -99,6 +118,11 @@ export const validateExecutionProfileConfiguration = (
     resolveWorkflowAnalyzerProfile(company, overrides);
     resolveImplementationPlannerProfile(company, overrides, 'fast');
     resolveImplementationPlannerProfile(company, overrides, 'ralplan');
+    for (const strategy of ['simple', 'standard', 'complex'] as const) {
+      for (const role of ['context', 'implementation', 'verification', 'review'] as const) {
+        resolveTaskExecutionProfile(company, overrides, strategy, role);
+      }
+    }
     for (const profile of Object.values(overrides?.agents ?? {})) {
       resolveAgentExecutionProfile(company, null, profile);
     }

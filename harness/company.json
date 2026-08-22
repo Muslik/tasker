@@ -113,6 +113,38 @@
       "timeoutMs": 1800000,
       "serviceTier": "fast"
     },
+    "context-simple": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "timeoutMs": 600000,
+      "serviceTier": "fast"
+    },
+    "implementation-simple": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "implementation-standard": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "timeoutMs": 1800000,
+      "serviceTier": "fast"
+    },
+    "verification-complex": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "timeoutMs": 1800000,
+      "serviceTier": "fast"
+    },
     "investigation": {
       "provider": "codex",
       "command": "codex",
@@ -166,6 +198,26 @@
     "implementationPlanner": {
       "fast": "planning-fast",
       "ralplan": "planning-ralplan"
+    },
+    "taskStrategies": {
+      "simple": {
+        "context": "context-simple",
+        "implementation": "implementation-simple",
+        "verification": "verification",
+        "review": "review"
+      },
+      "standard": {
+        "context": "workflow-analysis",
+        "implementation": "implementation-standard",
+        "verification": "verification",
+        "review": "review"
+      },
+      "complex": {
+        "context": "investigation",
+        "implementation": "implementation",
+        "verification": "verification-complex",
+        "review": "review"
+      }
     }
   },
   "globalPackageRules": [
