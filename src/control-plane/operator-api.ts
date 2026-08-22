@@ -25,6 +25,7 @@ import {
   ExecutionRunViewSchema,
   ExpectedRunCommandSchema,
   OperatorActivityResponseSchema,
+  OperatorExecutionAttemptSchema,
   PlanningClarificationSubmissionSchema,
   OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
@@ -53,6 +54,13 @@ import {
 } from '../temporal/index.js';
 
 const TaskReferenceParamsSchema = z.object({ taskReference: z.string().min(1) }).strict();
+const ExecutionAttemptParamsSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    nodeId: z.string().min(1),
+    blockRun: z.coerce.number().int().positive(),
+  })
+  .strict();
 const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
 const JiraSyncBodySchema = z.object({ repository: RepositoryReferenceSchema.optional() }).strict();
 const JiraAttachmentParamsSchema = z
@@ -412,6 +420,36 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       ),
     );
   });
+
+  api.get(
+    '/api/operator/tasks/:taskReference/execution-attempts/:nodeId/:blockRun',
+    async (request, reply) => {
+      if (options.executionActivity === undefined) {
+        return reply
+          .code(503)
+          .send(apiError('execution_activity_unavailable', 'Execution activity is unavailable'));
+      }
+      const params = ExecutionAttemptParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply
+          .code(400)
+          .send(apiError('invalid_request', 'Valid attempt identity is required'));
+      }
+      const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
+      if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
+      if (lifecycle.value?.execution === null || lifecycle.value?.execution === undefined) {
+        return reply.code(404).send(apiError('attempt_not_found', 'Execution has not started'));
+      }
+      const attempt = options.executionActivity.readAttempt(
+        lifecycle.value.execution,
+        params.data.nodeId,
+        params.data.blockRun,
+      );
+      return attempt === null
+        ? reply.code(404).send(apiError('attempt_not_found', 'Execution attempt does not exist'))
+        : reply.send(OperatorExecutionAttemptSchema.parse(attempt));
+    },
+  );
 
   api.get('/api/jira/issues/:issueKey', (request, reply) => {
     if (options.jiraIssueService === undefined) {

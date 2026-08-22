@@ -153,4 +153,92 @@ describe('execution activity', () => {
 
     expect(transcript).toMatchObject({ operationId, totalBytes: 24, truncated: false });
   });
+
+  it('reads a completed attempt with full output and registered evidence after execution advances', () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const workflowId = 'tasker:jira:AVIA-12045';
+    const runId = 'execution-run';
+    const nodeId = 'implement-fix';
+    const operationId = `${workflowId}:${runId}:${nodeId}:attempt-1`;
+    const evidenceId = `task-step-evidence:${'a'.repeat(64)}`;
+    ledger.repository.transact({
+      artifacts: [
+        {
+          artifactId: evidenceId,
+          artifactKind: 'task_step_evidence',
+          storageUri: 'file:///tmp/tasker-artifacts/after.png',
+          payload: {
+            schemaVersion: 1,
+            operationId,
+            relativePath: 'after.png',
+            contentSha256: 'b'.repeat(64),
+            byteLength: 42,
+            mimeType: 'image/png',
+            recordedAt: '2026-08-22T00:00:00.000Z',
+          },
+          metadata: {},
+        },
+      ],
+    });
+    traces.append(operationId, 1, 'stdout', '{"type":"turn.started"}\n');
+    traces.persistOutputArtifact({
+      operationId,
+      workflowId,
+      workflowRunId: runId,
+      nodeId,
+      stepReference: 'code.implement@1',
+      stepAttempt: 1,
+      runner: 'agent',
+      command: 'codex',
+      args: [],
+      cwd: '/tmp/worktree',
+      exitCode: 0,
+      status: 'completed',
+      stdout: 'full provider output',
+      stderr: '',
+      details: { output: { summary: 'Implemented' } },
+      result: {
+        status: 'completed',
+        summary: 'Implemented',
+        artifactIds: [evidenceId],
+        transcriptId: `task-step-transcript:${operationId}`,
+      },
+    });
+    const execution = {
+      runtime: 'execution' as const,
+      schemaVersion: 2 as const,
+      taskReference: 'jira:AVIA-12045',
+      workflowId,
+      runId,
+      workflowHash: 'a'.repeat(64),
+      nodeStates: { [nodeId]: 'succeeded' as const, review: 'running' as const },
+      blockRuns: { [nodeId]: 1, review: 1 },
+      loopIterations: {},
+      status: 'running' as const,
+      currentNodeId: 'review',
+      wait: null,
+      outcome: null,
+    };
+
+    const attempt = new LedgerExecutionActivityReader(ledger.repository).readAttempt(
+      execution,
+      nodeId,
+      1,
+    );
+
+    expect(attempt).toMatchObject({
+      nodeId,
+      blockRun: 1,
+      transcript: { operationId, totalBytes: 24 },
+      output: { command: 'codex', stdout: 'full provider output', status: 'completed' },
+      evidence: [
+        {
+          artifactId: evidenceId,
+          relativePath: 'after.png',
+          mimeType: 'image/png',
+        },
+      ],
+    });
+  });
 });

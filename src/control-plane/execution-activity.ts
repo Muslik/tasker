@@ -7,10 +7,13 @@ import {
   executionOperationIdFor,
   TemporalTaskStepTraceStore,
 } from '../temporal/activities/block-execution.js';
+import { TaskStepEvidenceArtifactSchema } from '../temporal/task-step-evidence-contracts.js';
 import { systemClock } from '../shared/clock.js';
 import type { PlanningTranscriptView } from './planning-transcript.js';
 import {
+  OperatorExecutionAttemptSchema,
   OperatorActivityEntrySchema,
+  type OperatorExecutionAttempt,
   type OperatorActivityResponse,
 } from './operator-contracts.js';
 
@@ -38,6 +41,11 @@ const jenkinsEvidenceFrom = (details: unknown): z.infer<typeof JenkinsEvidenceSc
 export interface ExecutionActivityReader {
   readActivity(workflowId: string): OperatorActivityResponse['entries'];
   readCurrentTranscript(execution: ExecutionWorkflowPublicState): PlanningTranscriptView | null;
+  readAttempt(
+    execution: ExecutionWorkflowPublicState,
+    nodeId: string,
+    blockRun: number,
+  ): OperatorExecutionAttempt | null;
 }
 
 export class LedgerExecutionActivityReader implements ExecutionActivityReader {
@@ -57,6 +65,41 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
     );
     const transcript = new TemporalTaskStepTraceStore(this.ledger, systemClock).read(operationId);
     return transcript.ok ? transcript.value : null;
+  }
+
+  public readAttempt(
+    execution: ExecutionWorkflowPublicState,
+    nodeId: string,
+    blockRun: number,
+  ): OperatorExecutionAttempt | null {
+    if (blockRun < 1 || blockRun > (execution.blockRuns[nodeId] ?? 0)) return null;
+    const operationId = executionOperationIdFor(
+      execution.workflowId,
+      execution.runId,
+      nodeId,
+      blockRun,
+    );
+    const traces = new TemporalTaskStepTraceStore(this.ledger, systemClock);
+    const transcript = traces.read(operationId);
+    const output = traces.readOutputArtifact(operationId);
+    if (!transcript.ok || !output.ok) return null;
+    const evidence = (output.value?.result?.artifactIds ?? []).flatMap((artifactId) => {
+      const artifact = this.ledger.readArtifact(artifactId);
+      if (artifact?.artifactKind !== 'task_step_evidence') return [];
+      const parsed = TaskStepEvidenceArtifactSchema.safeParse(artifact.payload);
+      return parsed.success ? [{ artifactId, ...parsed.data }] : [];
+    });
+    return OperatorExecutionAttemptSchema.parse({
+      schemaVersion: 1,
+      taskReference: execution.taskReference,
+      workflowId: execution.workflowId,
+      workflowRunId: execution.runId,
+      nodeId,
+      blockRun,
+      transcript: transcript.value,
+      output: output.value,
+      evidence,
+    });
   }
 
   public readActivity(workflowId: string): OperatorActivityResponse['entries'] {

@@ -6,6 +6,8 @@ import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
+import { TaskStepOutputArtifactSchema } from '../temporal/task-step-output.js';
+import { TaskStepEvidenceArtifactSchema } from '../temporal/task-step-evidence-contracts.js';
 import {
   PlanningClarificationAnswerCommandSchema,
   PlanningStrategyRequestSchema,
@@ -69,6 +71,25 @@ export const BlockReceiptSummarySchema = z
     usageReference: z.string().min(1).nullable(),
     usage: AgentInvocationUsageSchema.nullable(),
     completedAt: z.iso.datetime(),
+  })
+  .strict()
+  .readonly();
+
+export const OperatorEvidenceArtifactSchema = TaskStepEvidenceArtifactSchema.extend({
+  artifactId: z.string().min(1),
+}).strict();
+
+export const OperatorExecutionAttemptSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
+    nodeId: z.string().min(1),
+    blockRun: z.number().int().positive(),
+    transcript: PlanningTranscriptViewSchema.nullable(),
+    output: TaskStepOutputArtifactSchema.nullable(),
+    evidence: z.array(OperatorEvidenceArtifactSchema),
   })
   .strict()
   .readonly();
@@ -393,6 +414,7 @@ export const OperatorStreamEventSchema = z
 
 export type PlanningTaskSummary = z.infer<typeof PlanningTaskSummarySchema>;
 export type WorkflowNodeStatus = z.infer<typeof WorkflowNodeStatusSchema>;
+export type OperatorExecutionAttempt = z.infer<typeof OperatorExecutionAttemptSchema>;
 export type BlockReceiptSummary = z.infer<typeof BlockReceiptSummarySchema>;
 export type OperatorWorkflowStep = z.infer<typeof OperatorWorkflowStepSchema>;
 export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;
