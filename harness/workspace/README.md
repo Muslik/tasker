@@ -127,6 +127,12 @@ a worktree or content snapshot.
    file. `inspect` can reconcile a lost Activity response without redoing completed
    work.
 
+Every task step container also receives isolated runtime surfaces. `/workspace` is the
+product worktree and is mounted read-only unless the frozen semantic block owns
+`workspace.write`. `/tasker/scratch` is disposable step-scoped storage,
+`/tasker/artifacts` is durable evidence pending import, and `/tasker/cache` owns writable
+tool caches. Prompt wording and `.gitignore` are not security boundaries.
+
 There is deliberately no standalone `wt` hook in the normal path. Temporal creates the
 managed worktree and invokes the bootstrap Activity before repository analysis or
 planning. A worker crash, VPN outage, or lost Activity response retries `inspect` and
@@ -137,24 +143,23 @@ Docker-only `workspaceRuntime` policy; there is no host command escape hatch.
 
 There are three independent decisions which must not be collapsed into one:
 
-| Question                                   | Owner                  | Example                                        |
-| ------------------------------------------ | ---------------------- | ---------------------------------------------- |
-| Is guidance installed for this repository? | workspace profile      | `localization`, `state-data`, `ui-kit`         |
-| Does this task need an operation?          | analyzer + validator   | add `bug.validate_fix@1` or omit it            |
-| Which guidance may that operation use?     | versioned step binding | `bug.validate_fix@1` selects `playwright-demo` |
+| Question                                   | Owner                  | Example                                          |
+| ------------------------------------------ | ---------------------- | ------------------------------------------------ |
+| Is guidance installed for this repository? | workspace profile      | `localization`, `state-data`, `ui-kit`           |
+| Does this task need an operation?          | planner + validator    | bind runtime bug evidence into Verify or omit it |
+| Which guidance may that operation use?     | versioned step binding | `verify.acceptance@1` selects `playwright-demo`  |
 
 Installing a `SKILL.md` never adds a graph node and never authorizes a remote effect.
 The block catalog does that. In particular:
 
-- `playwright-demo` is reusable execution guidance. It is selected by the agent-run
-  `bug.validate_fix@1` block; deterministic `validate.visual@1` runs the exact project command
-  and does not gain agent skills. An ordinary non-visual feature gains neither block merely
-  because the package exists.
+- `playwright-demo` is reusable execution guidance. It is selected by a Verify block
+  only when accepted criteria require runtime/visual evidence. Exact project commands
+  are internal Verify operations and do not gain agent skills. An ordinary non-visual
+  feature gains neither behavior merely because the package exists.
 - `pr-finalize` is retained from the old harness as migration/reference material, not as
-  Tasker's final PR executor. It combines commit, push, PR creation, Jira mutation, and
-  human confirmation in one imperative skill, which conflicts with durable recovery.
-  Its useful rules must be split between `pr.prepare@1`, CI/review waits, Jira integration
-  blocks, and deterministic pre-PR obligations.
+  Tasker's final PR executor. Its useful rules are expressed as separately receipted
+  operations owned by one semantic Delivery block; one operator row does not mean one
+  opaque remote mutation.
 - read/write integrations are typed Activities. A prompt or skill can draft input and
   interpret evidence; it cannot grant itself `git.write`, `jira.write`, or another
   outward-facing capability.

@@ -105,12 +105,11 @@ hash. Receipts expose the actual CLI version, session, token usage, duration, pr
 hash, and a versioned price-table, provider-reported, or explicitly unrated API-equivalent cost. There is no legacy model field,
 hard-coded `gpt-5.4` path, or silent provider fallback.
 
-The first Phase 8 vertical slice is implemented as provider-neutral CI predicates plus a
-validator-enforced passed-CI boundary. Exact-revision Jenkins observations classify terminal
-results; task-caused failures enter an agent repair/revalidation/review/republish loop, while
-flaky, infrastructure, and unknown results enter separate durable waits and re-observe on resume.
-Automatic Jenkins retrigger remains a later reconciled effect; the current flaky branch waits for
-an external retry rather than hiding a non-idempotent mutation in `ci.observe@1`.
+The former Phase 8 expanded CI slice is superseded by semantic Delivery. Exact-revision
+Jenkins observations remain provider-neutral typed operations; task-caused failures
+materialize one linked implementation continuation, while flaky, infrastructure, and
+unknown results remain states of the active Delivery block and re-observe on resume.
+Automatic Jenkins retrigger remains a later reconciled effect rather than a hidden read-side mutation.
 
 Jira lifecycle transitions now preflight provider-owned field requirements for both
 admission and review-ready paths. Missing values become an actionable durable wait
@@ -125,29 +124,29 @@ Bootstrap delivery failures now preserve their bounded Activity root cause in th
 durable operator wait. Workspace/Docker, context, planning, investigation, and freeze
 failures are diagnosable from the console and Resume retries only the pending stage.
 
-Phase 4B is complete: Generate starts Bootstrap v3 without a graph/hash, prepares the
+Phase 4B is superseded by the semantic-workflow cutover: Generate starts Bootstrap v3 without a workflow/hash, prepares the
 managed worktree and Docker runtime, persists graph-free context and evidence, and runs
 mandatory planning. The planner may request registered investigation blocks and owns
-the first complete workflow candidate. Deterministic compilation and validation feed
+the first complete semantic workflow candidate. Deterministic compilation and validation feed
 bounded corrections back to planning before optional review and freeze. The former
 pre-planning assembler, draft-revision Activity, schema v7 reader, and `phase=before`
 execution reproduction are deleted with no compatibility path.
 
 Implementation Plan v2 makes verification part of the accepted planning decision rather
 than an execution-time guess. Each criterion has a stable id, observable expectation,
-typed verification strategy, and references to the exact workflow step nodes that prove
+typed verification strategy, and references to the exact semantic Verify work that proves
 it. Missing references reject the decision. The planner may select a new automated test,
 but test creation remains implementation work and no universal materialization block is
 inserted. Planner receipts are `implementation-planner@3`; v1 plans and prior receipts
 have no compatibility reader.
 
-Phase 5 is complete. The former raw `workflow.tree` response, persisted
+The former Phase 5 projection is superseded. The raw `workflow.tree` response, persisted
 `workflow.stages`, and Cockpit tree component are deleted. Blocks and durable waits own
 configurable stage descriptors. A dedicated operator endpoint joins the complete
-Bootstrap lifecycle, the frozen graph, live Execution node state, and immutable Block
-Receipts into one disposable read model. It shows preparation, investigation, and
-planning before an execution graph exists, then semantic execution stages. Only agent
-invocations, configured process commands, and durable human waits become rows. Internal
+Bootstrap lifecycle, frozen semantic source, executable provenance, live Execution state,
+and immutable Block Receipts/Run Events into one disposable read model. It shows preparation,
+investigation, and planning before execution starts, then semantic execution stages. Agent
+invocations and durable human decisions become rows; configured commands are expandable operations. Internal
 Temporal containers, integrations, retries, reconciliation and receipt validation affect
 stage state but remain diagnostics. Future stages remain compact headers; rows appear
 when their work starts, so unselected recovery branches stay absent. Operator waits use

@@ -121,11 +121,13 @@ previous run's task snapshot.
 
 ## 5. Context, planning, candidate validation, and freeze
 
-Every task receives a newly assembled graph. There is no default bugfix, feature,
-translation, or PR template.
+Every task receives a newly assembled semantic workflow. There is no default bugfix,
+feature, translation, or PR template. The semantic workflow is the planner- and
+operator-facing domain artifact; the compiled Temporal execution IR is a separate
+deterministic artifact and is never presented as the task workflow.
 
-The canonical lifecycle is `bootstrap run -> graph-free planning context -> planner
-candidate -> frozen execution workflow`; see
+The canonical lifecycle is `bootstrap run -> graph-free planning context -> semantic
+planner candidate -> deterministic compilation -> frozen execution workflow`; see
 [`planning-lifecycle.md`](planning-lifecycle.md). Bootstrap is a durable infrastructure
 protocol, not a reusable business graph. Context discovery creates an append-only
 Evidence Bundle. The mandatory planner may select bounded pre-plan investigation and
@@ -141,22 +143,23 @@ Assembly input is a bounded, provenance-bearing planner context:
 - mandatory obligations and safety constraints;
 - exact prompt, skill, policy, and provider-profile versions/hashes.
 
-The planner's `ready` decision emits untrusted `WorkflowSource` JSON together with the
+The planner's `ready` decision emits untrusted `SemanticWorkflowSource` JSON together with the
 implementation plan and optional follow-ups. Every acceptance criterion declares an
 observable expected result plus typed verification (`automated_test`, `process`,
-`runtime_evidence`, or `inspection`) and references the exact execution step nodes that
-will prove it. A new automated test is an explicit planning choice and remains part of
+`runtime_evidence`, or `inspection`) and references the semantic Verify work that will
+prove it. A new automated test is an explicit planning choice and remains part of
 implementation; Tasker does not insert a universal test-materialization step. A
-deterministic boundary rejects references to step nodes absent from the same candidate,
-then the compiler parses, canonicalizes, validates, and hashes the workflow. The
-compiler may reject a graph but never silently insert missing nodes; otherwise the UI's
-“why this workflow” provenance would be false.
+deterministic boundary rejects references absent from the same candidate, then the
+compiler parses, canonicalizes, validates, hashes, and lowers the semantic source to a
+separate executable IR. The compiler may expand only the internal protocol declared by a
+selected registered block. It may not insert an unselected semantic step; otherwise the
+UI's “why this workflow” provenance would be false.
 
 Examples of deterministic obligations:
 
 - a write path verifies after implementation;
 - a PR path observes CI and reaches human code review;
-- every semantic loop is explicit and bounded;
+- every planner-visible semantic loop is explicit and bounded;
 - every effect has the required capability and reconciliation policy;
 - terminal paths end in an allowed final state or explicit durable wait.
 
@@ -183,10 +186,10 @@ that already contains the exact PR URL is accepted without rewriting human text.
 than one comment with the managed prefix is a remote conflict; Tasker stops instead of
 choosing or deleting a comment silently.
 
-The first compiled candidate is not yet executable or immutable. Validation rejection
+The first semantic candidate and its compiled IR are not yet executable or immutable. Validation rejection
 persists exact feedback plus the rejected `ready` decision and asks the planner for a
-complete replacement candidate. Tasker never patches compiled IR or inserts nodes
-silently.
+complete replacement candidate. Tasker never patches accepted semantic source or
+compiled IR silently.
 
 Bootstrap v3 is the only bootstrap runtime. The previous bootstrap implementation,
 precompiled-graph generation path, workflow IDs, and tests are deleted rather than
@@ -196,10 +199,11 @@ The exact module and dependency map is documented in
 [`technical-architecture.md`](technical-architecture.md). In particular, the durable
 core imports neither the control plane nor tracker/SCM/CI adapters; only the API and
 worker composition roots choose concrete external systems.
-After the plan fits and optional operator review succeeds, the accepted compiled graph,
-run policy, and hashes become the frozen execution input only after Tasker persists an
-immutable receipt containing the task/run identity, graph hash, planning artifact and
-attempt, Evidence Bundle snapshot, approval mode, and timestamp. The receipt operation
+After the plan fits and optional operator review succeeds, the accepted semantic source,
+compiled IR, run policy, and hashes become frozen only after Tasker persists an immutable
+receipt containing the task/run identity, semantic hash, executable hash, compiler
+version, planning artifact and attempt, Evidence Bundle snapshot, approval mode, and
+timestamp. The receipt operation
 is idempotent: Activity redelivery returns the exact prior receipt, while a conflicting
 hash for the same run fails closed. Until receipt persistence succeeds, the public run
 remains `draft`; exhausted infrastructure retries open a durable operator wait and keep
@@ -240,23 +244,21 @@ history, but none of its mutable artifacts can become current state for the repl
 
 ### 5.2 Runtime vocabulary
 
-- **Stage** is an operator projection such as Workspace, Investigate, Plan, Implement,
-  Validate, Delivery, or Human review. It groups work but is not schedulable. Every block
-  and durable wait declares its stage in the harness contract. A stage is present even
-  when its work is deterministic, but deterministic mechanics do not become operator
-  steps. Expanding a stage reveals only configurable work: one row per agent invocation,
-  one row per configured process command, and one row per durable human wait. A sequence,
-  branch, loop, finalize node, integration adapter, retry, reconciliation probe, and
-  receipt validator affect stage state but are diagnostics rather than operator steps.
-  Planned future stages remain compact headers; their configurable rows appear only
-  when execution starts them. Conditional repair/CI/review bodies therefore remain
-  absent unless their branch actually runs.
+- **Stage** is an operator projection such as Workspace, Investigate, Plan, Development,
+  Agent review, Delivery, or Human review. It groups semantic work but is not schedulable.
+  Expanding a stage reveals the selected semantic blocks, their attempts, and their
+  internal events. A command, integration call, local commit, retry, reconciliation
+  probe, receipt validator, compiler container, or unmaterialized recovery path is not a
+  task step. Planned future stages remain compact headers. Conditional repair, CI, and
+  review continuations remain absent until an observed fact materializes them.
   Bootstrap stages come from the complete Bootstrap lifecycle; execution stage state
   comes from Execution node state. Attempts, receipts, evidence, and the raw immutable
   graph remain available from the agent/process transcript and diagnostic surfaces.
-- **Block** is a reusable versioned work contract selected into one task graph. It owns
-  inputs, outcomes, completion rules, recovery, prompt/skills/profile where relevant,
-  and produced evidence.
+- **Semantic Block** is a reusable versioned work contract selected into one task
+  workflow. It owns inputs, outcomes, completion rules, recovery protocol,
+  prompt/skills/profile where relevant, and produced evidence. One agent invocation is
+  one operator step. Registered commands and external effects owned by the block appear
+  as internal operations with their own receipts.
 - **Effect** is one atomic filesystem, Git, tracker, SCM, CI, or other external
   operation with durable intent and receipt. It may be an expandable child of a block
   rather than an operator stage.
@@ -264,19 +266,35 @@ history, but none of its mutable artifacts can become current state for the repl
   may propose content, request allowed mediated effects, ask a question, or return a
   candidate result; it cannot declare authoritative completion.
 
+### 5.3 Semantic source and executable IR
+
+The semantic source answers what this task will do and why. For a simple bug it is
+expected to remain close to:
+
+```text
+Investigate -> Plan -> Development loop (Implement + Verify)
+-> Agent review -> Pull request delivery -> Human review
+```
+
+The executable IR answers how Temporal resumes exact operations. It may contain pure
+interpreter mechanics or references to block-owned internal protocols, but those details
+do not become planner-authored task work. Both artifacts are immutable and linked by the
+freeze receipt. The raw executable IR remains downloadable diagnostic evidence.
+
 ## 6. Generic Temporal graph interpreter
 
 Tasker does not generate and deploy TypeScript Workflow code per Jira task. One stable,
 versioned Temporal Workflow interprets the compiled graph:
 
 ```text
-ExecutionWorkflow(frozenGraph, runSettings, contextReferences)
+ExecutionWorkflow(frozenExecutableIr, semanticWorkflowReference, runSettings, contextReferences)
 ```
 
 The Bootstrap Workflow owns workspace/context preparation, investigation admission,
 mandatory planning, optional plan review, deterministic draft validation, and the
 immutable freeze receipt. The Execution Workflow receives only the accepted frozen
-graph and opaque references. It never discovers planning nodes by name.
+executable IR plus opaque semantic/artifact references. It never discovers planning
+nodes by name.
 
 Plan approval is the execution boundary, not a second launch gate. After a valid plan
 is approved, or immediately after automatic plan acceptance, Bootstrap freezes the
@@ -325,13 +343,19 @@ asynchronous notifications where a caller does not need a synchronous result.
 
 ## 7. Activities and block contracts
 
-A registered block has a stable versioned reference and one execution kind:
+A registered semantic block has a stable versioned reference and one primary execution
+protocol:
 
-- `agent`: a prompt, logical skills, allowed tools, structured input/output, and
-  provider policy;
-- `process`: a policy-owned command or process adapter, never arbitrary shell from the
-  generated graph;
-- `integration`: a typed external adapter with prepare/execute/reconcile behavior.
+- `agent`: a prompt, logical skills, allowed tools, structured input/output, and provider
+  policy;
+- `verification`: exact project process operations plus optional runtime/visual agent
+  judgment;
+- `delivery`: typed Git/tracker/SCM/CI operations with prepare/execute/reconcile behavior;
+- task-specific external/human protocols such as translations or package publication.
+
+An internal operation remains typed and independently receipted. Grouping it under a
+semantic block does not turn several remote mutations into one unobservable or
+unreconcilable Activity.
 
 Logical agent skills are stored once in the pinned workspace harness. An Activity
 projects the resolved ambient and bound selection into the active subscription CLI's
@@ -370,26 +394,25 @@ reconciles effects, and only then persists an immutable Block Receipt and return
 terminal block outcome to Temporal. A prose summary or schema-valid result without the
 declared evidence cannot complete a block.
 
-The local-ready suffix separates four responsibilities:
+The local-ready suffix separates three operator responsibilities:
 
 ```text
-code.implement/code.repair (agent judgment and workspace mutation)
--> validate.* (exact project-owned process command)
--> bug.validate_fix when the task is a reproduced bug (agent evidence)
--> review.agent (independent typed review)
+Implement (one agent attempt, workspace mutation, optional local commits)
+-> Verify (exact project operations plus criterion-linked runtime evidence)
+-> Agent review (independent typed review)
 ```
 
-The `quality-boundaries` policy enforces the final two markers on every compiled path that contains
-`bug.validate_fix@1`; prompt wording alone is not allowed to place independent review before the
-evidence it must judge.
+The `quality-boundaries` policy enforces accepted Verify evidence before independent
+review and accepted review before Delivery. A reproduced bug binds the investigated
+scenario to Verify; it is not a later sibling node that can accidentally run after
+review.
 
-A non-zero `validate.*` command is accepted as diagnostic process evidence and maps to
-`validation.failed@1`; it is neither an Activity failure nor success inferred from agent prose.
-The frozen graph may enter a bounded `code.repair` plus revalidation loop.
-`review.agent` maps its typed decision to `agent_review.accepted@1` or
-`agent_review.changes_requested@1`; requested changes enter a separate bounded
-repair/revalidation/re-review loop. Exhaustion opens `operator_guidance@1` while preserving the
-same worktree and completed prefix.
+A non-zero verification command is accepted as diagnostic operation evidence and maps
+to a failed Verify domain verdict; it is neither an Activity failure nor success inferred
+from agent prose. The current Development loop advances to another Implement attempt.
+Agent-review changes materialize one linked revision continuation rather than a
+precompiled nested recovery tree. Exhaustion opens operator guidance while preserving
+the same worktree and completed prefix.
 
 Activities may be non-deterministic. They must be independently retryable at their
 declared boundary and persist useful evidence before returning. Long CLI calls
@@ -408,7 +431,9 @@ Provider bindings are selected only through named execution profiles. A company 
 registers complete Codex and Claude subscription-CLI definitions and routing for
 workflow analysis plus `fast`/`ralplan` planning. A project may redirect those routes
 and map a logical agent profile such as `implementation` or `review` to another
-registered profile. An explicit run override, where policy exposes one, has highest
+registered profile. A deterministic task strategy (`simple`, `standard`, or `complex`)
+selects a registered route; it never emits a raw model/provider name. An explicit run
+override, where policy exposes one, has highest
 precedence:
 
 ```text
@@ -445,7 +470,7 @@ planner-selected investigation. It decides both acceptance and how acceptance wi
 proved: reuse or create an automated test, run a registered project process, collect
 runtime evidence, or inspect a bounded artifact. Planning remains read-only; test code
 and other workspace mutations happen in execution. The same `ready` decision contains
-the plan and the first complete workflow candidate. `planReviewRequired` is chosen when
+the plan and the first complete semantic workflow candidate. `planReviewRequired` is chosen when
 starting the task:
 
 - `false`: an accepted plan proceeds automatically;
@@ -541,18 +566,17 @@ classifies failures:
 - attributable to the change -> revision loop;
 - unknown -> diagnostic Activity, then question or guidance wait after its budget.
 
-`ci.observe@1` is an atomic read block. A reachable terminal Jenkins build always completes that
-observation with mutually exclusive predicate facts (`ci.passed`, task-caused, flaky,
-infrastructure, or unknown). Only inability to observe — access, transport, configuration, or
-timeout — blocks the Activity itself.
+CI observation is an atomic, independently receipted Delivery operation. A reachable
+terminal Jenkins build always completes that observation with one typed result (passed,
+task-caused, flaky, infrastructure, or unknown). Only inability to observe — access,
+transport, configuration, or timeout — blocks the operation itself.
 
-The frozen task graph owns recovery. It must place a bounded, check-before recovery loop between
-PR publication and human review. Task-caused failures run the editable `ci.repair@1` agent block,
-then repeat declared validation, independent review, publication, and exact-revision observation.
-Flaky, infrastructure, and unknown outcomes enter distinct durable waits and re-observe after the
-operator resumes them. The loop can exit only with `ci.passed@1`; the deterministic validator
-rejects any PR path that can reach code review without that proof. Automatic Jenkins retriggering
-is a future reconciled remote-effect block, not a hidden side effect of observation.
+The semantic Delivery block owns the PR/CI/human-review protocol. It persists each remote
+intent and receipt separately and can reach human review only after exact-revision CI
+proof. Task-caused failures materialize one linked implementation continuation. Flaky,
+infrastructure, and unknown outcomes remain typed states of the active CI operation and
+re-observe after resume; they are not predeclared sibling wait nodes. Automatic Jenkins
+retriggering remains an explicit reconciled operation, never a hidden side effect.
 
 Validation scope is task-specific. Project policy and changed-surface evidence may
 select build-only, targeted tests, full validation, Allure inspection, post-fix
@@ -568,20 +592,21 @@ The console remains a three-pane operational surface:
 - left: tasks, lifecycle state, attention/wait indicator, elapsed time, and shadow cost;
 - center: selected Activity/agent stream, decisions, artifacts, plan, Jira details,
   questions, review comments, and compact errors;
-- right: the current graph/revision, active node, retry/loop budget, waits, child runs,
+- right: the current semantic workflow/revision, active step, retry/loop budget, waits, child runs,
   and completion state.
 
 The UI is a projection, never execution authority. Runtime status comes from Temporal
 Workflow state/history and Search Attributes. Tasker SQLite stores product metadata,
-cached Jira data, graph rationale, transcripts, artifacts, usage, shadow cost,
+cached Jira data, semantic rationale, operation events, transcripts, artifacts, usage, shadow cost,
 retrospective annotations, and UI-friendly indexes.
 
-The primary operator rail renders semantic stages and configurable work, not the raw
-execution tree. Its dedicated read model joins three authorities without becoming one itself:
-the Bootstrap/Execution lifecycle supplies live state, the frozen graph supplies
-structure, and immutable Block Receipts supply attempts, claims, evidence, and effects.
-The persisted `WorkflowView` retains planning decisions, validation, and the immutable
-graph only; it does not cache runtime stages. The raw graph remains downloadable
+The primary operator rail renders the frozen semantic workflow, not the raw executable
+tree. Its dedicated read model joins four authorities without becoming one itself: the
+Bootstrap/Execution lifecycle supplies live state, the semantic source supplies
+structure, executable provenance supplies the exact runtime mapping, and immutable Block
+Receipts/operation events supply attempts, claims, evidence, and effects.
+The persisted `WorkflowView` retains planning decisions, validation, and immutable
+semantic/executable references only; it does not cache runtime stages. The raw executable IR remains downloadable
 diagnostic evidence. Changing a block's stage or registering a new stage does not
 require a Cockpit change. Pre-pilot projection schema cutovers delete obsolete
 projections and regenerate them; Tasker does not upcast removed `workflow.tree` or
@@ -591,13 +616,20 @@ The visibility contract is intentionally stricter than the execution contract:
 
 - one agent invocation with one snapshotted profile, prompt, model and skill set is one
   operator step;
-- one configured project/company command is one process step;
+- one configured project/company command is one expandable operation event owned by its
+  semantic step;
 - one durable operator decision is one wait step;
 - mechanics without their own harness configuration are never operator steps.
 
-This is a control-plane projection rule, not a Cockpit filter. Temporal may retain a
-larger recovery graph so it can resume exact branches, while the projection schema does
-not expose its containers as pseudo-work.
+This is a control-plane projection rule, not a Cockpit filter. The semantic artifact is
+the operator structure; the executable IR remains diagnostic even when it contains more
+mechanical nodes.
+
+Every current and completed semantic-step attempt has a durable Run Inspector. It
+exposes normalized agent messages, integration operations, full commands and referenced
+stdout/stderr, workspace change sets, local commits, artifacts, completion evidence,
+usage, duration, and shadow cost. Provider raw JSONL is secondary diagnostics. Hidden
+chain-of-thought is neither requested nor stored.
 
 Operator attention is a distinct UI state, not a generic brand accent. A durable wait
 requiring a decision uses one amber treatment in the selected task, the active workflow
@@ -685,8 +717,8 @@ fail-closed; an analyzer cannot grant itself a Jira/Bitbucket/publish capability
 
 ## 15. Architectural invariants
 
-1. Every initial graph is assembled specifically for its task.
-2. Generated graph data is untrusted until deterministic validation succeeds.
+1. Every initial semantic workflow is assembled specifically for its task.
+2. Generated semantic data is untrusted until deterministic validation and compilation succeed.
 3. Temporal is the only execution-history authority.
 4. Tasker product storage never decides which node executes next.
 5. Workflow code is deterministic; all I/O and LLM work occurs in Activities.
@@ -705,11 +737,15 @@ fail-closed; an analyzer cannot grant itself a Jira/Bitbucket/publish capability
 16. Mutable state is resolved by exact run/episode/operation identity; a task reference
     may group history but can never select the current graph, plan, evidence, receipt,
     review, continuation, or transcript.
+17. Read-only agent work is enforced by container mounts, not prompt text.
+18. Scratch and durable evidence live outside the product worktree unless accepted
+    implementation explicitly promotes an artifact.
+19. Transport completion and domain acceptance are separate operator states.
 
 ## 16. Decision record
 
 Decision: use Temporal as Tasker's durable execution kernel and retain Tasker's dynamic
-graph compiler/interpreter and product control plane.
+semantic-workflow compiler, executable-IR interpreter, and product control plane.
 
 Why: durable waits, restart recovery, retry timers, messaging, task queues, workflow
 coordination, and worker versioning are established infrastructure. Reimplementing them
@@ -726,6 +762,11 @@ Rejected:
 - put LLM planning inside Workflow code: non-deterministic and unreplayable;
 - adopt Effect/LangGraph as another control-flow runtime: they do not replace Temporal
   durability and are unnecessary for the current block/IR boundary.
+- make the planner author complete validation/CI/review recovery IR: it duplicates
+  mechanics into every task, inflates context, and makes the operator graph describe
+  hypothetical paths instead of selected semantic work;
+- show compiled IR as the operator workflow: transport nodes and domain work have
+  different status and observability semantics.
 
 The completed custom-runtime-to-Temporal migration remains available in Git history;
 it is not a live compatibility surface or an input to future implementation.

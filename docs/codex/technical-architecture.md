@@ -166,29 +166,30 @@ because they persist artifacts and invoke providers. The actual planning domain 
   harness blocks and policy to the agent;
 - [`implementation-plan.ts`](../../src/planning/implementation-plan.ts) defines the typed
   plan, questions, criteria, and verification references;
-- [`proposal.ts`](../../src/planning/proposal.ts) parses the untrusted workflow proposal;
-- [`planner.ts`](../../src/planning/planner.ts) compiles it and applies generic
+- [`proposal.ts`](../../src/planning/proposal.ts) parses the untrusted semantic workflow proposal;
+- [`planner.ts`](../../src/planning/planner.ts) validates and compiles it and applies generic
   obligations;
 - [`obligations.ts`](../../src/planning/obligations.ts) contains vendor-neutral structural
   safety checks. Company ordering belongs in file-backed policies, not here.
 
-The planner may choose any registered step and control-flow node. It cannot invent a
-step type, capability, wait, predicate, provider profile, or adapter. A rejected
+The planner may choose any registered semantic block and semantic sequence/loop. It
+cannot invent a block, capability, provider profile, adapter, or recovery tree. A rejected
 candidate is returned to the same planner with exact validator feedback; Tasker never
 patches the graph silently.
 
-### 3.5 Workflow IR, compiler, and freeze
+### 3.5 Semantic workflow, executable IR, compiler, and freeze
 
-[`src/workflow/schema.ts`](../../src/workflow/schema.ts) defines the only graph IR:
-sequence, step, branch, bounded loop, wait, gate, and finalize. The source graph is
-untrusted JSON. [`src/workflow/compiler.ts`](../../src/workflow/compiler.ts) validates
-references, control flow, bounds, capabilities, effects, terminal paths, and contracts,
-then produces the canonical hash-bearing compiled graph.
+[`src/workflow/schema.ts`](../../src/workflow/schema.ts) defines separate untrusted
+Semantic Workflow Source and executable IR contracts. The semantic source contains
+task-selected blocks and visible bounded loops. [`src/workflow/compiler.ts`](../../src/workflow/compiler.ts)
+validates references, bounds, capabilities, effects, terminal paths, and contracts, then
+lowers selected block protocols to canonical hash-bearing executable IR.
 
 The compiler knows contracts, not Jira or particular step names. Loaded harness
-manifests supply step/predicate/wait registries through
+manifests supply semantic block and internal-operation registries through
 [`src/planning/contracts.ts`](../../src/planning/contracts.ts). The immutable run
-snapshot and freeze receipt are persisted before execution starts.
+snapshot and freeze receipt persist both semantic and executable hashes before execution
+starts.
 
 ### 3.6 Execution Workflow
 
@@ -300,8 +301,8 @@ that the planning or execution core is Jira-specific. A second tracker extends t
 discriminated union and the corresponding Cockpit details view while continuing to
 produce the same neutral `WorkflowGenerationSubject`.
 
-Replacing Jenkins is the same shape: bind `ci.observe@1` to another adapter that emits
-the declared provider-neutral output predicates. Replacing Codex with Claude is an
+Replacing Jenkins is the same shape: bind the Delivery CI-observation operation to
+another adapter that emits the declared provider-neutral typed outcome. Replacing Codex with Claude is an
 execution-profile/configuration choice behind the existing provider contract.
 
 ## 7. Deliberate non-core product code

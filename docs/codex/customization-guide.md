@@ -1,10 +1,12 @@
 # Customizing Tasker
 
-Status: canonical extension guide, Block Contract v4 revision, 2026-08-22
+Status: canonical semantic-workflow cutover guide, 2026-08-22
 
-Tasker has no reusable workflow templates. Every initial workflow is assembled from an
-empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
-waits, prompts, skills, policies, obligations, and adapters.
+Tasker has no reusable task-family workflow templates. Every initial semantic workflow
+is assembled from an empty source for one task. Reuse exists below that source:
+versioned semantic blocks, internal operation protocols, prompts, skills, policies,
+obligations, and adapters. Deterministic compilation may lower a selected block to a
+larger executable IR, but that IR is not planner-authored or operator-facing work.
 
 Temporal is replaceable infrastructure at the execution boundary, not the place where
 company workflow knowledge is encoded. Most customization must not touch Temporal
@@ -14,9 +16,9 @@ Workflow code.
 
 | Surface | Target/current location | Change it for |
 |---|---|---|
-| Workflow IR/compiler/validator | `src/workflow/` | generic graph syntax, hashes, ABI, deterministic invariants |
+| Semantic workflow/compiler/validator | `src/workflow/` | semantic source, executable IR lowering, hashes, ABI, deterministic invariants |
 | Temporal interpreter | `src/temporal/workflows/` | genuinely new generic control-flow semantics only |
-| Block catalog | `harness/steps/<step>/step.json` | versioned task capabilities and Activity bindings |
+| Semantic block catalog | `harness/steps/<step>/step.json` | versioned task capabilities, internal operation protocols, and Activity bindings |
 | Typed block ABI | `src/harness/step-contracts.ts` | runtime validation for named manifest input/output contracts |
 | Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
 | Agent prompts | `harness/prompts/` and `harness/steps/*/prompt.md` | global planner/analyzer prompts and colocated step instructions |
@@ -52,17 +54,17 @@ The editable source pack is [`harness/`](../../harness). Its current ownership i
 `loadHarnessPack` in
 [`src/harness/loader.ts`](../../src/harness/loader.ts) validates these files, loads prompt
 content and hashes, resolves enabled policies, applies project configuration, and produces one
-immutable catalog. The exact catalog exposed to the planner is assembled by
+  immutable catalog. The exact semantic catalog exposed to the planner is assembled by
 [`src/planning/analyzer-context.ts`](../../src/planning/analyzer-context.ts):
 
 - policy-owned blocks are absent when their policy does not apply to the task origin;
 - process blocks are absent when neither company nor project policy binds their executor to a
   command;
 - each remaining block includes its description, stage, input/output contract, effects,
-  capabilities, artifacts, completion evaluator, execution profile, prompt path/hash, and
-  logical skills;
-- the planner selects only from this catalog and the registered graph primitives, predicates,
-  and waits. It cannot invent a step, prompt, model, effect, or shell command.
+  capabilities, artifacts, completion evaluator, execution profile, prompt path/hash,
+  logical skills, and internal operation protocol;
+- the planner selects only from this catalog and semantic sequence/loop/step primitives.
+  It cannot invent a step, prompt, model, effect, shell command, or recovery tree.
 
 `harness/steps/<step>/step.json` is the only production block catalog. Agent prompts are local
 paths inside the same atomic step package. There is no built-in fallback in TypeScript: removing
@@ -83,10 +85,12 @@ There is no ambient access to the whole harness:
 2. A selected agent block receives the full snapshotted step prompt, typed step input, current
    run evidence, operator guidance when resuming, the resolved provider/model profile, and only
    global/project ambient skills plus that block's base, project-step, and policy bindings.
-3. A process block receives a typed sequence of `{ command, args }` invocations already bound by
-   company/project policy. No shell string is parsed and no LLM is invoked.
-4. An integration block receives a typed adapter and durable effect/reconciliation boundary. No
-   LLM is allowed to perform the remote mutation directly.
+3. A Verify block receives exact process/runtime operations already bound by
+   company/project policy. Each operation has its own receipt; no shell string is emitted
+   by the planner.
+4. A Delivery block receives typed Git/tracker/SCM/CI adapters and durable
+   effect/reconciliation boundaries. An LLM may draft content but cannot perform the
+   remote mutation directly.
 
 [`src/providers/agent-skills.ts`](../../src/providers/agent-skills.ts) materializes the selected
 skill subset into an isolated Codex or Claude provider home. The agent runner in
@@ -112,41 +116,44 @@ task + linked context + bounded repository evidence
         appended investigation evidence, then re-plan
                          |
                          v
-          implementation plan + workflow candidate
+       implementation plan + semantic workflow candidate
                          |
                          v
-             compile -> validate -> optional review
+        validate -> compile executable IR -> optional review
                          |
-                 frozen graph hash
-                         |
-                         v
-     generic Temporal Workflow interprets the graph
+        frozen semantic hash + executable hash
                          |
                          v
-       registered Activities execute individual blocks
+     generic Temporal Workflow interprets executable IR
+                         |
+                         v
+       semantic blocks execute observable operations
 ```
 
 Context discovery gathers a bounded starting evidence set without creating a graph.
 The mandatory planner decides whether it needs a blocking answer, a registered
-investigation block, or can return the plan and first complete workflow candidate. The
+investigation block, or can return the plan and first complete semantic workflow candidate. The
 validator decides whether each candidate is safe and complete. The interpreter sees only
-the frozen graph and records execution progress. Activities perform I/O. Keeping these
+the frozen executable IR and semantic reference and records execution progress.
+Activities perform I/O. Keeping these
 roles separate is what lets a new company or process replace one layer without rewriting
 the application. See
 [`planning-lifecycle.md`](planning-lifecycle.md) for the complete lifecycle.
 
 ## 3. Add a workflow block
 
-A block has a stable reference such as `test_ops.fill_plan@1` and exactly one execution
-kind:
+A semantic block has a stable reference such as `test_ops.fill_plan@1` and one primary
+execution protocol:
 
-- `agent`: invokes a provider with a versioned prompt and logical skills;
-- `process`: invokes a registered policy-owned command/process adapter;
-- `integration` in the file manifest, materialized as an `effect` executor in the
-  immutable Block Definition: invokes a typed adapter with external-effect
-  reconciliation.
+- `agent`: invokes one provider episode with a versioned prompt and logical skills;
+- `verification`: executes exact policy-owned commands and optional runtime/visual agent
+  judgment;
+- `delivery`: invokes typed Git/tracker/SCM/CI operations with external-effect
+  reconciliation;
+- a task-specific human/external protocol such as translation or package publication.
 
-Waits and gates are graph nodes/messages, not fake executors.
+Waits are typed states owned by the active semantic block or a real task-specific human
+boundary. Potential recovery waits are not predeclared sibling nodes.
 
 To add `fill-test-ops-plan`:
 
@@ -167,19 +174,19 @@ This must not require changes to the generic interpreter, task queue, Temporal C
 operator layout, or another block. If it does, first prove that the behavior is a new
 generic control-flow concept rather than an ordinary task step.
 
-For a `process` block, add its executor key and typed execution plan to the relevant
+For a verification operation, add its executor key and typed execution plan to the relevant
 `processCommands` map in company or project policy. A plan contains one or more ordered
 `{ command, args }` invocations and an optional timeout. The analyzer sees the available
-block; execution uses the whole plan captured in that run's immutable snapshot and stops
-at the first failing invocation. Do not add shell composition or step-name branching to
-an Activity.
+Verify profile; execution uses the whole plan captured in that run's immutable snapshot
+and stops at the first failing invocation. Commands appear in the owning attempt log, not
+as task workflow nodes. Do not add shell composition or step-name branching to an Activity.
 
-Project validation is a concrete example. `validate.targeted@1`, `validate.full@1`,
-`validate.build@1`, and `validate.visual@1` are reusable process contracts. Each project binds
-only the supported executor keys to exact commands in its `processCommands` map. The planner
-selects a registered block; it never emits shell. A non-zero command exit remains a completed,
-receipted diagnostic result so the frozen graph can decide whether to run `code.repair@1`.
-`validation.visual@1` is deliberately absent from the initial six profiles: their
+Project validation is a concrete example. Each project binds only supported targeted,
+full, build, or visual operation keys to exact commands in its `processCommands` map. The
+planner selects a Verify profile; it never emits shell. A non-zero command exit remains a
+completed, receipted diagnostic result and a failed Verify domain verdict, so the visible
+Development loop starts another Implement attempt. Visual verification is deliberately
+absent from profiles whose
 repository scripts run broad Playwright suites. It becomes available only after the
 contract can carry and validate a task-specific selector.
 
@@ -300,8 +307,8 @@ Keep these boundaries distinct:
 - **ambient skills** are explicitly declared global or project scope;
 - **step skills** are selected by one immutable agent-step binding (`playwright-demo` for
   reproduction/visual verification, CI readers for CI analysis);
-- **integration effects** are performed only by typed Activities (`pr.prepare@1`, Jira
-  mutation, publication), never by a catch-all skill.
+- **integration effects** are performed only by typed internal Delivery operations (Git
+  push, PR, Jira mutation, publication), never by a catch-all skill.
 
 The old `pr-finalize` skill is therefore migration input, not the Tasker execution model:
 it combines several remote effects and approval points which Temporal must persist and
@@ -316,9 +323,9 @@ universal before/after recipe.
 
 Policy `path_sequence` obligations accept `direction: "before"` and
 `direction: "after"`. Use `before` for prerequisites such as evidence required before
-PR publication. Use `after` for continuations such as revision -> PR update -> CI ->
-thread acknowledgement -> review. This validates a dynamically assembled graph without
-turning the sequence into a Temporal branch.
+PR publication. Use `after` for semantic continuations such as revision -> Delivery ->
+human review. Internal PR update, CI, and thread acknowledgement operations remain
+independently receipted without becoming planner-authored nodes.
 
 A policy may declare `appliesTo.taskOrigins` and task-evidence selectors, so Jira-only
 blocks are absent from test inputs or a future GitLab Issue analyzer context, while
@@ -338,7 +345,7 @@ Project policy describes workflow peculiarities, not source architecture. Good f
 - `translations.kind = none`: Tasker adds no special translation workflow; locale files and
   ordinary repository commands remain implementation details;
 - `translations.kind = human_handoff`: the repository has a proven extract -> human wait -> pull
-  process and explicitly binds the corresponding process steps;
+  process and explicitly binds the corresponding semantic protocol operations;
 - changed CSS/visual surfaces require screenshot verification;
 - changes in a specific package require build A and tests B/C;
 - final publication is human-owned;
@@ -383,7 +390,7 @@ snapshots. Disabling it and restarting Tasker removes the skill from future runs
 snapshotted running work remains unchanged. A policy may still declare path obligations
 or policy-owned blocks when it represents an independently recoverable external effect
 or human wait. Do not use either merely to display an internal checklist item. The
-generic `pr.prepare@1` integration remains unaware of AI policy. No Temporal Workflow,
+generic Delivery protocol remains unaware of AI policy. No Temporal Workflow,
 API route, or Bitbucket adapter changes when this policy is removed.
 
 The current file-backed manifest vocabulary deliberately reuses named runtime schemas
@@ -433,6 +440,20 @@ The repository preparation Activity:
 8. keeps the same worktree and runtime state across questions, waits, worker restarts,
    and plan revisions.
 
+Execution mounts are effect-derived, not prompt-derived. Every agent container receives
+separate run/step-scoped surfaces:
+
+```text
+/workspace         product worktree
+/tasker/scratch    disposable temporary files
+/tasker/artifacts  durable evidence pending import
+/tasker/cache      project/provider caches
+```
+
+A block without `workspace.write` receives `/workspace` read-only. Scratch is the only
+place for temporary reproduction specs; durable evidence is registered from the artifact
+root. Neither location relies on `.gitignore` or filename conventions for isolation.
+
 `TASKER_WORKSPACE_HARNESS_PATH` can select another portable pack and
 `TASKER_HARNESS_SNAPSHOT_STORE` can relocate immutable snapshots. There is no external
 host bootstrap command: project executable setup belongs to the Docker runtime policy,
@@ -472,13 +493,11 @@ The generic external-effect journal is reusable, but reconciliation remains
 effect-specific. A Git ref, Jira comment, package version, and PR thread have different
 proof surfaces; do not hide them behind a generic “exactly once” claim.
 
-Human waits may expose a provider-neutral `resolutionMapping` that turns a small typed
-decision into predicate facts. Graphs can branch or loop on those facts without adding
-vendor logic to Temporal. A bounded loop that cannot safely fail may declare an
-`exhaustedWait`; after its attempt budget, Tasker asks the operator for guidance and
-passes that text to the first step of the next cycle. Add these semantics only to the
-workflow contract/catalog. Bitbucket parsing and reply APIs stay in the adapter, while
-the actual revision instructions stay in an editable file-backed step prompt.
+Human waits may expose a provider-neutral resolution mapping that turns a small typed
+decision into semantic-block state. A bounded Development loop can open operator
+guidance after its budget. Bitbucket parsing and reply APIs stay in the adapter, while
+actual revision evidence materializes one implementation continuation only after real
+comments exist.
 
 For Jenkins, project manifests configure only the replaceable provider mapping:
 
@@ -486,17 +505,17 @@ For Jenkins, project manifests configure only the replaceable provider mapping:
 { "ci": { "kind": "jenkins", "job": "front-avia" } }
 ```
 
-`ci.observe@1` remains a normal file-backed graph block. Moving to GitLab CI means
-binding the same contract to another read adapter and changing project/company policy;
+CI observation is an internal, independently receipted Delivery operation. Moving to
+GitLab CI means binding the same operation contract to another read adapter and changing project/company policy;
 it does not require a Temporal Workflow branch.
 
-CI control flow is assembled from provider-neutral facts and blocks. The observation contract
-must map every terminal result to all registered CI predicates so a later observation replaces,
-rather than leaks, the previous verdict. `ci.repair@1` is an editable agent block and prompt;
-flaky, infrastructure, and unknown outcomes are durable wait contracts. The graph compiler accepts
-provider-specific adapters but the obligation validator requires a `ci.passed@1` proof after
-observation and before human review. A provider-specific retry mutation needs its own reconciled
-effect block; it must not be added to the read-only observer.
+Delivery control flow consumes provider-neutral CI facts. The observation contract maps
+every terminal result to one typed outcome so a later observation replaces, rather than
+leaks, the previous verdict. Task-caused failure materializes one implementation
+continuation; flaky, infrastructure, and unknown outcomes remain typed states of the
+active Delivery block. The semantic validator requires exact-revision CI proof before
+human review. A provider-specific retry mutation needs its own reconciled internal
+operation; it must not be hidden inside the read observer.
 
 Moving to GitLab Issues and GitLab CI should require:
 
@@ -521,10 +540,10 @@ remains in its artifact store. Keep any remote-media policy off until a selected
 task and its transition requirements have been inspected.
 
 Required transition fields are not duplicated in Tasker configuration. Jira remains
-their source of truth: before `jira.start-work@1` or `jira.review-ready@1` mutates an
+their source of truth: before an Implement-admission or Delivery-review-ready operation mutates an
 issue, the adapter reads the selected transition metadata and current issue values. If
 a required value such as Development estimate is absent, the run names the exact Jira
-field and waits. Fill it in Jira and press Resume; Tasker re-runs only that block and
+field and waits. Fill it in Jira and press Resume; Tasker re-runs only that operation and
 preserves the already completed workflow prefix. It does not guess or write business
 estimates on the operator's behalf.
 
@@ -534,10 +553,13 @@ Execution profiles live in `harness/company.json`. A profile is a complete execu
 choice, not a loose model alias. Codex profiles declare `provider`, `command`, `model`,
 `effort`, `timeoutMs`, and `serviceTier`; Claude profiles declare the same fields except
 the Codex-specific service tier. `executionProfileRouting` selects profiles for workflow
-analysis and both implementation-planning strategies.
+analysis and implementation-planning strategies. Task execution additionally resolves a
+registered `simple`, `standard`, or `complex` strategy to logical context,
+implementation, verification, and review profiles.
 
 Agent step manifests reference logical profiles such as `investigation`,
-`implementation`, `verification`, `documentation`, or `review`. To use Claude for deep
+`implementation`, `verification`, `documentation`, or `review`. A planner may choose a
+strategy enum but never a raw provider/model. To use Claude for deep
 planning without changing a prompt, block, or Temporal module, register a Claude profile
 and point `executionProfileRouting.implementationPlanner.ralplan` at it. To change only
 one repository, set `executionProfileOverrides` in that project's manifest:
@@ -551,8 +573,8 @@ one repository, set `executionProfileOverrides` in that project's manifest:
 }
 ```
 
-Resolution order is explicit run override, project redirect, then company route or the
-logical profile named by a step. Every referenced profile is validated when the harness
+Resolution order is explicit run override, project strategy/profile redirect, then
+company strategy route or the logical profile named by a step. Every referenced profile is validated when the harness
 pack loads. Removing or misspelling one is a configuration error; there is no default
 model and no compatibility mapping. A run records the resolved profile rather than
 re-reading configuration during retry or resume.
@@ -597,8 +619,8 @@ Reproduction or implementation may discover a shared component, translation proc
 or additional verification requirement. The Activity returns
 `workflow_change_required`; it does not edit Workflow state itself.
 
-Tasker asks the analyzer for a validated continuation and starts the accepted graph as
-a Child Workflow. The parent keeps its completed prefix immutable and waits on a typed
+Tasker asks the analyzer for a validated semantic continuation, compiles it, and starts
+the accepted executable IR as a Child Workflow. The parent keeps its completed prefix immutable and waits on a typed
 join. A different repository may additionally require its own managed worktree and
 publication lifecycle, but does not change this control-flow rule.
 
@@ -607,7 +629,7 @@ auto-accepted by policy, but deterministic validation never becomes optional.
 
 ## 12. When interpreter changes are justified
 
-Change the generic interpreter only for a new domain-independent control-flow semantic,
+Change the generic interpreter only for a new domain-independent executable-control-flow semantic,
 for example a formally specified parallel join mode that cannot be represented by
 existing sequence/branch/loop/wait/child concepts.
 
@@ -631,7 +653,10 @@ Before accepting customization:
 - is it a block/policy/adapter/obligation instead of a hidden workflow template?
 - is every untyped boundary validated?
 - are effects, idempotency, reconciliation, retries, timeouts, and cancellation explicit?
-- can the operator read the prompt and see why the graph contains the block?
+- can the operator read the prompt and see why the semantic workflow contains the block?
+- do every command, integration, commit, artifact and verdict remain inspectable without
+  becoming task workflow nodes?
+- is read-only access enforced by container mounts?
 - does Temporal history stay small and secret-free?
 - does recovery resume the failed boundary without discarding earlier work?
 - does the change affect only future immutable snapshots/attempts?

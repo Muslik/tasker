@@ -137,28 +137,28 @@ The provider boundary carries `decision` and `evidenceRequests` as direct struct
 values. They are never JSON serialized inside string fields. Provider-only output
 schemas may make optional workflow-node fields required and nullable when a subscription
 CLI requires every declared property in `required`; the adapter removes those nulls
-before validating the stricter domain decision. The domain plan and workflow contracts
+before validating the stricter domain decision. The domain plan and semantic workflow contracts
 do not inherit this transport concession.
 
 Planning chooses whether verification reuses an existing automated test, creates a new
 test during implementation, runs a registered project process, records runtime evidence,
 or performs bounded inspection. No verification kind is mandatory for every task, and
-there is no generic test-materialization block. For a reproduced bug, the planner can
-combine a regression test with `bug.validate_fix@1`, which repeats the investigated
-scenario after implementation.
+there is no generic test-materialization block. For a reproduced bug, the planner binds
+the investigated scenario to the selected Verify semantic block and may additionally
+request a committed regression test.
 
 An external evidence request is a provider protocol response, not a fourth planning
 decision. The provider may not return a provisional decision while requesting evidence.
 
-The planner selects from registered blocks; it does not invent a provider, model, skill,
+The planner selects from registered semantic blocks; it does not invent a provider, model, skill,
 step reference, command, or effect. Provider/model selection comes from a named,
 snapshotted execution profile. Project blocks lacking required configuration, such as
 an unconfigured process command, are absent from that run's planning catalog.
 
 ## Pre-plan investigation
 
-Investigation is neither a hard-coded bug workflow nor part of the frozen execution
-graph. A planner may request `bug.investigate@1` when reproduction evidence is needed,
+Investigation is neither a hard-coded bug workflow nor part of the frozen executable
+workflow. A planner may request a registered bootstrap investigation block when reproduction evidence is needed,
 or skip it when existing evidence is sufficient or the task is not a bug.
 
 Bootstrap investigation uses the same generic block runner, provider profiles,
@@ -171,8 +171,8 @@ as ordinary agent work. The differences are explicit in the block contract:
 
 Completed investigation receipts are appended to the Evidence Bundle with provenance,
 then the planner runs again. `before` reproduction media remains private Tasker evidence;
-Tasker does not attach it to Jira. The frozen bug workflow normally contains only the
-implementation and post-fix proof.
+Tasker does not attach it to Jira. The frozen semantic workflow binds post-fix proof to
+Verify instead of creating a later reproduction sibling node.
 
 An exhausted Activity retry opens `investigation.retry@1` on the same Temporal run and
 worktree. An agent uncertainty opens its typed `needs_input` wait. Neither condition

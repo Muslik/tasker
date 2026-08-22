@@ -12,7 +12,7 @@ invariants live in [`architecture.md`](architecture.md); sequencing lives in
 |---|---|---|
 | Language | TypeScript on Node.js 24 | Existing codebase/provider integrations and one type system |
 | Durable execution | Temporal TypeScript SDK | Proven recovery, waits, messaging, retries, queues, and versioning |
-| Workflow model | Generic deterministic interpreter over Tasker's compiled JSON IR | Dynamic per-task workflows without dynamic code deployment |
+| Workflow model | Task-specific Semantic Workflow Source compiled deterministically to JSON execution IR interpreted by one stable Temporal Workflow | Keep planner/operator meaning small without dynamic code deployment or planner-authored recovery mechanics |
 | Boundary validation | Zod | Existing schemas, runtime validation, JSON Schema export |
 | Product store | SQLite/WAL with `better-sqlite3` initially | Local-first metadata/artifacts/indexes; not execution authority |
 | HTTP/control plane | Fastify | Existing typed local API and SSE-compatible surface |
@@ -65,9 +65,10 @@ ExecutionWorkflowV2(input: ExecutionWorkflowInput): Promise<ExecutionWorkflowRes
 ```
 
 Bootstrap owns workspace/context preparation, mandatory planning, optional plan review,
-draft validation, and freeze. Execution receives the frozen graph and opaque context
-references only. A validated continuation starts a new Bootstrap or Execution Workflow
-according to whether it needs planning or is already frozen.
+semantic draft validation, deterministic compilation, and freeze. Execution receives
+the frozen executable IR, semantic workflow reference, and opaque context references
+only. A validated continuation starts a new Bootstrap or Execution Workflow according
+to whether it needs planning or is already frozen.
 
 Bootstrap input contains only bounded, immutable, non-secret data:
 
@@ -78,10 +79,10 @@ Plan acceptance is the execution boundary. Bootstrap freezes the validated graph
 starts Execution immediately; a second manual execution-start policy is not part of
 the public contract.
 
-It does not contain a graph, graph hash, repository path, or planning snapshot. Bootstrap
-creates those only after the managed worktree and Docker runtime exist. Execution input
-then receives the frozen compiled graph, IR ABI version, and opaque artifact/context
-references needed to interpret it.
+It does not contain a semantic workflow, executable IR, repository path, or planning
+snapshot. Bootstrap creates those only after the managed worktree and Docker runtime
+exist. Execution input then receives the frozen executable IR, IR ABI version, semantic
+artifact reference, and opaque artifact/context references needed to interpret it.
 
 Workflow code may use Temporal Workflow APIs, pure helpers, and deterministic Tasker IR
 logic. It may not import filesystem, database, network, provider, Jira, Bitbucket, or
@@ -133,7 +134,7 @@ Activities are grouped by domain boundary rather than one enormous executor:
 | intake/repository | sync task, resolve repo, clone/fetch, allocate worktree, bootstrap harness |
 | planning | analyze task/repo, assemble graph revision, create/revise implementation plan |
 | agent | execute versioned prompt/skills with a registered provider profile (Codex and Claude today) |
-| process | run registered build/test/reproduction commands, capture media |
+| verification operation | run registered build/test commands and capture runtime/media evidence inside the owning Verify block |
 | SCM/tracker | branch/push/PR/thread/Jira comment operations |
 | CI | start/observe Jenkins, fetch Allure evidence, classify failure |
 | package/translation | extract/pull translations, dev-publish probe, released-version probe |
@@ -169,9 +170,11 @@ the matching Temporal Activity route:
 - `single_attempt`: no automatic Activity retry. Process and external-effect adapters
   remain here until they implement effect-specific reconciliation.
 
-Logical workflow retry budgets remain separate from Activity redelivery. A new logical
-attempt may use operator guidance or another bounded-loop iteration; a Temporal
-redelivery has the same operation ID and must only recover the interrupted attempt.
+Logical semantic-block retry budgets remain separate from Activity redelivery. A new
+logical attempt may use operator guidance, another visible Development-loop iteration,
+or one fact-triggered continuation; a Temporal redelivery has the same operation ID and
+must only recover the interrupted attempt. Potential CI/review recovery is not expanded
+into the initial task graph.
 
 | Class | Default handling |
 |---|---|
@@ -208,6 +211,7 @@ semantics.
 - normalized task and cached Jira projections;
 - repository catalog, checkout/worktree/bootstrap locators;
 - workflow source/rationale and artifact bodies;
+- semantic-to-executable provenance and compiler receipts;
 - prompts/skills/policy/block snapshots and hashes;
 - transcripts, screenshots, videos, test/Allure reports;
 - remote-effect intents/receipts/reconciliation evidence;
@@ -234,20 +238,22 @@ state, attention state, repository key, and graph revision.
 
 ## 9. Candidate revisions and execution continuations
 
-Before product execution, no graph exists until the mandatory planner returns `ready`
-with a plan and complete workflow candidate. The compiler and all deterministic
-validators run against that candidate. Rejection is persisted with exact feedback and
-the rejected decision; the planner must return a complete replacement candidate. Only
-an accepted candidate can be frozen.
+Before product execution, no semantic workflow exists until the mandatory planner
+returns `ready` with a plan and complete semantic candidate. Deterministic validators
+and the compiler run against that candidate. Rejection is persisted with exact feedback
+and the rejected decision; the planner must return a complete replacement candidate.
+Only an accepted semantic source plus its compiled executable IR can be frozen.
 
 After freeze, an execution Activity may return `workflow_change_required`. A planning
-Activity then produces a new compiled continuation artifact. The Workflow records its
-hash and decision.
+Activity then produces a new semantic continuation and compiled executable artifact.
+The Workflow records both hashes and the decision. Review/CI repair continuations are
+created only after a real changes-requested/task-caused fact.
 
 An accepted continuation starts as a Child Workflow and the parent waits for its typed
-result. This preserves the accepted parent graph and its completed prefix without
-teaching the interpreter how to mutate graph input. Ordinary branches inside an
-accepted graph remain interpreter nodes and do not create Child Workflows.
+result. This preserves the accepted parent semantic workflow, executable IR, and
+completed prefix without teaching the interpreter how to mutate input. Ordinary control
+flow inside accepted executable IR remains interpreter data and does not create Child
+Workflows.
 
 During the pilot, a run-policy flag may require operator approval for the accepted plan
 and candidate, and separately for execution continuations.
@@ -258,7 +264,8 @@ disabled.
 
 Provider selection is configuration, not workflow structure. Named company profiles
 contain the subscription CLI, model, effort, timeout, and provider-specific options;
-company routes and project redirects select among them. Codex and Claude implement the
+company strategy routes and project redirects select among them. A task selects only a
+registered `simple`, `standard`, or `complex` strategy, never a raw model. Codex and Claude implement the
 same structured Activity contract. Unknown profiles fail pack loading, and the resolved
 profile is frozen into the run snapshot. Any additional provider requires its own adapter and a
 registered profile before it can be selected.
@@ -279,12 +286,16 @@ is explicitly unrated. Subscription use does not claim that amount was charged.
 The API merges:
 
 - Temporal Workflow Query/Describe/Visibility data for live runtime state;
-- Tasker product data for Jira content, rationale, artifacts, transcripts, costs, and
-  retrospectives.
+- the frozen semantic source for operator structure;
+- executable provenance for exact runtime correlation;
+- Tasker product data for Jira content, operation events, changesets, commits, artifacts,
+  transcripts, costs, and retrospectives.
 
-The selected run may stream Activity-owned transcript events from Tasker storage and
-receive runtime state changes through a bounded projection stream. Temporal Event
-History is available in diagnostics but is not rendered as raw operator activity.
+Every current or completed semantic-step attempt may stream/read normalized Run Events
+from Tasker storage: agent messages, integration calls, commands/output references,
+workspace changes, commits, artifacts, verdicts, and usage. Temporal Event History is
+available in diagnostics but is not rendered as raw operator activity. Raw provider
+JSONL and executable IR are secondary diagnostic surfaces.
 
 Pino logs are bounded/redacted infrastructure diagnostics. Routine Jira sync success or
 failure updates sync health only. OpenTelemetry export may be added after the Temporal

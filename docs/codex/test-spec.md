@@ -1,6 +1,6 @@
 # Tasker Temporal test specification
 
-Status: canonical acceptance and recovery specification, 2026-08-13
+Status: canonical semantic-workflow cutover acceptance specification, 2026-08-22
 
 Production isolation invariant: test builders stay under `test/support`. The server,
 workflow subject source, harness loader, and operator API expose no fixture task source,
@@ -13,7 +13,7 @@ do not re-test Temporal internals or preserve legacy queue/lease implementation 
 
 Use four layers:
 
-1. pure unit/property tests for IR, compiler, validator, interpreter helpers, policies,
+1. pure unit/property tests for semantic source, executable IR, compiler, validator, interpreter helpers, policies,
    schemas, and cost calculations;
 2. Temporal time-skipping integration tests with mocked Activities for Workflow state,
    messages, timers, retries, graph revisions, and child coordination;
@@ -31,18 +31,18 @@ duplicate-effect invariant.
 
 Every accepted implementation must prove:
 
-- a generated graph is rejected until its IR, ABI, capabilities, effects, bounds, and
-  semantic obligations validate;
+- a generated semantic workflow is rejected until its capabilities, effects, bounds,
+  obligations, executable IR and ABI validate;
 - context discovery and every planner read append provenance-bearing evidence instead
   of overwriting prior observations;
 - initial context discovery and mandatory planning run through Temporal, reuse persisted
   evidence and an accepted planner decision, and resume after transient bootstrap failure;
 - exhausted bootstrap Activity retries expose the bounded root cause in the durable
   operator wait instead of requiring worker-log access;
-- a draft graph cannot execute product effects before planning, recompilation,
+- a draft semantic workflow cannot execute product effects before planning, compilation,
   deterministic validation, and configured plan review complete;
 - a planning workflow proposal cannot mutate the draft or bypass the compiler directly;
-- every initial graph is assembled for its task, not selected from a base template;
+- every initial semantic workflow is assembled for its task, not selected from a base template;
 - Temporal is the only authority for execution position, waits, timers, and retries;
 - Workflow code is deterministic and imports no I/O/provider/database/process modules;
 - the Execution Workflow contains no named planning, Docker, provider, tracker, SCM,
@@ -55,7 +55,7 @@ Every accepted implementation must prove:
 - human waits consume no Activity worker slot;
 - duplicate messages and Activity delivery do not duplicate remote effects;
 - blocking uncertainty pauses for an answer regardless of plan-review preference;
-- graph/plan/prompt/policy revisions are immutable and provenance-bearing;
+- semantic/executable/plan/prompt/policy revisions are immutable and provenance-bearing;
 - large artifacts and secrets do not enter Workflow payloads, Search Attributes, or
   logs;
 - two task states are independent;
@@ -68,13 +68,20 @@ Every accepted implementation must prove:
 - retrospective changes require human approval.
 - one provider invocation produces exactly one agent row with its snapshotted profile,
   skills and attempts;
-- one configured process command produces exactly one process row;
-- deterministic sequence, branch, loop, retry, integration and finalize nodes never
-  produce operator rows;
+- one configured command or integration call produces one internal operation event under
+  its owning semantic attempt, not a task workflow row;
+- deterministic executable sequence, branch, retry, reconciliation and finalize nodes
+  never produce operator rows;
+- a selected semantic loop produces one operator container with attempt history;
 - planned future stages have no child rows until execution starts them;
 - an unselected conditional recovery body remains absent;
 - an operator wait uses the same attention treatment in the graph and decision surface;
 - light and dark themes preserve readable status and attention contrast across reloads.
+- read-only agent blocks receive a physically read-only product mount;
+- scratch/artifacts live outside the product worktree;
+- transport completion and domain verdict project independently;
+- every current and completed semantic attempt remains addressable with commands,
+  outputs, changesets, commits, artifacts, and usage.
 
 ## 3. Pure domain tests
 
@@ -82,7 +89,9 @@ Every accepted implementation must prove:
 
 Required scenarios:
 
-- `task_specific_source_compiles_to_stable_hash`
+- `task_specific_semantic_source_compiles_to_stable_semantic_and_executable_hashes`
+- `simple_bug_semantic_source_has_at_most_ten_nodes`
+- `compiled_recovery_mechanics_are_absent_from_planner_source`
 - `same_semantics_with_different_object_order_has_same_hash`
 - `unknown_step_version_is_rejected`
 - `unbounded_loop_is_rejected`
@@ -90,10 +99,11 @@ Required scenarios:
 - `step_without_required_capability_is_rejected`
 - `effect_without_reconciliation_contract_is_rejected`
 - `bug_investigation_requirement_is_selected_from_task_evidence`
-- `bug_fix_without_declared_validation_is_rejected`
+- `bug_fix_without_verify_criterion_is_rejected`
 - `write_path_without_verification_is_rejected`
 - `pr_path_without_ci_and_code_review_is_rejected`
-- `compiler_does_not_silently_insert_missing_obligation`
+- `compiler_does_not_silently_insert_missing_semantic_work`
+- `compiler_may_lower_only_selected_registered_block_protocols`
 - `company_or_vendor_payload_is_absent_from_workflow_domain`
 
 ### 3.2 Interpreter
@@ -108,8 +118,8 @@ Required scenarios:
 - `graph_revision_preserves_completed_node_set`
 - `terminal_state_cannot_return_to_runnable`
 - `agent_completion_claim_without_required_evidence_remains_incomplete`
-- `nonzero_declared_validation_is_completed_diagnostic_evidence_not_activity_failure`
-- `validation_output_maps_to_registered_passed_or_failed_predicates`
+- `nonzero_verification_operation_is_completed_diagnostic_evidence_and_failed_domain_verdict`
+- `transport_success_never_projects_as_verify_passed_without_domain_evidence`
 - `agent_review_output_maps_to_registered_review_predicates`
 - `receipt_redelivery_restores_identical_predicate_facts_without_reinvoking_provider`
 - `output_predicate_reference_declared_by_manifest_is_registered`
@@ -257,6 +267,11 @@ For a representative run, inspect Event History and Search Attributes:
 - provider session resume failure starts a new attempt from persisted context;
 - process exit classification distinguishes task failure, infra failure, and cancellation;
 - no nested generic retry multiplies Temporal Activity attempts.
+- every provider/integration/command event is normalized into the same attempt stream;
+- completed attempts remain readable after the workflow advances;
+- large stdout/stderr uses bounded event previews plus complete referenced artifacts;
+- a registered Luna profile and a registered Claude profile satisfy the same step
+  contract without changing workflow structure.
 
 ### 6.2 Worktree recovery
 
@@ -268,6 +283,14 @@ For a representative run, inspect Event History and Search Attributes:
   twice;
 - dirty/conflicting state opens typed attention instead of destructive reset;
 - deleting/recreating API process does not lose worktree locator.
+- read-only investigation receives a read-only `/workspace` mount;
+- temporary reproduction code is created only in `/tasker/scratch` and cannot enter Jest,
+  Playwright, or repository discovery unless invoked explicitly;
+- `/tasker/artifacts` evidence is imported by logical ID and remains readable after
+  scratch cleanup;
+- add/modify/delete/rename/binary changes and local commits produce one immutable
+  `WorkspaceChangeSet` per attempt;
+- hygiene failure is attributed to the owning step before downstream Verify starts.
 
 ### 6.3 Jira
 
@@ -326,7 +349,7 @@ For each mutation adapter, inject process termination:
 Playwright acceptance scenarios:
 
 1. task list shows per-task state, attention, elapsed time, and cost independently;
-2. selecting a task shows its agent/process stream in the center and active graph on the
+2. selecting a task shows its unified run stream in the center and active semantic workflow on the
    right;
 3. start form includes optional repository and plan-review checkbox;
 4. plan review accepts feedback and visibly creates a new attempt;
@@ -345,13 +368,19 @@ Playwright acceptance scenarios:
 14. an operator-confirmed restart terminates an unfinished run, preserves its Temporal
     history, and creates a new run/workspace with the same task settings; an unconfirmed
     request is rejected.
+15. a completed step can be opened and shows agent messages, full commands, referenced
+    stdout/stderr, Jira/CI operations, changesets, commits, artifacts, verdict and usage;
+16. one Development loop renders once with current/max attempt and causal failure;
+17. failed Verify is not green merely because its Activity completed;
+18. future CI/review recovery is absent until a real outcome materializes it;
+19. file diff and artifact views survive reload and worker restart.
 
 ## 8. Delivery gates
 
 ### Kernel v2 gate
 
 - Bootstrap and Execution v2 are the only API/worker path;
-- two independently built frozen graphs run concurrently and survive worker replacement;
+- two independently built frozen semantic/executable pairs run concurrently and survive worker replacement;
 - separate durable waits resume only their own runs;
 - Workflow modules remain free of provider, filesystem, database, tracker, SCM, CI,
   Docker, and repository imports;
@@ -359,8 +388,8 @@ Playwright acceptance scenarios:
 
 ### Block contract gate
 
-- an agent candidate with no required evidence cannot advance the graph;
-- process, workspace mutation, structured artifact, and reconciled effect evaluators
+- an agent candidate with no required evidence cannot advance its semantic block;
+- verification operation, workspace mutation, structured artifact, and reconciled effect evaluators
   produce immutable Block Receipts;
 - redelivery after receipt persistence returns the same receipt;
 - question, infrastructure, continuation, contract, and permanent failure remain
@@ -380,6 +409,10 @@ Playwright acceptance scenarios:
   duplicate mutation;
 - an independent reviewer can reject the implementation before publication;
 - no remote mutation capability is needed to prove the local path.
+- investigation cannot write the product mount and cannot leak scratch into later
+  project validation;
+- safe evidence representation normalization does not reinvoke the provider;
+- implementation can create reconciled local commits without push.
 
 ### Remote delivery and CI gate
 
@@ -387,8 +420,8 @@ Playwright acceptance scenarios:
 - Jira/Bitbucket effects reconcile response loss and 400/403 without repeating local
   work;
 - CI distinguishes passed, caused-by-change, flaky, infrastructure, and unknown;
-- review revisions rerun the selected validation/reviewer/CI suffix on the same PR and
-  worktree;
+- review and task-caused CI revisions materialize one linked semantic continuation on the
+  same PR and worktree instead of precompiling nested recovery trees;
 - before-reproduction evidence remains private; only an explicit final-demo policy may
   publish run media.
 
@@ -408,3 +441,12 @@ Playwright acceptance scenarios:
 - every recovery resumes from the correct boundary;
 - operator interventions, time, and cost are measurable;
 - retrospective changes are proposed and manually approved, never self-applied.
+
+Before the next real Jira pilot, a synthetic simple-bug journey additionally proves:
+
+- no more than ten semantic nodes and one initial Development loop;
+- Luna profiles are frozen for simple context/implementation and an independent stronger
+  review profile is used;
+- attempt 1 Verify failure advances to attempt 2 without a separate `code.repair` node;
+- mock PR/CI reaches the human-review wait and survives worker restart;
+- all legacy expanded-recovery step registrations and projection schemas are deleted.
