@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { BlockReceiptSchema, blockReceiptId } from '../blocks/index.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import { TaskStepOutputArtifactSchema } from '../temporal/task-step-output.js';
 import type { ExecutionWorkflowPublicState } from '../temporal/index.js';
@@ -89,6 +90,17 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
       const parsed = TaskStepEvidenceArtifactSchema.safeParse(artifact.payload);
       return parsed.success ? [{ artifactId, ...parsed.data }] : [];
     });
+    const receiptId = blockReceiptId({
+      workflowId: execution.workflowId,
+      workflowRunId: execution.runId,
+      nodeId,
+      blockRun,
+    });
+    const receiptArtifact = this.ledger.readArtifact(receiptId);
+    const receipt = BlockReceiptSchema.safeParse(receiptArtifact?.payload);
+    const mutation = receipt.success
+      ? receipt.data.evidence.find((item) => item.kind === 'workspace_mutation')
+      : undefined;
     return OperatorExecutionAttemptSchema.parse({
       schemaVersion: 1,
       taskReference: execution.taskReference,
@@ -99,6 +111,16 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
       transcript: transcript.value,
       output: output.value,
       evidence,
+      workspaceChanges:
+        mutation === undefined
+          ? null
+          : {
+              changed: mutation.changed,
+              fingerprint: mutation.fingerprint,
+              trackedDiffSha256: mutation.trackedDiffSha256 ?? null,
+              paths: mutation.changedPaths ?? [],
+              truncated: mutation.changedPathsTruncated ?? false,
+            },
     });
   }
 

@@ -90,6 +90,21 @@ export const OperatorExecutionAttemptSchema = z
     transcript: PlanningTranscriptViewSchema.nullable(),
     output: TaskStepOutputArtifactSchema.nullable(),
     evidence: z.array(OperatorEvidenceArtifactSchema),
+    workspaceChanges: z
+      .object({
+        changed: z.boolean(),
+        fingerprint: z.string().min(1),
+        trackedDiffSha256: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/u)
+          .nullable(),
+        paths: z.array(
+          z.object({ status: z.string().length(2), path: z.string().min(1) }).strict(),
+        ),
+        truncated: z.boolean(),
+      })
+      .strict()
+      .nullable(),
   })
   .strict()
   .readonly();

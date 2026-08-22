@@ -2567,6 +2567,38 @@ const ExecutionAttemptSurface = ({
               )}
             </div>
           )}
+          {attempt.workspaceChanges === null ? null : (
+            <div className="py-3">
+              <div className="flex items-center justify-between gap-3">
+                <strong className="text-xs font-medium">
+                  Files changed · {attempt.workspaceChanges.paths.length}
+                </strong>
+                {attempt.workspaceChanges.truncated ? (
+                  <span className="text-[10px] text-amber-700 dark:text-amber-300">truncated</span>
+                ) : null}
+              </div>
+              {attempt.workspaceChanges.paths.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">No product file changes</p>
+              ) : (
+                <ul className="mt-2 space-y-1 font-mono text-xs">
+                  {attempt.workspaceChanges.paths.map((file) => (
+                    <li
+                      className="flex min-w-0 items-center gap-2"
+                      key={`${file.status}:${file.path}`}
+                    >
+                      <span className="w-6 shrink-0 text-muted-foreground">{file.status}</span>
+                      <span className="min-w-0 break-all">{file.path}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {attempt.workspaceChanges.trackedDiffSha256 === null ? null : (
+                <p className="mt-2 break-all text-[10px] text-muted-foreground">
+                  diff {attempt.workspaceChanges.trackedDiffSha256}
+                </p>
+              )}
+            </div>
+          )}
           {attempt.evidence.length === 0 ? null : (
             <div className="py-3">
               <strong className="text-xs font-medium">Evidence · {attempt.evidence.length}</strong>

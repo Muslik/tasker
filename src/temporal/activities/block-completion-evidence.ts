@@ -121,6 +121,9 @@ export const collectBlockCompletionEvidence = async (
             reference: inspected.value.intentArtifactId,
             changed: inspected.value.changed,
             fingerprint: inspected.value.current.fingerprint,
+            trackedDiffSha256: inspected.value.current.trackedDiffSha256,
+            changedPaths: inspected.value.current.changedPaths,
+            changedPathsTruncated: inspected.value.current.changedPathsTruncated,
           });
         } else {
           issues.push(`Workspace completion inspection failed: ${inspected.error.kind}`);

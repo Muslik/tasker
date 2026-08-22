@@ -172,6 +172,19 @@ export const CompletionEvidenceSchema = z.discriminatedUnion('kind', [
       reference: EvidenceReferenceSchema,
       changed: z.boolean(),
       fingerprint: z.string().min(1),
+      trackedDiffSha256: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/u)
+        .optional(),
+      changedPaths: z
+        .array(
+          z
+            .object({ status: z.string().length(2), path: z.string().min(1) })
+            .strict()
+            .readonly(),
+        )
+        .optional(),
+      changedPathsTruncated: z.boolean().optional(),
     })
     .strict()
     .readonly(),

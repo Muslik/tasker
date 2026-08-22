@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { LedgerExecutionActivityReader } from '../../src/control-plane/execution-activity.js';
+import { BlockReceiptSchema, blockReceiptId } from '../../src/blocks/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { systemClock } from '../../src/shared/clock.js';
 import { TemporalTaskStepTraceStore } from '../../src/temporal/activities/block-execution.js';
+import { JsonValueSchema } from '../../src/workflow/schema.js';
 
 describe('execution activity', () => {
   let ledger: SqliteLedger | null = null;
@@ -69,7 +71,6 @@ describe('execution activity', () => {
         transcriptId: null,
       },
     });
-
     expect(
       new LedgerExecutionActivityReader(ledger.repository).readActivity('tasker:jira:AVIA-12329'),
     ).toEqual([
@@ -205,6 +206,59 @@ describe('execution activity', () => {
         transcriptId: `task-step-transcript:${operationId}`,
       },
     });
+    const receiptId = blockReceiptId({
+      workflowId,
+      workflowRunId: runId,
+      nodeId,
+      blockRun: 1,
+    });
+    ledger.repository.transact({
+      artifacts: [
+        {
+          artifactId: receiptId,
+          artifactKind: 'block_receipt',
+          storageUri: `ledger://artifacts/${receiptId}`,
+          payload: JsonValueSchema.parse(
+            BlockReceiptSchema.parse({
+              schemaVersion: 4,
+              receiptId,
+              blockReference: 'code.implement@1',
+              blockDefinitionHash: 'definition-hash',
+              taskReference: 'jira:AVIA-12045',
+              workflowId,
+              workflowRunId: runId,
+              workflowHash: 'a'.repeat(64),
+              nodeId,
+              blockRun: 1,
+              claim: {
+                status: 'candidate_complete',
+                summary: 'Implemented',
+                output: { summary: 'Implemented' },
+                evidenceReferences: ['workspace-change'],
+              },
+              verdict: { status: 'accepted', evidenceReferences: ['workspace-change'] },
+              predicateFacts: {},
+              evidence: [
+                {
+                  kind: 'workspace_mutation',
+                  reference: 'workspace-change',
+                  changed: true,
+                  fingerprint: 'c'.repeat(64),
+                  trackedDiffSha256: 'd'.repeat(64),
+                  changedPaths: [{ status: ' M', path: 'src/TripInfo.scss' }],
+                  changedPathsTruncated: false,
+                },
+              ],
+              transcriptReference: `task-step-transcript:${operationId}`,
+              usageReference: null,
+              usage: null,
+              completedAt: '2026-08-22T00:00:00.000Z',
+            }),
+          ),
+          metadata: {},
+        },
+      ],
+    });
     const execution = {
       runtime: 'execution' as const,
       schemaVersion: 2 as const,
@@ -239,6 +293,12 @@ describe('execution activity', () => {
           mimeType: 'image/png',
         },
       ],
+      workspaceChanges: {
+        changed: true,
+        trackedDiffSha256: 'd'.repeat(64),
+        paths: [{ status: ' M', path: 'src/TripInfo.scss' }],
+        truncated: false,
+      },
     });
   });
 });
