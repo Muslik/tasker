@@ -34,7 +34,7 @@ and operator projections.
 
 ## Sequencing rule
 
-Block Contract v3 makes completion evidence and deterministic predicate facts authoritative. Do not add more
+Block Definition v3 and Block Receipt v4 make completion evidence, durable usage, and deterministic predicate facts authoritative. Do not add more
 production effects until the current receipt boundary remains green under repository-
 wide recovery tests. The execution kernel advances only from immutable receipts, never
 from an agent's schema-valid prose claim.
@@ -89,7 +89,7 @@ runtime refresh path reads only the selected task's Temporal projection, persist
 transcript, and activity instead of reloading Jira and the full planning surface. Query
 failures are rendered as observability failures rather than swallowed by polling.
 
-Block Contract v3 is the active execution boundary. The immutable planning snapshot
+Block Definition v3 with Block Receipt v4 is the active execution boundary. The immutable planning snapshot
 contains the full block definition; Activities persist the agent/process/effect
 candidate, collect completion evidence independently, evaluate the declared contract,
 derive only block-declared output predicates, and persist an idempotent Block Receipt. Only an accepted receipt returns `completed`
@@ -102,7 +102,7 @@ and fast/ralplan planner profiles; a project may redirect those routes and logic
 profiles. Resolution fails closed, and the immutable planning snapshot records the
 resolved provider, command, model, effort, timeout, service tier, and configuration
 hash. Receipts expose the actual CLI version, session, token usage, duration, prompt
-hash, and reported API-equivalent cost where available. There is no legacy model field,
+hash, and a versioned price-table, provider-reported, or explicitly unrated API-equivalent cost. There is no legacy model field,
 hard-coded `gpt-5.4` path, or silent provider fallback.
 
 The first Phase 8 vertical slice is implemented as provider-neutral CI predicates plus a
@@ -203,7 +203,7 @@ and accepted independent review before enabling remote publication authority.
   subscription CLIs;
 - company routing, project overrides, and explicit operator overrides have deterministic
   precedence and reject an unknown profile;
-- the current run snapshot accepts only schema v8 and contains the complete resolved
+- the current run snapshot accepts only schema v9 and contains the complete resolved
   profile for every agent block and both planner strategies;
 - the operator session banner shows the actual profile, provider, model, effort, time,
   measured tokens, and API-equivalent cost status.

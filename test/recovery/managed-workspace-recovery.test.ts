@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { nodeCommandRunner } from '../../src/providers/command-runner.js';
+import { nodeCommandRunner, type CommandRunner } from '../../src/providers/command-runner.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import {
@@ -42,6 +42,7 @@ const setup = () => {
     '-m',
     'fixture',
   ]);
+  git(repositoryPath, ['remote', 'add', 'origin', repositoryPath]);
   const clock = makeAdjustableClock('2026-08-03T12:00:00.000Z');
   const ledger = openSqliteLedger({ filename: join(root, 'tasker.sqlite'), clock });
   const resource = { root, ledger: ledger as SqliteLedger | null };
@@ -53,10 +54,17 @@ const setup = () => {
   };
   const request: PrepareWorkspaceRequest = {
     taskReference: 'fixture:change-file',
+    taskKey: 'FIX-1',
+    taskTitle: 'Change file',
     workflowId: 'tasker:fixture:change-file',
     workflowRunId: 'run-1',
     repositoryReference: 'example/fixture',
     repositoryPath,
+    gitPolicy: {
+      baseBranch: 'main',
+      branch: { kind: 'task_key_slug', maxLength: 96 },
+      commit: { kind: 'task_key_subject' },
+    },
   };
   return { resource, clock, ledger, configuration, request, repositoryPath };
 };
@@ -69,6 +77,56 @@ afterEach(() => {
 });
 
 describe('managed workspace recovery', () => {
+  it('uses the task key when a title has no safe ASCII branch slug', () => {
+    const { clock, ledger, configuration, request } = setup();
+    const manager = new ManagedWorkspaceManager(
+      configuration,
+      new WorkspaceStore(ledger.repository, clock),
+      nodeCommandRunner,
+    );
+
+    const identity = manager.identity({
+      ...request,
+      taskKey: 'AVIA-13417',
+      taskTitle: 'Время прилёта наезжает на разделитель',
+    });
+
+    expect(identity.branch).toBe('AVIA-13417');
+  });
+
+  it('rejects a task branch that already exists on the remote', async () => {
+    const { clock, ledger, configuration, request } = setup();
+    const remoteCollisionRunner: CommandRunner = {
+      run: (command) =>
+        command.args[0] === 'ls-remote'
+          ? Promise.resolve({
+              status: 'exited',
+              exitCode: 0,
+              stdout: `${'a'.repeat(40)}\trefs/heads/FIX-1-change-file\n`,
+              stderr: '',
+              durationMs: 1,
+            })
+          : nodeCommandRunner.run(command),
+    };
+    const manager = new ManagedWorkspaceManager(
+      configuration,
+      new WorkspaceStore(ledger.repository, clock),
+      remoteCollisionRunner,
+    );
+    const branch = manager.identity(request).branch;
+
+    const result = await manager.prepare(request);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: 'remote_branch_conflict',
+        branch,
+        message: `Remote branch ${branch} already exists outside this run`,
+      },
+    });
+  });
+
   it('reuses the durable worktree after ledger and manager restart without losing changes', async () => {
     const { resource, clock, ledger, configuration, request, repositoryPath } = setup();
     const firstManager = new ManagedWorkspaceManager(
@@ -82,6 +140,7 @@ describe('managed workspace recovery', () => {
     if (!first.ok) throw new Error(first.error.kind);
     expect(first.value.path.startsWith(configuration.workspaceStorePath)).toBe(true);
     expect(first.value.repository.sourcePath).toBe(realpathSync(repositoryPath));
+    expect(first.value.repository.baseBranch).toBe('main');
     expect(git(first.value.path, ['branch', '--show-current'])).toBe(first.value.branch);
 
     writeFileSync(join(first.value.path, 'feature.txt'), 'changed once\n', 'utf8');

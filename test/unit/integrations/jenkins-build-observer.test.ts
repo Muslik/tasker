@@ -61,6 +61,7 @@ const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
     repository: {
       reference: task.repository,
       sourcePath: '/tmp/source',
+      baseBranch: 'master',
       baseCommit: 'd'.repeat(40),
     },
     runnerId: 'test',

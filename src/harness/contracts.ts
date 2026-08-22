@@ -15,6 +15,7 @@ import {
   type JsonValue,
 } from '../workflow/schema.js';
 import {
+  ApiPricingTableSchema,
   ExecutionProfileNameSchema,
   ExecutionProfileRoutingSchema,
   ExecutionProfileSchema,
@@ -245,6 +246,32 @@ const CiPolicySchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+const GitBranchPolicySchema = z
+  .object({
+    kind: z.literal('task_key_slug'),
+    maxLength: z.number().int().min(32).max(160).default(96),
+  })
+  .strict();
+
+const GitCommitPolicySchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('task_key_subject') }).strict(),
+  z
+    .object({
+      kind: z.literal('conventional_task_key'),
+      allowedTypes: z.array(z.string().regex(/^[a-z][a-z0-9-]*$/u)).min(1),
+      requireScope: z.boolean().default(false),
+    })
+    .strict(),
+]);
+
+export const HarnessGitPolicySchema = z
+  .object({
+    baseBranch: z.string().regex(/^[A-Za-z0-9._/-]+$/u),
+    branch: GitBranchPolicySchema,
+    commit: GitCommitPolicySchema,
+  })
+  .strict();
+
 const WorkspaceRuntimeImageSchema = z
   .object({
     kind: z.literal('prebuilt'),
@@ -289,6 +316,7 @@ export const HarnessProjectManifestSchema = z
     repositoryKind: z.enum(['frontend', 'generic']),
     translations: TranslationPolicySchema,
     ci: CiPolicySchema.default({ kind: 'none' }),
+    git: HarnessGitPolicySchema,
     processCommands: ProcessCommandsSchema,
     workspaceRuntime: WorkspaceRuntimeSchema.partial().optional(),
     executionProfileOverrides: ProjectExecutionProfileOverridesSchema.optional(),
@@ -325,6 +353,7 @@ export const HarnessCompanyManifestSchema = z
       })
       .strict(),
     globalPackageRules: z.array(GlobalPackageRuleManifestSchema),
+    apiPricing: ApiPricingTableSchema,
     executionProfiles: z
       .record(ExecutionProfileNameSchema, ExecutionProfileSchema)
       .refine((profiles) => Object.keys(profiles).length > 0, {
@@ -335,6 +364,7 @@ export const HarnessCompanyManifestSchema = z
   .strict();
 
 export type HarnessProjectManifest = z.infer<typeof HarnessProjectManifestSchema>;
+export type HarnessGitPolicy = z.infer<typeof HarnessGitPolicySchema>;
 export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema>;
 export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
 export type WorkspaceRuntime = z.infer<typeof WorkspaceRuntimeSchema>;

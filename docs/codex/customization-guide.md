@@ -1,6 +1,6 @@
 # Customizing Tasker
 
-Status: canonical extension guide, Block Contract v3 revision, 2026-08-13
+Status: canonical extension guide, Block Contract v4 revision, 2026-08-22
 
 Tasker has no reusable workflow templates. Every initial workflow is assembled from an
 empty graph for one task. Reuse exists below the graph: versioned blocks, predicates,
@@ -20,8 +20,8 @@ Workflow code.
 | Typed block ABI | `src/harness/step-contracts.ts` | runtime validation for named manifest input/output contracts |
 | Activities/executors | `src/temporal/activities/` | provider, process, or integration execution |
 | Agent prompts | `harness/prompts/` and `harness/steps/*/prompt.md` | global planner/analyzer prompts and colocated step instructions |
-| Company policy | `harness/company.json` | reusable organization-wide workflow facts |
-| Project workflow policy | `harness/projects/*/project.json` | repository-specific runtime, CI, translation, and validation facts |
+| Company policy | `harness/company.json` | reusable organization-wide workflow facts and API price table |
+| Project workflow policy | `harness/projects/*/project.json` | repository-specific runtime, Git, CI, translation, and validation facts |
 | Workspace guidance | `harness/workspace/profiles/*/guidance` | pinned `.ai`, `AGENTS.md`, and `CLAUDE.md` rules for agent work |
 | Mandatory obligations | `src/planning/obligations.ts` | safety/semantic rules an analyzer cannot waive |
 | Integrations/repositories | `src/integrations/`, `src/repositories/` | Jira/Bitbucket/Jenkins today, alternatives later |
@@ -37,8 +37,8 @@ The editable source pack is [`harness/`](../../harness). Its current ownership i
 
 | Path | Authority |
 |---|---|
-| [`company.json`](../../harness/company.json) | company capabilities, Docker runtime, provider/model profiles, planner routing, global process and package rules |
-| [`projects/*/project.json`](../../harness/projects) | repository-specific bootstrap, services, CI kind, translation mode, and typed validation processes |
+| [`company.json`](../../harness/company.json) | company capabilities, Docker runtime, provider/model profiles, API price table, planner routing, global process and package rules |
+| [`projects/*/project.json`](../../harness/projects) | repository-specific bootstrap, services, Git policy, CI kind, translation mode, and typed validation processes |
 | [`policies/*.json`](../../harness/policies) | optional company overlays, required graph ordering, and skills added to existing agent blocks |
 | [`steps/*/step.json`](../../harness/steps) | complete block catalog: stage, executor, skills, completion, effects, artifacts, and recovery boundary |
 | [`steps/*/prompt.md`](../../harness/steps) | readable instruction colocated with each agent block |
@@ -183,6 +183,21 @@ receipted diagnostic result so the frozen graph can decide whether to run `code.
 repository scripts run broad Playwright suites. It becomes available only after the
 contract can carry and validate a task-specific selector.
 
+Project process declarations are executable policy, not documentation guesses. Run
+`pnpm harness:smoke` to bootstrap the Tasker Docker runtime and execute every registered process
+against a clean, Tasker-owned worktree. Use `TASKER_SMOKE_PROJECTS=front-avia,front-bus` to limit a
+diagnostic run. Reports live under the OS application-data `Tasker/smoke/reports` directory. A
+command that fails on clean master must be fixed upstream or removed from the available block
+catalog; do not teach the planner to ignore it.
+
+### Git and base-branch policy
+
+`projects/*/project.json.git` owns the exact remote base branch, task-branch format, and
+commit-subject grammar. Workspace preparation fetches and pins the remote base before planning.
+The PR adapter uses the same frozen policy, checks collisions before work starts, and validates the
+actual commit after hooks. Change these rules in project policy; do not add repository-name
+branches in Temporal or an integration adapter.
+
 ### Block completion contract
 
 An agent block returns a typed claim:
@@ -212,6 +227,18 @@ exit to `validation.failed@1=true`. Independent review maps its typed `decision`
 bounded repair loops without teaching the Temporal interpreter their names.
 
 Arbitrary natural-language text cannot secretly alter the graph or grant effects.
+
+### Provider usage and shadow pricing
+
+`company.json.apiPricing` maps exact configured model names to per-million input, cached-input, and
+output rates, plus optional long-context multipliers. Its version and source URLs are harness
+policy. Profile resolution freezes the matching row into the run snapshot, so a later price edit
+cannot rewrite historical cost.
+
+Agent Activities persist measured tokens and one explicit cost state: `price_table`,
+`provider_reported`, or `unrated`. The cockpit aggregates receipts by workflow and step. The amount
+is an API-equivalent estimate for subscription use, not money charged. Unknown models stay visible
+as unrated rather than borrowing another model's price.
 
 ## 4. Prompts and skills
 

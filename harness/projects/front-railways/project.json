@@ -1,10 +1,15 @@
 {
   "schemaVersion": 2,
-  "version": "1",
+  "version": "2",
   "repository": "onetwotrip/front-railways",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
   "ci": { "kind": "jenkins", "job": "front-railways" },
+  "git": {
+    "baseBranch": "master",
+    "branch": { "kind": "task_key_slug" },
+    "commit": { "kind": "task_key_subject" }
+  },
   "workspaceRuntime": {
     "bootstrap": ["pnpm install --frozen-lockfile"],
     "services": []

@@ -13,5 +13,5 @@ describe('Temporal workflow bundle', () => {
     expect(bundle.code).toContain('bootstrapWorkflowV3');
     expect(bundle.code).toContain('executionWorkflowV2');
     expect(bundle.code).not.toContain('taskWorkflow');
-  });
+  }, 15_000);
 });

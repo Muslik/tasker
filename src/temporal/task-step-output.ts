@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
 import { JsonValueSchema } from '../workflow/schema.js';
+import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
 import { ExecuteTaskStepResultSchema } from './activities/block-execution-contracts.js';
 
 export const TaskStepOutputArtifactSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     operationId: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
@@ -21,6 +22,7 @@ export const TaskStepOutputArtifactSchema = z
     stdout: z.string(),
     stderr: z.string(),
     details: JsonValueSchema,
+    usage: AgentInvocationUsageSchema.nullable(),
     result: ExecuteTaskStepResultSchema.nullable(),
     recordedAt: z.iso.datetime(),
   })

@@ -55,6 +55,7 @@ import {
   ImplementationPlannerReceiptSchema,
   type ImplementationPlannerReceipt,
 } from './contracts.js';
+import { estimateApiCost } from './api-cost.js';
 
 type ProviderWorkflowNodeSource =
   | {
@@ -497,7 +498,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
           outputTokens: stream.value.usage.outputTokens,
           reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
         },
-        hypotheticalApiCostUsd: stream.value.reportedCostUsd,
+        apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
       });
       if (hasEvidenceRequests) {
         if (providerOutput.data.decision !== null) {

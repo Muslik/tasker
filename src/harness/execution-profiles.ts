@@ -4,6 +4,7 @@ import {
   ExecutionProfileNameSchema,
   ResolvedExecutionProfileSchema,
   type ExecutionProfile,
+  type ApiPricingTable,
   type ExecutionProfileRouting,
   type ProjectExecutionProfileOverrides,
   type ResolvedExecutionProfile,
@@ -12,6 +13,7 @@ import {
 export interface ExecutionProfileConfiguration {
   readonly executionProfiles: Readonly<Record<string, ExecutionProfile>>;
   readonly executionProfileRouting: ExecutionProfileRouting;
+  readonly apiPricing: ApiPricingTable;
 }
 
 const canonicalJson = (value: unknown): string => {
@@ -30,12 +32,21 @@ const resolveNamedProfile = (
   const parsedName = ExecutionProfileNameSchema.parse(name);
   const profile = company.executionProfiles[parsedName];
   if (profile === undefined) throw new Error(`Unknown execution profile ${parsedName}`);
+  const modelPricing = company.apiPricing.models[profile.model];
+  const apiPricing =
+    modelPricing === undefined
+      ? null
+      : {
+          version: company.apiPricing.version,
+          ...modelPricing,
+        };
   const configurationSha256 = createHash('sha256')
-    .update(canonicalJson({ name: parsedName, ...profile }))
+    .update(canonicalJson({ name: parsedName, ...profile, apiPricing }))
     .digest('hex');
   return ResolvedExecutionProfileSchema.parse({
     name: parsedName,
     ...profile,
+    apiPricing,
     configurationSha256,
   });
 };

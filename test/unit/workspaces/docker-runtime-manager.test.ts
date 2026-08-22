@@ -131,6 +131,7 @@ describe('Docker workspace runtime manager', () => {
       repository: {
         reference: 'onetwotrip/front-avia',
         sourcePath: repositoryPath,
+        baseBranch: 'master',
         baseCommit: 'c'.repeat(40),
       },
       runnerId: 'test',

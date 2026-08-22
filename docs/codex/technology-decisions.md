@@ -270,8 +270,9 @@ artifacts.
 
 Receipts record profile/hash, provider, CLI version, model, effort, session, duration,
 prompt hash, and normalized token usage. Shadow API cost is computed from measured
-tokens when a versioned price table is available; provider-reported API equivalent is
-retained when supplied. Subscription use does not claim that amount was charged.
+tokens using the versioned, source-linked price row frozen into the execution profile;
+provider-reported API equivalent is retained when no model row exists, and otherwise the receipt
+is explicitly unrated. Subscription use does not claim that amount was charged.
 
 ## 11. UI and observability
 

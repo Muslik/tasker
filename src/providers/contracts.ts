@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { PlanningStrategySchema } from '../planning/implementation-plan.js';
+import { AgentApiCostSchema } from './agent-usage.js';
 
 export const WorkflowAnalyzerReceiptSchema = z
   .object({
@@ -24,7 +25,7 @@ export const WorkflowAnalyzerReceiptSchema = z
         reasoningOutputTokens: z.number().int().nonnegative(),
       })
       .strict(),
-    hypotheticalApiCostUsd: z.number().nonnegative().nullable(),
+    apiCost: AgentApiCostSchema,
   })
   .strict();
 
@@ -53,7 +54,7 @@ export const ImplementationPlannerReceiptSchema = z
         reasoningOutputTokens: z.number().int().nonnegative(),
       })
       .strict(),
-    hypotheticalApiCostUsd: z.number().nonnegative().nullable(),
+    apiCost: AgentApiCostSchema,
   })
   .strict();
 

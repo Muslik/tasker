@@ -182,9 +182,9 @@ const formatProviderSession = (activity: ActivityLoadState): string => {
   const measuredTokens = session.usage.inputTokens + session.usage.outputTokens;
   const provider = session.provider === 'codex_cli' ? 'Codex' : 'Claude';
   const cost =
-    session.hypotheticalApiCostUsd === null
+    session.apiCost.source === 'unrated'
       ? 'API cost unrated'
-      : `$${session.hypotheticalApiCostUsd.toFixed(2)} API equivalent`;
+      : `$${session.apiCost.amountUsd.toFixed(2)} API equivalent`;
   return `${session.profile} · ${provider} · ${session.model}/${session.effort} · ${seconds}s · ${measuredTokens.toLocaleString()} tok · ${cost}`;
 };
 
@@ -1406,9 +1406,9 @@ const ImplementationPlanSurface = ({
   const plan = record.decision.plan;
   const measuredTokens = record.receipt.usage.inputTokens + record.receipt.usage.outputTokens;
   const apiCost =
-    record.receipt.hypotheticalApiCostUsd === null
+    record.receipt.apiCost.source === 'unrated'
       ? 'API cost unrated'
-      : `~$${record.receipt.hypotheticalApiCostUsd.toFixed(2)} API`;
+      : `~$${record.receipt.apiCost.amountUsd.toFixed(2)} API`;
   const metadata = (
     <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
       <StateBadge>{record.selectedStrategy}</StateBadge>

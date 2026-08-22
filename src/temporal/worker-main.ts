@@ -235,6 +235,13 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     loadWorkspaceConfiguration(),
     workspaceStore,
     nodeCommandRunner,
+    bitbucketConfiguration === null
+      ? {}
+      : {
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'http.extraHeader',
+          GIT_CONFIG_VALUE_0: `Authorization: Bearer ${bitbucketConfiguration.token}`,
+        },
   );
   const bootstrapConfiguration = loadWorkspaceBootstrapConfiguration();
   assertWorkspaceHarnessSkillBindings(
@@ -279,12 +286,21 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     });
     const runtime = await connectTaskerTemporalWorker(configuration, {
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, dockerRuntimes, {
-        resolve: (repositoryReference) =>
+        resolveRuntime: (repositoryReference) =>
           resolveWorkspaceRuntimePolicy(
             harnessPack.company,
             harnessPack.projects.find((project) => project.repository === repositoryReference) ??
               null,
           ),
+        resolveGit: (repositoryReference) => {
+          const project = harnessPack.projects.find(
+            (candidate) => candidate.repository === repositoryReference,
+          );
+          if (project === undefined) {
+            throw new Error(`Project Git policy is missing for ${repositoryReference}`);
+          }
+          return project.git;
+        },
       }),
       ...createBootstrapContextAssemblyActivity(planningContexts),
       ...createPlanningActivity(planning),

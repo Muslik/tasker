@@ -33,6 +33,7 @@ import {
   workspaceHarnessEnvironment,
 } from './agent-skills.js';
 import { WorkflowAnalyzerReceiptSchema, type WorkflowAnalyzerReceipt } from './contracts.js';
+import { estimateApiCost } from './api-cost.js';
 
 const WorkflowAnalyzerProviderOutputSchema = z
   .object({
@@ -281,7 +282,7 @@ export class SubscriptionCliWorkflowAnalyzer {
             outputTokens: stream.value.usage.outputTokens,
             reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
           },
-          hypotheticalApiCostUsd: stream.value.reportedCostUsd,
+          apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
         }),
       });
     } finally {

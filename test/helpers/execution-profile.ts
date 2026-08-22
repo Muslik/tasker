@@ -8,6 +8,7 @@ export const TEST_CODEX_PROFILE = ResolvedExecutionProfileSchema.parse({
   effort: 'medium',
   timeoutMs: 600_000,
   serviceTier: 'fast',
+  apiPricing: null,
   configurationSha256: 'e'.repeat(64),
 });
 
@@ -18,5 +19,6 @@ export const TEST_CLAUDE_PROFILE = ResolvedExecutionProfileSchema.parse({
   model: 'sonnet',
   effort: 'high',
   timeoutMs: 600_000,
+  apiPricing: null,
   configurationSha256: 'f'.repeat(64),
 });

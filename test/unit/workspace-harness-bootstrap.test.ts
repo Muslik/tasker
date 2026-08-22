@@ -53,6 +53,7 @@ const locatorFor = (
   repository: {
     reference,
     sourcePath: repository.path,
+    baseBranch: 'master',
     baseCommit: repository.baseCommit,
   },
   runnerId: 'test',

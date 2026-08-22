@@ -28,6 +28,7 @@ const requestFor = (taskReference: string): IntegrationStepExecutionRequest => (
     repository: {
       reference: task.repository,
       sourcePath: '/repositories/front-avia',
+      baseBranch: 'master',
       baseCommit: 'c'.repeat(40),
     },
     runnerId: 'test',

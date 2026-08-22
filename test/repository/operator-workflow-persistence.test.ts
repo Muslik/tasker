@@ -49,7 +49,7 @@ const receipt = (sessionId: string): WorkflowAnalyzerReceipt =>
       outputTokens: 240,
       reasoningOutputTokens: 40,
     },
-    hypotheticalApiCostUsd: null,
+    apiCost: { source: 'unrated' },
   });
 
 afterEach(() => {

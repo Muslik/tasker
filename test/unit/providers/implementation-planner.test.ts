@@ -474,7 +474,7 @@ describe('Codex CLI implementation planner', () => {
           strategy: 'ralplan',
           sessionId: 'claude-planner-1',
           usage: { inputTokens: 1200, cachedInputTokens: 500, outputTokens: 250 },
-          hypotheticalApiCostUsd: 0.42,
+          apiCost: { source: 'provider_reported', amountUsd: 0.42 },
         },
       },
     });

@@ -39,14 +39,14 @@ Commands below were resolved from the current `package.json` files. They are sto
 ordered `{ command, args }` invocations; Tasker does not parse shell strings. A sequence
 stops at its first non-zero result.
 
-| Project               | Targeted validation                                              | Full validation                     | Build                     | Visual      |
-| --------------------- | ---------------------------------------------------------------- | ----------------------------------- | ------------------------- | ----------- |
-| `front-railways`      | `pnpm run typecheck`                                             | unavailable                         | `pnpm run build`          | unavailable |
-| `front-bus`           | unavailable                                                      | `pnpm run test -- --runInBand`      | `pnpm run build`          | unavailable |
-| `front-avia`          | `typecheck` → `lint:eslint` → `lint:stylelint` → `lint:circular` | `pnpm run test:unit -- --runInBand` | `pnpm run build`          | unavailable |
-| `front-core-packages` | `node type-check.mjs` → `pnpm run linters`                       | `pnpm run test:unit -- --runInBand` | `pnpm run build-packages` | unavailable |
-| `front-components`    | `pnpm run lint-no-fix`                                           | `pnpm run test:unit -- --runInBand` | `pnpm run build-packages` | unavailable |
-| `front-backoffice`    | `pnpm run agent:typecheck`                                       | unavailable                         | `pnpm run build`          | unavailable |
+| Project               | Targeted validation                                              | Full validation                  | Build                      | Visual      |
+| --------------------- | ---------------------------------------------------------------- | -------------------------------- | -------------------------- | ----------- |
+| `front-railways`      | `pnpm run typecheck`                                             | unavailable                      | `pnpm run build`           | unavailable |
+| `front-bus`           | unavailable                                                      | unavailable                      | `pnpm run build`           | unavailable |
+| `front-avia`          | `typecheck` → `lint:eslint` → `lint:stylelint` → `lint:circular` | `pnpm run test:unit --runInBand` | `pnpm run build`           | unavailable |
+| `front-core-packages` | `node type-check.mjs` → `pnpm run linters`                       | `pnpm run test:unit --runInBand` | `pnpm run build-packages`  | unavailable |
+| `front-components`    | `pnpm run lint-no-fix`                                           | `pnpm run test:unit --runInBand` | `pnpm run storybook:build` | unavailable |
+| `front-backoffice`    | unavailable                                                      | unavailable                      | `pnpm run build`           | unavailable |
 
 `test:ui` is deliberately not registered for any project. Today the process ABI has no
 typed Playwright selector, so exposing it would let an ordinary validation node launch
@@ -54,6 +54,40 @@ the complete visual suite. Likewise `front-backoffice`'s
 `agent:eslint-for-changed` is excluded because it runs `eslint --fix` and mutates the
 workspace. Missing categories stay unavailable to the planner instead of falling back
 to an expensive or mutating command.
+
+These declarations are executable policy. `pnpm harness:smoke` runs them in the same Docker
+runtime used by task Activities against disposable Tasker-owned worktrees. Five profiles currently
+pass every registered command on a clean base. `front-bus` full validation was removed because its
+test command finds no tests; `front-backoffice` targeted validation was removed because clean
+master currently reports TypeScript failures. `front-components` remains unverified while its
+Bitbucket lookup returns VPN/authorization `403`.
+
+```sh
+pnpm harness:smoke
+TASKER_SMOKE_PROJECTS=front-components pnpm harness:smoke
+```
+
+Clones, worktrees, Docker runtimes, and JSON reports live under
+`~/Library/Application Support/Tasker/smoke`. The runner never reads or writes
+`~/Projects/work`. Any non-zero command or dirty worktree fails the profile.
+
+## Git policy
+
+Every project manifest declares its base branch, branch format, and commit-message contract.
+Workspace preparation fetches the configured remote base, pins that exact revision, and blocks on
+an existing local or remote task branch. Application repositories use `TASK-123 subject`; package
+repositories use the declared conventional type and optional scope. PR publication targets the
+same configured base and verifies the actual commit subject after Git hooks run. A title with no
+ASCII slug falls back to the Jira key.
+
+## Usage and API-equivalent cost
+
+Every successful subscription-agent invocation persists provider, profile hash, model, effort,
+session, duration, measured token classes, and an API-cost result in its output artifact and Block
+Receipt. `company.json.apiPricing` is a versioned, source-linked table resolved into the immutable
+run snapshot. A known model produces a `price_table` estimate with the exact table version; a
+provider-reported amount is retained when no row exists; otherwise the receipt is explicitly
+`unrated`. These are hypothetical API equivalents, never claims about subscription charges.
 
 All six profiles currently use `translations.kind = none`. This does not say that the
 repository has no localized text; it says Tasker has no special human translation

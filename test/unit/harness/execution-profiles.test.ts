@@ -50,6 +50,22 @@ const company = {
       ralplan: 'company-deep',
     },
   },
+  apiPricing: {
+    version: 'test-pricing-v1',
+    sourceUrls: ['https://example.com/pricing'],
+    models: {
+      'gpt-5.6-terra': {
+        inputPerMillionUsd: 2,
+        cachedInputPerMillionUsd: 0.2,
+        outputPerMillionUsd: 12,
+      },
+      'gpt-5.6-sol': {
+        inputPerMillionUsd: 4,
+        cachedInputPerMillionUsd: 0.4,
+        outputPerMillionUsd: 20,
+      },
+    },
+  },
 } as const satisfies ExecutionProfileConfiguration;
 
 const project = {
@@ -65,6 +81,11 @@ describe('execution profile resolution', () => {
     expect(resolveWorkflowAnalyzerProfile(company, project, 'company-deep').name).toBe(
       'company-deep',
     );
+    expect(resolveWorkflowAnalyzerProfile(company, null).apiPricing).toMatchObject({
+      version: 'test-pricing-v1',
+      inputPerMillionUsd: 2,
+    });
+    expect(resolveWorkflowAnalyzerProfile(company, project).apiPricing).toBeNull();
 
     expect(resolveImplementationPlannerProfile(company, project, 'fast').name).toBe('company-fast');
     expect(resolveImplementationPlannerProfile(company, project, 'ralplan').name).toBe(

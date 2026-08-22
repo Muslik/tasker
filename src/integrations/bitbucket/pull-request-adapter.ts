@@ -4,6 +4,7 @@ import { relative, resolve, sep } from 'node:path';
 
 import { z } from 'zod';
 
+import type { HarnessGitPolicy } from '../../harness/contracts.js';
 import type { CommandResult, WorkspaceCommandRunner } from '../../providers/command-runner.js';
 import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
@@ -13,7 +14,11 @@ import type {
   IntegrationStepExecutionResult,
 } from '../execution.js';
 import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.js';
-import { PullRequestDraftSchema, type PullRequestDraft } from '../pull-request-draft.js';
+import {
+  PullRequestDraftSchema,
+  type GitCommitDraft,
+  type PullRequestDraft,
+} from '../pull-request-draft.js';
 import type { GitCommitIdentity } from './git-identity.js';
 import type {
   BitbucketPullRequest,
@@ -50,6 +55,31 @@ type RemoteBranchProbe =
   | { readonly status: 'found'; readonly commit: string }
   | { readonly status: 'missing' }
   | { readonly status: 'failed'; readonly failure: GitFailure };
+
+export const formatGitCommitMessage = (
+  taskKey: string,
+  draft: GitCommitDraft,
+  policy: HarnessGitPolicy['commit'],
+):
+  | { readonly ok: true; readonly message: string }
+  | { readonly ok: false; readonly reason: string } => {
+  if (policy.kind === 'task_key_subject') {
+    return draft.kind === 'subject'
+      ? { ok: true, message: `${taskKey}: ${draft.subject}` }
+      : { ok: false, reason: 'Project policy requires a task-key subject commit draft' };
+  }
+  if (draft.kind !== 'conventional') {
+    return { ok: false, reason: 'Project policy requires a conventional commit draft' };
+  }
+  if (!policy.allowedTypes.includes(draft.type)) {
+    return { ok: false, reason: `Commit type ${draft.type} is not allowed by project policy` };
+  }
+  if (policy.requireScope && draft.scope === null) {
+    return { ok: false, reason: 'Project policy requires a conventional commit scope' };
+  }
+  const scope = draft.scope === null ? '' : `(${draft.scope})`;
+  return { ok: true, message: `${draft.type}${scope}: [${taskKey}] ${draft.subject}` };
+};
 
 const commandMessage = (result: CommandResult): string => {
   switch (result.status) {
@@ -160,7 +190,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
 
     const targetBranch = await this.targetBranch(request);
     if (targetBranch.status === 'blocked') return targetBranch.result;
-    const localCommit = await this.commitWorkspace(request);
+    const localCommit = await this.commitWorkspace(request, draft.value);
     if (localCommit.status === 'blocked') return localCommit.result;
     const artifactCheck = await this.verifyBranchArtifacts(
       request,
@@ -304,11 +334,23 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
     | { readonly status: 'ready'; readonly branch: string }
     | { readonly status: 'blocked'; readonly result: IntegrationStepExecutionResult }
   > {
+    const branch = request.project?.git.baseBranch;
+    if (branch === undefined) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'configuration',
+          summary: 'Project Git base branch is not configured',
+          details: { repository: request.workspace.repository.reference },
+          artifactIds: [],
+        },
+      };
+    }
     const result = await this.runGit(request, 'resolve_target_branch', [
-      'symbolic-ref',
-      '--quiet',
-      '--short',
-      'refs/remotes/origin/HEAD',
+      'rev-parse',
+      '--verify',
+      `refs/remotes/origin/${branch}`,
     ]);
     if (!commandSucceeded(result)) {
       return {
@@ -322,27 +364,46 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
         },
       };
     }
-    const symbolic = result.stdout.trim();
-    return symbolic.startsWith('origin/') && symbolic.length > 'origin/'.length
-      ? { status: 'ready', branch: symbolic.slice('origin/'.length) }
-      : {
-          status: 'blocked',
-          result: {
-            status: 'blocked',
-            kind: 'configuration',
-            summary: `Unsupported origin HEAD reference: ${symbolic}`,
-            details: { symbolic },
-            artifactIds: [],
-          },
-        };
+    return { status: 'ready', branch };
   }
 
   private async commitWorkspace(
     request: IntegrationStepExecutionRequest,
+    draft: PullRequestDraft,
   ): Promise<
     | { readonly status: 'ready'; readonly commit: string }
     | { readonly status: 'blocked'; readonly result: IntegrationStepExecutionResult }
   > {
+    const gitPolicy = request.project?.git;
+    if (gitPolicy === undefined) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'configuration',
+          summary: 'Project Git policy is not configured',
+          details: { repository: request.workspace.repository.reference },
+          artifactIds: [],
+        },
+      };
+    }
+    const commitMessage = formatGitCommitMessage(
+      request.task.taskId,
+      draft.commit,
+      gitPolicy.commit,
+    );
+    if (!commitMessage.ok) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'invalid_request',
+          summary: commitMessage.reason,
+          details: { policy: gitPolicy.commit.kind },
+          artifactIds: [],
+        },
+      };
+    }
     const unmerged = await this.runGit(request, 'inspect_unmerged_paths', [
       'diff',
       '--name-only',
@@ -415,7 +476,6 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       if (!commandSucceeded(staged)) {
         return this.gitBlocked('Cannot stage task changes', 'configuration', staged);
       }
-      const title = `${request.task.taskId}: ${request.task.title.replaceAll(/\s+/gu, ' ').trim()}`;
       const committed = await this.runGit(request, 'commit_task_changes', [
         '-c',
         `user.name=${this.commitIdentity.name}`,
@@ -423,7 +483,7 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
         `user.email=${this.commitIdentity.email}`,
         'commit',
         '-m',
-        title,
+        commitMessage.message,
       ]);
       if (!commandSucceeded(committed)) {
         return this.gitBlocked('Cannot commit task changes', 'configuration', committed);
@@ -443,6 +503,27 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
           kind: 'invalid_request',
           summary: 'The task has no committed change to publish',
           details: { baseCommit: request.workspace.repository.baseCommit },
+          artifactIds: [],
+        },
+      };
+    }
+    const actualMessage = await this.runGit(request, 'read_commit_subject', [
+      'log',
+      '-1',
+      '--format=%s',
+      commit,
+    ]);
+    if (!commandSucceeded(actualMessage)) {
+      return this.gitBlocked('Cannot read the commit subject', 'configuration', actualMessage);
+    }
+    if (actualMessage.stdout.trim() !== commitMessage.message) {
+      return {
+        status: 'blocked',
+        result: {
+          status: 'blocked',
+          kind: 'configuration',
+          summary: 'Git hooks changed the commit message outside project policy',
+          details: { expected: commitMessage.message, actual: actualMessage.stdout.trim() },
           artifactIds: [],
         },
       };

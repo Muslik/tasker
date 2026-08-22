@@ -31,6 +31,11 @@ export type WorkspacePreparationError =
       readonly reason: string;
     }
   | {
+      readonly kind: 'remote_branch_conflict';
+      readonly branch: string;
+      readonly message: string;
+    }
+  | {
       readonly kind: 'git_failed';
       readonly operation: string;
       readonly message: string;
@@ -50,13 +55,20 @@ const isWithin = (parent: string, child: string): boolean => {
   return path.length > 0 && !path.startsWith('..') && !isAbsolute(path);
 };
 
-const branchSlug = (taskReference: string): string => {
-  const slug = taskReference
+const branchSlug = (title: string, maximumLength: number): string =>
+  title
+    .normalize('NFKD')
+    .replaceAll(/[\u0300-\u036f]/gu, '')
     .toLocaleLowerCase('en-US')
-    .replaceAll(/[^a-z0-9._-]+/gu, '-')
+    .replaceAll(/[^a-z0-9]+/gu, '-')
     .replaceAll(/^-+|-+$/gu, '')
-    .slice(0, 48);
-  return slug.length === 0 ? 'task' : slug;
+    .slice(0, maximumLength);
+
+const branchName = (request: PrepareWorkspaceRequest): string => {
+  const key = request.taskKey.toLocaleUpperCase('en-US');
+  const available = Math.max(0, request.gitPolicy.branch.maxLength - key.length - 1);
+  const slug = branchSlug(request.taskTitle, available);
+  return slug.length === 0 ? key : `${key}-${slug}`;
 };
 
 const commandMessage = (result: CommandResult): string => {
@@ -77,6 +89,7 @@ const sameIdentity = (left: WorkspaceLocator, right: WorkspaceLocator): boolean 
   left.workflowRunId === right.workflowRunId &&
   left.repository.reference === right.repository.reference &&
   left.repository.sourcePath === right.repository.sourcePath &&
+  left.repository.baseBranch === right.repository.baseBranch &&
   left.repository.baseCommit === right.repository.baseCommit &&
   left.runnerId === right.runnerId &&
   left.path === right.path &&
@@ -87,6 +100,7 @@ export class ManagedWorkspaceManager {
     private readonly configuration: WorkspaceConfiguration,
     private readonly store: WorkspaceStore,
     private readonly commands: CommandRunner,
+    private readonly remoteEnvironment: Readonly<Record<string, string>> = {},
   ) {}
 
   public identity(requestInput: PrepareWorkspaceRequest): {
@@ -107,7 +121,7 @@ export class ManagedWorkspaceManager {
     return {
       workspaceId,
       path: resolve(this.configuration.workspaceStorePath, workspaceId),
-      branch: `tasker/${branchSlug(request.taskReference)}/${sha256(request.workflowRunId).slice(0, 12)}`,
+      branch: branchName(request),
     };
   }
 
@@ -183,9 +197,22 @@ export class ManagedWorkspaceManager {
       ['rev-parse', '--path-format=absolute', '--git-common-dir'],
     );
     if (!sourceCommonDirectory.ok) return sourceCommonDirectory;
-    const baseCommit = await this.git(request.repositoryPath, 'read source HEAD', [
+    const fetched = await this.git(
+      request.repositoryPath,
+      'fetch configured base branch',
+      [
+        'fetch',
+        '--prune',
+        'origin',
+        `+refs/heads/${request.gitPolicy.baseBranch}:refs/remotes/origin/${request.gitPolicy.baseBranch}`,
+      ],
+      true,
+      10 * 60_000,
+    );
+    if (!fetched.ok) return fetched;
+    const baseCommit = await this.git(request.repositoryPath, 'read configured base revision', [
       'rev-parse',
-      'HEAD',
+      `refs/remotes/origin/${request.gitPolicy.baseBranch}`,
     ]);
     if (!baseCommit.ok) return baseCommit;
     await mkdir(this.configuration.workspaceStorePath, { recursive: true, mode: 0o700 });
@@ -200,6 +227,7 @@ export class ManagedWorkspaceManager {
         repository: {
           reference: request.repositoryReference,
           sourcePath: resolve(request.repositoryPath),
+          baseBranch: request.gitPolicy.baseBranch,
           baseCommit: baseCommit.value,
         },
         runnerId: this.configuration.runnerId,
@@ -217,6 +245,18 @@ export class ManagedWorkspaceManager {
         kind: 'workspace_path_conflict',
         path: identity.path,
         reason: `Branch ${identity.branch} exists without its deterministic worktree path`,
+      });
+    }
+    const remoteBranchExists = await this.remoteBranchExists(
+      request.repositoryPath,
+      identity.branch,
+    );
+    if (!remoteBranchExists.ok) return remoteBranchExists;
+    if (remoteBranchExists.value) {
+      return err({
+        kind: 'remote_branch_conflict',
+        branch: identity.branch,
+        message: `Remote branch ${identity.branch} already exists outside this run`,
       });
     }
     const added = await this.git(request.repositoryPath, 'create managed worktree', [
@@ -239,6 +279,7 @@ export class ManagedWorkspaceManager {
       repository: {
         reference: request.repositoryReference,
         sourcePath: resolve(request.repositoryPath),
+        baseBranch: request.gitPolicy.baseBranch,
         baseCommit: baseCommit.value,
       },
       runnerId: this.configuration.runnerId,
@@ -350,14 +391,46 @@ export class ManagedWorkspaceManager {
     });
   }
 
-  private async git(cwd: string, operation: string, args: readonly string[]): Promise<GitOutcome> {
+  private async remoteBranchExists(
+    repositoryPath: string,
+    branch: string,
+  ): Promise<Outcome<boolean, WorkspacePreparationError>> {
+    const result = await this.commands.run({
+      command: 'git',
+      args: ['ls-remote', '--exit-code', '--heads', 'origin', branch],
+      cwd: repositoryPath,
+      env: { ...this.remoteEnvironment, GIT_TERMINAL_PROMPT: '0' },
+      stdin: '',
+      timeoutMs: 2 * 60_000,
+    });
+    if (result.status === 'exited' && (result.exitCode === 0 || result.exitCode === 2)) {
+      return ok(result.exitCode === 0);
+    }
+    return err({
+      kind: 'git_failed',
+      operation: 'inspect remote task branch',
+      message: commandMessage(result),
+      retryable: result.status !== 'exited' || result.exitCode !== 128,
+    });
+  }
+
+  private async git(
+    cwd: string,
+    operation: string,
+    args: readonly string[],
+    authenticated = false,
+    timeoutMs = 2 * 60_000,
+  ): Promise<GitOutcome> {
     const result = await this.commands.run({
       command: 'git',
       args,
       cwd,
-      env: { GIT_TERMINAL_PROMPT: '0' },
+      env: {
+        ...(authenticated ? this.remoteEnvironment : {}),
+        GIT_TERMINAL_PROMPT: '0',
+      },
       stdin: '',
-      timeoutMs: 2 * 60_000,
+      timeoutMs,
     });
     if (result.status === 'exited' && result.exitCode === 0) return ok(result.stdout.trim());
     return err({

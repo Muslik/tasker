@@ -274,10 +274,8 @@ describe('file-backed harness pack', () => {
     const backoffice = pack.projects.find(
       ({ repository }) => repository === 'onetwotrip/front-backoffice',
     );
-    expect(backoffice?.processCommands['validation.targeted@1']).toEqual({
-      commands: [{ command: 'pnpm', args: ['run', 'agent:typecheck'] }],
-      timeoutMs: 2_100_000,
-    });
+    expect(backoffice?.processCommands['validation.targeted@1']).toBeUndefined();
+    expect(backoffice?.processCommands['validation.build@1']).toBeDefined();
   });
 
   it('admits the company Jira issue types used for frontend work', () => {
@@ -461,7 +459,7 @@ describe('file-backed harness pack', () => {
         ],
       },
       'validation.full@1': {
-        commands: [{ command: 'pnpm', args: ['run', 'test:unit', '--', '--runInBand'] }],
+        commands: [{ command: 'pnpm', args: ['run', 'test:unit', '--runInBand'] }],
       },
       'validation.build@1': {
         commands: [{ command: 'pnpm', args: ['run', 'build'] }],

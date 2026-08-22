@@ -48,6 +48,8 @@ import {
   type AgentProvider,
   workspaceHarnessEnvironment,
 } from '../../providers/agent-skills.js';
+import type { AgentInvocationUsage } from '../../providers/agent-usage.js';
+import { estimateApiCost } from '../../providers/api-cost.js';
 import type {
   CommandMount,
   CommandRequest,
@@ -243,6 +245,7 @@ export interface TaskStepAgentResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly finalMessage: unknown;
+  readonly usage: AgentInvocationUsage;
 }
 
 export type TaskStepAgentFailure =
@@ -424,6 +427,21 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         stdout: execution.stdout,
         stderr: execution.stderr,
         finalMessage: parsed.data,
+        usage: {
+          provider: profile.provider,
+          profile: profile.name,
+          profileSha256: profile.configurationSha256,
+          model: profile.model,
+          effort: profile.effort,
+          serviceTier: profile.provider === 'codex' ? profile.serviceTier : null,
+          sessionId: stream.value.sessionId,
+          durationMs: execution.durationMs,
+          inputTokens: stream.value.usage.inputTokens,
+          cachedInputTokens: stream.value.usage.cachedInputTokens,
+          outputTokens: stream.value.usage.outputTokens,
+          reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
+          apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
+        },
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -540,13 +558,17 @@ export class TemporalTaskStepTraceStore {
     return `task-step-transcript:${operationId}`;
   }
 
+  public outputArtifactIdFor(operationId: string): string {
+    return `task-step-output:${operationId}:artifact`;
+  }
+
   public readOutputArtifact(
     operationId: string,
   ): Outcome<
     TaskStepOutputArtifact | null,
     Extract<TemporalTaskStepTraceStoreError, { readonly kind: 'output_corrupt' }>
   > {
-    const artifactId = `task-step-output:${operationId}:artifact`;
+    const artifactId = this.outputArtifactIdFor(operationId);
     const artifact = this.ledger.readArtifact(artifactId);
     if (artifact === null) return ok(null);
     const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
@@ -703,13 +725,14 @@ export class TemporalTaskStepTraceStore {
     readonly stdout: string;
     readonly stderr: string;
     readonly details: unknown;
+    readonly usage?: AgentInvocationUsage;
     readonly result?: ExecuteTaskStepResult;
   }): Outcome<
     { readonly artifactId: string; readonly result: ExecuteTaskStepResult | null },
     TemporalTaskStepTraceStoreError
   > {
     const aggregateId = `task-step-output:${input.operationId}`;
-    const artifactId = `${aggregateId}:artifact`;
+    const artifactId = this.outputArtifactIdFor(input.operationId);
     const existing = this.ledger.readArtifact(artifactId);
     if (existing !== null) {
       const parsed = TaskStepOutputArtifactSchema.safeParse(existing.payload);
@@ -732,7 +755,7 @@ export class TemporalTaskStepTraceStore {
             artifactIds: [artifactId, ...new Set(input.result.artifactIds)],
           });
     const payload = TaskStepOutputArtifactSchema.parse({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operationId: input.operationId,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
@@ -748,6 +771,7 @@ export class TemporalTaskStepTraceStore {
       stdout: input.stdout,
       stderr: input.stderr,
       details: asJson(input.details),
+      usage: input.usage ?? null,
       result,
       recordedAt,
     });
@@ -1006,6 +1030,7 @@ const persistAgentBlockedResult = (
   stdout: string,
   stderr: string,
   provider: AgentProvider,
+  usage?: AgentInvocationUsage,
 ): ExecuteTaskStepResult => {
   const result = block(
     summary,
@@ -1028,6 +1053,7 @@ const persistAgentBlockedResult = (
     stdout,
     stderr,
     details,
+    ...(usage === undefined ? {} : { usage }),
     result,
   });
   if (!persisted.ok || persisted.value.result === null) {
@@ -1391,6 +1417,7 @@ export const executeRegisteredTaskStep = async (
         provider.value.stdout,
         provider.value.stderr,
         executionProfile.provider,
+        provider.value.usage,
       );
     }
     const decision = decodedDecision.value;
@@ -1404,6 +1431,7 @@ export const executeRegisteredTaskStep = async (
         provider.value.stdout,
         provider.value.stderr,
         executionProfile.provider,
+        provider.value.usage,
       );
     }
     if (decision.status === 'workflow_change_required') {
@@ -1426,6 +1454,7 @@ export const executeRegisteredTaskStep = async (
           provider.value.stdout,
           provider.value.stderr,
           executionProfile.provider,
+          provider.value.usage,
         );
       }
       const result = ExecuteTaskStepResultSchema.parse({
@@ -1451,6 +1480,7 @@ export const executeRegisteredTaskStep = async (
         stdout: provider.value.stdout,
         stderr: provider.value.stderr,
         details: { request: declared.value },
+        usage: provider.value.usage,
         result,
       });
       if (!persisted.ok || persisted.value.result === null) {
@@ -1474,6 +1504,7 @@ export const executeRegisteredTaskStep = async (
         provider.value.stdout,
         provider.value.stderr,
         executionProfile.provider,
+        provider.value.usage,
       );
     }
     const outputRecord = validatedOutput.data as {
@@ -1514,6 +1545,7 @@ export const executeRegisteredTaskStep = async (
           effort: executionProfile.effort,
         },
       },
+      usage: provider.value.usage,
       result,
     });
     if (!persisted.ok || persisted.value.result === null) {
@@ -1978,7 +2010,11 @@ export const createTaskExecutionActivity = (
       predicateFacts,
       evidence: collection.evidence,
       transcriptReference: result.transcriptId,
-      usageReference: null,
+      usageReference:
+        outputArtifact.value.usage === null
+          ? null
+          : dependencies.traces.outputArtifactIdFor(operationId),
+      usage: outputArtifact.value.usage,
     });
     return recorded.ok
       ? executionResultFromReceipt(recorded.value)

@@ -86,7 +86,7 @@ describe('operator workflow projection', () => {
       },
     });
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 3,
+      schemaVersion: 4,
       receiptId: 'block-receipt:execution-workflow:execution-run:implement-fix:run-1',
       blockReference: 'code.implement@1',
       blockDefinitionHash: 'block-definition-hash',
@@ -114,6 +114,21 @@ describe('operator workflow projection', () => {
       ],
       transcriptReference: 'transcript:implement',
       usageReference: 'usage:implement',
+      usage: {
+        provider: 'codex',
+        profile: 'implementation',
+        profileSha256: 'e'.repeat(64),
+        model: 'gpt-5.6-sol',
+        effort: 'high',
+        serviceTier: 'fast',
+        sessionId: 'session-1',
+        durationMs: 60_000,
+        inputTokens: 1_000,
+        cachedInputTokens: 500,
+        outputTokens: 200,
+        reasoningOutputTokens: 50,
+        apiCost: { source: 'provider_reported', amountUsd: 0.2 },
+      },
       completedAt: '2026-08-10T00:01:00.000Z',
     });
 

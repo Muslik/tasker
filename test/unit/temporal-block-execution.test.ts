@@ -38,6 +38,21 @@ const translationFixture = makePlanningTaskSnapshot('avia-14001-translation-comp
 const project = pack.projects.find((candidate) => candidate.repository === fixture.repository);
 if (project === undefined) throw new Error('Missing harness project for fixture repository');
 const WORKFLOW_HASH = 'a'.repeat(64);
+const TEST_AGENT_USAGE = {
+  provider: 'codex' as const,
+  profile: 'test-agent',
+  profileSha256: 'e'.repeat(64),
+  model: 'gpt-5.6-terra',
+  effort: 'medium' as const,
+  serviceTier: 'fast' as const,
+  sessionId: 'test-session',
+  durationMs: 1_000,
+  inputTokens: 100,
+  cachedInputTokens: 50,
+  outputTokens: 20,
+  reasoningOutputTokens: 5,
+  apiCost: { source: 'unrated' as const },
+};
 
 const stubWorkspace = {
   schemaVersion: 1 as const,
@@ -48,6 +63,7 @@ const stubWorkspace = {
   repository: {
     reference: fixture.repository,
     sourcePath: '/tmp/source',
+    baseBranch: 'master',
     baseCommit: 'c'.repeat(40),
   },
   runnerId: 'test-runner',
@@ -215,6 +231,7 @@ describe('temporal block execution activity', () => {
           ok({
             stdout: '',
             stderr: '',
+            usage: TEST_AGENT_USAGE,
             finalMessage: {
               status: 'completed',
               outputJson: JSON.stringify({
@@ -288,6 +305,7 @@ describe('temporal block execution activity', () => {
         ok({
           stdout: '',
           stderr: '',
+          usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
             outputJson: JSON.stringify({
@@ -392,6 +410,7 @@ describe('temporal block execution activity', () => {
               ok({
                 stdout: '',
                 stderr: '',
+                usage: TEST_AGENT_USAGE,
                 finalMessage: {
                   status: 'blocked',
                   outputJson: JSON.stringify({ command: 'pnpm start', exitCode: 127 }),
@@ -856,6 +875,7 @@ describe('temporal block execution activity', () => {
         ok({
           stdout: '',
           stderr: '',
+          usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
             outputJson: JSON.stringify({ summary: 'Test operations plan ready', artifacts: [] }),
@@ -926,6 +946,23 @@ describe('temporal block execution activity', () => {
     expect(runtimeCall?.[2]?.cancellationSignal).toBeInstanceOf(AbortSignal);
     expect(runtimeCall?.[2]?.onProgress).toBeTypeOf('function');
     expect(calls).toEqual(['runtime', 'agent']);
+    expect(
+      receipts.read(
+        blockReceiptId({
+          workflowId: stubWorkspace.workflowId,
+          workflowRunId: stubWorkspace.workflowRunId,
+          nodeId: 'test-operations-plan',
+          blockRun: 1,
+        }),
+      ),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        usageReference:
+          'task-step-output:tasker:task-ref:run-1:test-operations-plan:attempt-1:artifact',
+        usage: TEST_AGENT_USAGE,
+      },
+    });
   });
 
   it('opens a recoverable infrastructure wait and retries the same block after runtime repair', async () => {
@@ -947,6 +984,7 @@ describe('temporal block execution activity', () => {
         ok({
           stdout: '',
           stderr: '',
+          usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
             outputJson: JSON.stringify({ summary: 'Test operations plan ready', artifacts: [] }),
@@ -1079,6 +1117,7 @@ describe('temporal block execution activity', () => {
         ok({
           stdout: '',
           stderr: '',
+          usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
             outputJson: JSON.stringify({
@@ -1249,6 +1288,7 @@ describe('temporal block execution activity', () => {
               ok({
                 stdout: '',
                 stderr: '',
+                usage: TEST_AGENT_USAGE,
                 finalMessage: {
                   status: 'completed',
                   outputJson: JSON.stringify({

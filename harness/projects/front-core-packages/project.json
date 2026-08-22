@@ -1,12 +1,25 @@
 {
   "schemaVersion": 2,
-  "version": "1",
+  "version": "3",
   "repository": "onetwotrip/front-core-packages",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
   "ci": { "kind": "jenkins", "job": "front-core-packages" },
+  "git": {
+    "baseBranch": "master",
+    "branch": { "kind": "task_key_slug" },
+    "commit": {
+      "kind": "conventional_task_key",
+      "allowedTypes": ["fix", "feat", "refactor", "test", "chore"],
+      "requireScope": false
+    }
+  },
   "workspaceRuntime": {
-    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "bootstrap": [
+      "pnpm install --frozen-lockfile",
+      "mise use --global rust@1.97.1",
+      "rustup target add wasm32-wasip1"
+    ],
     "services": []
   },
   "processCommands": {
@@ -17,7 +30,7 @@
       ]
     },
     "validation.full@1": {
-      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--", "--runInBand"] }]
+      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--runInBand"] }]
     },
     "validation.build@1": {
       "commands": [{ "command": "pnpm", "args": ["run", "build-packages"] }]

@@ -187,7 +187,7 @@ describe('subscription CLI workflow analyzer', () => {
           serviceTier: 'fast',
           sessionId: 'thread-analyzer-1',
           durationMs: 1250,
-          hypotheticalApiCostUsd: null,
+          apiCost: { source: 'unrated' },
           usage: {
             inputTokens: 1200,
             cachedInputTokens: 800,
@@ -259,7 +259,7 @@ describe('subscription CLI workflow analyzer', () => {
           effort: 'high',
           sessionId: 'claude-analyzer-1',
           usage: { inputTokens: 900, cachedInputTokens: 300, outputTokens: 180 },
-          hypotheticalApiCostUsd: 0.31,
+          apiCost: { source: 'provider_reported', amountUsd: 0.31 },
         },
       },
     });

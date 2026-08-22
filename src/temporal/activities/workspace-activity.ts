@@ -1,5 +1,6 @@
 import { Context } from '@temporalio/activity';
 
+import type { HarnessGitPolicy } from '../../harness/index.js';
 import type { Outcome } from '../../shared/outcome.js';
 import type {
   PrepareWorkspaceRequest,
@@ -18,7 +19,11 @@ import {
 
 interface WorkspaceSubject {
   readonly repositoryPath: string;
-  readonly task: { readonly repository: string };
+  readonly task: {
+    readonly repository: string;
+    readonly taskId: string;
+    readonly title: string;
+  };
 }
 
 export interface TemporalWorkspaceSubjectSource {
@@ -34,8 +39,9 @@ export interface TemporalManagedWorkspacePreparer {
   ): Promise<Outcome<WorkspaceLocator, WorkspacePreparationError>>;
 }
 
-export interface TemporalWorkspaceRuntimePolicySource {
-  resolve(repositoryReference: string): ResolvedWorkspaceRuntimePolicy;
+export interface TemporalWorkspacePolicySource {
+  resolveRuntime(repositoryReference: string): ResolvedWorkspaceRuntimePolicy;
+  resolveGit(repositoryReference: string): HarnessGitPolicy;
 }
 
 const failure = (
@@ -61,7 +67,7 @@ export const createWorkspaceActivity = (
   workspaces: TemporalManagedWorkspacePreparer,
   bootstrap: WorkspaceBootstrapper,
   runtimes: DockerWorkspaceRuntimePreparer,
-  runtimePolicies: TemporalWorkspaceRuntimePolicySource,
+  policies: TemporalWorkspacePolicySource,
 ): Pick<BootstrapWorkflowActivities, 'prepareTaskWorkspace'> => {
   const prepareDockerRuntime = async (workspace: WorkspaceLocator) => {
     const context = Context.current();
@@ -74,7 +80,7 @@ export const createWorkspaceActivity = (
       try {
         return await runtimes.prepare(
           workspace,
-          runtimePolicies.resolve(workspace.repository.reference),
+          policies.resolveRuntime(workspace.repository.reference),
           {
             cancellationSignal: context.cancellationSignal,
             onProgress: (progress) => {
@@ -105,10 +111,13 @@ export const createWorkspaceActivity = (
       context.heartbeat({ phase: 'prepare_worktree' });
       const prepared = await workspaces.prepare({
         taskReference: input.taskReference,
+        taskKey: subject.value.task.taskId,
+        taskTitle: subject.value.task.title,
         workflowId: input.workflowId,
         workflowRunId: input.workflowRunId,
         repositoryReference: subject.value.task.repository,
         repositoryPath: subject.value.repositoryPath,
+        gitPolicy: policies.resolveGit(subject.value.task.repository),
       });
       if (!prepared.ok) throw failure('preparation', prepared.error);
 

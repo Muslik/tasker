@@ -17,8 +17,32 @@ const statusTone: Readonly<Record<WorkflowNodeStatus, string>> = {
   failed: 'bg-destructive',
 };
 
+const usageFor = (steps: readonly OperatorWorkflowStep[]) => {
+  const usage = steps.flatMap((step) =>
+    step.kind === 'wait' ? [] : step.receipts.flatMap((receipt) => receipt.usage ?? []),
+  );
+  return {
+    tokens: usage.reduce((total, item) => total + item.inputTokens + item.outputTokens, 0),
+    durationMs: usage.reduce((total, item) => total + item.durationMs, 0),
+    costUsd: usage.reduce(
+      (total, item) => total + (item.apiCost.source === 'unrated' ? 0 : item.apiCost.amountUsd),
+      0,
+    ),
+    rated: usage.some((item) => item.apiCost.source !== 'unrated'),
+  };
+};
+
+const compactTokens = (tokens: number): string =>
+  tokens < 1_000 ? String(tokens) : `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
+
+const compactDuration = (durationMs: number): string =>
+  durationMs < 60_000
+    ? `${String(Math.round(durationMs / 1_000))}s`
+    : `${String(Math.round(durationMs / 60_000))}m`;
+
 const WorkflowStep = ({ step }: { readonly step: OperatorWorkflowStep }) => {
   const Icon = step.kind === 'agent' ? Bot : step.kind === 'process' ? Terminal : Pause;
+  const usage = usageFor([step]);
   return (
     <li>
       <Tooltip>
@@ -33,6 +57,11 @@ const WorkflowStep = ({ step }: { readonly step: OperatorWorkflowStep }) => {
           </span>
           {step.kind !== 'wait' && step.attempts > 1 ? (
             <span className="text-[10px] text-muted-foreground">attempt {step.attempts}</span>
+          ) : null}
+          {usage.tokens > 0 ? (
+            <span className="text-[10px] text-muted-foreground">
+              {compactTokens(usage.tokens)} tok
+            </span>
           ) : null}
           <span
             className={`size-1.5 shrink-0 rounded-full ${statusTone[step.status]}`}
@@ -140,10 +169,26 @@ export const WorkflowStages = ({
   stages,
 }: {
   readonly stages: readonly OperatorWorkflowStage[];
-}) => (
-  <div className="border-y border-border/70" data-testid="workflow-stages">
-    {stages.map((stage) => (
-      <Stage key={stage.key} stage={stage} />
-    ))}
-  </div>
-);
+}) => {
+  const usage = usageFor(stages.flatMap((stage) => stage.steps));
+  return (
+    <div className="border-y border-border/70" data-testid="workflow-stages">
+      {usage.tokens > 0 ? (
+        <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2 text-[10px] text-muted-foreground">
+          <span>{compactTokens(usage.tokens)} tokens</span>
+          <span>·</span>
+          <span>{compactDuration(usage.durationMs)} agent time</span>
+          {usage.rated ? (
+            <>
+              <span>·</span>
+              <span>~${usage.costUsd.toFixed(2)} API</span>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {stages.map((stage) => (
+        <Stage key={stage.key} stage={stage} />
+      ))}
+    </div>
+  );
+};

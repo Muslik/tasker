@@ -39,6 +39,7 @@ const input = {
   ],
   transcriptReference: 'transcript:1',
   usageReference: null,
+  usage: null,
 };
 
 describe('BlockReceiptStore', () => {
@@ -62,7 +63,7 @@ describe('BlockReceiptStore', () => {
     expect(first).toMatchObject({
       ok: true,
       value: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         blockReference: 'fill-test-ops-plan@1',
         verdict: { status: 'accepted' },
       },

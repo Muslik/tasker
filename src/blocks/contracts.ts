@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { WorkflowStageDescriptorSchema } from '../workflow/contracts.js';
 import { JsonValueSchema, OutputPredicateMappingSchema } from '../workflow/schema.js';
+import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const EvidenceReferenceSchema = z.string().min(1);
@@ -204,7 +205,7 @@ export const CompletionVerdictSchema = z.discriminatedUnion('status', [
 
 export const BlockReceiptSchema = z
   .object({
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
     receiptId: z.string().min(1),
     blockReference: VersionedReferenceSchema,
     blockDefinitionHash: z.string().min(1),
@@ -220,6 +221,7 @@ export const BlockReceiptSchema = z
     evidence: z.array(CompletionEvidenceSchema),
     transcriptReference: z.string().min(1).nullable(),
     usageReference: z.string().min(1).nullable(),
+    usage: AgentInvocationUsageSchema.nullable(),
     completedAt: z.iso.datetime(),
   })
   .strict()

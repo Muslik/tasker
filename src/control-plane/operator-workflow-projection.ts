@@ -66,6 +66,7 @@ const receiptSummary = (receipt: BlockReceipt): BlockReceiptSummary =>
     evidence: receipt.evidence,
     transcriptReference: receipt.transcriptReference,
     usageReference: receipt.usageReference,
+    usage: receipt.usage,
     completedAt: receipt.completedAt,
   });
 

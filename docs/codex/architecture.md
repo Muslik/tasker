@@ -358,7 +358,7 @@ Each block declares:
   `workflow_change_required`, `blocked`, and `failed`;
 - an authoritative completion evaluator and required evidence/artifact contracts.
 
-Block Definition and Block Receipt use schema v3. A block may declare a typed
+Block Definition uses schema v3 and Block Receipt uses schema v4. A block may declare a typed
 output-to-predicate mapping: one output discriminator, exact cases, and optional default facts.
 After output-schema validation and completion-evidence acceptance, the block runner derives those
 facts itself and persists them in the receipt. Provider output cannot write arbitrary workflow
@@ -630,8 +630,13 @@ Time and cost are attributed per Activity attempt:
 
 - queue delay, execution time, wait time, and operator time;
 - measured provider tokens when available;
-- provider/model and a versioned API price table for hypothetical cost;
+- provider/model and a source-linked API price row frozen into the run for hypothetical cost;
 - process/integration duration and retry count.
+
+Usage and pricing contracts are leaf provider data shared by receipts and projections; they do not
+import planning contracts. This keeps `blocks` from depending back on `planning`. Cost is one of
+`price_table`, `provider_reported`, or `unrated`, and never claims that a subscription invocation
+was billed at the displayed API-equivalent amount.
 
 ## 13. Deployment and concurrency
 

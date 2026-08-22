@@ -2,6 +2,7 @@ import { checksumString } from '../ledger/checksum.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type { JsonValue } from '../ledger/types.js';
 import type { Clock } from '../shared/clock.js';
+import type { AgentInvocationUsage } from '../providers/agent-usage.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 import {
@@ -28,6 +29,7 @@ export interface RecordBlockReceiptInput {
   readonly evidence: readonly CompletionEvidence[];
   readonly transcriptReference: string | null;
   readonly usageReference: string | null;
+  readonly usage: AgentInvocationUsage | null;
 }
 
 export type BlockReceiptStoreError =
@@ -72,6 +74,7 @@ const comparableReceipt = (receipt: BlockReceipt) => ({
   evidence: receipt.evidence,
   transcriptReference: receipt.transcriptReference,
   usageReference: receipt.usageReference,
+  usage: receipt.usage,
 });
 
 const comparableInput = (input: RecordBlockReceiptInput) => ({
@@ -89,6 +92,7 @@ const comparableInput = (input: RecordBlockReceiptInput) => ({
   evidence: input.evidence,
   transcriptReference: input.transcriptReference,
   usageReference: input.usageReference,
+  usage: input.usage,
 });
 
 export class BlockReceiptStore {
@@ -120,7 +124,7 @@ export class BlockReceiptStore {
 
     const completedAt = this.clock.now();
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 3,
+      schemaVersion: 4,
       receiptId,
       ...comparableInput(input),
       completedAt,

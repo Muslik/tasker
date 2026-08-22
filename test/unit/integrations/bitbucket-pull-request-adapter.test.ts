@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { getHarnessPack } from '../../../src/harness/index.js';
 import {
   BitbucketPullRequestAdapter,
   type BitbucketPullRequest,
@@ -22,6 +23,11 @@ import type { IntegrationStepExecutionRequest } from '../../../src/integrations/
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
 const task = makePlanningTaskSnapshot('avia-13236-short-bug');
+const project = getHarnessPack().projects.find(
+  (candidate) => candidate.repository === task.repository,
+);
+if (project === undefined) throw new Error(`Missing harness project ${task.repository}`);
+const testProject = { ...project, git: { ...project.git, baseBranch: 'main' } };
 
 const git = (cwd: string, args: readonly string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -98,6 +104,7 @@ const createGitWorkspace = () => {
     `${JSON.stringify({
       title: `${task.taskId}: ${task.title}`,
       description: task.description,
+      commit: { kind: 'subject', subject: task.title },
       branchArtifacts: ['feature.ts'],
     })}\n`,
     'utf8',
@@ -146,6 +153,7 @@ const requestFor = (
     repository: {
       reference: task.repository,
       sourcePath: workspace.workspace,
+      baseBranch: 'main',
       baseCommit: workspace.baseCommit,
     },
     runnerId: 'test',
@@ -156,7 +164,7 @@ const requestFor = (
   operatorGuidance: null,
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [],
-  project: null,
+  project: testProject,
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,
@@ -235,6 +243,9 @@ describe('Bitbucket pull request effect adapter', () => {
     expect(git(workspace.workspace, ['show', '-s', '--format=%an <%ae>|%cn <%ce>', 'HEAD'])).toBe(
       'Tasker Adapter <tasker-adapter@example.test>|Tasker Adapter <tasker-adapter@example.test>',
     );
+    expect(git(workspace.workspace, ['show', '-s', '--format=%s', 'HEAD'])).toBe(
+      `${task.taskId}: ${task.title}`,
+    );
   });
 
   it('refuses remote publication when a declared branch artifact is not committed', async () => {
@@ -244,6 +255,7 @@ describe('Bitbucket pull request effect adapter', () => {
       `${JSON.stringify({
         title: `${task.taskId}: ${task.title}`,
         description: task.description,
+        commit: { kind: 'subject', subject: task.title },
         branchArtifacts: ['.ai/workspace/AVIA-13236/verification.md'],
       })}\n`,
       'utf8',

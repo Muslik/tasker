@@ -180,7 +180,15 @@ describe('subscription CLI task-step runner', () => {
 
       expect(result).toMatchObject({
         ok: true,
-        value: { finalMessage: { done: true, labels: { result: 'verified' } } },
+        value: {
+          finalMessage: { done: true, labels: { result: 'verified' } },
+          usage: {
+            provider: 'codex',
+            inputTokens: 10,
+            cachedInputTokens: 2,
+            outputTokens: 4,
+          },
+        },
       });
       expect(observations).toHaveLength(1);
       expect(observations[0]?.skillsRoot).toBe(join(observations[0]?.codexHome ?? '', 'skills'));
@@ -247,7 +255,15 @@ describe('subscription CLI task-step runner', () => {
 
       expect(result).toMatchObject({
         ok: true,
-        value: { finalMessage: { done: true, labels: { result: 'verified' } } },
+        value: {
+          finalMessage: { done: true, labels: { result: 'verified' } },
+          usage: {
+            provider: 'claude',
+            inputTokens: 10,
+            cachedInputTokens: 3,
+            outputTokens: 4,
+          },
+        },
       });
       expect(requests[1]?.args).toEqual(
         expect.arrayContaining([

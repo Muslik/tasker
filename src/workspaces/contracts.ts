@@ -1,15 +1,20 @@
 import { z } from 'zod';
 
+import { HarnessGitPolicySchema } from '../harness/contracts.js';
+
 const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const GitObjectIdSchema = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u);
 
 export const PrepareWorkspaceRequestSchema = z
   .object({
     taskReference: z.string().min(1),
+    taskKey: z.string().regex(/^[A-Za-z][A-Za-z0-9]*-\d+$/u),
+    taskTitle: z.string().trim().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
     repositoryReference: z.string().min(1),
     repositoryPath: z.string().min(1),
+    gitPolicy: HarnessGitPolicySchema,
   })
   .strict()
   .readonly();
@@ -25,6 +30,7 @@ export const WorkspaceLocatorSchema = z
       .object({
         reference: z.string().min(1),
         sourcePath: z.string().min(1),
+        baseBranch: z.string().min(1),
         baseCommit: GitObjectIdSchema,
       })
       .strict(),

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "2",
+  "version": "3",
   "availableCapabilities": [
     "ci.read",
     "command.run",
@@ -47,6 +47,46 @@
     "implementationPlanner": "prompts/implementation-planner.md",
     "implementationPlannerSkills": ["jira", "confluence", "loop"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
+  },
+  "apiPricing": {
+    "version": "openai-2026-08-22",
+    "sourceUrls": [
+      "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+      "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+      "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
+    ],
+    "models": {
+      "gpt-5.6-sol": {
+        "inputPerMillionUsd": 4,
+        "cachedInputPerMillionUsd": 0.4,
+        "outputPerMillionUsd": 20,
+        "longContext": {
+          "thresholdTokens": 272000,
+          "inputMultiplier": 2,
+          "outputMultiplier": 1.5
+        }
+      },
+      "gpt-5.6-terra": {
+        "inputPerMillionUsd": 2,
+        "cachedInputPerMillionUsd": 0.2,
+        "outputPerMillionUsd": 12,
+        "longContext": {
+          "thresholdTokens": 272000,
+          "inputMultiplier": 2,
+          "outputMultiplier": 1.5
+        }
+      },
+      "gpt-5.6-luna": {
+        "inputPerMillionUsd": 0.2,
+        "cachedInputPerMillionUsd": 0.02,
+        "outputPerMillionUsd": 1.2,
+        "longContext": {
+          "thresholdTokens": 272000,
+          "inputMultiplier": 2,
+          "outputMultiplier": 1.5
+        }
+      }
+    }
   },
   "executionProfiles": {
     "workflow-analysis": {

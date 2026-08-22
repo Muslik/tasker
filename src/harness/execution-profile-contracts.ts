@@ -4,6 +4,39 @@ export const ExecutionProfileNameSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u)
 
 export const AgentEffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 
+const ApiModelPricingShape = {
+  inputPerMillionUsd: z.number().nonnegative(),
+  cachedInputPerMillionUsd: z.number().nonnegative(),
+  outputPerMillionUsd: z.number().nonnegative(),
+  longContext: z
+    .object({
+      thresholdTokens: z.number().int().positive(),
+      inputMultiplier: z.number().positive(),
+      outputMultiplier: z.number().positive(),
+    })
+    .strict()
+    .optional(),
+};
+
+const ApiModelPricingSchema = z.object(ApiModelPricingShape).strict().readonly();
+
+export const ApiPricingTableSchema = z
+  .object({
+    version: z.string().trim().min(1),
+    sourceUrls: z.array(z.url()).min(1),
+    models: z.record(z.string().trim().min(1), ApiModelPricingSchema),
+  })
+  .strict()
+  .readonly();
+
+const ResolvedApiPricingSchema = z
+  .object({
+    ...ApiModelPricingShape,
+    version: z.string().trim().min(1),
+  })
+  .strict()
+  .readonly();
+
 const ExecutionProfileBaseSchema = {
   command: z.string().trim().min(1),
   model: z.string().trim().min(1),
@@ -39,6 +72,7 @@ export const ResolvedExecutionProfileSchema = z.discriminatedUnion('provider', [
       effort: AgentEffortSchema,
       timeoutMs: z.number().int().positive(),
       serviceTier: z.enum(['fast', 'flex']),
+      apiPricing: ResolvedApiPricingSchema.nullable(),
       configurationSha256: z.string().regex(/^[a-f0-9]{64}$/u),
     })
     .strict()
@@ -51,6 +85,7 @@ export const ResolvedExecutionProfileSchema = z.discriminatedUnion('provider', [
       model: z.string().trim().min(1),
       effort: AgentEffortSchema,
       timeoutMs: z.number().int().positive(),
+      apiPricing: ResolvedApiPricingSchema.nullable(),
       configurationSha256: z.string().regex(/^[a-f0-9]{64}$/u),
     })
     .strict()
@@ -86,6 +121,7 @@ export const ProjectExecutionProfileOverridesSchema = z
   .readonly();
 
 export type ExecutionProfile = z.infer<typeof ExecutionProfileSchema>;
+export type ApiPricingTable = z.infer<typeof ApiPricingTableSchema>;
 export type ResolvedExecutionProfile = z.infer<typeof ResolvedExecutionProfileSchema>;
 export type ExecutionProfileRouting = z.infer<typeof ExecutionProfileRoutingSchema>;
 export type ProjectExecutionProfileOverrides = z.infer<

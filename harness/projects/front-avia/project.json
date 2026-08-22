@@ -1,10 +1,15 @@
 {
   "schemaVersion": 2,
-  "version": "1",
+  "version": "3",
   "repository": "onetwotrip/front-avia",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
   "ci": { "kind": "jenkins", "job": "front-avia" },
+  "git": {
+    "baseBranch": "master",
+    "branch": { "kind": "task_key_slug" },
+    "commit": { "kind": "task_key_subject" }
+  },
   "workspaceRuntime": {
     "bootstrap": ["pnpm install --frozen-lockfile", "pnpm run dicts"],
     "services": [
@@ -27,7 +32,7 @@
       ]
     },
     "validation.full@1": {
-      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--", "--runInBand"] }]
+      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--runInBand"] }]
     },
     "validation.build@1": {
       "commands": [{ "command": "pnpm", "args": ["run", "build"] }]

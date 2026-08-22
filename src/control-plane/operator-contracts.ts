@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { CompletionEvidenceSchema } from '../blocks/contracts.js';
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
+import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
@@ -66,6 +67,7 @@ export const BlockReceiptSummarySchema = z
     evidence: z.array(CompletionEvidenceSchema),
     transcriptReference: z.string().min(1).nullable(),
     usageReference: z.string().min(1).nullable(),
+    usage: AgentInvocationUsageSchema.nullable(),
     completedAt: z.iso.datetime(),
   })
   .strict()

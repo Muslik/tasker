@@ -607,7 +607,7 @@ export const makeTestImplementationPlanner = (): ImplementationPlanner => ({
             outputTokens: 0,
             reasoningOutputTokens: 0,
           },
-          hypotheticalApiCostUsd: 0,
+          apiCost: { source: 'provider_reported', amountUsd: 0 },
         },
       }),
     ),

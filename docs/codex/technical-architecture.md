@@ -215,7 +215,7 @@ is the generic Activity-side block host. For every step it:
 2. resolves the snapshotted block definition and validates its typed input;
 3. invokes exactly one executor kind: agent, configured process, or integration port;
 4. persists candidate output and independently gathers declared evidence;
-5. evaluates Block Contract v3;
+5. evaluates Block Definition v3 and persists Block Receipt v4;
 6. records an idempotent Block Receipt with predicate facts;
 7. returns `completed` only for an accepted receipt, otherwise a durable wait reason.
 
