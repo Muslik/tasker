@@ -36,8 +36,8 @@ Each Bootstrap run is a separate consistency boundary. The stable Jira/task refe
 groups history; it does not identify a plan or workflow. The Bootstrap `runId` is carried
 into a unique `planningEpisodeId`, and every candidate has its own
 `workflowOperationId`. Evidence revisions use an explicit operation scope. Plan review
-is keyed by planning episode, freeze by Bootstrap workflow/run, execution evidence by
-Execution workflow/run, and continuation by parent run.
+is keyed by planning episode, freeze by Bootstrap workflow/run, and execution evidence
+and continuation candidates by the exact Execution workflow/run.
 
 All reads start from the current Temporal lifecycle and follow these exact references.
 Tasker never falls back to the most recent artifact for the task. If the current run's
@@ -234,8 +234,13 @@ accepted parent graph or restarts the Jira task.
 Initial investigation/planning and runtime continuation are separate concepts:
 
 - before freeze, the planner owns the first complete graph;
-- after freeze, continuation extends completed work through a separately accepted
-  graph/Child Workflow.
+- after freeze, continuation extends completed work through a separately accepted,
+  independently hashed suffix interpreted by the same Execution Workflow and workspace.
+
+The continuation does not edit the frozen graph. Its semantic source, compiled graph,
+review decision, and state are separate artifacts attached to the exact Execution
+`runId`. Cross-repository continuation remains blocked until Tasker can prepare and
+project a child workspace lifecycle without weakening this isolation boundary.
 
 ## Supported schemas and deleted path
 

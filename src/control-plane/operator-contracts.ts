@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { CompletionEvidenceSchema } from '../blocks/contracts.js';
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
-import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
+import { AgentInvocationUsageSchema } from '../observability/agent-usage.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
@@ -152,6 +152,28 @@ export const OperatorWorkflowStageSchema = z
   })
   .strict();
 
+const OperatorWorkflowContinuationBaseSchema = z
+  .object({
+    continuationId: z.string().min(1),
+    attempt: z.number().int().positive(),
+    parentNodeId: z.string().min(1),
+    reason: z.string().min(1),
+    transcriptOperationId: z.string().min(1),
+  })
+  .strict();
+
+export const OperatorWorkflowContinuationSchema = z.union([
+  OperatorWorkflowContinuationBaseSchema.extend({
+    status: z.enum(['planning', 'needs_input']),
+  }).strict(),
+  OperatorWorkflowContinuationBaseSchema.extend({
+    usage: AgentInvocationUsageSchema,
+    semanticHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    status: z.enum(['awaiting_review', 'rejected', 'running', 'completed']),
+  }).strict(),
+]);
+
 export const OperatorInterventionActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('operator_guidance') }).strict(),
   z.object({ kind: z.literal('external_prerequisite') }).strict(),
@@ -168,7 +190,7 @@ const OperatorWorkflowCurrentBaseSchema = {
 
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(6),
+    schemaVersion: z.literal(7),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
@@ -200,6 +222,7 @@ export const OperatorWorkflowProjectionSchema = z
       ])
       .nullable(),
     stages: z.array(OperatorWorkflowStageSchema),
+    continuations: z.array(OperatorWorkflowContinuationSchema),
   })
   .strict()
   .readonly();
@@ -311,6 +334,24 @@ export const ResumeRunCommandSchema = z
     guidance: z.string().trim().min(1).max(10_000).optional(),
   })
   .strict();
+
+export const WorkflowChangeReviewCommandSchema = z.discriminatedUnion('decision', [
+  z
+    .object({
+      expectedRunId: z.string().min(1),
+      continuationId: z.string().min(1),
+      decision: z.literal('accept'),
+    })
+    .strict(),
+  z
+    .object({
+      expectedRunId: z.string().min(1),
+      continuationId: z.string().min(1),
+      decision: z.literal('reject'),
+      guidance: z.string().trim().min(1).max(10_000),
+    })
+    .strict(),
+]);
 
 export const RestartRunCommandSchema = z
   .object({
@@ -439,6 +480,7 @@ export type OperatorExecutionAttempt = z.infer<typeof OperatorExecutionAttemptSc
 export type BlockReceiptSummary = z.infer<typeof BlockReceiptSummarySchema>;
 export type OperatorWorkflowStep = z.infer<typeof OperatorWorkflowStepSchema>;
 export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;
+export type OperatorWorkflowContinuation = z.infer<typeof OperatorWorkflowContinuationSchema>;
 export type OperatorInterventionAction = z.infer<typeof OperatorInterventionActionSchema>;
 export type OperatorWorkflowProjection = z.infer<typeof OperatorWorkflowProjectionSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
@@ -446,6 +488,7 @@ export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
 export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
+export type WorkflowChangeReviewCommand = z.infer<typeof WorkflowChangeReviewCommandSchema>;
 export type RestartRunCommand = z.infer<typeof RestartRunCommandSchema>;
 export type ExpectedRunCommand = z.infer<typeof ExpectedRunCommandSchema>;
 export type PlanningClarificationSubmission = z.infer<typeof PlanningClarificationSubmissionSchema>;

@@ -9,6 +9,7 @@ import { err, ok, type Outcome } from '../../src/shared/outcome.js';
 import {
   BootstrapWorkflowInputSchema,
   BootstrapWorkflowPublicStateSchema,
+  ExecutionWorkflowPublicStateSchema,
   type BootstrapWorkflowInput,
   type ResolveBootstrapWaitCommand,
   type TaskRunLifecycle,
@@ -52,6 +53,10 @@ class ContractTaskRunService implements TaskRunService {
   public readonly resolutions: ResolveBootstrapWaitCommand[] = [];
   private current: TaskRunPublicState | null = null;
   private sequence = 0;
+
+  public setCurrent(current: TaskRunPublicState): void {
+    this.current = current;
+  }
 
   public start(inputValue: BootstrapWorkflowInput) {
     const input = BootstrapWorkflowInputSchema.parse(inputValue);
@@ -169,6 +174,110 @@ describe('Temporal bootstrap HTTP contract', () => {
     expect(stale.json()).toMatchObject({ error: 'stale_run' });
     expect(current.statusCode).toBe(200);
     expect(current.json()).toMatchObject({ runId: 'run-2' });
+    await api.close();
+  });
+
+  it('reviews only the exact continuation waiting in the active execution run', async () => {
+    const { api, runs } = setup();
+    const continuationId = 'execution-run:continuation-1';
+    runs.setCurrent(
+      ExecutionWorkflowPublicStateSchema.parse({
+        runtime: 'execution',
+        schemaVersion: 2,
+        taskReference: 'jira:AVIA-12045',
+        workflowId: 'tasker:execution:v2:jira:AVIA-12045:run-1',
+        runId: 'execution-run',
+        workflowHash: 'a'.repeat(64),
+        nodeStates: { delivery: 'running', deliver: 'waiting' },
+        blockRuns: { deliver: 1 },
+        loopIterations: {},
+        continuations: [
+          {
+            continuationId,
+            attempt: 1,
+            parentNodeId: 'deliver',
+            requestReference: 'artifact:workflow-change',
+            reason: 'CI exposed a task-caused change',
+            evidenceBundle: {
+              artifactId: 'evidence:continuation-1',
+              checksum: 'd'.repeat(64),
+              revision: 1,
+            },
+            transcriptOperationId: `${continuationId}:planner`,
+            analyzerReceiptReference: 'receipt:continuation-1',
+            usage: {
+              provider: 'codex',
+              profile: 'test',
+              profileSha256: 'e'.repeat(64),
+              model: 'test-model',
+              effort: 'low',
+              serviceTier: 'fast',
+              sessionId: 'session-1',
+              durationMs: 10,
+              inputTokens: 10,
+              cachedInputTokens: 0,
+              outputTokens: 5,
+              reasoningOutputTokens: 0,
+              apiCost: { source: 'unrated' },
+            },
+            semanticHash: 'b'.repeat(64),
+            workflowHash: 'c'.repeat(64),
+            graph: {
+              metadata: {
+                compilerVersion: 4,
+                irVersion: 'workflow-ir-v1',
+                references: { predicates: [], stepTypes: [], waits: [] },
+                workflowId: continuationId,
+                workflowVersion: 1,
+              },
+              root: {
+                kind: 'sequence',
+                id: 'continuation-1--delivery',
+                children: [
+                  { kind: 'finalize', id: 'continuation-1--finished', outcome: 'continued' },
+                ],
+              },
+            },
+            status: 'awaiting_review',
+          },
+        ],
+        status: 'waiting',
+        currentNodeId: 'deliver',
+        wait: {
+          nodeId: 'deliver',
+          waitKind: 'workflow_change.review@1',
+          reason: `Review continuation ${continuationId}`,
+        },
+        outcome: null,
+      }),
+    );
+
+    const mismatch = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/jira:AVIA-12045/workflow-change-review',
+      payload: {
+        expectedRunId: 'execution-run',
+        continuationId: 'different-continuation',
+        decision: 'accept',
+      },
+    });
+    expect(mismatch.statusCode).toBe(409);
+    expect(runs.resolutions).toHaveLength(0);
+
+    const accepted = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/jira:AVIA-12045/workflow-change-review',
+      payload: { expectedRunId: 'execution-run', continuationId, decision: 'accept' },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(runs.resolutions).toEqual([
+      expect.objectContaining({
+        runId: 'execution-run',
+        nodeId: 'deliver',
+        waitKind: 'workflow_change.review@1',
+        resolution: { decision: 'accept', continuationId },
+      }),
+    ]);
     await api.close();
   });
 });

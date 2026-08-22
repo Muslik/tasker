@@ -5,6 +5,9 @@ import {
   JsonValueSchema,
   StepActivityDeliverySchema,
 } from '../../workflow/schema.js';
+import { PlanningSnapshotReferenceSchema } from '../../planning/run-planning-snapshot.js';
+import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
+import { AgentInvocationUsageSchema } from '../../observability/agent-usage.js';
 
 export const EXECUTION_WORKFLOW_SCHEMA_VERSION = 2;
 
@@ -46,6 +49,52 @@ export const ExecutionWaitSchema = z
   .strict()
   .readonly();
 
+const ExecutionContinuationCandidateObjectSchema = z
+  .object({
+    continuationId: z.string().min(1),
+    attempt: z.number().int().positive(),
+    parentNodeId: z.string().min(1),
+    requestReference: z.string().min(1),
+    reason: z.string().min(1),
+    evidenceBundle: EvidenceBundleReferenceSchema,
+    transcriptOperationId: z.string().min(1),
+    analyzerReceiptReference: z.string().min(1),
+    usage: AgentInvocationUsageSchema,
+    semanticHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    graph: CompiledWorkflowSchema,
+  })
+  .strict();
+
+export const ExecutionContinuationCandidateSchema =
+  ExecutionContinuationCandidateObjectSchema.readonly();
+
+const ExecutionContinuationCandidateStateSchema = ExecutionContinuationCandidateObjectSchema.extend(
+  {
+    status: z.enum(['awaiting_review', 'rejected', 'running', 'completed']),
+  },
+)
+  .strict()
+  .readonly();
+
+const ExecutionContinuationPlanningStateSchema = z
+  .object({
+    continuationId: z.string().min(1),
+    attempt: z.number().int().positive(),
+    parentNodeId: z.string().min(1),
+    requestReference: z.string().min(1),
+    reason: z.string().min(1),
+    transcriptOperationId: z.string().min(1),
+    status: z.enum(['planning', 'needs_input']),
+  })
+  .strict()
+  .readonly();
+
+export const ExecutionContinuationStateSchema = z.union([
+  ExecutionContinuationPlanningStateSchema,
+  ExecutionContinuationCandidateStateSchema,
+]);
+
 const ExecutionWorkflowStateBaseSchema = z
   .object({
     runtime: z.literal('execution'),
@@ -57,6 +106,7 @@ const ExecutionWorkflowStateBaseSchema = z
     nodeStates: z.record(z.string(), ExecutionNodeStatusSchema),
     blockRuns: z.record(z.string(), z.number().int().nonnegative()),
     loopIterations: z.record(z.string(), z.number().int().nonnegative()),
+    continuations: z.array(ExecutionContinuationStateSchema),
   })
   .strict();
 
@@ -156,6 +206,33 @@ export const EvaluateExecutionPredicateInputSchema = z
   .strict()
   .readonly();
 
+export const PlanExecutionContinuationInputSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
+    parentNodeId: z.string().min(1),
+    attempt: z.number().int().positive(),
+    requestReference: z.string().min(1),
+    planningSnapshot: PlanningSnapshotReferenceSchema,
+    guidance: z.string().trim().min(1).max(10_000).nullable(),
+  })
+  .strict()
+  .readonly();
+
+export const PlanExecutionContinuationResultSchema = z.discriminatedUnion('status', [
+  ExecutionContinuationCandidateObjectSchema.extend({ status: z.literal('ready') })
+    .strict()
+    .readonly(),
+  z
+    .object({
+      status: z.literal('needs_input'),
+      summary: z.string().min(1),
+      waitKind: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const ExecutionWorkflowResultSchema = z
   .object({
     taskReference: z.string().min(1),
@@ -174,9 +251,16 @@ export type ResolveExecutionWaitReceipt = z.infer<typeof ResolveExecutionWaitRec
 export type RunExecutionBlockInput = z.infer<typeof RunExecutionBlockInputSchema>;
 export type ExecutionBlockResult = z.infer<typeof ExecutionBlockResultSchema>;
 export type EvaluateExecutionPredicateInput = z.infer<typeof EvaluateExecutionPredicateInputSchema>;
+export type ExecutionContinuationCandidate = z.infer<typeof ExecutionContinuationCandidateSchema>;
+export type ExecutionContinuationState = z.infer<typeof ExecutionContinuationStateSchema>;
+export type PlanExecutionContinuationInput = z.infer<typeof PlanExecutionContinuationInputSchema>;
+export type PlanExecutionContinuationResult = z.infer<typeof PlanExecutionContinuationResultSchema>;
 export type ExecutionWorkflowResult = z.infer<typeof ExecutionWorkflowResultSchema>;
 
 export interface ExecutionWorkflowActivities {
   runExecutionBlock(input: RunExecutionBlockInput): Promise<ExecutionBlockResult>;
+  planExecutionContinuation(
+    input: PlanExecutionContinuationInput,
+  ): Promise<PlanExecutionContinuationResult>;
   evaluateExecutionPredicate(input: EvaluateExecutionPredicateInput): Promise<boolean>;
 }

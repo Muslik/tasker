@@ -17,7 +17,7 @@ import {
 import { BootstrapContextAssembler } from '../control-plane/bootstrap-context-assembly.js';
 import { WorkflowFreezeStore } from '../control-plane/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../control-plane/planning-evidence.js';
-import { loadHarnessPack } from '../harness/index.js';
+import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
 import {
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
@@ -47,7 +47,11 @@ import {
 } from '../integrations/index.js';
 import { openSqliteLedger } from '../ledger/index.js';
 import { WorkflowGenerationSubjectSource } from '../planning/index.js';
-import { SubscriptionCliImplementationPlanner, nodeCommandRunner } from '../providers/index.js';
+import {
+  SubscriptionCliImplementationPlanner,
+  SubscriptionCliWorkflowAnalyzer,
+  nodeCommandRunner,
+} from '../providers/index.js';
 import {
   BitbucketRepositoryClient,
   createManagedRepositoryStore,
@@ -93,6 +97,7 @@ import { createBootstrapInvestigationActivity } from './activities/bootstrap-inv
 import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activity.js';
 import { createTaskAdmissionActivity } from './activities/task-admission-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
+import { createExecutionContinuationActivity } from './activities/execution-continuation-activity.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
 
@@ -217,6 +222,18 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     planningTranscripts,
   );
   const contextDiscovery = new ContextDiscoveryService(evidenceBundles, systemClock);
+  const continuationAnalyzer = new SubscriptionCliWorkflowAnalyzer(
+    temporalCommandRunner,
+    (repositoryReference) => {
+      const project = harnessPack.projects.find(
+        (candidate) => candidate.repository === repositoryReference,
+      );
+      return resolveWorkflowAnalyzerProfile(
+        harnessPack.company,
+        project?.executionProfileOverrides ?? null,
+      );
+    },
+  );
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
@@ -322,6 +339,13 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ),
       ...createTaskAdmissionActivity(planningStore, workspaceStore, jiraStartWork),
       ...createWorkflowFreezeActivity(workflowFreezes),
+      ...createExecutionContinuationActivity(
+        ledger.repository,
+        systemClock,
+        planningStore,
+        continuationAnalyzer,
+        contextDiscovery,
+      ),
       ...executionActivities,
     });
     try {

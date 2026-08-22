@@ -1139,6 +1139,13 @@ export class ImplementationPlanningCoordinator {
     return transcript.ok ? transcript : err({ kind: 'transcript', error: transcript.error });
   }
 
+  public readOperationTranscript(
+    operationId: string,
+  ): Outcome<PlanningTranscriptView, ImplementationPlanningError> {
+    const transcript = this.transcripts.read(operationId);
+    return transcript.ok ? transcript : err({ kind: 'transcript', error: transcript.error });
+  }
+
   public prepare(
     taskReference: string,
     requestedStrategy: PlanningStrategyRequest,

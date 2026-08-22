@@ -50,6 +50,7 @@ export const createTaskAdmissionActivity = (
     context.heartbeat({ phase: 'jira_admission', taskReference: input.taskReference });
     const result = await jira.execute({
       operationId: `task-admission:${input.workflowId}:${input.workflowRunId}`,
+      nodeId: 'admission',
       stepReference: jira.id,
       taskReference: input.taskReference,
       task: snapshot.value.task,
@@ -82,7 +83,12 @@ export const createTaskAdmissionActivity = (
       ? AdmitTaskExecutionResultSchema.parse({ status: 'completed', summary: result.summary })
       : AdmitTaskExecutionResultSchema.parse({
           status: 'needs_input',
-          waitKind: result.status === 'waiting' ? result.waitKind : `${jira.id}.${result.kind}@1`,
+          waitKind:
+            result.status === 'waiting'
+              ? result.waitKind
+              : result.status === 'continuation_required'
+                ? `${jira.id}.continuation-required@1`
+                : `${jira.id}.${result.kind}@1`,
           summary: result.summary,
         });
   },

@@ -7,7 +7,6 @@ import type { BlockReceiptStore } from '../blocks/index.js';
 import { type ImplementationPlanningCoordinator } from './implementation-planning.js';
 import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
-import { type WorkflowContinuationCoordinator } from './workflow-continuation.js';
 import type {
   BitbucketReviewCoordinator,
   BitbucketReviewSyncError,
@@ -32,6 +31,7 @@ import {
   RestartRunCommandSchema,
   ResumeRunCommandSchema,
   RunStartCommandSchema,
+  WorkflowChangeReviewCommandSchema,
   WorkflowResponseSchema,
   type OperatorTaskSummary,
 } from './operator-contracts.js';
@@ -77,7 +77,6 @@ export interface BuildOperatorApiOptions {
   readonly logger?: boolean | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
-  readonly workflowContinuation?: WorkflowContinuationCoordinator | undefined;
   readonly executionActivity?: ExecutionActivityReader | undefined;
   readonly bitbucketReview?: Pick<BitbucketReviewCoordinator, 'sync'> | undefined;
   readonly temporalRunService: TaskRunService;
@@ -258,9 +257,6 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
   const currentPlanningEpisodeId = (lifecycle: TaskRunLifecycle | null): string | null =>
     lifecycle?.bootstrap.planning?.planningEpisodeId ?? null;
 
-  const currentRunId = (lifecycle: TaskRunLifecycle | null): string | null =>
-    lifecycle?.bootstrap.runId ?? null;
-
   const sendTemporalState = (
     reply: FastifyReply,
     _taskReference: string,
@@ -298,7 +294,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         });
       }
       const withExecution = applyTemporalRunToTask(withPlanning, run.value);
-      return options.workflowContinuation?.decorateTask(withExecution) ?? withExecution;
+      return withExecution;
     };
     if (options.jiraIssueService === undefined) {
       return reply.send({
@@ -327,7 +323,6 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
     const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
-    const bootstrapRunId = currentRunId(lifecycle);
     const executionWorkflowId = lifecycle?.execution?.workflowId ?? null;
 
     if (params.data.taskReference.startsWith('jira:') && options.jiraIssueService !== undefined) {
@@ -345,10 +340,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
           planningEpisodeId === null
             ? []
             : (options.implementationPlanning?.readActivity(planningEpisodeId) ?? []),
-        continuation:
-          bootstrapRunId === null
-            ? []
-            : (options.workflowContinuation?.readActivity(bootstrapRunId) ?? []),
+        continuation: [],
         execution:
           executionWorkflowId === null
             ? []
@@ -377,10 +369,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         planningEpisodeId === null
           ? []
           : (options.implementationPlanning?.readActivity(planningEpisodeId) ?? []),
-      continuation:
-        bootstrapRunId === null
-          ? []
-          : (options.workflowContinuation?.readActivity(bootstrapRunId) ?? []),
+      continuation: [],
       execution:
         executionWorkflowId === null
           ? []
@@ -416,6 +405,10 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
             return snapshot.ok ? snapshot.value : null;
           },
           (execution) => options.executionActivity?.readCurrentTranscript(execution) ?? null,
+          (operationId) => {
+            const transcript = options.implementationPlanning?.readOperationTranscript(operationId);
+            return transcript?.ok === true ? transcript.value : null;
+          },
         ),
       ),
     );
@@ -532,7 +525,6 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       const events = [
         ...options.service.listStreamEventsAfter(cursor),
         ...(options.implementationPlanning?.listStreamEventsAfter(cursor) ?? []),
-        ...(options.workflowContinuation?.listStreamEventsAfter(cursor) ?? []),
       ].sort((left, right) => left.sequence - right.sequence);
       for (const event of events) {
         reply.raw.write(
@@ -808,6 +800,58 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     return resumed.ok
       ? sendTemporalState(reply, params.data.taskReference, resumed.value)
       : sendTemporalRunError(reply, resumed.error);
+  });
+
+  api.post('/api/workflows/:taskReference/workflow-change-review', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const command = WorkflowChangeReviewCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(apiError('invalid_workflow_change_review', 'Workflow change review is invalid'));
+    }
+    const current = await temporalRunService.read(params.data.taskReference);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.runtime !== 'execution' ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'workflow_change.review@1'
+    ) {
+      return reply
+        .code(409)
+        .send(
+          apiError('run_not_at_workflow_change_review', 'No workflow change is awaiting review'),
+        );
+    }
+    const candidate = current.value.continuations.find(
+      ({ continuationId, status }) =>
+        continuationId === command.data.continuationId && status === 'awaiting_review',
+    );
+    if (candidate === undefined) {
+      return reply
+        .code(409)
+        .send(apiError('continuation_mismatch', 'The reviewed continuation is not active'));
+    }
+    const reviewed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
+      nodeId: current.value.wait.nodeId,
+      waitKind: current.value.wait.waitKind,
+      resolution:
+        command.data.decision === 'accept'
+          ? { decision: 'accept', continuationId: candidate.continuationId }
+          : {
+              decision: 'reject',
+              continuationId: candidate.continuationId,
+              guidance: command.data.guidance,
+            },
+    });
+    return reviewed.ok
+      ? sendTemporalState(reply, params.data.taskReference, reviewed.value)
+      : sendTemporalRunError(reply, reviewed.error);
   });
 
   api.post('/api/workflows/:taskReference/plan-review', async (request, reply) => {

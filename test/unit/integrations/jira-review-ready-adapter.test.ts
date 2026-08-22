@@ -34,6 +34,7 @@ const requestFor = (
   url: string | null = pullRequestUrl,
 ): IntegrationStepExecutionRequest => ({
   operationId,
+  nodeId: 'deliver-change',
   stepReference: 'jira.review-ready@1',
   taskReference: task.reference,
   task,

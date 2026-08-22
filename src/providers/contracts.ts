@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { PlanningStrategySchema } from '../planning/implementation-plan.js';
-import { AgentApiCostSchema } from './agent-usage.js';
+import { AgentApiCostSchema } from '../observability/agent-usage.js';
 
 export const WorkflowAnalyzerReceiptSchema = z
   .object({

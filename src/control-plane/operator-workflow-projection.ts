@@ -26,6 +26,7 @@ type ExecutionSnapshotReader = (lifecycle: TaskRunLifecycle) => RunPlanningSnaps
 type ExecutionTranscriptReader = (
   execution: ExecutionWorkflowPublicState,
 ) => PlanningTranscriptView | null;
+type ContinuationTranscriptReader = (operationId: string) => PlanningTranscriptView | null;
 
 const TYPED_RESOLUTION_WAITS = new Set([
   'code_review@1',
@@ -386,10 +387,11 @@ export const createOperatorWorkflowProjection = (
   receipts: BlockReceiptReader,
   readSnapshot: ExecutionSnapshotReader = () => null,
   readExecutionTranscript: ExecutionTranscriptReader = () => null,
+  readContinuationTranscript: ContinuationTranscriptReader = () => null,
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 6,
+      schemaVersion: 7,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
@@ -397,19 +399,32 @@ export const createOperatorWorkflowProjection = (
       graphHash: null,
       current: null,
       stages: [],
+      continuations: [],
     });
   }
 
   const execution = lifecycle.execution;
   const active = execution ?? lifecycle.bootstrap;
   const graph = lifecycle.bootstrap.draft?.graph ?? null;
+  const visibleContinuations =
+    execution?.continuations.flatMap((continuation) =>
+      'graph' in continuation && continuation.status !== 'rejected' ? [continuation] : [],
+    ) ?? [];
+  const executionGraphs = [
+    ...(graph === null ? [] : [graph]),
+    ...visibleContinuations.map(({ graph: continuationGraph }) => continuationGraph),
+  ];
   const snapshot = graph === null ? null : readSnapshot(lifecycle);
   const executionNodeId =
     execution === null || execution.status === 'completed'
       ? null
       : (execution.currentNodeId ?? graph?.root.id ?? null);
   const executionNode =
-    executionNodeId === null || graph === null ? null : findNode(graph.root, executionNodeId);
+    executionNodeId === null
+      ? null
+      : (executionGraphs
+          .map((candidate) => findNode(candidate.root, executionNodeId))
+          .find((candidate) => candidate !== null) ?? null);
   const activeNodeId =
     execution === null
       ? lifecycle.bootstrap.status === 'completed'
@@ -417,6 +432,10 @@ export const createOperatorWorkflowProjection = (
         : lifecycle.bootstrap.currentNodeId
       : executionNodeId;
   const currentRuntime = execution === null ? ('bootstrap' as const) : ('execution' as const);
+  const activeContinuation = execution?.continuations.findLast(
+    ({ status }) =>
+      status === 'planning' || status === 'needs_input' || status === 'awaiting_review',
+  );
   const current =
     activeNodeId === null || active.status === 'completed'
       ? null
@@ -446,10 +465,15 @@ export const createOperatorWorkflowProjection = (
                   snapshot,
                 )
               : null,
-          transcript: execution === null ? null : readExecutionTranscript(execution),
+          transcript:
+            activeContinuation === undefined
+              ? execution === null
+                ? null
+                : readExecutionTranscript(execution)
+              : readContinuationTranscript(activeContinuation.transcriptOperationId),
         };
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',
@@ -459,6 +483,35 @@ export const createOperatorWorkflowProjection = (
     stages: [
       ...createBootstrapStages(lifecycle),
       ...(graph === null ? [] : createExecutionStages(graph, execution, receipts, snapshot)),
+      ...visibleContinuations.flatMap((continuation) =>
+        createExecutionStages(continuation.graph, execution, receipts, snapshot).map((stage) => ({
+          ...stage,
+          key: `continuation:${continuation.continuationId}:${stage.key}`,
+        })),
+      ),
     ],
+    continuations:
+      execution?.continuations.map((continuation) =>
+        'graph' in continuation
+          ? {
+              continuationId: continuation.continuationId,
+              attempt: continuation.attempt,
+              parentNodeId: continuation.parentNodeId,
+              reason: continuation.reason,
+              transcriptOperationId: continuation.transcriptOperationId,
+              usage: continuation.usage,
+              semanticHash: continuation.semanticHash,
+              workflowHash: continuation.workflowHash,
+              status: continuation.status,
+            }
+          : {
+              continuationId: continuation.continuationId,
+              attempt: continuation.attempt,
+              parentNodeId: continuation.parentNodeId,
+              reason: continuation.reason,
+              transcriptOperationId: continuation.transcriptOperationId,
+              status: continuation.status,
+            },
+      ) ?? [],
   });
 };

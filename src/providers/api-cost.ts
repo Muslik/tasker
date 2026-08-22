@@ -1,5 +1,5 @@
 import type { ResolvedExecutionProfile } from '../harness/execution-profile-contracts.js';
-import { AgentApiCostSchema, type AgentInvocationUsage } from './agent-usage.js';
+import { AgentApiCostSchema, type AgentInvocationUsage } from '../observability/agent-usage.js';
 
 type TokenUsage = Pick<AgentInvocationUsage, 'inputTokens' | 'cachedInputTokens' | 'outputTokens'>;
 

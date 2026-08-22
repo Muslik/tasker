@@ -47,7 +47,7 @@ export const toBootstrapInvestigationResult = (
 };
 
 export const createBootstrapInvestigationActivity = (
-  execution: ExecutionWorkflowActivities,
+  execution: Pick<ExecutionWorkflowActivities, 'runExecutionBlock'>,
   snapshots: ImplementationPlanningStore,
   receipts: BlockReceiptStore,
   evidenceBundles: EvidenceBundleStore,

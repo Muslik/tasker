@@ -129,5 +129,11 @@ export const testTemporalActivities = {
       predicateFacts: {},
       receiptReference: `block-receipt:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
     }),
+  planExecutionContinuation: () =>
+    Promise.resolve({
+      status: 'needs_input' as const,
+      summary: 'No continuation is configured for this test fixture',
+      waitKind: 'workflow_change.test-fixture@1',
+    }),
   evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
 } satisfies BootstrapWorkflowActivities & ExecutionWorkflowActivities;

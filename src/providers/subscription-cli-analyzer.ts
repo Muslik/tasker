@@ -45,6 +45,7 @@ const WorkflowAnalyzerProviderOutputSchema = z
   .strict();
 
 export interface WorkflowAnalyzerRequest extends WorkflowAnalyzerContext {
+  readonly operationId: string;
   readonly repositoryPath: string;
   readonly repositoryReference: string;
   readonly evidenceBundle: EvidenceBundle;
@@ -113,6 +114,7 @@ export class SubscriptionCliWorkflowAnalyzer {
     const profile = this.profileFor(request.repositoryReference);
     const command = profile.command;
     const version = await this.runner.run({
+      operationId: request.operationId,
       command,
       args: ['--version'],
       cwd: request.repositoryPath,
@@ -152,6 +154,7 @@ export class SubscriptionCliWorkflowAnalyzer {
       );
       const outputSchema = codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema);
       const execution = await this.runner.run({
+        operationId: request.operationId,
         command,
         args:
           profile.provider === 'codex'

@@ -137,6 +137,7 @@ const requestFor = (
   operationId: string,
 ): IntegrationStepExecutionRequest => ({
   operationId,
+  nodeId: 'deliver-change',
   stepReference: 'pr.prepare@1',
   taskReference: task.reference,
   task,

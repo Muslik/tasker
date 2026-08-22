@@ -10,7 +10,6 @@ export * from './operator-service.js';
 export * from './operator-store.js';
 export * from './workflow-generator.js';
 export * from './bootstrap-context-assembly.js';
-export * from './workflow-continuation.js';
 export * from './workflow-freeze.js';
 export * from './execution-activity.js';
 export * from './persisted-generation-subject.js';

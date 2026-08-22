@@ -165,6 +165,7 @@ describe('subscription CLI workflow analyzer', () => {
     const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CODEX_PROFILE);
 
     const result = await analyzer.analyze({
+      operationId: 'analyzer:test:codex',
       repositoryPath: analyzerRepositoryPath,
       repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
@@ -234,6 +235,7 @@ describe('subscription CLI workflow analyzer', () => {
     const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CLAUDE_PROFILE);
 
     const result = await analyzer.analyze({
+      operationId: 'analyzer:test:claude',
       repositoryPath: analyzerRepositoryPath,
       repositoryReference: fixture().repository,
       taskSnapshot: fixture(),
@@ -268,6 +270,7 @@ describe('subscription CLI workflow analyzer', () => {
     const analyzer = new SubscriptionCliWorkflowAnalyzer(runner, () => TEST_CODEX_PROFILE);
 
     const result = await analyzer.analyze({
+      operationId: 'analyzer:test:invalid',
       repositoryPath: analyzerRepositoryPath,
       repositoryReference: fixture().repository,
       taskSnapshot: fixture(),

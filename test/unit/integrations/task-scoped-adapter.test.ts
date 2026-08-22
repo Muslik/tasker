@@ -14,6 +14,7 @@ const task = makePlanningTaskSnapshot('avia-12536-feature-review');
 
 const requestFor = (taskReference: string): IntegrationStepExecutionRequest => ({
   operationId: `tasker:test:${taskReference}:publish`,
+  nodeId: 'deliver-change',
   stepReference: 'pr.prepare@1',
   taskReference,
   task,

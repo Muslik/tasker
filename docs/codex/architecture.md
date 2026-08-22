@@ -228,7 +228,8 @@ artifact is addressed by the identity of the run boundary that created it:
   revision;
 - freeze receipts: exact Bootstrap workflow/run pair;
 - execution receipts, evidence, reviews, and transcripts: exact Execution workflow/run;
-- continuations: exact parent `runId`, with a distinct child identity derived from it.
+- continuations: exact Execution `runId`, with a distinct candidate/attempt identity
+  derived from it.
 
 The control plane first asks Temporal for the current lifecycle and then follows only
 the exact identifiers exposed by that lifecycle. There is no `latest by task`, fallback
@@ -508,9 +509,13 @@ does not mutate the accepted graph. The parent Workflow:
 2. calls a planning Activity for a continuation proposal;
 3. validates and hashes the proposed revision;
 4. automatically accepts it when policy allows, or waits for review during the pilot;
-5. starts the accepted continuation as a Child Workflow with its own immutable graph,
-   even when it shares a repository, so the accepted parent graph never mutates;
-6. resumes the parent only from the join boundary.
+5. records the accepted suffix separately and interprets its namespaced nodes in the
+   same Execution Workflow and workspace, so the accepted parent graph never mutates;
+6. resumes the frozen parent traversal only after that suffix reaches its terminal.
+
+Cross-repository continuation is not silently forced through the parent workspace. It
+opens a typed prerequisite until Tasker has an explicit child-workspace lifecycle and
+operator projection for it.
 
 During stabilization, every graph revision is operator-reviewable. Once retrospective
 evidence shows a class is reliable, policy may auto-accept that class. The validator is

@@ -32,6 +32,7 @@ import type {
   OperatorActivityResponse,
   OperatorExecutionAttempt,
   OperatorTaskSummary,
+  OperatorWorkflowContinuation,
   OperatorWorkflowProjection,
   OperatorWorkflowStep,
   WorkflowResponse,
@@ -44,7 +45,6 @@ import {
   type PlanReviewAnnotation,
   type PlanReviewRound,
 } from '../control-plane/plan-review.js';
-import type { WorkflowContinuationRecord } from '../control-plane/workflow-continuation-contracts.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
@@ -60,17 +60,15 @@ import {
   loadImplementationPlan,
   loadPlanningTranscript,
   loadPlanReviewHistory,
-  loadWorkflowContinuation,
   loadJiraIssue,
   loadOperatorActivity,
   loadOperatorExecutionAttempt,
   loadOperatorWorkflowProjection,
   loadWorkflow,
   reviewPlan,
-  reviewWorkflowContinuation,
+  reviewWorkflowChange,
   restartWorkflow,
   resumeWorkflow,
-  retryWorkflowContinuation,
   syncCodeReview,
   syncJiraIssue,
 } from './api-client.js';
@@ -134,12 +132,6 @@ type PlanReviewHistoryLoadState =
   | { readonly status: 'ready'; readonly rounds: readonly PlanReviewRound[] }
   | { readonly status: 'failed'; readonly message: string };
 
-type WorkflowContinuationLoadState =
-  | { readonly status: 'loading' }
-  | { readonly status: 'missing' }
-  | { readonly status: 'ready'; readonly record: WorkflowContinuationRecord }
-  | { readonly status: 'failed'; readonly message: string };
-
 type JiraIssueLoadState =
   | { readonly status: 'not_applicable' }
   | { readonly status: 'loading' }
@@ -163,8 +155,7 @@ type TaskOperation =
   | 'resuming'
   | 'restarting'
   | 'accepting_continuation'
-  | 'rejecting_continuation'
-  | 'retrying_continuation';
+  | 'rejecting_continuation';
 
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 const TASK_RAIL_STORAGE_KEY = 'tasker.operator.tasksCollapsed';
@@ -1495,48 +1486,24 @@ const ImplementationPlanSurface = ({
   );
 };
 
-const continuationCandidateReference = (record: WorkflowContinuationRecord): string | null => {
-  if ('candidate' in record) return record.candidate.taskReference;
-  return record.status === 'invalid' ? record.candidateTaskReference : null;
-};
-
 const WorkflowContinuationSurface = ({
   continuation,
-  planning,
-  candidateActivity,
   guidance,
   pendingOperation,
   onGuidanceChange,
   onAccept,
   onReject,
-  onRevise,
-  onRetry,
 }: {
-  readonly continuation: WorkflowContinuationLoadState;
-  readonly planning: ImplementationPlanLoadState;
-  readonly candidateActivity: ActivityLoadState | null;
+  readonly continuation: OperatorWorkflowContinuation | null;
   readonly guidance: string;
   readonly pendingOperation: TaskOperation | null;
   readonly onGuidanceChange: (guidance: string) => void;
   readonly onAccept: () => void;
   readonly onReject: () => void;
-  readonly onRevise: () => void;
-  readonly onRetry: () => void;
 }) => {
-  if (continuation.status === 'loading' || continuation.status === 'missing') return null;
-  if (continuation.status === 'failed') return <InlineError>{continuation.message}</InlineError>;
-
-  const record = continuation.record;
+  if (continuation === null || continuation.status !== 'awaiting_review') return null;
   const busy =
-    pendingOperation === 'accepting_continuation' ||
-    pendingOperation === 'rejecting_continuation' ||
-    pendingOperation === 'retrying_continuation';
-  const retryable =
-    (record.status === 'blocked' || record.status === 'failed') &&
-    record.issues.some((issue) => issue.retryable);
-  const revisionRetryable =
-    record.status === 'rejected_by_operator' &&
-    !(planning.status === 'ready' && planning.record.status === 'needs_clarification');
+    pendingOperation === 'accepting_continuation' || pendingOperation === 'rejecting_continuation';
 
   return (
     <section
@@ -1548,110 +1515,62 @@ const WorkflowContinuationSurface = ({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <GitBranch className="size-4 text-amber-700 dark:text-amber-300" />
-            <strong className="text-sm">Workflow continuation</strong>
-            <StateBadge>{record.status.replaceAll('_', ' ')}</StateBadge>
-            <span className="text-[11px] text-muted-foreground">attempt {record.attempt}</span>
+            <strong className="text-sm">Workflow change proposed</strong>
+            <span className="text-[11px] text-muted-foreground">
+              attempt {continuation.attempt}
+            </span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {record.source.request.reason}
+          <p className="mt-1 max-w-4xl text-sm leading-5 text-foreground/90">
+            {continuation.reason}
           </p>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            {record.source.request.discoveredRepositories.map((repository) => (
-              <span key={repository}>{repository}</span>
-            ))}
-            {record.source.request.requiredCapabilities.map((capability) => (
-              <code key={capability}>{capability}</code>
-            ))}
-            {candidateActivity === null ? null : (
-              <span>{formatProviderSession(candidateActivity)}</span>
-            )}
-          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The proposed stages are visible in the workflow rail. Accept to execute them in this
+            same run and workspace, or describe what must change.
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {continuation.usage.model}/{continuation.usage.effort} ·{' '}
+            {(continuation.usage.inputTokens + continuation.usage.outputTokens).toLocaleString()}{' '}
+            tok ·{' '}
+            {continuation.usage.apiCost.source === 'unrated'
+              ? 'API cost unrated'
+              : `~$${continuation.usage.apiCost.amountUsd.toFixed(2)} API`}
+          </p>
         </div>
-        {retryable ? (
-          <Button size="sm" type="button" disabled={busy} onClick={onRetry}>
-            {pendingOperation === 'retrying_continuation' ? (
-              <LoaderCircle data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <RefreshCw data-icon="inline-start" />
-            )}
-            Retry
-          </Button>
-        ) : null}
-        {revisionRetryable ? (
-          <Button size="sm" type="button" disabled={busy} onClick={onRevise}>
-            {pendingOperation === 'rejecting_continuation' ? (
-              <LoaderCircle data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <RefreshCw data-icon="inline-start" />
-            )}
-            Retry planning
-          </Button>
-        ) : null}
-        {record.status === 'awaiting_review' ? (
-          <Button size="sm" type="button" disabled={busy} onClick={onAccept}>
-            {pendingOperation === 'accepting_continuation' ? (
-              <LoaderCircle data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <CheckCircle2 data-icon="inline-start" />
-            )}
-            Accept workflow
-          </Button>
-        ) : null}
+        <Button size="sm" type="button" disabled={busy} onClick={onAccept}>
+          {pendingOperation === 'accepting_continuation' ? (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <CheckCircle2 data-icon="inline-start" />
+          )}
+          Accept workflow
+        </Button>
       </div>
-
-      {'issues' in record ? (
-        <ul className="mt-2 space-y-1 text-xs text-destructive">
-          {record.issues.map((issue) => (
-            <li key={`${issue.code}:${issue.message}`}>
-              <code>{issue.code}</code> · {issue.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {record.status === 'linked' ? (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          Linked run <code>{record.child.runId}</code>
-        </p>
-      ) : null}
-
-      {record.status === 'awaiting_review' ? (
-        <div className="mt-2 flex items-end gap-2">
-          <textarea
-            className="min-h-14 flex-1 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
-            aria-label="Workflow continuation guidance"
-            placeholder="Why should this workflow be rejected?"
-            value={guidance}
-            disabled={busy}
-            onChange={(event) => {
-              onGuidanceChange(event.target.value);
-            }}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            disabled={busy || guidance.trim().length === 0}
-            onClick={onReject}
-          >
-            {pendingOperation === 'rejecting_continuation' ? (
-              <LoaderCircle data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <MessageSquare data-icon="inline-start" />
-            )}
-            Reject
-          </Button>
-        </div>
-      ) : null}
-
-      {record.status === 'rejected_by_operator' ? (
-        <p className="mt-2 text-xs text-muted-foreground">Operator: {record.guidance}</p>
-      ) : null}
-      {record.status === 'superseded_by_plan' ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Revised parent plan {record.implementationPlanArtifactId} replaces this candidate.
-        </p>
-      ) : null}
+      <div className="mt-2 flex items-end gap-2">
+        <textarea
+          className="min-h-14 flex-1 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+          aria-label="Workflow continuation guidance"
+          placeholder="What should the planner change in this workflow?"
+          value={guidance}
+          disabled={busy}
+          onChange={(event) => {
+            onGuidanceChange(event.target.value);
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          disabled={busy || guidance.trim().length === 0}
+          onClick={onReject}
+        >
+          {pendingOperation === 'rejecting_continuation' ? (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <MessageSquare data-icon="inline-start" />
+          )}
+          Request changes
+        </Button>
+      </div>
     </section>
   );
 };
@@ -2906,13 +2825,6 @@ export const App = () => {
   });
   const [planAnnotationDrafts, setPlanAnnotationDrafts] =
     useState<ReadonlyMap<string, readonly PlanReviewAnnotation[]>>(readStoredPlanAnnotations);
-  const [workflowContinuationState, setWorkflowContinuationState] =
-    useState<WorkflowContinuationLoadState>({ status: 'missing' });
-  const [continuationWorkflowState, setContinuationWorkflowState] = useState<WorkflowLoadState>({
-    status: 'missing',
-  });
-  const [continuationActivityState, setContinuationActivityState] =
-    useState<ActivityLoadState | null>(null);
   const [jiraIssueState, setJiraIssueState] = useState<JiraIssueLoadState>({
     status: 'not_applicable',
   });
@@ -2962,6 +2874,12 @@ export const App = () => {
     operatorProjectionState.projection.current?.status === 'waiting' &&
     operatorProjectionState.projection.current.intervention.kind !== 'typed_resolution'
       ? operatorProjectionState.projection.current.intervention
+      : null;
+  const selectedWorkflowContinuation =
+    operatorProjectionState.status === 'ready'
+      ? (operatorProjectionState.projection.continuations.findLast(
+          ({ status }) => status === 'awaiting_review',
+        ) ?? null)
       : null;
 
   const selectedIdRef = useRef(selectedId);
@@ -3129,48 +3047,6 @@ export const App = () => {
     }
   };
 
-  const refreshSelectedWorkflowContinuation = async (
-    taskReference: string,
-    refreshSequence: number,
-  ): Promise<void> => {
-    setWorkflowContinuationState({ status: 'loading' });
-    setContinuationWorkflowState({ status: 'missing' });
-    setContinuationActivityState(null);
-    try {
-      const response = await loadWorkflowContinuation(taskReference);
-      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
-      if (response.status === 'missing') {
-        setWorkflowContinuationState({ status: 'missing' });
-        return;
-      }
-      setWorkflowContinuationState({ status: 'ready', record: response.record });
-      const candidateReference = continuationCandidateReference(response.record);
-      if (candidateReference === null) return;
-      const [candidate, activity] = await Promise.all([
-        loadWorkflow(candidateReference),
-        loadOperatorActivity(candidateReference)
-          .then((loaded): ActivityLoadState => ({ status: 'ready', response: loaded }))
-          .catch((error: unknown): ActivityLoadState => ({
-            status: 'failed',
-            message: error instanceof Error ? error.message : 'Candidate activity is unavailable',
-          })),
-      ]);
-      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
-      setContinuationWorkflowState(
-        candidate.status === 'found'
-          ? { status: 'ready', response: candidate.response }
-          : { status: 'missing' },
-      );
-      setContinuationActivityState(activity);
-    } catch (error) {
-      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
-      setWorkflowContinuationState({
-        status: 'failed',
-        message: error instanceof Error ? error.message : 'Unexpected continuation failure',
-      });
-    }
-  };
-
   const refreshSelectedJiraIssue = async (
     taskReference: string,
     refreshSequence: number,
@@ -3204,7 +3080,6 @@ export const App = () => {
       refreshSelectedImplementationPlan(taskReference, refreshSequence),
       refreshSelectedPlanningTranscript(taskReference, refreshSequence),
       refreshSelectedPlanReviewHistory(taskReference, refreshSequence),
-      refreshSelectedWorkflowContinuation(taskReference, refreshSequence),
       refreshSelectedJiraIssue(taskReference, refreshSequence),
     ]);
   };
@@ -3756,34 +3631,30 @@ export const App = () => {
   };
 
   const handleWorkflowContinuationReview = (decision: 'accept' | 'reject'): void => {
-    if (selectedTask === null || workflowContinuationState.status !== 'ready') {
+    if (selectedTask === null || selectedRunId === null || selectedWorkflowContinuation === null)
       return;
-    }
-    const record = workflowContinuationState.record;
-    if (
-      (decision === 'accept' && record.status !== 'awaiting_review') ||
-      (decision === 'reject' &&
-        record.status !== 'awaiting_review' &&
-        record.status !== 'rejected_by_operator')
-    ) {
-      return;
-    }
     const taskReference = selectedTask.id;
-    const guidance =
-      record.status === 'rejected_by_operator'
-        ? record.guidance
-        : (continuationGuidanceDrafts.get(taskReference)?.trim() ?? '');
+    const guidance = continuationGuidanceDrafts.get(taskReference)?.trim() ?? '';
     if (decision === 'reject' && guidance.length === 0) return;
     const operation =
       decision === 'accept'
         ? ('accepting_continuation' as const)
         : ('rejecting_continuation' as const);
     setPendingOperations((current) => new Map(current).set(taskReference, operation));
-    void reviewWorkflowContinuation(
+    void reviewWorkflowChange(
       taskReference,
       decision === 'accept'
-        ? { decision, continuationId: record.continuationId }
-        : { decision, continuationId: record.continuationId, guidance },
+        ? {
+            expectedRunId: selectedRunId,
+            decision,
+            continuationId: selectedWorkflowContinuation.continuationId,
+          }
+        : {
+            expectedRunId: selectedRunId,
+            decision,
+            continuationId: selectedWorkflowContinuation.continuationId,
+            guidance,
+          },
     )
       .then(async () => {
         if (decision === 'reject') {
@@ -3814,39 +3685,7 @@ export const App = () => {
         });
       });
   };
-
-  const handleWorkflowContinuationRetry = (): void => {
-    if (selectedTask === null || workflowContinuationState.status !== 'ready') return;
-    const taskReference = selectedTask.id;
-    setPendingOperations((current) => new Map(current).set(taskReference, 'retrying_continuation'));
-    void retryWorkflowContinuation(taskReference)
-      .then(async () => {
-        await refreshTasks();
-        if (selectedIdRef.current === taskReference) await refreshSelection(taskReference);
-      })
-      .catch((error: unknown) => {
-        if (selectedIdRef.current === taskReference) {
-          setActivityState({
-            status: 'failed',
-            message:
-              error instanceof Error ? error.message : 'Unexpected continuation retry failure',
-          });
-        }
-      })
-      .finally(() => {
-        setPendingOperations((current) => {
-          if (current.get(taskReference) !== 'retrying_continuation') return current;
-          const next = new Map(current);
-          next.delete(taskReference);
-          return next;
-        });
-      });
-  };
-
-  const displayedWorkflowState =
-    continuationWorkflowState.status === 'ready' ? continuationWorkflowState : workflowState;
-  const view =
-    displayedWorkflowState.status === 'ready' ? displayedWorkflowState.response.view : null;
+  const view = workflowState.status === 'ready' ? workflowState.response.view : null;
 
   return (
     <TooltipProvider>
@@ -4025,9 +3864,7 @@ export const App = () => {
                 {view === null ? null : <ValidationSurface view={view} />}
                 <JiraPlanningSurface task={selectedTask} />
                 <WorkflowContinuationSurface
-                  continuation={workflowContinuationState}
-                  planning={implementationPlanState}
-                  candidateActivity={continuationActivityState}
+                  continuation={selectedWorkflowContinuation}
                   guidance={continuationGuidanceDrafts.get(selectedTask.id) ?? ''}
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   onGuidanceChange={(guidance) => {
@@ -4041,10 +3878,6 @@ export const App = () => {
                   onReject={() => {
                     handleWorkflowContinuationReview('reject');
                   }}
-                  onRevise={() => {
-                    handleWorkflowContinuationReview('reject');
-                  }}
-                  onRetry={handleWorkflowContinuationRetry}
                 />
                 <ScrollArea className="min-h-0 flex-1">
                   {selectedTask.status === 'plan_review' ? (

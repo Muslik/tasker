@@ -619,10 +619,12 @@ Reproduction or implementation may discover a shared component, translation proc
 or additional verification requirement. The Activity returns
 `workflow_change_required`; it does not edit Workflow state itself.
 
-Tasker asks the analyzer for a validated semantic continuation, compiles it, and starts
-the accepted executable IR as a Child Workflow. The parent keeps its completed prefix immutable and waits on a typed
-join. A different repository may additionally require its own managed worktree and
-publication lifecycle, but does not change this control-flow rule.
+Tasker asks the analyzer for a validated semantic continuation, compiles it, and records
+the review decision against the current Execution `runId`. An accepted same-repository
+suffix runs through namespaced nodes in the same Temporal Workflow and workspace. The
+parent graph and completed prefix remain immutable. A different repository requires a
+separately prepared child workspace and remains a typed prerequisite until that
+lifecycle is implemented.
 
 During the pilot every revision is reviewable. Later known low-risk classes may be
 auto-accepted by policy, but deterministic validation never becomes optional.

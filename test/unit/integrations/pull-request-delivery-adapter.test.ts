@@ -44,6 +44,7 @@ const request = (
   waitResolution: IntegrationStepExecutionRequest['waitResolution'] = null,
 ): IntegrationStepExecutionRequest => ({
   operationId: 'delivery:test:1',
+  nodeId: 'deliver-change',
   stepReference: 'deliver.pull-request@1',
   taskReference: task.reference,
   task,
@@ -145,13 +146,15 @@ describe('pull-request semantic delivery', () => {
     const result = await fixture.delivery.execute(request());
 
     expect(result).toMatchObject({
-      status: 'waiting',
-      waitKind: 'delivery.ci-change@1',
-      details: {
-        phase: 'ci',
-        output: pullRequestOutput,
-        ci: { status: 'likely_caused_by_change', build: { number: 73 } },
-      },
+      status: 'continuation_required',
+      request: { discoveredAtNodeId: 'deliver-change' },
     });
+    if (result.status !== 'continuation_required') {
+      throw new Error('Expected task-caused CI continuation');
+    }
+    expect(result.request.changes[0]).toMatchObject({ kind: 'task_scope_changed' });
+    const change = result.request.changes[0];
+    if (change?.kind !== 'task_scope_changed') throw new Error('Expected task scope change');
+    expect(change.objective).toContain('Repair the exact CI failure');
   });
 });

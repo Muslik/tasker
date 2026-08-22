@@ -18,12 +18,8 @@ import {
   JiraWorkflowGenerationSubjectResolver,
   PullRequestReviewEvidenceStore,
 } from '../integrations/index.js';
-import {
-  SubscriptionCliImplementationPlanner,
-  SubscriptionCliWorkflowAnalyzer,
-  nodeCommandRunner,
-} from '../providers/index.js';
-import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
+import { SubscriptionCliImplementationPlanner, nodeCommandRunner } from '../providers/index.js';
+import { loadHarnessPack } from '../harness/index.js';
 import { WorkflowGenerationSubjectSource } from '../planning/index.js';
 import {
   BitbucketRepositoryClient,
@@ -49,7 +45,6 @@ import {
   PersistedGenerationSubjectResolver,
   PersistedGenerationSubjectRunStore,
 } from './persisted-generation-subject.js';
-import { createWorkflowContinuationCoordinator } from './workflow-continuation.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
   DockerWorkspaceCommandRunner,
@@ -98,18 +93,6 @@ export const startOperatorServer = async (): Promise<void> => {
     nodeCommandRunner,
     new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
   );
-  const continuationAnalyzer = new SubscriptionCliWorkflowAnalyzer(
-    dockerCommands,
-    (repositoryReference) => {
-      const project = harnessPack.projects.find(
-        (candidate) => candidate.repository === repositoryReference,
-      );
-      return resolveWorkflowAnalyzerProfile(
-        harnessPack.company,
-        project?.executionProfileOverrides ?? null,
-      );
-    },
-  );
   const subjects = new WorkflowGenerationSubjectSource(
     [
       new PersistedGenerationSubjectResolver(service),
@@ -133,14 +116,6 @@ export const startOperatorServer = async (): Promise<void> => {
     planner: new SubscriptionCliImplementationPlanner(dockerCommands),
     harnessPack,
   });
-  const workflowContinuation = createWorkflowContinuationCoordinator({
-    ledger: ledger.repository,
-    clock: systemClock,
-    workflows: service,
-    subjects,
-    analyzer: continuationAnalyzer,
-    repositories: repositoryCatalog,
-  });
   const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
   const bitbucketReview =
     bitbucketConfiguration === null
@@ -156,7 +131,6 @@ export const startOperatorServer = async (): Promise<void> => {
     jiraIssueService,
     logger: true,
     implementationPlanning,
-    workflowContinuation,
     executionActivity: new LedgerExecutionActivityReader(ledger.repository),
     ...(bitbucketReview === undefined ? {} : { bitbucketReview }),
     temporalRunService: temporalRuntime.service,

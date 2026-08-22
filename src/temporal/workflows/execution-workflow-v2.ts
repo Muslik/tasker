@@ -11,6 +11,7 @@ import {
 import type { CompiledWorkflowNode, JsonValue } from '../../workflow/index.js';
 import type {
   ExecutionBlockResult,
+  ExecutionContinuationState,
   ExecutionWorkflowActivities,
   ExecutionWorkflowInput,
   ExecutionWorkflowPublicState,
@@ -61,6 +62,25 @@ const guidanceFrom = (resolution: JsonValue): string | null =>
     ? resolution.guidance.trim()
     : null;
 
+const continuationReviewFrom = (
+  resolution: JsonValue,
+  continuationId: string,
+):
+  | { readonly decision: 'accept' }
+  | { readonly decision: 'reject'; readonly guidance: string }
+  | null => {
+  if (!isRecord(resolution) || resolution.continuationId !== continuationId) return null;
+  if (resolution.decision === 'accept') return { decision: 'accept' };
+  if (
+    resolution.decision === 'reject' &&
+    typeof resolution.guidance === 'string' &&
+    resolution.guidance.trim().length > 0
+  ) {
+    return { decision: 'reject', guidance: resolution.guidance.trim() };
+  }
+  return null;
+};
+
 export async function executionWorkflowV2(
   input: ExecutionWorkflowInput,
 ): Promise<ExecutionWorkflowResult> {
@@ -69,6 +89,7 @@ export async function executionWorkflowV2(
   const blockRuns: Record<string, number> = {};
   const loopIterations: Record<string, number> = {};
   const predicateFacts: Record<string, boolean> = {};
+  const continuations: ExecutionContinuationState[] = [];
   let pendingResolution: ResolveExecutionWaitCommand | null = null;
   let queuedGuidance: string | null = null;
   let state: AvailableExecutionState = {
@@ -81,6 +102,7 @@ export async function executionWorkflowV2(
     nodeStates,
     blockRuns,
     loopIterations,
+    continuations,
     status: 'running',
     currentNodeId: input.graph.root.id,
     wait: null,
@@ -242,6 +264,108 @@ export async function executionWorkflowV2(
             Object.assign(predicateFacts, result.predicateFacts);
             nodeStates[node.id] = 'succeeded';
             return { kind: 'continue' };
+          }
+          if (result.status === 'continuation_required') {
+            const planningReference = input.contextReferences.find(
+              ({ kind }) => kind === 'planning_snapshot',
+            );
+            if (planningReference?.hash === undefined) {
+              throw ApplicationFailure.nonRetryable(
+                'Execution continuation has no planning snapshot reference',
+              );
+            }
+            let continuationAttempt = 1;
+            let continuationGuidance: string | null = null;
+            for (;;) {
+              const continuationId = `${execution.runId}:continuation-${String(continuationAttempt)}`;
+              continuations.push({
+                continuationId,
+                attempt: continuationAttempt,
+                parentNodeId: node.id,
+                requestReference: result.requestReference,
+                reason: result.summary,
+                transcriptOperationId: `${continuationId}:planner`,
+                status: 'planning',
+              });
+              state = { ...state, continuations: [...continuations] };
+              const candidate = await recoverableDeliveryActivities.planExecutionContinuation({
+                taskReference: input.taskReference,
+                workflowId: execution.workflowId,
+                workflowRunId: execution.runId,
+                parentNodeId: node.id,
+                attempt: continuationAttempt,
+                requestReference: result.requestReference,
+                planningSnapshot: {
+                  artifactId: planningReference.reference,
+                  checksum: planningReference.hash,
+                },
+                guidance: continuationGuidance,
+              });
+              if (candidate.status === 'needs_input') {
+                continuations[continuations.length - 1] = {
+                  continuationId,
+                  attempt: continuationAttempt,
+                  parentNodeId: node.id,
+                  requestReference: result.requestReference,
+                  reason: candidate.summary,
+                  transcriptOperationId: `${continuationId}:planner`,
+                  status: 'needs_input',
+                };
+                state = { ...state, continuations: [...continuations] };
+                const resolution = await openWait(node.id, candidate.waitKind, candidate.summary);
+                continuationGuidance = guidanceFrom(resolution);
+                continuationAttempt += 1;
+                markRunning(node.id);
+                continue;
+              }
+              const continuation: ExecutionContinuationState = {
+                ...candidate,
+                status: 'awaiting_review',
+              };
+              continuations[continuations.length - 1] = continuation;
+              state = { ...state, continuations: [...continuations] };
+              const resolution = await openWait(
+                node.id,
+                'workflow_change.review@1',
+                `Review continuation ${candidate.continuationId}`,
+              );
+              const review = continuationReviewFrom(resolution, candidate.continuationId);
+              if (review === null) {
+                throw ApplicationFailure.nonRetryable(
+                  'Workflow continuation review payload is invalid',
+                );
+              }
+              if (review.decision === 'reject') {
+                continuations[continuations.length - 1] = {
+                  ...continuation,
+                  status: 'rejected',
+                };
+                state = { ...state, continuations: [...continuations] };
+                continuationGuidance = review.guidance;
+                continuationAttempt += 1;
+                markRunning(node.id);
+                continue;
+              }
+              continuations[continuations.length - 1] = {
+                ...continuation,
+                status: 'running',
+              };
+              Object.assign(nodeStates, createExecutionNodeStates(candidate.graph.root));
+              state = { ...state, continuations: [...continuations] };
+              const traversal = await executeNode(candidate.graph.root);
+              if (traversal.kind !== 'finalized') {
+                throw ApplicationFailure.nonRetryable(
+                  `Continuation ${candidate.continuationId} completed without a terminal outcome`,
+                );
+              }
+              continuations[continuations.length - 1] = {
+                ...continuation,
+                status: 'completed',
+              };
+              state = { ...state, continuations: [...continuations] };
+              nodeStates[node.id] = 'succeeded';
+              return { kind: 'continue' };
+            }
           }
           const resolution = await openWait(node.id, result.waitKind, result.summary);
           waitResolution = resolution;

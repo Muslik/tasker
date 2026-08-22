@@ -27,6 +27,7 @@ if (jiraPolicy === undefined) throw new Error('Missing Jira lifecycle policy');
 
 const requestFor = (operationId: string): IntegrationStepExecutionRequest => ({
   operationId,
+  nodeId: 'admission',
   stepReference: 'jira.start-work@1',
   taskReference: task.reference,
   task,

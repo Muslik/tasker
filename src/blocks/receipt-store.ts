@@ -2,7 +2,7 @@ import { checksumString } from '../ledger/checksum.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type { JsonValue } from '../ledger/types.js';
 import type { Clock } from '../shared/clock.js';
-import type { AgentInvocationUsage } from '../providers/agent-usage.js';
+import type { AgentInvocationUsage } from '../observability/agent-usage.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 import {

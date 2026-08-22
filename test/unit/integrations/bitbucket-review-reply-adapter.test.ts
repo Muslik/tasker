@@ -75,6 +75,7 @@ const requestFor = (
   inputReview: PullRequestReviewEvidence,
 ): IntegrationStepExecutionRequest => ({
   operationId,
+  nodeId: 'deliver-change',
   stepReference: 'review.acknowledge@1',
   taskReference: task.reference,
   task,

@@ -17,16 +17,9 @@
   "requiredCapabilities": ["ci.read", "git.write", "tracker.write"],
   "resumeBoundary": "step",
   "idempotency": "probe",
-  "waitKinds": [
-    "ci_retry@1",
-    "ci_infrastructure@1",
-    "ci_unknown@1",
-    "delivery.ci-change@1",
-    "code_review@1",
-    "review_changes@1"
-  ],
+  "waitKinds": ["ci_retry@1", "ci_infrastructure@1", "ci_unknown@1", "code_review@1"],
   "artifactContracts": ["pull-request", "ci-verdict"],
   "requiredArtifactContracts": ["acceptance-verification"],
-  "workflowChanges": [],
+  "workflowChanges": ["task_scope_changed"],
   "reconciliation": { "strategy": "probe" }
 }

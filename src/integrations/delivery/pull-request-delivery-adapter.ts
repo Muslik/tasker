@@ -6,6 +6,7 @@ import {
 } from '../../harness/step-contracts.js';
 import { ImplementationPlanSchema } from '../../planning/implementation-plan.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import { WorkflowChangeRequestSchema } from '../../workflow/execution-result.js';
 import type { BitbucketPullRequestAdapter } from '../bitbucket/pull-request-adapter.js';
 import type { PullRequestReviewEvidence } from '../bitbucket/review.js';
 import type {
@@ -39,7 +40,10 @@ const combineArtifacts = (
 ): readonly string[] => [...new Set([...current, ...next])];
 
 const relay = (
-  result: Extract<IntegrationStepExecutionResult, { readonly status: 'blocked' | 'waiting' }>,
+  result: Extract<
+    IntegrationStepExecutionResult,
+    { readonly status: 'blocked' | 'continuation_required' | 'waiting' }
+  >,
   artifactIds: readonly string[],
 ): IntegrationStepExecutionResult => ({
   ...result,
@@ -103,6 +107,20 @@ const waitingDetails = (
   extra: Readonly<Record<string, JsonValue>> = {},
 ): JsonValue => JsonValueSchema.parse({ phase, output: pullRequest, ...extra });
 
+const continuationRequest = (
+  request: IntegrationStepExecutionRequest,
+  summary: string,
+  objective: string,
+  artifactIds: readonly string[],
+) =>
+  WorkflowChangeRequestSchema.parse({
+    schemaVersion: 1,
+    discoveredAtNodeId: request.nodeId,
+    summary,
+    evidenceArtifactIds: [...artifactIds],
+    changes: [{ kind: 'task_scope_changed', objective }],
+  });
+
 export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
   public readonly id = 'delivery.pull-request@1';
 
@@ -154,7 +172,7 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
       );
     }
     const ci = parsedCi.data;
-    const ciWait = this.ciWait(ci, pullRequest, artifactIds);
+    const ciWait = this.ciWait(request, ci, pullRequest, artifactIds);
     if (ciWait !== null) return ciWait;
 
     if (request.task.origin === 'jira') {
@@ -185,12 +203,14 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
     }
     if (decision === 'changes_requested') {
       return {
-        status: 'waiting',
-        waitKind: 'review_changes@1',
+        status: 'continuation_required',
         summary: `Pull request ${pullRequest.externalId} has actionable human review feedback`,
-        details: waitingDetails('human_review_changes', pullRequest, {
-          reviewId: resolution.success ? resolution.data.reviewId : (review?.reviewId ?? null),
-        }),
+        request: continuationRequest(
+          request,
+          `Human review ${resolution.success ? resolution.data.reviewId : (review?.reviewId ?? 'unknown')} requested changes`,
+          'Address the actionable human review findings, re-run acceptance verification and independent review, then update the same pull request.',
+          artifactIds,
+        ),
         artifactIds,
       };
     }
@@ -204,19 +224,31 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
   }
 
   private ciWait(
+    request: IntegrationStepExecutionRequest,
     ci: CiObservationOutput,
     pullRequest: PullRequestOutput,
     artifactIds: readonly string[],
   ): IntegrationStepExecutionResult | null {
     if (ci.status === 'passed') return null;
+    if (ci.status === 'likely_caused_by_change') {
+      return {
+        status: 'continuation_required',
+        summary: `Jenkins build #${String(ci.build.number)} failed because of the task change`,
+        request: continuationRequest(
+          request,
+          `Jenkins build #${String(ci.build.number)} classified the failure as task-caused`,
+          'Repair the exact CI failure, re-run acceptance verification and independent review, then update the same pull request.',
+          artifactIds,
+        ),
+        artifactIds,
+      };
+    }
     const waitKind =
       ci.status === 'likely_flaky'
         ? 'ci_retry@1'
         : ci.status === 'infrastructure'
           ? 'ci_infrastructure@1'
-          : ci.status === 'likely_caused_by_change'
-            ? 'delivery.ci-change@1'
-            : 'ci_unknown@1';
+          : 'ci_unknown@1';
     return {
       status: 'waiting',
       waitKind,

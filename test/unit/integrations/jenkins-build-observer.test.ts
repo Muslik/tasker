@@ -43,6 +43,7 @@ const commands: CommandRunner = {
 
 const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
   operationId: 'tasker:test:observe-ci:attempt-1',
+  nodeId: 'deliver-change',
   stepReference: 'ci.observe@1',
   taskReference: task.reference,
   task,

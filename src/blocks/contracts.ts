@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { WorkflowStageDescriptorSchema } from '../workflow/contracts.js';
 import { JsonValueSchema, OutputPredicateMappingSchema } from '../workflow/schema.js';
 import { SemanticExecutionRoleSchema } from '../workflow/semantic-schema.js';
-import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
+import { AgentInvocationUsageSchema } from '../observability/agent-usage.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const EvidenceReferenceSchema = z.string().min(1);

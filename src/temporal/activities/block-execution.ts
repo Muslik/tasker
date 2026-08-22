@@ -48,7 +48,7 @@ import {
   type AgentProvider,
   workspaceHarnessEnvironment,
 } from '../../providers/agent-skills.js';
-import type { AgentInvocationUsage } from '../../providers/agent-usage.js';
+import type { AgentInvocationUsage } from '../../observability/agent-usage.js';
 import { estimateApiCost } from '../../providers/api-cost.js';
 import type {
   CommandMount,
@@ -1269,6 +1269,7 @@ export const executeRegisteredTaskStep = async (
     });
     const execution = await adapter.execute({
       operationId: executionOperationId(input),
+      nodeId: input.nodeId,
       stepReference: input.uses,
       taskReference: input.taskReference,
       task: snapshot.task,
@@ -1282,6 +1283,52 @@ export const executeRegisteredTaskStep = async (
       project: snapshot.harness.project,
       runtime,
     });
+    if (execution.status === 'continuation_required') {
+      const declared = parseDeclaredWorkflowChangeRequest(
+        execution.request,
+        current.contract.workflowChanges,
+      );
+      if (!declared.ok) {
+        const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'integration', {
+          kind: declared.error.kind,
+          adapter: adapter.id,
+        });
+        return block(
+          `Integration adapter ${adapter.id} returned an undeclared continuation request`,
+          `${input.uses}.invalid_request@1`,
+          [...execution.artifactIds, ...artifactIds],
+        );
+      }
+      const result = ExecuteTaskStepResultSchema.parse({
+        status: 'workflow_change_required',
+        summary: execution.summary,
+        request: declared.value,
+        artifactIds: execution.artifactIds,
+        transcriptId: null,
+      });
+      const persisted = dependencies.traces.persistOutputArtifact({
+        operationId: executionOperationId(input),
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        nodeId: input.nodeId,
+        stepReference: input.uses,
+        stepAttempt: input.stepAttempt,
+        runner: 'integration',
+        command: adapter.id,
+        args: [],
+        cwd: input.workspace.path,
+        exitCode: 0,
+        status: 'workflow_change_required',
+        stdout: '',
+        stderr: '',
+        details: { request: declared.value },
+        result,
+      });
+      if (!persisted.ok || persisted.value.result === null) {
+        throw new Error(`Integration continuation receipt persistence failed for ${input.uses}`);
+      }
+      return persisted.value.result;
+    }
     if (execution.status === 'blocked' || execution.status === 'waiting') {
       const result = block(
         execution.summary,
@@ -1901,7 +1948,7 @@ const executionResultFromReceipt = (receipt: BlockReceipt) => {
 export const createTaskExecutionActivity = (
   dependencies: TaskExecutionActivityDependencies,
   runtimeFactory: () => TaskStepActivityContext = temporalRuntime,
-): ExecutionWorkflowActivities => ({
+): Pick<ExecutionWorkflowActivities, 'runExecutionBlock' | 'evaluateExecutionPredicate'> => ({
   runExecutionBlock: async (input: RunExecutionBlockInput) => {
     const workspaceReference = input.contextReferences.find(({ kind }) => kind === 'workspace');
     const planningReference = input.contextReferences.find(

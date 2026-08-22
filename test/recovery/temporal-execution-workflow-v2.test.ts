@@ -21,6 +21,8 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   taskReference,
   workflowHash: 'a'.repeat(64),
   contextReferences: [
+    { kind: 'workspace', reference: `workspace:${taskReference}`, hash: 'c'.repeat(64) },
+    { kind: 'planning_snapshot', reference: `planning:${taskReference}`, hash: 'd'.repeat(64) },
     { kind: 'block-snapshot', reference: `blocks:${taskReference}`, hash: 'b'.repeat(64) },
   ],
   graph: {
@@ -93,90 +95,6 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   },
 });
 
-const ciWorkflowInput = (taskReference: string): ExecutionWorkflowInput => ({
-  schemaVersion: 2,
-  taskReference,
-  workflowHash: 'c'.repeat(64),
-  contextReferences: [
-    { kind: 'block-snapshot', reference: `blocks:${taskReference}`, hash: 'd'.repeat(64) },
-  ],
-  graph: {
-    metadata: {
-      compilerVersion: 4,
-      irVersion: 'workflow-ir-v1',
-      references: {
-        predicates: ['ci.change_failure@1', 'ci.passed@1'],
-        stepTypes: ['fixture.ci-observe@1', 'fixture.ci-repair@1'],
-        waits: ['ci.manual@1', 'human.review@1', 'operator.guidance@1'],
-      },
-      workflowId: 'ci-recovery-fixture',
-      workflowVersion: 1,
-    },
-    root: {
-      kind: 'sequence',
-      id: 'ci-delivery',
-      children: [
-        {
-          kind: 'step',
-          id: 'observe-ci',
-          uses: 'fixture.ci-observe@1',
-          activityDelivery: { kind: 'read_only' },
-          with: {},
-        },
-        {
-          kind: 'bounded_loop',
-          id: 'ci-recovery-loop',
-          maxAttempts: 3,
-          until: 'ci.passed@1',
-          checkBefore: true,
-          exhaustedWait: 'operator.guidance@1',
-          body: {
-            kind: 'branch',
-            id: 'ci-failure-kind',
-            when: 'ci.change_failure@1',
-            then: {
-              kind: 'sequence',
-              id: 'repair-ci',
-              children: [
-                {
-                  kind: 'step',
-                  id: 'repair-ci-failure',
-                  uses: 'fixture.ci-repair@1',
-                  activityDelivery: { kind: 'workspace_reconciled' },
-                  with: {},
-                },
-                {
-                  kind: 'step',
-                  id: 'observe-repaired-ci',
-                  uses: 'fixture.ci-observe@1',
-                  activityDelivery: { kind: 'read_only' },
-                  with: {},
-                },
-              ],
-            },
-            otherwise: {
-              kind: 'sequence',
-              id: 'resume-external-ci',
-              children: [
-                { kind: 'wait', id: 'wait-for-ci', for: 'ci.manual@1' },
-                {
-                  kind: 'step',
-                  id: 'observe-resumed-ci',
-                  uses: 'fixture.ci-observe@1',
-                  activityDelivery: { kind: 'read_only' },
-                  with: {},
-                },
-              ],
-            },
-          },
-        },
-        { kind: 'wait', id: 'ci-human-review', for: 'human.review@1' },
-        { kind: 'finalize', id: 'ci-accepted', outcome: 'accepted' },
-      ],
-    },
-  },
-});
-
 const activities: ExecutionWorkflowActivities = {
   runExecutionBlock: (input) => {
     if (
@@ -186,24 +104,17 @@ const activities: ExecutionWorkflowActivities = {
     ) {
       return Promise.reject(new Error('receipt persistence failed'));
     }
-    if (input.uses === 'fixture.ci-observe@1') {
-      const passed = input.taskReference === 'fixture:ci-pass' || input.nodeId !== 'observe-ci';
+    if (
+      input.taskReference === 'fixture:continuation' &&
+      input.nodeId === 'inspect' &&
+      input.blockRun === 1
+    ) {
       return Promise.resolve({
-        status: 'completed',
-        summary: passed ? 'CI passed' : 'CI failed',
-        predicateFacts: {
-          'ci.passed@1': passed,
-          'ci.change_failure@1': input.taskReference === 'fixture:ci-repair' && !passed,
-        },
-        receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
-      });
-    }
-    if (input.uses === 'fixture.ci-repair@1') {
-      return Promise.resolve({
-        status: 'completed',
-        summary: 'CI failure repaired',
-        predicateFacts: {},
-        receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
+        status: 'continuation_required',
+        summary: 'Execution discovered a task-scoped workflow change',
+        waitKind: 'fixture.inspect@1.continuation-required@1',
+        requestReference: 'artifact:continuation-request',
+        receiptReference: 'receipt:inspect:1',
       });
     }
     return Promise.resolve({
@@ -212,8 +123,72 @@ const activities: ExecutionWorkflowActivities = {
       predicateFacts:
         input.uses === 'fixture.inspect@1'
           ? { 'investigation.ready@1': true }
-          : { 'repair.done@1': input.blockRun >= 2 },
+          : input.uses === 'fixture.implement-change@1'
+            ? { 'investigation.ready@1': true }
+            : { 'repair.done@1': input.blockRun >= 2 },
       receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
+    });
+  },
+  planExecutionContinuation: (input) => {
+    const prefix = `continuation-${String(input.attempt)}--`;
+    return Promise.resolve({
+      status: 'ready',
+      continuationId: `${input.workflowRunId}:continuation-${String(input.attempt)}`,
+      attempt: input.attempt,
+      parentNodeId: input.parentNodeId,
+      requestReference: input.requestReference,
+      reason: 'Add the execution work discovered after the frozen graph started',
+      evidenceBundle: {
+        artifactId: `evidence:${input.workflowRunId}:${String(input.attempt)}`,
+        checksum: 'a'.repeat(64),
+        revision: input.attempt,
+      },
+      transcriptOperationId: `${input.workflowRunId}:continuation-${String(input.attempt)}:planner`,
+      analyzerReceiptReference: `receipt:${input.workflowRunId}:${String(input.attempt)}`,
+      usage: {
+        provider: 'codex',
+        profile: 'test',
+        profileSha256: 'b'.repeat(64),
+        model: 'test-model',
+        effort: 'low',
+        serviceTier: 'fast',
+        sessionId: `session-${String(input.attempt)}`,
+        durationMs: 10,
+        inputTokens: 10,
+        cachedInputTokens: 0,
+        outputTokens: 5,
+        reasoningOutputTokens: 0,
+        apiCost: { source: 'unrated' },
+      },
+      semanticHash: String(input.attempt).repeat(64),
+      workflowHash: input.attempt === 1 ? 'e'.repeat(64) : 'f'.repeat(64),
+      graph: {
+        metadata: {
+          compilerVersion: 4,
+          irVersion: 'workflow-ir-v1',
+          references: {
+            predicates: [],
+            stepTypes: ['fixture.implement-change@1'],
+            waits: [],
+          },
+          workflowId: `${input.workflowRunId}:continuation-${String(input.attempt)}`,
+          workflowVersion: 1,
+        },
+        root: {
+          kind: 'sequence',
+          id: `${prefix}delivery`,
+          children: [
+            {
+              kind: 'step',
+              id: `${prefix}implement`,
+              uses: 'fixture.implement-change@1',
+              activityDelivery: { kind: 'workspace_reconciled' },
+              with: {},
+            },
+            { kind: 'finalize', id: `${prefix}finished`, outcome: 'continued' },
+          ],
+        },
+      },
     });
   },
   evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
@@ -434,62 +409,74 @@ describe('Execution Workflow v2 recovery', () => {
     await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
   }, 30_000);
 
-  it('skips CI recovery when the first exact-revision observation passes', async () => {
-    const taskReference = 'fixture:ci-pass';
-    expect(
-      await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
-    ).toMatchObject({ ok: true });
+  it('replans and accepts a continuation in the same durable run without replaying its parent', async () => {
+    const taskReference = 'fixture:continuation';
+    const workflowId = workflowIdFor(taskReference);
+    expect(await runs.start(workflowId, workflowInput(taskReference))).toMatchObject({ ok: true });
 
-    expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
+    const firstReview = await waitFor(taskReference, 'workflow_change.review@1');
+    expect(firstReview).toMatchObject({
       status: 'waiting',
-      blockRuns: { 'observe-ci': 1 },
-      loopIterations: {},
+      blockRuns: { inspect: 1 },
+      continuations: [
+        {
+          attempt: 1,
+          parentNodeId: 'inspect',
+          status: 'awaiting_review',
+        },
+      ],
     });
-    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
-  }, 30_000);
-
-  it('repairs task-caused CI failures and re-observes before review', async () => {
-    const taskReference = 'fixture:ci-repair';
+    const firstCandidate = firstReview.continuations[0];
+    if (firstCandidate === undefined) throw new Error('First continuation is missing');
     expect(
-      await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
-    ).toMatchObject({ ok: true });
-
-    expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
-      status: 'waiting',
-      blockRuns: {
-        'observe-ci': 1,
-        'repair-ci-failure': 1,
-        'observe-repaired-ci': 1,
-      },
-      loopIterations: { 'ci-recovery-loop': 1 },
-    });
-    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
-  }, 30_000);
-
-  it('durably resumes external CI failures without rerunning completed work', async () => {
-    const taskReference = 'fixture:ci-external';
-    expect(
-      await runs.start(workflowIdFor(taskReference), ciWorkflowInput(taskReference)),
-    ).toMatchObject({ ok: true });
-    const waiting = await waitFor(taskReference, 'ci.manual@1');
-    expect(waiting).toMatchObject({
-      status: 'waiting',
-      blockRuns: { 'observe-ci': 1 },
-      loopIterations: { 'ci-recovery-loop': 1 },
-    });
-
-    expect(
-      await runs.resolveWait(workflowIdFor(taskReference), {
-        runId: waiting.runId,
-        nodeId: 'wait-for-ci',
-        waitKind: 'ci.manual@1',
-        resolution: { decision: 'resume' },
+      await runs.resolveWait(workflowId, {
+        runId: firstReview.runId,
+        nodeId: 'inspect',
+        waitKind: 'workflow_change.review@1',
+        resolution: {
+          decision: 'reject',
+          continuationId: firstCandidate.continuationId,
+          guidance: 'Keep the suffix scoped to the discovered implementation change.',
+        },
       }),
     ).toMatchObject({ ok: true });
-    expect(await waitFor(taskReference, 'human.review@1')).toMatchObject({
-      status: 'waiting',
-      blockRuns: { 'observe-ci': 1, 'observe-resumed-ci': 1 },
+
+    const secondReview = await waitFor(taskReference, 'workflow_change.review@1');
+    expect(secondReview.runId).toBe(firstReview.runId);
+    expect(secondReview).toMatchObject({
+      blockRuns: { inspect: 1 },
+      continuations: [
+        { attempt: 1, status: 'rejected' },
+        { attempt: 2, status: 'awaiting_review' },
+      ],
     });
-    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
+
+    worker.shutdown();
+    await workerRun;
+    await startWorker();
+    const secondCandidate = secondReview.continuations[1];
+    if (secondCandidate === undefined) throw new Error('Second continuation is missing');
+    expect(
+      await runs.resolveWait(workflowId, {
+        runId: secondReview.runId,
+        nodeId: 'inspect',
+        waitKind: 'workflow_change.review@1',
+        resolution: { decision: 'accept', continuationId: secondCandidate.continuationId },
+      }),
+    ).toMatchObject({ ok: true });
+
+    const resumed = await waitFor(taskReference, 'review.accepted@1');
+    expect(resumed.runId).toBe(firstReview.runId);
+    expect(resumed).toMatchObject({
+      blockRuns: {
+        inspect: 1,
+        'continuation-2--implement': 1,
+      },
+      continuations: [
+        { attempt: 1, status: 'rejected' },
+        { attempt: 2, status: 'completed' },
+      ],
+    });
+    await environment.client.workflow.getHandle(workflowId).cancel();
   }, 30_000);
 });

@@ -82,6 +82,7 @@ const waitingLifecycleFor = (
       nodeStates: { 'active-step': 'waiting' },
       blockRuns: { 'active-step': 1 },
       loopIterations: {},
+      continuations: [],
       status: 'waiting',
       currentNodeId: 'active-step',
       wait: { nodeId: 'active-step', waitKind, reason: 'Action is required' },
@@ -127,6 +128,118 @@ describe('operator workflow projection', () => {
       status: 'waiting',
       intervention: { kind: 'operator_guidance' },
     });
+  });
+
+  it('projects an awaiting continuation as a reviewable suffix in the same workflow', () => {
+    const base = waitingLifecycleFor(
+      'deliver.pull-request@1',
+      'remote_reconciled',
+      'workflow_change.review@1',
+    );
+    if (base.execution === null) throw new Error('Execution fixture is missing');
+    const continuationGraph = CompiledWorkflowSchema.parse({
+      metadata: {
+        compilerVersion: 4,
+        irVersion: 'workflow-ir-v1',
+        workflowId: 'execution-run:continuation-1',
+        workflowVersion: 1,
+        references: {
+          predicates: ['verification.accepted@1'],
+          stepTypes: ['implement.change@1', 'verify.acceptance@1'],
+          waits: [],
+        },
+      },
+      root: {
+        kind: 'sequence',
+        id: 'continuation-1--delivery',
+        children: [
+          {
+            kind: 'step',
+            id: 'continuation-1--implement',
+            uses: 'implement.change@1',
+            activityDelivery: { kind: 'workspace_reconciled' },
+            with: { objective: 'Address CI finding', repository: 'front-avia', taskId: 'AVIA-1' },
+          },
+          { kind: 'finalize', id: 'continuation-1--finished', outcome: 'continued' },
+        ],
+      },
+    });
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      ...base,
+      execution: {
+        ...base.execution,
+        continuations: [
+          {
+            continuationId: 'execution-run:continuation-1',
+            attempt: 1,
+            parentNodeId: 'active-step',
+            requestReference: 'artifact:workflow-change',
+            reason: 'CI exposed a task-caused change',
+            evidenceBundle: {
+              artifactId: 'evidence:continuation-1',
+              checksum: 'f'.repeat(64),
+              revision: 1,
+            },
+            transcriptOperationId: 'execution-run:continuation-1:planner',
+            analyzerReceiptReference: 'receipt:continuation-1',
+            usage: {
+              provider: 'codex',
+              profile: 'test',
+              profileSha256: 'f'.repeat(64),
+              model: 'test-model',
+              effort: 'low',
+              serviceTier: 'fast',
+              sessionId: 'session-1',
+              durationMs: 10,
+              inputTokens: 10,
+              cachedInputTokens: 0,
+              outputTokens: 5,
+              reasoningOutputTokens: 0,
+              apiCost: { source: 'unrated' },
+            },
+            semanticHash: 'd'.repeat(64),
+            workflowHash: 'e'.repeat(64),
+            graph: continuationGraph,
+            status: 'awaiting_review',
+          },
+        ],
+      },
+    });
+
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      lifecycle,
+      { read: () => ok(null) },
+      () => null,
+      () => null,
+      (operationId) => ({
+        transcriptId: `planning-transcript:${operationId}`,
+        operationId,
+        chunks: [],
+        totalBytes: 0,
+        truncated: false,
+      }),
+    );
+
+    expect(projection.current).toMatchObject({
+      status: 'waiting',
+      waitKind: 'workflow_change.review@1',
+      intervention: { kind: 'typed_resolution' },
+      transcript: {
+        operationId: 'execution-run:continuation-1:planner',
+      },
+    });
+    expect(projection.continuations).toEqual([
+      expect.objectContaining({
+        continuationId: 'execution-run:continuation-1',
+        reason: 'CI exposed a task-caused change',
+        status: 'awaiting_review',
+      }),
+    ]);
+    const continuationStage = projection.stages.find(({ key }) =>
+      key.startsWith('continuation:execution-run:continuation-1:'),
+    );
+    expect(continuationStage).toMatchObject({ label: 'Development' });
   });
 
   it('shows one operator step for one executed agent block and hides internal mechanics', () => {
@@ -192,6 +305,7 @@ describe('operator workflow projection', () => {
         nodeStates: { 'implement-change': 'succeeded' },
         blockRuns: { 'implement-change': 1 },
         loopIterations: {},
+        continuations: [],
         status: 'running',
         currentNodeId: graph.root.id,
         wait: null,
@@ -346,6 +460,7 @@ describe('operator workflow projection', () => {
         nodeStates: { 'implement-fix': 'running' },
         blockRuns: { 'implement-fix': 1 },
         loopIterations: {},
+        continuations: [],
         status: 'running',
         currentNodeId: 'implement-fix',
         wait: null,
@@ -498,6 +613,7 @@ describe('operator workflow projection', () => {
         },
         blockRuns: {},
         loopIterations: { 'repair-validation': 1 },
+        continuations: [],
         status: 'running',
         currentNodeId: 'repair-code',
         wait: null,

@@ -225,7 +225,7 @@ staleness is visible.
 ## 8. Identifiers and payload discipline
 
 - Workflow ID: stable Tasker task-run identity, for example `task/AVIA-13235/<run-id>`.
-- Child Workflow ID: parent ID plus linked repository/revision identity.
+- Continuation ID: parent Execution `runId` plus monotonic attempt identity.
 - Activity ID: deterministic graph node/attempt identity where duplicate scheduling
   must be visible.
 - External operation ID: stable effect intent, reused across retries/reconciliation.
@@ -249,11 +249,13 @@ Activity then produces a new semantic continuation and compiled executable artif
 The Workflow records both hashes and the decision. Review/CI repair continuations are
 created only after a real changes-requested/task-caused fact.
 
-An accepted continuation starts as a Child Workflow and the parent waits for its typed
-result. This preserves the accepted parent semantic workflow, executable IR, and
-completed prefix without teaching the interpreter how to mutate input. Ordinary control
-flow inside accepted executable IR remains interpreter data and does not create Child
-Workflows.
+An accepted same-repository continuation is interpreted as a separately hashed suffix
+inside the same Execution Workflow and workspace. Its nodes are namespaced and its
+review state is persisted in Workflow history. This preserves the accepted parent
+semantic workflow, executable IR, and completed prefix without mutating the parent
+input or creating a second run whose waits are invisible to the operator projection.
+Cross-repository continuation is rejected until a child-workspace lifecycle is
+implemented explicitly.
 
 During the pilot, a run-policy flag may require operator approval for the accepted plan
 and candidate, and separately for execution continuations.

@@ -6,6 +6,7 @@ import {
   RestartRunCommandSchema,
   RunStartCommandSchema,
   ResumeRunCommandSchema,
+  WorkflowChangeReviewCommandSchema,
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
   OperatorExecutionAttemptSchema,
@@ -18,6 +19,7 @@ import type {
   RunStartCommand,
   RestartRunCommand,
   ResumeRunCommand,
+  WorkflowChangeReviewCommand,
   OperatorActivityResponse,
   OperatorExecutionAttempt,
   OperatorStreamEvent,
@@ -43,12 +45,6 @@ import {
   PlanningTranscriptViewSchema,
   type PlanningTranscriptView,
 } from '../control-plane/planning-transcript.js';
-import {
-  WorkflowContinuationRecordSchema,
-  WorkflowContinuationReviewCommandSchema,
-  type WorkflowContinuationRecord,
-  type WorkflowContinuationReviewCommand,
-} from '../control-plane/workflow-continuation-contracts.js';
 import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
 import {
   RepositoryCatalogResponseSchema,
@@ -65,10 +61,6 @@ type ImplementationPlanLookup =
 
 type PlanningTranscriptLookup =
   | { readonly status: 'found'; readonly transcript: PlanningTranscriptView }
-  | { readonly status: 'missing' };
-
-type WorkflowContinuationLookup =
-  | { readonly status: 'found'; readonly record: WorkflowContinuationRecord }
   | { readonly status: 'missing' };
 
 type JsonResponse = {
@@ -238,51 +230,6 @@ export const loadPlanningTranscript = async (
   return { status: 'found', transcript: parsed.data };
 };
 
-export const loadWorkflowContinuation = async (
-  taskReference: string,
-): Promise<WorkflowContinuationLookup> => {
-  const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(taskReference)}/continuation`,
-  );
-  if (result.response.status === 404) return { status: 'missing' };
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
-  if (!parsed.success) throw new Error('Workflow continuation does not match the cockpit contract');
-  return { status: 'found', record: parsed.data };
-};
-
-export const reviewWorkflowContinuation = async (
-  taskReference: string,
-  commandInput: WorkflowContinuationReviewCommand,
-): Promise<WorkflowContinuationRecord> => {
-  const command = WorkflowContinuationReviewCommandSchema.parse(commandInput);
-  const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(taskReference)}/continuation/review`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(command),
-    },
-  );
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
-  if (!parsed.success) throw new Error('Continuation review does not match the cockpit contract');
-  return parsed.data;
-};
-
-export const retryWorkflowContinuation = async (
-  taskReference: string,
-): Promise<WorkflowContinuationRecord> => {
-  const result = await fetchJson(
-    `/api/workflows/${encodeURIComponent(taskReference)}/continuation/retry`,
-    { method: 'POST' },
-  );
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = WorkflowContinuationRecordSchema.safeParse(result.body);
-  if (!parsed.success) throw new Error('Continuation retry does not match the cockpit contract');
-  return parsed.data;
-};
-
 export const generateWorkflow = async (
   taskReference: string,
   commandInput: RunStartCommand,
@@ -327,6 +274,25 @@ export const resumeWorkflow = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Resume response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const reviewWorkflowChange = async (
+  taskReference: string,
+  commandInput: WorkflowChangeReviewCommand,
+): Promise<ExecutionRunView> => {
+  const command = WorkflowChangeReviewCommandSchema.parse(commandInput);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/workflow-change-review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Workflow change review response is invalid');
   return parsed.data;
 };
 

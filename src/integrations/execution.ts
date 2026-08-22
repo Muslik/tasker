@@ -3,6 +3,7 @@ import type { HarnessPolicyManifest, HarnessProjectManifest } from '../harness/i
 import type { JsonValue } from '../workflow/schema.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
 import type { PullRequestReviewEvidence } from './bitbucket/review.js';
+import type { WorkflowChangeRequest } from '../workflow/execution-result.js';
 
 export interface TaskRunStepEvidence {
   readonly operationId: string;
@@ -29,6 +30,7 @@ export interface IntegrationStepRuntime {
 
 export interface IntegrationStepExecutionRequest {
   readonly operationId: string;
+  readonly nodeId: string;
   readonly stepReference: string;
   readonly taskReference: string;
   readonly task: PlanningTaskSnapshot;
@@ -68,6 +70,12 @@ export type IntegrationStepExecutionResult =
       readonly waitKind: string;
       readonly summary: string;
       readonly details: JsonValue;
+      readonly artifactIds: readonly string[];
+    }
+  | {
+      readonly status: 'continuation_required';
+      readonly summary: string;
+      readonly request: WorkflowChangeRequest;
       readonly artifactIds: readonly string[];
     };
 

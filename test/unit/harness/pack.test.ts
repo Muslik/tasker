@@ -307,9 +307,13 @@ describe('file-backed harness pack', () => {
     const delivery = pack.steps.find(({ reference }) => reference === 'deliver.pull-request@1');
 
     expect(delivery?.block.stage).toEqual({ id: 'delivery', label: 'Delivery' });
-    expect(delivery?.contract.waitKinds).toEqual(
-      expect.arrayContaining(['code_review@1', 'ci_infrastructure@1', 'review_changes@1']),
-    );
+    expect(delivery?.contract.waitKinds).toEqual([
+      'ci_retry@1',
+      'ci_infrastructure@1',
+      'ci_unknown@1',
+      'code_review@1',
+    ]);
+    expect(delivery?.contract.workflowChanges).toEqual(['task_scope_changed']);
   });
 
   it('binds company AI guidance to semantic implementation without adding workflow blocks', () => {
