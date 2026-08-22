@@ -203,7 +203,7 @@ and accepted independent review before enabling remote publication authority.
   subscription CLIs;
 - company routing, project overrides, and explicit operator overrides have deterministic
   precedence and reject an unknown profile;
-- the current run snapshot accepts only schema v9 and contains the complete resolved
+- the current run snapshot accepts only schema v10 and contains the complete resolved
   profile for every agent block and both planner strategies;
 - the operator session banner shows the actual profile, provider, model, effort, time,
   measured tokens, and API-equivalent cost status.

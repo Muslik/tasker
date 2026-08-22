@@ -239,7 +239,7 @@ Initial investigation/planning and runtime continuation are separate concepts:
 
 ## Supported schemas and deleted path
 
-Only Bootstrap v3, Execution v2, and planning/execution snapshot schema v9 are accepted.
+Only Bootstrap v3, Execution v2, and planning/execution snapshot schema v10 are accepted.
 The pre-planning graph assembler, draft-revision Activity, graph-bearing Generate input,
 schema v7 reader, legacy bootstrap workflow, and their compatibility tests are deleted.
 Development data created by those shapes is disposable and must be regenerated.

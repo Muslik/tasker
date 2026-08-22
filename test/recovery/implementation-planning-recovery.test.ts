@@ -105,6 +105,35 @@ const withPlanningFixture = async (
 };
 
 describe('implementation planning recovery', () => {
+  it('rejects obsolete planning activity payloads instead of inferring missing identity', async () => {
+    await withPlanningFixture(
+      'tasker-plan-obsolete-activity-',
+      async ({ directory, clock, ledger }) => {
+        const fixture = planningFixture(ledger, clock, directory, makeTestImplementationPlanner());
+        const aggregateId = `implementation-plan:${PLANNING_EPISODE_ID}`;
+        const recorded = ledger.repository.transact({
+          aggregate: {
+            aggregateId,
+            expectedVersion: 0,
+            events: [
+              {
+                eventId: `event:${aggregateId}:1`,
+                eventType: 'ImplementationPlanningStarted',
+                eventSchemaVersion: 1,
+                payload: { attempt: 1, strategy: 'fast' },
+              },
+            ],
+          },
+        });
+
+        expect(recorded.ok).toBe(true);
+        expect(() => fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toThrow(
+          'Invalid implementation planning event payload: ImplementationPlanningStarted',
+        );
+      },
+    );
+  });
+
   it('never supplies a plan from another run of the same task as previousDecision', async () => {
     await withPlanningFixture(
       'tasker-plan-run-isolation-',

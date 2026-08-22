@@ -119,9 +119,8 @@ const aggregateIdFor = (planningEpisodeId: string): string =>
 
 const PlanningActivityEventPayloadSchema = z.looseObject({
   attempt: z.number().int().positive(),
-  episodeId: z.string().min(1).optional(),
-  selectedStrategy: PlanningStrategySchema.optional(),
-  strategy: PlanningStrategySchema.optional(),
+  episodeId: z.string().min(1),
+  selectedStrategy: PlanningStrategySchema,
 });
 
 type PlanningActivityStatus =
@@ -398,7 +397,7 @@ export class ImplementationPlanningStore {
       {
         taskReference: planning.taskReference,
         attempt: planning.attempt,
-        strategy: planning.selectedStrategy,
+        selectedStrategy: planning.selectedStrategy,
         artifactId,
         episodeId: planning.planningEpisodeId,
       },
@@ -736,7 +735,7 @@ export class ImplementationPlanningStore {
       {
         taskReference: planning.taskReference,
         attempt: planning.attempt,
-        strategy: planning.selectedStrategy,
+        selectedStrategy: planning.selectedStrategy,
         failureKind: failure.kind,
         episodeId: planning.planningEpisodeId,
         ...(receipt === null ? {} : { artifactId }),
@@ -1301,62 +1300,48 @@ export class ImplementationPlanningCoordinator {
   public readActivity(planningEpisodeId: string): OperatorActivityResponse['entries'] {
     const entries: Array<OperatorActivityResponse['entries'][number]> = [];
     const episodes = new Map<string, PlanningActivityEpisode>();
-    let legacyEpisodeId: string | null = null;
 
-    const recordEpisode = (
-      event: EventRecord,
-      status: PlanningActivityStatus,
-      terminal: boolean,
-    ): void => {
+    const recordEpisode = (event: EventRecord, status: PlanningActivityStatus): void => {
       const payload = PlanningActivityEventPayloadSchema.safeParse(event.payload);
       if (!payload.success) {
         throw new Error(`Invalid implementation planning event payload: ${event.eventType}`);
       }
-      const strategy = payload.data.selectedStrategy ?? payload.data.strategy;
-      if (strategy === undefined) {
-        throw new Error(`Implementation planning event has no strategy: ${event.eventType}`);
-      }
-      const explicitEpisodeId = payload.data.episodeId;
-      const episodeId = explicitEpisodeId ?? legacyEpisodeId ?? `legacy:${String(event.sequence)}`;
-      if (explicitEpisodeId === undefined && legacyEpisodeId === null) {
-        legacyEpisodeId = episodeId;
-      }
+      const { episodeId, selectedStrategy } = payload.data;
       const existing = episodes.get(episodeId);
       if (existing === undefined) {
         episodes.set(episodeId, {
           attempts: new Set([payload.data.attempt]),
-          strategy,
+          strategy: selectedStrategy,
           status,
           sequence: event.sequence,
           occurredAt: event.occurredAt,
         });
       } else {
         existing.attempts.add(payload.data.attempt);
-        existing.strategy = strategy;
+        existing.strategy = selectedStrategy;
         existing.status = status;
         existing.sequence = event.sequence;
         existing.occurredAt = event.occurredAt;
       }
-      if (terminal && explicitEpisodeId === undefined) legacyEpisodeId = null;
     };
 
     const planningEvents = this.store.listEvents(planningEpisodeId);
     for (const event of planningEvents) {
       switch (event.eventType) {
         case 'ImplementationPlanningStarted':
-          recordEpisode(event, 'running', false);
+          recordEpisode(event, 'running');
           continue;
         case 'ImplementationPlanReady':
-          recordEpisode(event, 'ready', true);
+          recordEpisode(event, 'ready');
           continue;
         case 'ImplementationPlanNeedsClarification':
-          recordEpisode(event, 'needs_clarification', true);
+          recordEpisode(event, 'needs_clarification');
           continue;
         case 'ImplementationPlanInvestigationRequired':
-          recordEpisode(event, 'investigation_required', true);
+          recordEpisode(event, 'investigation_required');
           continue;
         case 'ImplementationPlanningFailed':
-          recordEpisode(event, 'paused', false);
+          recordEpisode(event, 'paused');
           continue;
         case 'ImplementationWorkflowCandidateValidated':
           continue;
