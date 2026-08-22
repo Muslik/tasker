@@ -116,9 +116,23 @@ export const OperatorWorkflowStageSchema = z
   })
   .strict();
 
+export const OperatorInterventionActionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('operator_guidance') }).strict(),
+  z.object({ kind: z.literal('external_prerequisite') }).strict(),
+  z.object({ kind: z.literal('typed_resolution') }).strict(),
+]);
+
+const OperatorWorkflowCurrentBaseSchema = {
+  runtime: z.enum(['bootstrap', 'execution']),
+  nodeId: z.string().min(1),
+  reference: z.string().min(1).nullable(),
+  blockRun: z.number().int().positive().nullable(),
+  transcript: PlanningTranscriptViewSchema.nullable(),
+};
+
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(5),
+    schemaVersion: z.literal(6),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
@@ -128,17 +142,26 @@ export const OperatorWorkflowProjectionSchema = z
       .regex(/^[a-f0-9]{64}$/u)
       .nullable(),
     current: z
-      .object({
-        runtime: z.enum(['bootstrap', 'execution']),
-        nodeId: z.string().min(1),
-        reference: z.string().min(1).nullable(),
-        status: z.enum(['running', 'waiting']),
-        blockRun: z.number().int().positive().nullable(),
-        waitKind: z.string().min(1).nullable(),
-        reason: z.string().min(1).nullable(),
-        transcript: PlanningTranscriptViewSchema.nullable(),
-      })
-      .strict()
+      .discriminatedUnion('status', [
+        z
+          .object({
+            ...OperatorWorkflowCurrentBaseSchema,
+            status: z.literal('running'),
+            waitKind: z.null(),
+            reason: z.null(),
+            intervention: z.null(),
+          })
+          .strict(),
+        z
+          .object({
+            ...OperatorWorkflowCurrentBaseSchema,
+            status: z.literal('waiting'),
+            waitKind: z.string().min(1),
+            reason: z.string().min(1).nullable(),
+            intervention: OperatorInterventionActionSchema,
+          })
+          .strict(),
+      ])
       .nullable(),
     stages: z.array(OperatorWorkflowStageSchema),
   })
@@ -373,6 +396,7 @@ export type WorkflowNodeStatus = z.infer<typeof WorkflowNodeStatusSchema>;
 export type BlockReceiptSummary = z.infer<typeof BlockReceiptSummarySchema>;
 export type OperatorWorkflowStep = z.infer<typeof OperatorWorkflowStepSchema>;
 export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;
+export type OperatorInterventionAction = z.infer<typeof OperatorInterventionActionSchema>;
 export type OperatorWorkflowProjection = z.infer<typeof OperatorWorkflowProjectionSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;

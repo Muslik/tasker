@@ -12,11 +12,113 @@ import { makeWorkflowProposal } from '../support/planning.js';
 
 const resources: SqliteLedger[] = [];
 
+const waitingLifecycleFor = (
+  reference: 'code.implement@1' | 'jira.start-work@1',
+  activityDelivery: 'workspace_reconciled' | 'remote_reconciled',
+  waitKind: string,
+) => {
+  const graph = CompiledWorkflowSchema.parse({
+    metadata: {
+      compilerVersion: 4,
+      irVersion: 'workflow-ir-v1',
+      workflowId: 'waiting-workflow',
+      workflowVersion: 1,
+      references: { predicates: [], stepTypes: [reference], waits: [] },
+    },
+    root: {
+      kind: 'step',
+      id: 'active-step',
+      uses: reference,
+      activityDelivery: { kind: activityDelivery },
+      with: {
+        objective: 'Continue the task',
+        repository: 'onetwotrip/front-avia',
+        taskId: 'AVIA-1',
+      },
+    },
+  });
+  const workflowHash = 'a'.repeat(64);
+  return TaskRunLifecycleSchema.parse({
+    bootstrap: {
+      runtime: 'bootstrap',
+      schemaVersion: 3,
+      taskReference: 'AVIA-1',
+      workflowId: 'bootstrap-workflow',
+      runId: 'bootstrap-run',
+      workflowHash,
+      settings: { planReview: 'automatic', planningStrategy: 'fast' },
+      phase: 'execution',
+      workspaceContext: null,
+      context: null,
+      draft: {
+        workflowHash,
+        graph,
+        planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'b'.repeat(64) },
+        evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'c'.repeat(64), revision: 1 },
+      },
+      planning: null,
+      freezeReceipt: null,
+      executionWorkflowId: 'execution-workflow',
+      nodeStates: {},
+      attempts: {},
+      status: 'completed',
+      currentNodeId: null,
+      wait: null,
+      outcome: 'execution_started',
+    },
+    execution: {
+      runtime: 'execution',
+      schemaVersion: 2,
+      taskReference: 'AVIA-1',
+      workflowId: 'execution-workflow',
+      runId: 'execution-run',
+      workflowHash,
+      nodeStates: { 'active-step': 'waiting' },
+      blockRuns: { 'active-step': 1 },
+      loopIterations: {},
+      status: 'waiting',
+      currentNodeId: 'active-step',
+      wait: { nodeId: 'active-step', waitKind, reason: 'Action is required' },
+      outcome: null,
+    },
+  });
+};
+
 afterEach(() => {
   for (const ledger of resources.splice(0)) ledger.close();
 });
 
 describe('operator workflow projection', () => {
+  it('classifies an integration failure as an external prerequisite', () => {
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      waitingLifecycleFor(
+        'jira.start-work@1',
+        'remote_reconciled',
+        'jira.start-work@1.invalid_request@1',
+      ),
+      { read: () => ok(null) },
+    );
+
+    expect(projection.current).toMatchObject({
+      status: 'waiting',
+      intervention: { kind: 'external_prerequisite' },
+    });
+  });
+
+  it('classifies an agent failure as operator guidance', () => {
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      waitingLifecycleFor('code.implement@1', 'workspace_reconciled', 'code.implement@1.blocked@1'),
+      { read: () => ok(null) },
+    );
+
+    expect(projection.current).toMatchObject({
+      status: 'waiting',
+      intervention: { kind: 'operator_guidance' },
+    });
+  });
+
   it('shows one operator step for one executed agent block and hides internal mechanics', () => {
     const clock = makeAdjustableClock('2026-08-10T00:00:00.000Z');
     const ledger = openSqliteLedger({ filename: ':memory:', clock });

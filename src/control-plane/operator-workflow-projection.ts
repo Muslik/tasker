@@ -14,6 +14,7 @@ import {
   OperatorWorkflowStageSchema,
   OperatorWorkflowStepSchema,
   type BlockReceiptSummary,
+  type OperatorInterventionAction,
   type OperatorWorkflowProjection,
   type OperatorWorkflowStage,
   type OperatorWorkflowStep,
@@ -25,6 +26,13 @@ type ExecutionSnapshotReader = (lifecycle: TaskRunLifecycle) => RunPlanningSnaps
 type ExecutionTranscriptReader = (
   execution: ExecutionWorkflowPublicState,
 ) => PlanningTranscriptView | null;
+
+const TYPED_RESOLUTION_WAITS = new Set([
+  'code_review@1',
+  'human_clarification',
+  'plan.approved@1',
+  'workflow_change.review@1',
+]);
 
 const titleCaseIdentifier = (value: string): string =>
   value
@@ -348,6 +356,30 @@ const findNode = (node: CompiledWorkflowNode, nodeId: string): CompiledWorkflowN
   return null;
 };
 
+const interventionFor = (
+  runtime: 'bootstrap' | 'execution',
+  nodeId: string,
+  waitKind: string,
+  executionNode: CompiledWorkflowNode | null,
+  snapshot: RunPlanningSnapshot | null,
+): OperatorInterventionAction => {
+  if (TYPED_RESOLUTION_WAITS.has(waitKind)) return { kind: 'typed_resolution' };
+  if (waitKind === 'operator_guidance@1') return { kind: 'operator_guidance' };
+  if (runtime === 'bootstrap') {
+    return nodeId === 'investigation' || nodeId === 'planning'
+      ? { kind: 'operator_guidance' }
+      : { kind: 'external_prerequisite' };
+  }
+  if (executionNode?.kind !== 'step') return { kind: 'external_prerequisite' };
+  const snapshotted = snapshot?.harness.steps.find(
+    ({ reference }) => reference === executionNode.uses,
+  );
+  const block = snapshotted?.block ?? getHarnessStepDefinition(executionNode.uses)?.block;
+  return block?.executor.kind === 'agent'
+    ? { kind: 'operator_guidance' }
+    : { kind: 'external_prerequisite' };
+};
+
 export const createOperatorWorkflowProjection = (
   taskReference: string,
   lifecycle: TaskRunLifecycle | null,
@@ -357,7 +389,7 @@ export const createOperatorWorkflowProjection = (
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 5,
+      schemaVersion: 6,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
@@ -384,11 +416,12 @@ export const createOperatorWorkflowProjection = (
         ? null
         : lifecycle.bootstrap.currentNodeId
       : executionNodeId;
+  const currentRuntime = execution === null ? ('bootstrap' as const) : ('execution' as const);
   const current =
     activeNodeId === null || active.status === 'completed'
       ? null
       : {
-          runtime: execution === null ? ('bootstrap' as const) : ('execution' as const),
+          runtime: currentRuntime,
           nodeId: activeNodeId,
           reference:
             executionNode?.kind === 'step'
@@ -403,10 +436,20 @@ export const createOperatorWorkflowProjection = (
               : (execution.blockRuns[executionNodeId] ?? null),
           waitKind: active.status === 'waiting' ? active.wait.waitKind : null,
           reason: active.status === 'waiting' ? (active.wait.reason ?? null) : null,
+          intervention:
+            active.status === 'waiting'
+              ? interventionFor(
+                  currentRuntime,
+                  activeNodeId,
+                  active.wait.waitKind,
+                  executionNode,
+                  snapshot,
+                )
+              : null,
           transcript: execution === null ? null : readExecutionTranscript(execution),
         };
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 5,
+    schemaVersion: 6,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',

@@ -28,6 +28,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type {
+  OperatorInterventionAction,
   OperatorActivityResponse,
   OperatorTaskSummary,
   OperatorWorkflowProjection,
@@ -808,7 +809,13 @@ const CodeReviewControls = ({
   );
 };
 
-const OperatorIntervention = ({
+type ResumableInterventionAction = Exclude<
+  OperatorInterventionAction,
+  { readonly kind: 'typed_resolution' }
+>;
+
+export const OperatorIntervention = ({
+  action,
   stage,
   guidance,
   pending,
@@ -819,6 +826,7 @@ const OperatorIntervention = ({
   onRestartCancel,
   onRestartConfirm,
 }: {
+  readonly action: ResumableInterventionAction;
   readonly stage: string;
   readonly guidance: string;
   readonly pending: boolean;
@@ -828,78 +836,86 @@ const OperatorIntervention = ({
   readonly onRestartRequest: () => void;
   readonly onRestartCancel: () => void;
   readonly onRestartConfirm: () => void;
-}) => (
-  <section className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3">
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <strong className="text-sm">Action required</strong>
-        <p className="mt-1 max-w-4xl text-sm leading-5 text-foreground/90">{stage}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Fix the prerequisite, or tell the agent how it should proceed. The same workflow step will
-          resume without repeating completed work.
-        </p>
-      </div>
-      <div className="flex shrink-0 gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          type="button"
-          disabled={pending}
-          onClick={onRestartRequest}
-        >
-          <RotateCcw data-icon="inline-start" />
-          Restart from scratch
-        </Button>
-        <Button size="sm" type="button" disabled={pending} onClick={onResume}>
-          {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-          {pending ? 'Working…' : 'Resume'}
-        </Button>
-      </div>
-    </div>
-    <textarea
-      className="mt-2 min-h-16 w-full resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
-      aria-label="Operator guidance"
-      placeholder="Optional guidance for the next attempt: what changed or what should the agent do differently?"
-      value={guidance}
-      disabled={pending}
-      onChange={(event) => {
-        onGuidanceChange(event.target.value);
-      }}
-    />
-    {restartConfirming ? (
-      <div className="mt-3 flex items-center justify-between gap-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
-        <div>
-          <strong className="text-sm text-destructive">Abandon this run?</strong>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Tasker will preserve its Temporal history, terminate unfinished work, and create a new
-            workspace from the current harness.
+}) => {
+  const acceptsGuidance = action.kind === 'operator_guidance';
+  return (
+    <section className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <strong className="text-sm">
+            {acceptsGuidance ? 'Guidance required' : 'Prerequisite required'}
+          </strong>
+          <p className="mt-1 max-w-4xl text-sm leading-5 text-foreground/90">{stage}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {acceptsGuidance
+              ? 'Tell the agent what changed or how to approach the same step. Completed work will not repeat.'
+              : 'Resolve this requirement in its owning system, then resume the same step. This step does not read free-form guidance.'}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             type="button"
             disabled={pending}
-            onClick={onRestartCancel}
+            onClick={onRestartRequest}
           >
-            Cancel
+            <RotateCcw data-icon="inline-start" />
+            Restart from scratch
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            type="button"
-            disabled={pending}
-            onClick={onRestartConfirm}
-          >
+          <Button size="sm" type="button" disabled={pending} onClick={onResume}>
             {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-            {pending ? 'Restarting…' : 'Confirm restart'}
+            {pending ? 'Working…' : 'Resume'}
           </Button>
         </div>
       </div>
-    ) : null}
-  </section>
-);
+      {acceptsGuidance ? (
+        <textarea
+          className="mt-2 min-h-16 w-full resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+          aria-label="Operator guidance"
+          placeholder="What changed, or what should the agent do differently?"
+          value={guidance}
+          disabled={pending}
+          onChange={(event) => {
+            onGuidanceChange(event.target.value);
+          }}
+        />
+      ) : null}
+      {restartConfirming ? (
+        <div className="mt-3 flex items-center justify-between gap-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <div>
+            <strong className="text-sm text-destructive">Abandon this run?</strong>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Tasker will preserve its Temporal history, terminate unfinished work, and create a new
+              workspace from the current harness.
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              disabled={pending}
+              onClick={onRestartCancel}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              disabled={pending}
+              onClick={onRestartConfirm}
+            >
+              {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+              {pending ? 'Restarting…' : 'Confirm restart'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+};
 
 const ValidationSurface = ({ view }: { readonly view: WorkflowView }) => {
   const issues = view.workflow.validatorReport.issues;
@@ -2731,6 +2747,12 @@ export const App = () => {
     operatorProjectionState.status === 'ready'
       ? operatorProjectionState.projection.activeRunId
       : null;
+  const selectedIntervention =
+    operatorProjectionState.status === 'ready' &&
+    operatorProjectionState.projection.current?.status === 'waiting' &&
+    operatorProjectionState.projection.current.intervention.kind !== 'typed_resolution'
+      ? operatorProjectionState.projection.current.intervention
+      : null;
 
   const selectedIdRef = useRef(selectedId);
   useEffect(() => {
@@ -3427,7 +3449,10 @@ export const App = () => {
     if (selectedTask === null || selectedTask.status !== 'waiting') return;
     if (selectedRunId === null) return;
     const taskReference = selectedTask.id;
-    const guidance = interventionGuidanceDrafts.get(taskReference)?.trim() ?? '';
+    const guidance =
+      selectedIntervention?.kind === 'operator_guidance'
+        ? (interventionGuidanceDrafts.get(taskReference)?.trim() ?? '')
+        : '';
     setRuntimeWatchTaskId(taskReference);
     setPendingOperations((current) => new Map(current).set(taskReference, 'resuming'));
     void resumeWorkflow(
@@ -3737,18 +3762,9 @@ export const App = () => {
                     }}
                   />
                 ) : null}
-                {selectedTask.status === 'waiting' &&
-                !(
-                  implementationPlanState.status === 'ready' &&
-                  implementationPlanState.record.status === 'needs_clarification'
-                ) &&
-                !(
-                  workflowContinuationState.status === 'ready' &&
-                  (workflowContinuationState.record.status === 'awaiting_review' ||
-                    workflowContinuationState.record.status === 'accepted' ||
-                    workflowContinuationState.record.status === 'rejected_by_operator')
-                ) ? (
+                {selectedTask.status === 'waiting' && selectedIntervention !== null ? (
                   <OperatorIntervention
+                    action={selectedIntervention}
                     stage={selectedTask.currentStage}
                     guidance={interventionGuidanceDrafts.get(selectedTask.id) ?? ''}
                     pending={

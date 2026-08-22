@@ -153,8 +153,9 @@ stage state but remain diagnostics. Future stages remain compact headers; rows a
 when their work starts, so unselected recovery branches stay absent. Operator waits use
 a persistent amber action surface, and the console
 supports persisted light/dark themes.
-The raw graph remains a downloadable diagnostic artifact. View schema v5 projections
-are deleted when encountered instead of being interpreted or upcast.
+The raw graph remains a downloadable diagnostic artifact. Operator workflow projection schema v6
+includes a typed intervention action; obsolete projections are deleted instead of interpreted or
+upcast.
 
 Phase 6 implementation is present: project manifests own exact `validate.*` commands; non-zero
 validation results become typed loop facts; `code.repair`, `bug.validate_fix`, and

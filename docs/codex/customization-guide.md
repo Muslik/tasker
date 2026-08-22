@@ -576,6 +576,12 @@ review scope, and execution identity. The replacement cannot read mutable artifa
 abandoned run. Do not use restart for ordinary retries: fix the prerequisite and `Resume` the same
 run so completed work is retained.
 
+Wait UI is driven by the operator projection's typed intervention action. Agent retries use
+`operator_guidance`; deterministic integration, process, workspace, and external handoff waits use
+`external_prerequisite`; plan/questions/review use `typed_resolution`. Do not add a Cockpit regex
+over wait text. An external prerequisite never receives free-form guidance: repair the source
+system and resume the same block.
+
 Codex and Claude are current first-class subscription-CLI adapters for analysis,
 planning, and agent steps. Adding another provider means implementing this same adapter
 contract and registering profiles. It is not a skill migration or workflow change.

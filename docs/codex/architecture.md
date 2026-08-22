@@ -509,10 +509,17 @@ history. Duplicate webhook/poll results are deduplicated by stable external iden
 PR conversation is the primary review channel: Tasker imports unresolved Bitbucket
 threads, starts a revision Activity, and posts acknowledgements only through the
 integration adapter after CI, then returns to code review. Provider-specific resolution
-may be added behind the same boundary when its API and policy are verified. The cockpit may
-also submit operator guidance. For an infrastructure or agent block, that guidance
-resumes the same durable wait and is included in the next attempt; the completed
-prefix, worktree, artifacts, and conversation provenance remain intact.
+may be added behind the same boundary when its API and policy are verified.
+
+The operator projection classifies each wait before Cockpit renders it:
+
+- `typed_resolution` uses a dedicated question, plan-review, continuation, or code-review control;
+- `operator_guidance` exposes free-form text to the next agent attempt;
+- `external_prerequisite` instructs the operator to repair the owning system and does not expose or
+  submit guidance that a deterministic integration/process step cannot consume.
+
+Resume preserves the completed prefix, worktree, artifacts, and conversation provenance in all
+three cases. Classification belongs to the control-plane projection, not a Cockpit string filter.
 
 When a bootstrap Activity exhausts its automatic delivery retries, the wait reason
 contains the bounded root cause returned by the Activity, not a generic stage label.

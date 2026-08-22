@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath, URL } from 'node:url';
+
+const sourceRoot = fileURLToPath(new URL('./src', import.meta.url));
 
 const project = (name: string, include: string[]) => ({
+  resolve: { alias: { '@': sourceRoot } },
   test: {
     name,
     include,
@@ -8,9 +12,14 @@ const project = (name: string, include: string[]) => ({
 });
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': sourceRoot,
+    },
+  },
   test: {
     projects: [
-      project('unit', ['test/unit/**/*.test.ts']),
+      project('unit', ['test/unit/**/*.test.ts', 'test/unit/**/*.test.tsx']),
       project('property', ['test/property/**/*.test.ts']),
       project('repository', ['test/repository/**/*.test.ts']),
       project('contract', ['test/contract/**/*.test.ts']),
