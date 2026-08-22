@@ -58,7 +58,7 @@ describe('workspace mutation recovery', () => {
       operationId: 'workflow:implement:attempt-1',
       workspaceId: 'a'.repeat(24),
       workspacePath: root,
-      stepReference: 'code.implement@1',
+      stepReference: 'implement.change@1',
     };
 
     const initial = await recovery.prepare(input);

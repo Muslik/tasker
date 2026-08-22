@@ -113,6 +113,7 @@ export const RunExecutionBlockInputSchema = z
     activityDelivery: StepActivityDeliverySchema,
     contextReferences: z.array(ExecutionContextReferenceSchema),
     operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
+    waitResolution: JsonValueSchema.nullable(),
     input: JsonValueSchema,
   })
   .strict()

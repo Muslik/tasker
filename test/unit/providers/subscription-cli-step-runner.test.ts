@@ -182,7 +182,7 @@ describe('subscription CLI task-step runner', () => {
     try {
       const result = await runner.run({
         operationId: 'workflow:step:attempt-1',
-        stepReference: 'code.implement@1',
+        stepReference: 'implement.change@1',
         profile: TEST_CODEX_PROFILE,
         prompt: 'Return the result.',
         skills: ['jira'],
@@ -269,7 +269,7 @@ describe('subscription CLI task-step runner', () => {
     try {
       const result = await runner.run({
         operationId: 'workflow:claude-step:attempt-1',
-        stepReference: 'code.implement@1',
+        stepReference: 'implement.change@1',
         profile: TEST_CLAUDE_PROFILE,
         prompt: 'Return the result.',
         skills: [],

@@ -185,6 +185,7 @@ export async function executionWorkflowV2(
   const runBlock = async (
     node: Extract<CompiledWorkflowNode, { readonly kind: 'step' }>,
     operatorGuidance: string | null,
+    waitResolution: JsonValue | null,
   ): Promise<ExecutionBlockResult> => {
     blockRuns[node.id] = (blockRuns[node.id] ?? 0) + 1;
     const activities =
@@ -204,6 +205,7 @@ export async function executionWorkflowV2(
         activityDelivery: node.activityDelivery,
         contextReferences: input.contextReferences,
         operatorGuidance,
+        waitResolution,
         input: node.with,
       });
     } catch (error) {
@@ -232,15 +234,17 @@ export async function executionWorkflowV2(
       }
       case 'step': {
         let operatorGuidance = queuedGuidance;
+        let waitResolution: JsonValue | null = null;
         queuedGuidance = null;
         for (;;) {
-          const result = await runBlock(node, operatorGuidance);
+          const result = await runBlock(node, operatorGuidance, waitResolution);
           if (result.status === 'completed') {
             Object.assign(predicateFacts, result.predicateFacts);
             nodeStates[node.id] = 'succeeded';
             return { kind: 'continue' };
           }
           const resolution = await openWait(node.id, result.waitKind, result.summary);
+          waitResolution = resolution;
           operatorGuidance = guidanceFrom(resolution);
           markRunning(node.id);
         }

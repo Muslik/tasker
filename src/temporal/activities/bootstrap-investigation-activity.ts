@@ -99,6 +99,7 @@ export const createBootstrapInvestigationActivity = (
         },
       ],
       operatorGuidance: input.operatorGuidance,
+      waitResolution: null,
       input: input.step.with,
     });
     if (result.status === 'needs_input') {

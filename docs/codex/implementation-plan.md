@@ -156,12 +156,13 @@ The raw graph remains a downloadable diagnostic artifact. Operator workflow proj
 includes a typed intervention action; obsolete projections are deleted instead of interpreted or
 upcast.
 
-Phase 6 implementation is present: project manifests own exact `validate.*` commands; non-zero
-validation results become typed loop facts; `code.repair`, `bug.validate_fix`, and
-`review.agent` have separate completion contracts; and validation/review repair is bounded by
-durable operator guidance. The remaining checkpoint is empirical: run one real feature and one
-real bug through this suffix and inspect same-run receipts, worktree reuse, final bug evidence,
-and accepted independent review before enabling remote publication authority.
+Semantic execution is present: `implement.change` owns initial work and evidence-driven repair,
+`verify.acceptance` owns exact project commands and runtime proof, `review.change` owns independent
+read-only review, and `deliver.pull-request` owns reconciled PR/CI/Jira/human-review operations.
+Runtime failures re-enter their owning block or create a linked continuation; they are not separate
+planner nodes. The remaining checkpoint is empirical: run one real feature and one real bug through
+this suffix and inspect same-run receipts, worktree reuse, final bug evidence, and accepted
+independent review before broadening the allowlist.
 
 ## Phase 0 exit gate
 

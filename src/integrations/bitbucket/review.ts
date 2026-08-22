@@ -563,7 +563,13 @@ export const pullRequestReferenceFrom = (
 ): z.infer<typeof pullRequestOutputSchema> | null => {
   for (let index = steps.length - 1; index >= 0; index -= 1) {
     const step = steps[index];
-    if (step?.stepReference !== 'pr.prepare@1' || step.status !== 'completed') continue;
+    if (
+      step === undefined ||
+      step.stepReference !== 'deliver.pull-request@1' ||
+      (step.status !== 'completed' && step.status !== 'blocked')
+    ) {
+      continue;
+    }
     const details = z.object({ output: pullRequestOutputSchema }).safeParse(step.details);
     if (details.success) return details.data.output;
   }

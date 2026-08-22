@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadHarnessPack } from '../../../src/harness/index.js';
+import { pullRequestOutputSchema } from '../../../src/harness/step-contracts.js';
 import {
   ExternalEffectStore,
   JiraReviewReadyAdapter,
@@ -56,6 +57,7 @@ const requestFor = (
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
+  waitResolution: null,
   evidence: {
     acceptedPlan: null,
     completedSteps: [
@@ -90,6 +92,22 @@ const requestFor = (
     heartbeat: () => {},
   },
 });
+
+const executeReviewReady = (
+  adapter: JiraReviewReadyAdapter,
+  request: IntegrationStepExecutionRequest,
+) => {
+  const step = request.evidence.completedSteps[0];
+  const parsed = pullRequestOutputSchema.parse(
+    step === undefined ||
+      typeof step.details !== 'object' ||
+      step.details === null ||
+      Array.isArray(step.details)
+      ? null
+      : step.details.output,
+  );
+  return adapter.executeForPullRequest(request, parsed);
+};
 
 class StatefulJiraReviewPort implements JiraLifecyclePort {
   public issue: JiraLifecycleIssue = {
@@ -243,7 +261,8 @@ describe('Jira review-ready effect adapter', () => {
       },
     ];
 
-    const result = await adapterFor(jira).execute(
+    const result = await executeReviewReady(
+      adapterFor(jira),
       requestFor('workflow:jira-review:new-run-attempt-1'),
     );
 
@@ -271,7 +290,8 @@ describe('Jira review-ready effect adapter', () => {
       },
     ];
 
-    const result = await adapterFor(jira).execute(
+    const result = await executeReviewReady(
+      adapterFor(jira),
       requestFor('workflow:jira-review:ambiguous-comments-attempt-1'),
     );
 
@@ -297,7 +317,7 @@ describe('Jira review-ready effect adapter', () => {
     ];
     const adapter = adapterFor(jira);
 
-    const blocked = await adapter.execute(requestFor('workflow:jira-review:attempt-1'));
+    const blocked = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-1'));
 
     expect(blocked).toMatchObject({
       status: 'blocked',
@@ -322,7 +342,7 @@ describe('Jira review-ready effect adapter', () => {
     expect(jira.commentCalls).toEqual([]);
 
     jira.fieldValues.customfield_12345 = 3;
-    const resumed = await adapter.execute(requestFor('workflow:jira-review:attempt-2'));
+    const resumed = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-2'));
 
     expect(resumed).toMatchObject({ status: 'completed' });
     expect(jira.fieldObservationCalls).toEqual([['customfield_12345'], ['customfield_12345']]);
@@ -333,7 +353,10 @@ describe('Jira review-ready effect adapter', () => {
   it('moves the issue to code review and posts one compact pull-request comment', async () => {
     const jira = new StatefulJiraReviewPort();
 
-    const result = await adapterFor(jira).execute(requestFor('workflow:jira-review:attempt-1'));
+    const result = await executeReviewReady(
+      adapterFor(jira),
+      requestFor('workflow:jira-review:attempt-1'),
+    );
 
     expect(result).toMatchObject({
       status: 'completed',
@@ -350,8 +373,8 @@ describe('Jira review-ready effect adapter', () => {
     const adapter = adapterFor(jira);
     const request = requestFor('workflow:jira-review:attempt-1');
 
-    const first = await adapter.execute(request);
-    const redelivered = await adapter.execute(request);
+    const first = await executeReviewReady(adapter, request);
+    const redelivered = await executeReviewReady(adapter, request);
 
     expect(first).toMatchObject({ status: 'completed' });
     expect(redelivered).toMatchObject({ status: 'completed' });
@@ -364,9 +387,9 @@ describe('Jira review-ready effect adapter', () => {
     jira.mode = 'forbidden-comment';
     const adapter = adapterFor(jira);
 
-    const blocked = await adapter.execute(requestFor('workflow:jira-review:attempt-1'));
+    const blocked = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-1'));
     jira.mode = 'normal';
-    const resumed = await adapter.execute(requestFor('workflow:jira-review:attempt-2'));
+    const resumed = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-2'));
 
     expect(blocked).toMatchObject({ status: 'blocked', kind: 'infrastructure' });
     expect(resumed).toMatchObject({ status: 'completed' });
@@ -381,8 +404,8 @@ describe('Jira review-ready effect adapter', () => {
     jira.comments = [{ id: '9', body: `Existing PR: [73|${pullRequestUrl}]` }];
     const adapter = adapterFor(jira);
 
-    const first = await adapter.execute(requestFor('workflow:jira-review:attempt-1'));
-    const resumed = await adapter.execute(requestFor('workflow:jira-review:attempt-2'));
+    const first = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-1'));
+    const resumed = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-2'));
 
     expect(first).toMatchObject({ status: 'completed' });
     expect(resumed).toMatchObject({ status: 'completed' });
@@ -393,7 +416,8 @@ describe('Jira review-ready effect adapter', () => {
   it('requires a concrete pull-request URL before observing or mutating Jira', async () => {
     const jira = new StatefulJiraReviewPort();
 
-    const result = await adapterFor(jira).execute(
+    const result = await executeReviewReady(
+      adapterFor(jira),
       requestFor('workflow:jira-review:attempt-1', null),
     );
 

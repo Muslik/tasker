@@ -83,12 +83,12 @@ describe('production architecture boundaries', () => {
 
   it('keeps company workflow vocabulary out of core obligation validation', () => {
     const companyReferences = [
-      'bug.validate_fix@1',
-      'ci.observe@1',
-      'ci.passed@1',
+      'implement.change@1',
+      'verify.acceptance@1',
+      'verification.accepted@1',
+      'review.change@1',
+      'deliver.pull-request@1',
       'code_review@1',
-      'pr.prepare@1',
-      'review.agent@1',
       'translation_complete@1',
       'final_publish@1',
     ];

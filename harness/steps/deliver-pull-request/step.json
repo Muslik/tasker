@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "reference": "deliver.pull-request@1",
+  "description": "Publish the current reviewed change, observe CI, update Jira, and own the human-review wait.",
+  "stage": { "id": "delivery", "label": "Delivery" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "pull_request_output",
+  "executor": {
+    "kind": "integration",
+    "adapter": "delivery.pull-request@1"
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
+  "activityDelivery": "remote_reconciled",
+  "allowedEffects": ["git.write"],
+  "requiredCapabilities": ["ci.read", "git.write", "tracker.write"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [
+    "ci_retry@1",
+    "ci_infrastructure@1",
+    "ci_unknown@1",
+    "delivery.ci-change@1",
+    "code_review@1",
+    "review_changes@1"
+  ],
+  "artifactContracts": ["pull-request", "ci-verdict"],
+  "requiredArtifactContracts": ["acceptance-verification"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

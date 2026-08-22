@@ -37,6 +37,7 @@ const requestFor = (taskReference: string): IntegrationStepExecutionRequest => (
     preparedAt: '2026-08-05T00:00:00.000Z',
   },
   operatorGuidance: null,
+  waitResolution: null,
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: loadHarnessPack().policies,
   project: null,

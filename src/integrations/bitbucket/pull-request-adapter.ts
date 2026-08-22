@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
 
 import { z } from 'zod';
 
@@ -9,16 +7,11 @@ import type { CommandResult, WorkspaceCommandRunner } from '../../providers/comm
 import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import type {
-  IntegrationStepAdapter,
   IntegrationStepExecutionRequest,
   IntegrationStepExecutionResult,
 } from '../execution.js';
 import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.js';
-import {
-  PullRequestDraftSchema,
-  type GitCommitDraft,
-  type PullRequestDraft,
-} from '../pull-request-draft.js';
+import type { GitCommitDraft, PullRequestDraft } from '../pull-request-draft.js';
 import type { GitCommitIdentity } from './git-identity.js';
 import type {
   BitbucketPullRequest,
@@ -32,15 +25,6 @@ const PullRequestReceiptResultSchema = z
     url: z.url().nullable(),
     sourceBranch: z.string().min(1),
     targetBranch: z.string().min(1),
-  })
-  .strict();
-
-const PullRequestStepInputSchema = z
-  .object({
-    objective: z.string().min(1),
-    repository: z.string().min(1),
-    taskId: z.string().min(1),
-    draftPath: z.string().min(1),
   })
   .strict();
 
@@ -161,7 +145,7 @@ const problemResult = (
   artifactIds,
 });
 
-export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
+export class BitbucketPullRequestAdapter {
   public readonly id = 'bitbucket.pull-request@1';
 
   public constructor(
@@ -172,11 +156,10 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
     private readonly effects: ExternalEffectStore,
   ) {}
 
-  public async execute(
+  public async executeDraft(
     request: IntegrationStepExecutionRequest,
+    draft: PullRequestDraft,
   ): Promise<IntegrationStepExecutionResult> {
-    const draft = await this.loadDraft(request);
-    if (draft.status === 'blocked') return draft.result;
     const repository = qualifiedRepository(request.workspace.repository.reference);
     if (repository === null) {
       return {
@@ -190,12 +173,12 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
 
     const targetBranch = await this.targetBranch(request);
     if (targetBranch.status === 'blocked') return targetBranch.result;
-    const localCommit = await this.commitWorkspace(request, draft.value);
+    const localCommit = await this.commitWorkspace(request, draft);
     if (localCommit.status === 'blocked') return localCommit.result;
     const artifactCheck = await this.verifyBranchArtifacts(
       request,
       localCommit.commit,
-      draft.value.branchArtifacts,
+      draft.branchArtifacts,
     );
     if (artifactCheck !== null) return artifactCheck;
     const sourceRef = `refs/heads/${request.workspace.branch}`;
@@ -211,81 +194,8 @@ export class BitbucketPullRequestAdapter implements IntegrationStepAdapter {
       targetBranch: targetBranch.branch,
       repositoryReference: request.workspace.repository.reference,
       artifactIds: pushed.artifactIds,
-      draft: draft.value,
+      draft,
     });
-  }
-
-  private async loadDraft(
-    request: IntegrationStepExecutionRequest,
-  ): Promise<
-    | { readonly status: 'ready'; readonly value: PullRequestDraft }
-    | { readonly status: 'blocked'; readonly result: IntegrationStepExecutionResult }
-  > {
-    const input = PullRequestStepInputSchema.safeParse(request.stepInput);
-    if (!input.success) {
-      return {
-        status: 'blocked',
-        result: {
-          status: 'blocked',
-          kind: 'invalid_request',
-          summary: 'Pull request preparation has no valid draft reference',
-          details: {
-            issues: input.error.issues.map(
-              (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-            ),
-          },
-          artifactIds: [],
-        },
-      };
-    }
-    const path = resolve(request.workspace.path, input.data.draftPath);
-    const difference = relative(request.workspace.path, path);
-    if (difference === '..' || difference.startsWith(`..${sep}`)) {
-      return {
-        status: 'blocked',
-        result: {
-          status: 'blocked',
-          kind: 'invalid_request',
-          summary: 'Pull request draft path escapes the managed worktree',
-          details: { draftPath: input.data.draftPath },
-          artifactIds: [],
-        },
-      };
-    }
-    try {
-      const parsed = PullRequestDraftSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
-      return parsed.success
-        ? { status: 'ready', value: parsed.data }
-        : {
-            status: 'blocked',
-            result: {
-              status: 'blocked',
-              kind: 'invalid_request',
-              summary: 'Pull request draft is invalid',
-              details: {
-                draftPath: input.data.draftPath,
-                issues: parsed.error.issues.map(
-                  (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-                ),
-              },
-              artifactIds: [],
-            },
-          };
-    } catch (error) {
-      return {
-        status: 'blocked',
-        result: {
-          status: 'blocked',
-          kind: 'invalid_request',
-          summary: 'Pull request draft cannot be read',
-          details: {
-            draftPath: input.data.draftPath,
-            message: error instanceof Error ? error.message : 'Unknown read failure',
-          },
-          artifactIds: [],
-        },
-      };
-    }
   }
 
   private gitEnvironment(): Readonly<Record<string, string>> {

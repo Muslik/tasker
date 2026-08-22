@@ -125,6 +125,7 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
     .object({
       status: z.literal('blocked'),
       summary: z.string().min(1),
+      waitKind: z.string().min(1),
       category: z.enum([
         'infrastructure',
         'authorization',
@@ -220,7 +221,7 @@ export const CompletionVerdictSchema = z.discriminatedUnion('status', [
 
 export const BlockReceiptSchema = z
   .object({
-    schemaVersion: z.literal(4),
+    schemaVersion: z.literal(5),
     receiptId: z.string().min(1),
     blockReference: VersionedReferenceSchema,
     blockDefinitionHash: z.string().min(1),

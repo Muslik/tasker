@@ -70,6 +70,7 @@ const requestFor = (heartbeat = vi.fn()): IntegrationStepExecutionRequest => ({
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
+  waitResolution: null,
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [],
   project,

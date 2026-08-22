@@ -1276,15 +1276,16 @@ export const executeRegisteredTaskStep = async (
       stepInput: JsonValueSchema.parse(validatedInput.data),
       workspace: input.workspace,
       operatorGuidance: input.operatorGuidance,
+      waitResolution: input.waitResolution,
       evidence,
       policies: snapshot.harness.policies,
       project: snapshot.harness.project,
       runtime,
     });
-    if (execution.status === 'blocked') {
+    if (execution.status === 'blocked' || execution.status === 'waiting') {
       const result = block(
         execution.summary,
-        blockingWaitKindFor(input.uses),
+        execution.status === 'waiting' ? execution.waitKind : `${input.uses}.${execution.kind}@1`,
         execution.artifactIds,
       );
       const persisted = dependencies.traces.persistOutputArtifact({
@@ -1302,7 +1303,10 @@ export const executeRegisteredTaskStep = async (
         status: 'blocked',
         stdout: '',
         stderr: '',
-        details: { kind: execution.kind, details: execution.details },
+        details:
+          execution.status === 'waiting'
+            ? execution.details
+            : { kind: execution.kind, details: execution.details },
         result,
       });
       if (!persisted.ok || persisted.value.result === null) {
@@ -1826,6 +1830,7 @@ const claimFromResult = (
       return AgentClaimSchema.parse({
         status: 'blocked',
         summary: result.summary,
+        waitKind: result.waitKind,
         category: blockedCategory(result.summary, outputArtifact.details),
         retryable: true,
       });
@@ -1874,7 +1879,7 @@ const executionResultFromReceipt = (receipt: BlockReceipt) => {
       return {
         status: 'needs_input' as const,
         summary: receipt.claim.summary,
-        waitKind: `${receipt.blockReference}.${receipt.claim.category}@1`,
+        waitKind: receipt.claim.waitKind,
       };
     case 'failed':
       return {
@@ -2002,6 +2007,7 @@ export const createTaskExecutionActivity = (
         workspace: preparedWorkspace,
         planningSnapshot: snapshotReference,
         operatorGuidance: input.operatorGuidance,
+        waitResolution: input.waitResolution,
         input: input.input,
       },
       dependencies,

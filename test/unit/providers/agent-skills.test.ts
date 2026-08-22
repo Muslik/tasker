@@ -78,7 +78,7 @@ const createWorkspaceSkillCatalog = (profile = 'front-bus'): string => {
               },
             ],
             stepBindings: {
-              'review.agent@1': { addSkills: ['feature-review'] },
+              'review.change@1': { addSkills: ['feature-review'] },
             },
             guidance: 'guidance',
           },
@@ -175,7 +175,7 @@ describe('provider-neutral agent skills', () => {
         configurationRoot: mkdtempSync(join(tmpdir(), `tasker-${provider}-config-`)),
         selection: {
           kind: 'step',
-          reference: 'review.agent@1',
+          reference: 'review.change@1',
           skills: ['jira', 'ai-assistance'],
         },
       });
@@ -200,7 +200,7 @@ describe('provider-neutral agent skills', () => {
       provider: 'codex',
       repositoryPath,
       configurationRoot: mkdtempSync(join(tmpdir(), 'tasker-codex-config-')),
-      selection: { kind: 'step', reference: 'review.agent@1', skills: ['jira'] },
+      selection: { kind: 'step', reference: 'review.change@1', skills: ['jira'] },
     });
 
     expect(result).toMatchObject({ ok: true });

@@ -53,6 +53,7 @@ const requestFor = (operationId: string): IntegrationStepExecutionRequest => ({
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
+  waitResolution: null,
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [jiraPolicy],
   project: null,

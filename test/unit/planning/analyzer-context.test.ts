@@ -37,10 +37,10 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.buildingBlocks).not.toHaveProperty('waits');
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toEqual(
       expect.arrayContaining([
-        'bug.validate_fix@1',
-        'validate.targeted@1',
-        'review.agent@1',
-        'ci.observe@1',
+        'implement.change@1',
+        'verify.acceptance@1',
+        'review.change@1',
+        'deliver.pull-request@1',
       ]),
     );
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toEqual(
@@ -51,23 +51,20 @@ describe('workflow analyzer context', () => {
         'ai.assistance.validate@1',
       ]),
     );
-    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toContain(
-      'jira.start-work@1',
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toEqual(
+      expect.arrayContaining(['code.repair@1', 'ci.repair@1', 'jira.start-work@1']),
     );
     const implementationExecutor = plannerContext.buildingBlocks.steps.find(
-      ({ reference }) => reference === 'code.implement@1',
+      ({ reference }) => reference === 'implement.change@1',
     )?.executor;
     expect(implementationExecutor?.kind).toBe('agent');
     expect(implementationExecutor?.skills).toContain('ai-assistance');
-    expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
-      'review-after-final-bug-proof',
-      'publish-and-acknowledge-review-revision',
-    ]);
+    expect(plannerContext.obligations.map(({ id }) => id)).toEqual(['local-ready-before-delivery']);
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');
     expect(JSON.stringify(context.plannerContext)).not.toContain('workflowTemplates');
   });
 
-  it('exposes Jira lifecycle policy only to Jira-origin task analysis', () => {
+  it('keeps Jira lifecycle operations out of the semantic Jira task catalog', () => {
     const fixture = makePlanningTaskSnapshot('avia-13236-short-bug', { origin: 'jira' });
 
     const context = createWorkflowAnalyzerContext(fixture);
@@ -81,18 +78,13 @@ describe('workflow analyzer context', () => {
       .loose()
       .parse(context.plannerContext);
 
-    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
-      'jira.start-work@1',
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toEqual(
+      expect.arrayContaining(['jira.start-work@1', 'jira.review-ready@1']),
     );
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
-      'jira.review-ready@1',
+      'deliver.pull-request@1',
     );
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
-      'jira-admission-before-workspace-write',
-    );
-    expect(plannerContext.obligations.map(({ id }) => id)).toContain(
-      'jira-review-ready-before-code-review',
-    );
+    expect(plannerContext.obligations.map(({ id }) => id)).toEqual(['local-ready-before-delivery']);
   });
 
   it('does not expose bug reproduction policy to a Jira feature task', () => {
@@ -109,7 +101,7 @@ describe('workflow analyzer context', () => {
       .loose()
       .parse(context.plannerContext);
 
-    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).not.toContain(
       'jira.start-work@1',
     );
   });

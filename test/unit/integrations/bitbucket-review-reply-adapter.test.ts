@@ -52,7 +52,7 @@ const review = (threadIds: readonly number[] = [41]): PullRequestReviewEvidence 
 const pullRequestStep = {
   operationId: 'tasker:prepare-pr:attempt-2',
   nodeId: 'review-prepare-pr',
-  stepReference: 'pr.prepare@1',
+  stepReference: 'deliver.pull-request@1',
   status: 'completed' as const,
   summary: 'Pull request updated',
   artifactIds: [],
@@ -98,6 +98,7 @@ const requestFor = (
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
+  waitResolution: null,
   evidence: {
     acceptedPlan: null,
     completedSteps: [pullRequestStep],

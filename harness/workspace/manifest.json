@@ -69,25 +69,13 @@
         }
       ],
       "stepBindings": {
-        "code.implement@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
         "implement.change@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
-        "code.repair@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
-        "review.agent@1": {
           "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
         },
         "review.change@1": {
           "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
         },
         "verify.acceptance@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
-        "review.revise@1": {
           "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
         }
       },

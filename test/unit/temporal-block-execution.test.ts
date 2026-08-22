@@ -272,7 +272,7 @@ describe('temporal block execution activity', () => {
         workflowHash: WORKFLOW_HASH,
         nodeId: 'agent-review',
         stepAttempt: 1,
-        uses: 'review.agent@1',
+        uses: 'review.change@1',
         activityDelivery: { kind: 'read_only' },
         workspace: stubWorkspace,
         planningSnapshot: {
@@ -280,6 +280,7 @@ describe('temporal block execution activity', () => {
           checksum: 'd'.repeat(64),
         },
         operatorGuidance: 'VPN is enabled; retry the same verification without restarting.',
+        waitResolution: null,
         input: {
           objective: 'Review the implementation',
           repository: fixture.repository,
@@ -288,7 +289,7 @@ describe('temporal block execution activity', () => {
       },
       {
         snapshots: {
-          readRunSnapshot: () => ok(makeSnapshot('review.agent@1')),
+          readRunSnapshot: () => ok(makeSnapshot('review.change@1')),
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
@@ -311,7 +312,7 @@ describe('temporal block execution activity', () => {
     expect(prompts[0]).toContain('SNAPSHOT PROMPT');
     expect(prompts[0]).toContain('VPN is enabled; retry the same verification');
     expect(selectedSkills).toEqual([[]]);
-    expect(stepReferences).toEqual(['review.agent@1']);
+    expect(stepReferences).toEqual(['review.change@1']);
     expect(workspaceAccess).toEqual(['read_only']);
   });
 
@@ -344,7 +345,7 @@ describe('temporal block execution activity', () => {
       workflowHash: WORKFLOW_HASH,
       nodeId: 'implement-feature',
       stepAttempt: 1,
-      uses: 'code.implement@1',
+      uses: 'implement.change@1',
       activityDelivery: { kind: 'workspace_reconciled' as const },
       workspace: stubWorkspace,
       planningSnapshot: {
@@ -352,6 +353,7 @@ describe('temporal block execution activity', () => {
         checksum: 'd'.repeat(64),
       },
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Normalize passenger names',
         repository: fixture.repository,
@@ -360,7 +362,7 @@ describe('temporal block execution activity', () => {
     };
     const dependencies = {
       snapshots: {
-        readRunSnapshot: () => ok(makeSnapshot('code.implement@1')),
+        readRunSnapshot: () => ok(makeSnapshot('implement.change@1')),
       },
       currentSteps: createCurrentStepRegistry(pack),
       traces,
@@ -410,6 +412,7 @@ describe('temporal block execution activity', () => {
           checksum: 'd'.repeat(64),
         },
         operatorGuidance: null,
+        waitResolution: null,
         input: {
           objective: 'Reproduce the reported bug',
           repository: fixture.repository,
@@ -481,24 +484,24 @@ describe('temporal block execution activity', () => {
         workflowHash: WORKFLOW_HASH,
         nodeId: 'validate-bug-fix',
         stepAttempt: 1,
-        uses: 'bug.validate_fix@1',
-        activityDelivery: { kind: 'workspace_reconciled' },
+        uses: 'verify.acceptance@1',
+        activityDelivery: { kind: 'read_only' },
         workspace: stubWorkspace,
         planningSnapshot: {
           artifactId: 'planning-snapshot:test',
           checksum: 'd'.repeat(64),
         },
         operatorGuidance: null,
+        waitResolution: null,
         input: {
           objective: 'Repeat the investigated scenario and prove the fix',
-          phase: 'after',
           repository: fixture.repository,
           taskId: fixture.taskId,
         },
       },
       {
         snapshots: {
-          readRunSnapshot: () => ok(makeSnapshot('bug.validate_fix@1')),
+          readRunSnapshot: () => ok(makeSnapshot('verify.acceptance@1')),
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
@@ -532,8 +535,8 @@ describe('temporal block execution activity', () => {
 
     expect(result).toMatchObject({
       status: 'blocked',
-      summary: `Agent execution for bug.validate_fix@1 is blocked: ${reason}`,
-      waitKind: 'bug.validate_fix.1.blocked@1',
+      summary: `Agent execution for verify.acceptance@1 is blocked: ${reason}`,
+      waitKind: 'verify.acceptance.1.blocked@1',
     });
   });
 
@@ -558,7 +561,7 @@ describe('temporal block execution activity', () => {
       workflowHash: WORKFLOW_HASH,
       nodeId: 'implement-feature',
       stepAttempt: 1,
-      uses: 'code.implement@1',
+      uses: 'implement.change@1',
       activityDelivery: { kind: 'workspace_reconciled' as const },
       workspace: stubWorkspace,
       planningSnapshot: {
@@ -566,6 +569,7 @@ describe('temporal block execution activity', () => {
         checksum: 'd'.repeat(64),
       },
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Normalize passenger names',
         repository: fixture.repository,
@@ -574,7 +578,7 @@ describe('temporal block execution activity', () => {
     };
     const dependencies = {
       snapshots: {
-        readRunSnapshot: () => ok(makeSnapshot('code.implement@1')),
+        readRunSnapshot: () => ok(makeSnapshot('implement.change@1')),
       },
       currentSteps: createCurrentStepRegistry(pack),
       traces,
@@ -599,8 +603,8 @@ describe('temporal block execution activity', () => {
     expect(first).toMatchObject({
       status: 'blocked',
       summary:
-        'Agent execution for code.implement@1 is blocked: Provider stopped after reporting a controlled failure',
-      waitKind: 'code.implement.1.blocked@1',
+        'Agent execution for implement.change@1 is blocked: Provider stopped after reporting a controlled failure',
+      waitKind: 'implement.change.1.blocked@1',
       artifactIds: [
         'task-step-output:tasker:task-ref:run-1:implement-feature:attempt-1:artifact',
         'task-step-mutation-intent:test',
@@ -653,6 +657,7 @@ describe('temporal block execution activity', () => {
           checksum: 'd'.repeat(64),
         },
         operatorGuidance: null,
+        waitResolution: null,
         input: {
           repository: componentTask.repository,
           taskId: translationFixture.taskId,
@@ -744,6 +749,7 @@ describe('temporal block execution activity', () => {
           checksum: 'd'.repeat(64),
         },
         operatorGuidance: null,
+        waitResolution: null,
         input: {
           repository: componentTask.repository,
           taskId: translationFixture.taskId,
@@ -813,7 +819,7 @@ describe('temporal block execution activity', () => {
       workflowHash: WORKFLOW_HASH,
       nodeId: 'prepare-pr',
       stepAttempt: 1,
-      uses: 'pr.prepare@1',
+      uses: 'deliver.pull-request@1',
       activityDelivery: { kind: 'remote_reconciled' as const },
       workspace: stubWorkspace,
       planningSnapshot: {
@@ -821,15 +827,15 @@ describe('temporal block execution activity', () => {
         checksum: 'd'.repeat(64),
       },
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: fixture.title,
         repository: fixture.repository,
         taskId: fixture.taskId,
-        draftPath: '.tasker/pull-request/draft.json',
       },
     };
     const dependencies = {
-      snapshots: { readRunSnapshot: () => ok(makeSnapshot('pr.prepare@1')) },
+      snapshots: { readRunSnapshot: () => ok(makeSnapshot('deliver.pull-request@1')) },
       currentSteps: createCurrentStepRegistry(pack),
       traces,
       mutationRecovery,
@@ -837,7 +843,7 @@ describe('temporal block execution activity', () => {
       commands: workspaceCommands(),
       workspaces: stubWorkspaceStore,
       integrations: new IntegrationStepAdapterRegistry([
-        { id: 'bitbucket.pull-request@1', execute },
+        { id: 'delivery.pull-request@1', execute },
       ]),
     };
     const runtime = {
@@ -888,7 +894,7 @@ describe('temporal block execution activity', () => {
     const receipts = new BlockReceiptStore(ledger.repository, systemClock);
     const activity = createTaskExecutionActivity(
       {
-        snapshots: { readRunSnapshot: () => ok(makeSnapshot('ci.observe@1')) },
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('deliver.pull-request@1')) },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
         mutationRecovery,
@@ -899,7 +905,7 @@ describe('temporal block execution activity', () => {
         workspaces: stubWorkspaceStore,
         integrations: new IntegrationStepAdapterRegistry([
           {
-            id: 'jenkins.build@1',
+            id: 'delivery.pull-request@1',
             execute: () =>
               Promise.resolve({
                 status: 'blocked',
@@ -926,8 +932,8 @@ describe('temporal block execution activity', () => {
       workflowHash: WORKFLOW_HASH,
       nodeId: 'observe-ci',
       blockRun: 1,
-      uses: 'ci.observe@1',
-      activityDelivery: { kind: 'read_only' },
+      uses: 'deliver.pull-request@1',
+      activityDelivery: { kind: 'remote_reconciled' },
       contextReferences: [
         { kind: 'workspace', reference: stubWorkspace.workspaceId },
         {
@@ -937,6 +943,7 @@ describe('temporal block execution activity', () => {
         },
       ],
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Observe CI',
         repository: fixture.repository,
@@ -946,7 +953,7 @@ describe('temporal block execution activity', () => {
 
     expect(result).toMatchObject({
       status: 'needs_input',
-      waitKind: 'ci.observe@1.verification@1',
+      waitKind: 'deliver.pull-request@1.verification@1',
     });
     expect(
       receipts.read(
@@ -958,6 +965,75 @@ describe('temporal block execution activity', () => {
         }),
       ),
     ).toMatchObject({ ok: true, value: { claim: { category: 'verification' } } });
+  });
+
+  it('restores the exact semantic integration wait from its durable receipt', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const execute = vi.fn(() =>
+      Promise.resolve({
+        status: 'waiting' as const,
+        waitKind: 'code_review@1',
+        summary: 'Pull request passed CI and is waiting for human review',
+        details: { phase: 'human_review' },
+        artifactIds: ['pull-request:42'],
+      }),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('deliver.pull-request@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        runtimes: readyRuntime(),
+        agentRunner: { run: vi.fn() },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+        integrations: new IntegrationStepAdapterRegistry([
+          { id: 'delivery.pull-request@1', execute },
+        ]),
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+    const input = {
+      schemaVersion: 2 as const,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'deliver-change',
+      blockRun: 1,
+      uses: 'deliver.pull-request@1',
+      activityDelivery: { kind: 'remote_reconciled' as const },
+      contextReferences: [
+        { kind: 'workspace' as const, reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot' as const,
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      waitResolution: null,
+      input: {
+        objective: 'Deliver the reviewed change',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+
+    const first = await activity.runExecutionBlock(input);
+    const redelivered = await activity.runExecutionBlock(input);
+
+    expect(first).toMatchObject({ status: 'needs_input', waitKind: 'code_review@1' });
+    expect(redelivered).toEqual(first);
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('advances the execution graph only after an accepted BlockReceipt', async () => {
@@ -1023,6 +1099,7 @@ describe('temporal block execution activity', () => {
         },
       ],
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Prepare the test plan',
         repository: fixture.repository,
@@ -1133,6 +1210,7 @@ describe('temporal block execution activity', () => {
         },
       ],
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Prepare the test plan',
         repository: fixture.repository,
@@ -1195,6 +1273,7 @@ describe('temporal block execution activity', () => {
         },
       ],
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Prepare the test plan',
         repository: fixture.repository,
@@ -1243,7 +1322,7 @@ describe('temporal block execution activity', () => {
     );
     const activity = createTaskExecutionActivity(
       {
-        snapshots: { readRunSnapshot: () => ok(makeSnapshot('review.agent@1')) },
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('review.change@1')) },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
         mutationRecovery,
@@ -1267,7 +1346,7 @@ describe('temporal block execution activity', () => {
       workflowHash: WORKFLOW_HASH,
       nodeId: 'agent-review',
       blockRun: 1,
-      uses: 'review.agent@1',
+      uses: 'review.change@1',
       activityDelivery: { kind: 'read_only' as const },
       contextReferences: [
         { kind: 'workspace', reference: stubWorkspace.workspaceId },
@@ -1278,6 +1357,7 @@ describe('temporal block execution activity', () => {
         },
       ],
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Review the implementation',
         repository: fixture.repository,
@@ -1299,87 +1379,13 @@ describe('temporal block execution activity', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it('records a failed declared validation as evidence for the repair loop', async () => {
-    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
-    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
-    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
-    const command = vi
-      .fn<CommandRunner['run']>()
-      .mockResolvedValueOnce({
-        status: 'exited',
-        exitCode: 0,
-        stdout: 'typecheck passed',
-        stderr: '',
-        durationMs: 8,
-      })
-      .mockResolvedValue({
-        status: 'exited',
-        exitCode: 1,
-        stdout: '',
-        stderr: 'eslint failed',
-        durationMs: 8,
-      });
-    const activity = createTaskExecutionActivity(
-      {
-        snapshots: { readRunSnapshot: () => ok(makeSnapshot('validate.targeted@1')) },
-        currentSteps: createCurrentStepRegistry(pack),
-        traces,
-        mutationRecovery,
-        receipts,
-        runtimes: readyRuntime(),
-        agentRunner: { run: vi.fn() },
-        commands: workspaceCommands(command),
-        workspaces: stubWorkspaceStore,
-      },
-      () => ({
-        attempt: 1,
-        cancellationSignal: new AbortController().signal,
-        heartbeat: () => {},
-      }),
-    );
-
-    const result = await activity.runExecutionBlock({
-      schemaVersion: 2,
-      taskReference: 'task-ref',
-      workflowId: stubWorkspace.workflowId,
-      workflowRunId: stubWorkspace.workflowRunId,
-      workflowHash: WORKFLOW_HASH,
-      nodeId: 'validate-targeted',
-      blockRun: 1,
-      uses: 'validate.targeted@1',
-      activityDelivery: { kind: 'single_attempt' },
-      contextReferences: [
-        { kind: 'workspace', reference: stubWorkspace.workspaceId },
-        {
-          kind: 'planning_snapshot',
-          reference: 'planning-snapshot:test',
-          hash: 'd'.repeat(64),
-        },
-      ],
-      operatorGuidance: null,
-      input: { profile: 'targeted', taskId: fixture.taskId },
-    });
-
-    expect(result).toMatchObject({
-      status: 'completed',
-      predicateFacts: {
-        'validation.passed@1': false,
-        'validation.failed@1': true,
-      },
-    });
-    expect(command.mock.calls.map(([request]) => [request.command, request.args])).toEqual([
-      ['pnpm', ['run', 'typecheck']],
-      ['pnpm', ['run', 'lint:eslint']],
-    ]);
-  });
-
   it('opens a durable wait when an agent claims completion without proving a mutation', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const receipts = new BlockReceiptStore(ledger.repository, systemClock);
     const activity = createTaskExecutionActivity(
       {
-        snapshots: { readRunSnapshot: () => ok(makeSnapshot('code.implement@1')) },
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('implement.change@1')) },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
         mutationRecovery,
@@ -1423,7 +1429,7 @@ describe('temporal block execution activity', () => {
       workflowHash: WORKFLOW_HASH,
       nodeId: 'implement-feature',
       blockRun: 1,
-      uses: 'code.implement@1',
+      uses: 'implement.change@1',
       activityDelivery: { kind: 'workspace_reconciled' },
       contextReferences: [
         { kind: 'workspace', reference: stubWorkspace.workspaceId },
@@ -1434,6 +1440,7 @@ describe('temporal block execution activity', () => {
         },
       ],
       operatorGuidance: null,
+      waitResolution: null,
       input: {
         objective: 'Implement the change',
         repository: fixture.repository,
@@ -1443,7 +1450,7 @@ describe('temporal block execution activity', () => {
 
     expect(result).toMatchObject({
       status: 'needs_input',
-      waitKind: 'code.implement@1.completion-evidence-required@1',
+      waitKind: 'implement.change@1.completion-evidence-required@1',
     });
     expect(result.summary).toContain('No workspace mutation was proven');
     const receipt = receipts.read(

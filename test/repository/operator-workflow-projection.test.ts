@@ -18,7 +18,7 @@ const draftProvenance = {
 } as const;
 
 const waitingLifecycleFor = (
-  reference: 'code.implement@1' | 'jira.start-work@1',
+  reference: 'deliver.pull-request@1' | 'implement.change@1',
   activityDelivery: 'workspace_reconciled' | 'remote_reconciled',
   waitKind: string,
 ) => {
@@ -99,9 +99,9 @@ describe('operator workflow projection', () => {
     const projection = createOperatorWorkflowProjection(
       'AVIA-1',
       waitingLifecycleFor(
-        'jira.start-work@1',
+        'deliver.pull-request@1',
         'remote_reconciled',
-        'jira.start-work@1.invalid_request@1',
+        'deliver.pull-request@1.invalid_request@1',
       ),
       { read: () => ok(null) },
     );
@@ -115,7 +115,11 @@ describe('operator workflow projection', () => {
   it('classifies an agent failure as operator guidance', () => {
     const projection = createOperatorWorkflowProjection(
       'AVIA-1',
-      waitingLifecycleFor('code.implement@1', 'workspace_reconciled', 'code.implement@1.blocked@1'),
+      waitingLifecycleFor(
+        'implement.change@1',
+        'workspace_reconciled',
+        'implement.change@1.blocked@1',
+      ),
       { read: () => ok(null) },
     );
 
@@ -195,7 +199,7 @@ describe('operator workflow projection', () => {
       },
     });
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 4,
+      schemaVersion: 5,
       receiptId: 'block-receipt:execution-workflow:execution-run:implement-change:run-1',
       blockReference: 'implement.change@1',
       blockDefinitionHash: 'block-definition-hash',
@@ -273,7 +277,7 @@ describe('operator workflow projection', () => {
         workflowVersion: 1,
         references: {
           predicates: [],
-          stepTypes: ['code.implement@1', 'validate.targeted@1'],
+          stepTypes: ['implement.change@1', 'verify.acceptance@1'],
           waits: ['code_review@1'],
         },
       },
@@ -284,16 +288,16 @@ describe('operator workflow projection', () => {
           {
             kind: 'step',
             id: 'implement-fix',
-            uses: 'code.implement@1',
+            uses: 'implement.change@1',
             activityDelivery: { kind: 'workspace_reconciled' },
             with: { objective: 'Fix', repository: 'front-avia', taskId: 'AVIA-1' },
           },
           {
             kind: 'step',
             id: 'validate-fix',
-            uses: 'validate.targeted@1',
-            activityDelivery: { kind: 'single_attempt' },
-            with: { profile: 'targeted', taskId: 'AVIA-1' },
+            uses: 'verify.acceptance@1',
+            activityDelivery: { kind: 'read_only' },
+            with: { objective: 'Verify', repository: 'front-avia', taskId: 'AVIA-1' },
           },
           { kind: 'wait', id: 'review', for: 'code_review@1' },
         ],
@@ -367,13 +371,13 @@ describe('operator workflow projection', () => {
     expect(projection.current).toMatchObject({
       runtime: 'execution',
       nodeId: 'implement-fix',
-      reference: 'code.implement@1',
+      reference: 'implement.change@1',
       status: 'running',
       blockRun: 1,
       transcript: { operationId: 'implement-fix' },
     });
-    expect(executionStages.map(({ label }) => label)).toEqual(['Implement', 'Validate', 'Review']);
-    expect(executionStages.map(({ steps }) => steps.length)).toEqual([1, 0, 0]);
+    expect(executionStages.map(({ label }) => label)).toEqual(['Development', 'Review']);
+    expect(executionStages.map(({ steps }) => steps.length)).toEqual([1, 0]);
   });
 
   it('keeps repair loops visible inside their surrounding operator phase', () => {
@@ -387,8 +391,8 @@ describe('operator workflow projection', () => {
         workflowId: 'workflow-with-repair-loop',
         workflowVersion: 1,
         references: {
-          predicates: ['validation.passed@1'],
-          stepTypes: ['code.implement@1', 'code.repair@1', 'validate.targeted@1'],
+          predicates: ['verification.accepted@1'],
+          stepTypes: ['implement.change@1', 'verify.acceptance@1'],
           waits: ['operator_guidance@1'],
         },
       },
@@ -399,22 +403,22 @@ describe('operator workflow projection', () => {
           {
             kind: 'step',
             id: 'implement-fix',
-            uses: 'code.implement@1',
+            uses: 'implement.change@1',
             activityDelivery: { kind: 'workspace_reconciled' },
             with: { objective: 'Fix the defect', repository: 'front-avia', taskId: 'AVIA-1' },
           },
           {
             kind: 'step',
             id: 'validate-fix',
-            uses: 'validate.targeted@1',
-            activityDelivery: { kind: 'single_attempt' },
-            with: { profile: 'targeted', taskId: 'AVIA-1' },
+            uses: 'verify.acceptance@1',
+            activityDelivery: { kind: 'read_only' },
+            with: { objective: 'Verify', repository: 'front-avia', taskId: 'AVIA-1' },
           },
           {
             kind: 'bounded_loop',
             id: 'repair-validation',
             maxAttempts: 3,
-            until: 'validation.passed@1',
+            until: 'verification.accepted@1',
             checkBefore: true,
             exhaustedWait: 'operator_guidance@1',
             body: {
@@ -424,7 +428,7 @@ describe('operator workflow projection', () => {
                 {
                   kind: 'step',
                   id: 'repair-code',
-                  uses: 'code.repair@1',
+                  uses: 'implement.change@1',
                   activityDelivery: { kind: 'workspace_reconciled' },
                   with: {
                     objective: 'Repair validation failure',
@@ -435,9 +439,9 @@ describe('operator workflow projection', () => {
                 {
                   kind: 'step',
                   id: 'revalidate-fix',
-                  uses: 'validate.targeted@1',
-                  activityDelivery: { kind: 'single_attempt' },
-                  with: { profile: 'targeted', taskId: 'AVIA-1' },
+                  uses: 'verify.acceptance@1',
+                  activityDelivery: { kind: 'read_only' },
+                  with: { objective: 'Verify', repository: 'front-avia', taskId: 'AVIA-1' },
                 },
               ],
             },
@@ -506,34 +510,33 @@ describe('operator workflow projection', () => {
     });
     const executionStages = projection.stages.filter(({ key }) => key.startsWith('execution:'));
 
-    expect(executionStages.map(({ label }) => label)).toEqual(['Implement', 'Validate']);
+    expect(executionStages.map(({ label }) => label)).toEqual(['Development']);
     expect(executionStages[0]).toMatchObject({
-      key: 'execution:implementation:1',
+      key: 'execution:development:1',
       status: 'running',
       steps: [
         {
           kind: 'agent',
-          reference: 'code.implement@1',
+          reference: 'implement.change@1',
           status: 'succeeded',
         },
         {
           kind: 'agent',
-          reference: 'code.repair@1',
+          reference: 'verify.acceptance@1',
+          status: 'succeeded',
+        },
+        {
+          kind: 'agent',
+          reference: 'implement.change@1',
           status: 'running',
         },
       ],
     });
-    expect(executionStages[1]).toMatchObject({
-      key: 'execution:verification:2',
-      status: 'succeeded',
-      steps: [
-        {
-          kind: 'process',
-          reference: 'validate.targeted@1',
-          status: 'succeeded',
-        },
-      ],
-    });
+    expect(executionStages[0]?.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'agent', reference: 'verify.acceptance@1' }),
+      ]),
+    );
     expect(JSON.stringify(executionStages)).not.toContain('repair-validation-body');
   });
 });

@@ -35,6 +35,8 @@ const jenkinsEvidenceFrom = (details: unknown): z.infer<typeof JenkinsEvidenceSc
   if (direct.success) return direct.data;
   const wrapped = z.object({ output: JenkinsEvidenceSchema }).loose().safeParse(details);
   if (wrapped.success) return wrapped.data.output;
+  const delivery = z.object({ ci: JenkinsEvidenceSchema }).loose().safeParse(details);
+  if (delivery.success) return delivery.data.ci;
   const blocked = z.object({ details: JenkinsEvidenceSchema }).loose().safeParse(details);
   return blocked.success ? blocked.data.details : null;
 };
@@ -137,7 +139,11 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
         const artifact = pointer.success ? this.ledger.readArtifact(pointer.data.artifactId) : null;
         const output =
           artifact === null ? null : TaskStepOutputArtifactSchema.safeParse(artifact.payload);
-        if (output === null || !output.success || output.data.stepReference !== 'ci.observe@1') {
+        if (
+          output === null ||
+          !output.success ||
+          output.data.stepReference !== 'deliver.pull-request@1'
+        ) {
           return [];
         }
         const evidence = jenkinsEvidenceFrom(output.data.details);

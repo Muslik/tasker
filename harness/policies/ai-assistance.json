@@ -15,15 +15,7 @@
   "agentSkills": [
     {
       "skill": "ai-assistance",
-      "steps": [
-        "code.implement@1",
-        "implement.change@1",
-        "code.repair@1",
-        "ci.repair@1",
-        "component.consume_published@1",
-        "review.revise@1",
-        "pr.describe@1"
-      ]
+      "steps": ["implement.change@1", "component.consume_published@1"]
     }
   ],
   "obligations": []

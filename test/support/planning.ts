@@ -231,6 +231,12 @@ const semanticWorkflow = (task: TestTaskFixture): SemanticWorkflowSource => {
           uses: 'review.change@1',
           with: taskInput(`Review ${task.title}`),
         },
+        {
+          kind: 'step',
+          id: 'deliver-change',
+          uses: 'deliver.pull-request@1',
+          with: taskInput(`Deliver ${task.title}`),
+        },
       ],
     },
   };

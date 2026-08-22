@@ -21,6 +21,7 @@ export const ExecuteTaskStepInputSchema = z
     workspace: WorkspaceLocatorSchema,
     planningSnapshot: PlanningSnapshotReferenceSchema,
     operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
+    waitResolution: JsonValueSchema.nullable(),
     input: JsonValueSchema,
   })
   .strict()

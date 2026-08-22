@@ -21,10 +21,9 @@ import { loadHarnessPack } from '../harness/index.js';
 import {
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
-  BitbucketReviewClient,
-  BitbucketReviewReplyAdapter,
   ConfluencePlanningEvidenceReader,
   PullRequestReviewEvidenceStore,
+  PullRequestDeliveryAdapter,
   createJiraIssueService,
   ExternalEffectStore,
   IntegrationStepAdapterRegistry,
@@ -35,7 +34,6 @@ import {
   JiraPlanningEvidenceReader,
   JiraReviewReadyAdapter,
   JiraServerClient,
-  JiraStartWorkAdapter,
   JiraWorkflowGenerationSubjectResolver,
   LoopPlanningEvidenceReader,
   loadConfluencePlanningEvidenceConfiguration,
@@ -146,40 +144,39 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   };
   const jiraLifecycleClient =
     jiraConfiguration === null ? null : new JiraLifecycleClient(jiraConfiguration);
+  const jenkinsBuildObserver =
+    jenkinsConfiguration === null
+      ? null
+      : new JenkinsBuildObserverAdapter(
+          jenkinsConfiguration,
+          nodeCommandRunner,
+          new JenkinsBuildClient(jenkinsConfiguration),
+        );
+  const bitbucketPullRequests =
+    bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
+      ? null
+      : new BitbucketPullRequestAdapter(
+          bitbucketConfiguration,
+          gitCommitIdentity,
+          dockerCommands,
+          new BitbucketPullRequestClient(bitbucketConfiguration),
+          externalEffects,
+        );
+  const jiraReviewReady =
+    jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
+      ? null
+      : new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
-    ...(jenkinsConfiguration === null
-      ? []
-      : [
-          new JenkinsBuildObserverAdapter(
-            jenkinsConfiguration,
-            nodeCommandRunner,
-            new JenkinsBuildClient(jenkinsConfiguration),
-          ),
-        ]),
-    ...(bitbucketConfiguration === null || !bitbucketPullRequestEffectsEnabled
+    ...(bitbucketPullRequests === null || jenkinsBuildObserver === null
       ? []
       : [
           authorizeExternalEffect(
-            new BitbucketPullRequestAdapter(
-              bitbucketConfiguration,
-              gitCommitIdentity,
-              dockerCommands,
-              new BitbucketPullRequestClient(bitbucketConfiguration),
-              externalEffects,
+            new PullRequestDeliveryAdapter(
+              bitbucketPullRequests,
+              jenkinsBuildObserver,
+              jiraReviewReady,
             ),
           ),
-          authorizeExternalEffect(
-            new BitbucketReviewReplyAdapter(
-              new BitbucketReviewClient(bitbucketConfiguration),
-              externalEffects,
-            ),
-          ),
-        ]),
-    ...(jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
-      ? []
-      : [
-          authorizeExternalEffect(new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects)),
-          authorizeExternalEffect(new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects)),
         ]),
   ]);
   const repositoryCatalog = createManagedRepositoryStore(

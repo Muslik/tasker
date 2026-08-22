@@ -36,6 +36,7 @@ export interface IntegrationStepExecutionRequest {
   readonly stepInput: JsonValue;
   readonly workspace: WorkspaceLocator;
   readonly operatorGuidance: string | null;
+  readonly waitResolution: JsonValue | null;
   readonly evidence: TaskRunEvidence;
   readonly policies: readonly HarnessPolicyManifest[];
   readonly project: HarnessProjectManifest | null;
@@ -58,6 +59,13 @@ export type IntegrationStepExecutionResult =
         | 'remote_conflict'
         | 'verification'
         | 'unknown_outcome';
+      readonly summary: string;
+      readonly details: JsonValue;
+      readonly artifactIds: readonly string[];
+    }
+  | {
+      readonly status: 'waiting';
+      readonly waitKind: string;
       readonly summary: string;
       readonly details: JsonValue;
       readonly artifactIds: readonly string[];

@@ -301,7 +301,7 @@ describe('Bitbucket review intake', () => {
     const step: TaskRunStepEvidence = {
       operationId: 'tasker:jira:AVIA-13236:prepare-pr:attempt-1',
       nodeId: 'prepare-pr',
-      stepReference: 'pr.prepare@1',
+      stepReference: 'deliver.pull-request@1',
       status: 'completed',
       summary: 'PR ready',
       artifactIds: [],

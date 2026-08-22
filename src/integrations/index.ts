@@ -6,3 +6,4 @@ export * from './execution.js';
 export * from './pull-request-draft.js';
 export * from './planning-evidence.js';
 export * from './task-scoped-adapter.js';
+export * from './delivery/index.js';

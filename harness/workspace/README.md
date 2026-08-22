@@ -176,7 +176,7 @@ Both views originate from the same `SKILL.md` package and supporting files. Scri
 `TASKER_SKILLS_ROOT`, which points at the selected provider view instead of a hard-coded
 `.codex` or `.claude` path. A missing logical package blocks before the subscription CLI
 starts. Thus `pr-finalize` can remain in the pinned migration catalog without becoming
-visible to `code.implement@1` or another unrelated step.
+visible to `implement.change@1` or another unrelated step.
 
 The four scopes have distinct selection rules:
 
@@ -238,7 +238,7 @@ changes. Planning reads the same configured filesystem that later execution uses
   alone grants no visibility.
 - Bind repository-specific operational knowledge with `profiles[].stepBindings`.
   `feature-review` remains unbound because its current package can publish Bitbucket
-  state, which is incompatible with the read-only `review.agent@1` effect boundary.
+  state, which is incompatible with the read-only `review.change@1` effect boundary.
 - Keep portable packages in the Agent Skills common subset: a directory named after
   the logical skill, a `SKILL.md` with `name` and `description`, and optional files
   referenced relative to that directory. Never put provider CLI flags or provider-home

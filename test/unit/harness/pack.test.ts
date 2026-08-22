@@ -37,12 +37,12 @@ afterEach(async () => {
 describe('file-backed harness pack', () => {
   it('derives the production step catalog exclusively from step manifests', async () => {
     const root = await createTemporaryPack();
-    await rm(join(root, 'steps/bug-validate-fix'), { recursive: true });
+    await rm(join(root, 'steps/fill-test-ops-plan'), { recursive: true });
     await rm(join(root, 'policies/quality-boundaries.json'));
 
     const pack = loadHarnessPack(root);
 
-    expect(pack.steps.map(({ reference }) => reference)).not.toContain('bug.validate_fix@1');
+    expect(pack.steps.map(({ reference }) => reference)).not.toContain('fill-test-ops-plan@1');
   });
 
   it('rejects flat step manifests outside an atomic step package', async () => {
@@ -56,7 +56,7 @@ describe('file-backed harness pack', () => {
 
   it('registers a typed company step without changing the workflow compiler', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-    const baseStep = getHarnessStepDefinition('code.implement@1');
+    const baseStep = getHarnessStepDefinition('implement.change@1');
     if (baseStep === undefined) throw new Error('Expected implementation definition');
     const customStep: { readonly reference: string; readonly contract: StepTypeContract } = {
       reference: 'company.custom@1',
@@ -103,7 +103,7 @@ describe('file-backed harness pack', () => {
 
   it('registers predicates declared by a block output mapping', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-    const baseStep = getHarnessStepDefinition('review.agent@1');
+    const baseStep = getHarnessStepDefinition('review.change@1');
     if (baseStep === undefined) throw new Error('Expected review definition');
 
     const contracts = createHarnessWorkflowContracts([
@@ -164,7 +164,7 @@ describe('file-backed harness pack', () => {
 
   it('rejects obsolete step manifests instead of upcasting them', async () => {
     const root = await createTemporaryPack();
-    const manifestPath = join(root, 'steps/ci-observe/step.json');
+    const manifestPath = join(root, 'steps/deliver-pull-request/step.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
       schemaVersion: number;
     };
@@ -201,7 +201,7 @@ describe('file-backed harness pack', () => {
   it('loads company policy blocks and path obligations from files', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
 
-    expect(pack.steps.map(({ reference }) => reference)).toContain('pr.describe@1');
+    expect(pack.steps.map(({ reference }) => reference)).toContain('deliver.pull-request@1');
     expect(pack.steps.map(({ reference }) => reference)).not.toEqual(
       expect.arrayContaining([
         'ai.assistance.initialize@1',
@@ -223,7 +223,7 @@ describe('file-backed harness pack', () => {
           version: '1',
           obligations: [
             expect.objectContaining({
-              id: 'review-after-final-bug-proof',
+              id: 'local-ready-before-delivery',
               direction: 'after',
             }),
           ],
@@ -231,12 +231,7 @@ describe('file-backed harness pack', () => {
         expect.objectContaining({
           id: 'review-feedback',
           version: '1',
-          obligations: [
-            expect.objectContaining({
-              id: 'publish-and-acknowledge-review-revision',
-              direction: 'after',
-            }),
-          ],
+          obligations: [],
         }),
       ]),
     );
@@ -299,43 +294,37 @@ describe('file-backed harness pack', () => {
       pack.steps.find((stepDefinition) => stepDefinition.reference === reference)?.contract
         .activityDelivery;
 
-    expect(deliveryFor('code.implement@1')).toEqual({ kind: 'workspace_reconciled' });
-    expect(deliveryFor('validate.full@1')).toEqual({ kind: 'single_attempt' });
-    expect(deliveryFor('review.agent@1')).toEqual({ kind: 'read_only' });
+    expect(deliveryFor('implement.change@1')).toEqual({ kind: 'workspace_reconciled' });
+    expect(deliveryFor('verify.acceptance@1')).toEqual({ kind: 'read_only' });
+    expect(deliveryFor('review.change@1')).toEqual({ kind: 'read_only' });
     expect(deliveryFor('translations.extract@1')).toEqual({ kind: 'single_attempt' });
-    expect(deliveryFor('ci.observe@1')).toEqual({ kind: 'read_only' });
-    expect(deliveryFor('pr.prepare@1')).toEqual({ kind: 'remote_reconciled' });
-    expect(deliveryFor('review.acknowledge@1')).toEqual({ kind: 'remote_reconciled' });
-    expect(deliveryFor('jira.start-work@1')).toEqual({ kind: 'remote_reconciled' });
-    expect(deliveryFor('jira.review-ready@1')).toEqual({ kind: 'remote_reconciled' });
+    expect(deliveryFor('deliver.pull-request@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toBeUndefined();
   });
 
-  it('keeps Jira admission inside the semantic implementation stage', () => {
+  it('owns PR, CI, Jira, and human review inside one semantic Delivery block', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-    const admission = pack.steps.find(({ reference }) => reference === 'jira.start-work@1');
+    const delivery = pack.steps.find(({ reference }) => reference === 'deliver.pull-request@1');
 
-    expect(admission?.block.stage).toEqual({ id: 'implementation', label: 'Implement' });
+    expect(delivery?.block.stage).toEqual({ id: 'delivery', label: 'Delivery' });
+    expect(delivery?.contract.waitKinds).toEqual(
+      expect.arrayContaining(['code_review@1', 'ci_infrastructure@1', 'review_changes@1']),
+    );
   });
 
-  it('binds company AI guidance to agent work without adding workflow blocks', () => {
+  it('binds company AI guidance to semantic implementation without adding workflow blocks', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-    const prepare = pack.steps.find(({ reference }) => reference === 'pr.prepare@1');
-    const describe = pack.steps.find(({ reference }) => reference === 'pr.describe@1');
+    const implementation = pack.steps.find(({ reference }) => reference === 'implement.change@1');
+    const aiPolicy = pack.policies.find(({ id }) => id === 'ai-assistance');
 
-    expect(prepare?.contract.requiredArtifactContracts).toEqual(['pull-request-draft']);
-    expect(prepare?.contract.requiredArtifactContracts).not.toContain('ai-assistance-compliance');
-    expect(describe?.contract.requiredArtifactContracts).toEqual([]);
-    expect(describe?.block.executor).toMatchObject({
-      kind: 'agent',
-      profile: 'documentation',
-      skills: [],
+    expect(implementation?.block.executor.kind).toBe('agent');
+    expect(aiPolicy?.agentSkills).toContainEqual({
+      skill: 'ai-assistance',
+      steps: ['implement.change@1', 'component.consume_published@1'],
     });
-    expect(describe?.block.completion).toEqual({
-      kind: 'structured_evidence',
-      source: 'workspace_files',
-      requiredArtifactKinds: ['pull-request-draft'],
-    });
+    expect(pack.steps.map(({ reference }) => reference)).not.toEqual(
+      expect.arrayContaining(['pr.describe@1', 'pr.prepare@1']),
+    );
   });
 
   it('removes policy-owned blocks from future packs when the policy is disabled', async () => {
@@ -355,17 +344,11 @@ describe('file-backed harness pack', () => {
     ]);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
-    const implementation = pack.steps.find(({ reference }) => reference === 'code.implement@1');
-    const describe = pack.steps.find(({ reference }) => reference === 'pr.describe@1');
+    const implementation = pack.steps.find(({ reference }) => reference === 'implement.change@1');
     expect(implementation?.block.executor.kind).toBe('agent');
-    expect(describe?.block.executor.kind).toBe('agent');
     if (implementation?.block.executor.kind !== 'agent') throw new Error('Expected agent block');
-    if (describe?.block.executor.kind !== 'agent') throw new Error('Expected agent block');
     expect(implementation.block.executor.skills).not.toContain('ai-assistance');
-    expect(describe.block.executor.skills).not.toContain('ai-assistance');
-    expect(references).toContain('pr.describe@1');
-    expect(references).toContain('pr.prepare@1');
-    expect(references).toContain('review.acknowledge@1');
+    expect(references).toContain('deliver.pull-request@1');
   });
 
   it('removes the Bitbucket acknowledgement block when review feedback policy is disabled', async () => {
@@ -396,65 +379,56 @@ describe('file-backed harness pack', () => {
     expect(references).not.toContain('jira.review-ready@1');
   });
 
-  it('binds visual evidence guidance to final bug validation while commands stay deterministic', () => {
-    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
-    const skillsFor = (reference: string): readonly string[] => {
-      const definition = pack.steps.find((candidate) => candidate.reference === reference);
-      if (definition?.block.executor.kind !== 'agent') {
-        throw new Error(`Expected agent ${reference}`);
-      }
-      return definition.block.executor.skills;
-    };
-
-    expect(skillsFor('bug.validate_fix@1')).toContain('playwright-demo');
-    expect(
-      pack.steps.find(({ reference }) => reference === 'validate.visual@1')?.block.executor,
-    ).toEqual({ kind: 'process', executor: 'validation.visual@1' });
-  });
-
-  it('requires typed post-fix evidence for successful reproduction', () => {
-    const reproduction = getHarnessStepDefinition('bug.validate_fix@1');
-    if (reproduction === undefined) throw new Error('Expected reproduction block');
+  it('binds project checks and visual evidence to one semantic Verify block', () => {
+    const verify = getHarnessStepDefinition('verify.acceptance@1');
+    if (verify === undefined) throw new Error('Expected semantic Verify block');
 
     expect(
-      reproduction.contract.outputSchema.safeParse({
-        summary: 'Visible bug fixed',
-        phase: 'after',
-        outcome: 'verified_fixed',
-        evidence: [{ kind: 'video', path: 'evidence/after.mp4', mimeType: 'video/mp4' }],
+      verify.contract.outputSchema.safeParse({
+        decision: 'accepted',
+        summary: 'All acceptance evidence passed',
+        findings: [],
       }).success,
     ).toBe(true);
     expect(
-      reproduction.contract.outputSchema.safeParse({
-        summary: 'Claimed success without proof',
-        phase: 'after',
-        outcome: 'verified_fixed',
-        evidence: [],
+      verify.contract.outputSchema.safeParse({
+        decision: 'accepted',
+        summary: 'The agent tried to publish a model-authored path',
+        findings: [],
+        evidence: [{ path: '/tmp/after.mp4' }],
       }).success,
     ).toBe(false);
-    expect(
-      reproduction.contract.outputSchema.safeParse({
-        summary: 'Mismatched media metadata',
-        phase: 'after',
-        outcome: 'verified_fixed',
-        evidence: [{ kind: 'video', path: 'evidence/after.png', mimeType: 'image/png' }],
-      }).success,
-    ).toBe(false);
+    expect(verify.block.executor).toMatchObject({
+      kind: 'agent',
+      skills: ['playwright-demo', 'test-design'],
+    });
+    expect(verify.block.completion).toMatchObject({
+      kind: 'structured_evidence',
+      requiredArtifactKinds: ['acceptance-verification'],
+    });
   });
 
-  it('registers declared validation commands and typed local review', () => {
+  it('registers the compact semantic catalog and project-owned verification commands', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const references = pack.steps.map(({ reference }) => reference);
     const project = pack.projects.find(({ repository }) => repository === 'onetwotrip/front-avia');
-    const review = getHarnessStepDefinition('review.agent@1');
-    const ciObservation = getHarnessStepDefinition('ci.observe@1');
+    const review = getHarnessStepDefinition('review.change@1');
 
     expect(references).toEqual(
       expect.arrayContaining([
-        'bug.validate_fix@1',
-        'ci.repair@1',
+        'bug.investigate@1',
+        'implement.change@1',
+        'verify.acceptance@1',
+        'review.change@1',
+        'deliver.pull-request@1',
+      ]),
+    );
+    expect(references).not.toEqual(
+      expect.arrayContaining([
+        'code.implement@1',
         'code.repair@1',
-        'validate.targeted@1',
+        'ci.repair@1',
+        'pr.prepare@1',
         'review.agent@1',
       ]),
     );
@@ -506,46 +480,6 @@ describe('file-backed harness pack', () => {
         changes_requested: {
           'agent_review.accepted@1': false,
           'agent_review.changes_requested@1': true,
-        },
-      },
-    });
-    expect(ciObservation?.contract.outputPredicates).toEqual({
-      discriminator: 'status',
-      cases: {
-        passed: {
-          'ci.passed@1': true,
-          'ci.change_failure@1': false,
-          'ci.flaky@1': false,
-          'ci.infrastructure@1': false,
-          'ci.unknown@1': false,
-        },
-        likely_caused_by_change: {
-          'ci.passed@1': false,
-          'ci.change_failure@1': true,
-          'ci.flaky@1': false,
-          'ci.infrastructure@1': false,
-          'ci.unknown@1': false,
-        },
-        likely_flaky: {
-          'ci.passed@1': false,
-          'ci.change_failure@1': false,
-          'ci.flaky@1': true,
-          'ci.infrastructure@1': false,
-          'ci.unknown@1': false,
-        },
-        infrastructure: {
-          'ci.passed@1': false,
-          'ci.change_failure@1': false,
-          'ci.flaky@1': false,
-          'ci.infrastructure@1': true,
-          'ci.unknown@1': false,
-        },
-        unknown: {
-          'ci.passed@1': false,
-          'ci.change_failure@1': false,
-          'ci.flaky@1': false,
-          'ci.infrastructure@1': false,
-          'ci.unknown@1': true,
         },
       },
     });

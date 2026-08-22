@@ -1,9 +1,8 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 
-import { pullRequestOutputSchema } from '../../harness/step-contracts.js';
+import type { pullRequestOutputSchema } from '../../harness/step-contracts.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import type {
-  IntegrationStepAdapter,
   IntegrationStepExecutionRequest,
   IntegrationStepExecutionResult,
 } from '../execution.js';
@@ -63,16 +62,6 @@ const problemResult = (
 const statusIndex = (path: readonly string[], status: string): number =>
   path.findIndex((candidate) => sameJiraValue(candidate, status));
 
-const pullRequestFrom = (request: IntegrationStepExecutionRequest) => {
-  for (let index = request.evidence.completedSteps.length - 1; index >= 0; index -= 1) {
-    const completed = request.evidence.completedSteps[index];
-    if (completed?.stepReference !== 'pr.prepare@1' || completed.status !== 'completed') continue;
-    const parsed = z.object({ output: pullRequestOutputSchema }).safeParse(completed.details);
-    if (parsed.success) return parsed.data.output;
-  }
-  return null;
-};
-
 const transitionReceipt = (
   issueKey: JiraIssueKey,
   fromStatus: string,
@@ -86,7 +75,7 @@ const commentReceipt = (
   pullRequestUrl: string,
 ): JsonValue => ({ issueKey, commentId, pullRequestUrl });
 
-export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
+export class JiraReviewReadyAdapter {
   public readonly id = 'jira.review-ready@1';
 
   public constructor(
@@ -94,18 +83,19 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
     private readonly effects: ExternalEffectStore,
   ) {}
 
-  public async execute(
+  public async executeForPullRequest(
     request: IntegrationStepExecutionRequest,
+    pullRequest: z.infer<typeof pullRequestOutputSchema>,
   ): Promise<IntegrationStepExecutionResult> {
+    if (request.task.origin !== 'jira') {
+      return blocked('invalid_request', 'Jira review-ready cannot run for a non-Jira task', {
+        taskOrigin: request.task.origin,
+      });
+    }
     const configured = jiraLifecyclePolicyConfiguration(request);
     if (!configured.success) {
       return blocked('configuration', 'Jira lifecycle policy is missing or invalid', {
         issues: configured.error.issues.map((issue) => issue.message),
-      });
-    }
-    if (request.task.origin !== 'jira') {
-      return blocked('invalid_request', 'Jira review-ready cannot run for a non-Jira task', {
-        taskOrigin: request.task.origin,
       });
     }
     const issueKey = JiraIssueKeySchema.safeParse(request.task.taskId);
@@ -114,13 +104,10 @@ export class JiraReviewReadyAdapter implements IntegrationStepAdapter {
         taskId: request.task.taskId,
       });
     }
-    const pullRequest = pullRequestFrom(request);
-    if (pullRequest?.url === null || pullRequest === null) {
-      return blocked(
-        'verification',
-        'A durable pull-request URL is required before Jira can enter code review',
-        { taskId: request.task.taskId },
-      );
+    if (pullRequest.url === null) {
+      return blocked('verification', 'Jira review-ready requires a pull-request URL', {
+        taskId: request.task.taskId,
+      });
     }
 
     const artifactIds: string[] = [];

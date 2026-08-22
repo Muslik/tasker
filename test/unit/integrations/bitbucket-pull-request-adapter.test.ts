@@ -23,6 +23,12 @@ import type { IntegrationStepExecutionRequest } from '../../../src/integrations/
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
 const task = makePlanningTaskSnapshot('avia-13236-short-bug');
+const pullRequestDraft = {
+  title: `${task.taskId}: ${task.title}`,
+  description: task.description,
+  commit: { kind: 'subject' as const, subject: task.title },
+  branchArtifacts: ['feature.ts'],
+};
 const project = getHarnessPack().projects.find(
   (candidate) => candidate.repository === task.repository,
 );
@@ -102,10 +108,7 @@ const createGitWorkspace = () => {
   writeFileSync(
     join(workspace, '.tasker/pull-request/draft.json'),
     `${JSON.stringify({
-      title: `${task.taskId}: ${task.title}`,
-      description: task.description,
-      commit: { kind: 'subject', subject: task.title },
-      branchArtifacts: ['feature.ts'],
+      ...pullRequestDraft,
     })}\n`,
     'utf8',
   );
@@ -162,6 +165,7 @@ const requestFor = (
     preparedAt: '2026-08-04T00:00:00.000Z',
   },
   operatorGuidance: null,
+  waitResolution: null,
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [],
   project: testProject,
@@ -218,7 +222,10 @@ describe('Bitbucket pull request effect adapter', () => {
       new ExternalEffectStore(ledger.repository, systemClock),
     );
 
-    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+    const result = await adapter.executeDraft(
+      requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      pullRequestDraft,
+    );
 
     expect(result).toMatchObject({
       status: 'blocked',
@@ -237,7 +244,10 @@ describe('Bitbucket pull request effect adapter', () => {
     const pullRequests = new StatefulPullRequestPort();
     const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
-    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+    const result = await adapter.executeDraft(
+      requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      pullRequestDraft,
+    );
 
     expect(result).toMatchObject({ status: 'completed' });
     expect(git(workspace.workspace, ['show', '-s', '--format=%an <%ae>|%cn <%ce>', 'HEAD'])).toBe(
@@ -263,7 +273,10 @@ describe('Bitbucket pull request effect adapter', () => {
     const pullRequests = new StatefulPullRequestPort();
     const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
-    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+    const result = await adapter.executeDraft(
+      requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      { ...pullRequestDraft, branchArtifacts: ['.ai/workspace/AVIA-13236/verification.md'] },
+    );
 
     expect(result).toMatchObject({
       status: 'blocked',
@@ -305,11 +318,11 @@ describe('Bitbucket pull request effect adapter', () => {
     const adapter = adapterFor(commands, pullRequests);
     const request = requestFor(workspace, 'workflow:prepare-pr:attempt-1');
 
-    const result = await adapter.execute(request);
-    const repeated = await adapter.execute({
-      ...request,
-      runtime: { ...request.runtime, attempt: 2 },
-    });
+    const result = await adapter.executeDraft(request, pullRequestDraft);
+    const repeated = await adapter.executeDraft(
+      { ...request, runtime: { ...request.runtime, attempt: 2 } },
+      pullRequestDraft,
+    );
 
     expect(result).toMatchObject({
       status: 'completed',
@@ -345,8 +358,9 @@ describe('Bitbucket pull request effect adapter', () => {
     };
     const pullRequests = new StatefulPullRequestPort();
     const blockedAdapter = adapterFor(blockedCommands, pullRequests);
-    const first = await blockedAdapter.execute(
+    const first = await blockedAdapter.executeDraft(
       requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      pullRequestDraft,
     );
     const commitAfterBlockedPush = git(workspace.workspace, ['rev-parse', 'HEAD']);
     if (ledger === undefined) throw new Error('Missing effect ledger');
@@ -358,8 +372,9 @@ describe('Bitbucket pull request effect adapter', () => {
       new ExternalEffectStore(ledger.repository, systemClock),
     );
 
-    const resumed = await resumedAdapter.execute(
+    const resumed = await resumedAdapter.executeDraft(
       requestFor(workspace, 'workflow:prepare-pr:attempt-2'),
+      pullRequestDraft,
     );
 
     expect(first.status).toBe('blocked');
@@ -378,7 +393,10 @@ describe('Bitbucket pull request effect adapter', () => {
     pullRequests.value = pullRequest(`refs/heads/${workspace.branch}`);
     const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
-    const result = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+    const result = await adapter.executeDraft(
+      requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      pullRequestDraft,
+    );
 
     expect(result).toMatchObject({ status: 'completed', output: { externalId: '73' } });
     expect(pullRequests.createCalls).toBe(0);
@@ -389,14 +407,18 @@ describe('Bitbucket pull request effect adapter', () => {
     const pullRequests = new StatefulPullRequestPort();
     const adapter = adapterFor(workspaceCommandRunner, pullRequests);
 
-    const first = await adapter.execute(requestFor(workspace, 'workflow:prepare-pr:attempt-1'));
+    const first = await adapter.executeDraft(
+      requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      pullRequestDraft,
+    );
     const firstRemoteCommit = git(workspace.workspace, [
       'rev-parse',
       `refs/remotes/origin/${workspace.branch}`,
     ]);
     writeFileSync(join(workspace.workspace, 'feature.ts'), 'export const value = 3;\n', 'utf8');
-    const revised = await adapter.execute(
+    const revised = await adapter.executeDraft(
       requestFor(workspace, 'workflow:review-prepare-pr:attempt-1'),
+      pullRequestDraft,
     );
     const localCommit = git(workspace.workspace, ['rev-parse', 'HEAD']);
     const remoteCommit = git(workspace.workspace, [
