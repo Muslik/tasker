@@ -86,6 +86,8 @@ import {
 } from './workspace-mutation-recovery.js';
 import { collectBlockCompletionEvidence } from './block-completion-evidence.js';
 import type { TaskStepFilesystemStore } from './task-step-filesystem.js';
+import type { TaskStepEvidenceStore } from './task-step-evidence.js';
+import { normalizeTaskStepEvidencePaths } from './task-step-evidence.js';
 
 const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
   z
@@ -248,6 +250,7 @@ export interface TaskStepAgentResult {
   readonly stderr: string;
   readonly finalMessage: unknown;
   readonly usage: AgentInvocationUsage;
+  readonly artifactIds: readonly string[];
 }
 
 export type TaskStepAgentFailure =
@@ -263,6 +266,7 @@ export type TaskStepAgentFailure =
       readonly message: string;
     }
   | { readonly kind: 'skill_materialization_failed'; readonly message: string }
+  | { readonly kind: 'evidence_persistence_failed'; readonly message: string }
   | { readonly kind: 'invalid_skill_selection'; readonly issues: readonly string[] }
   | { readonly kind: 'provider_timed_out'; readonly durationMs: number; readonly stderr: string }
   | {
@@ -283,6 +287,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
   public constructor(
     private readonly runner: WorkspaceCommandRunner,
     private readonly filesystems: TaskStepFilesystemStore,
+    private readonly evidence: TaskStepEvidenceStore,
   ) {}
 
   public async run(
@@ -435,7 +440,19 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
       }
       const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) return err(stream.error);
-      const parsed = request.outputSchema.safeParse(stream.value.finalMessage);
+      const evidence = await this.evidence.register(
+        request.operationId,
+        stepFilesystem.artifactsPath,
+      );
+      if (!evidence.ok) {
+        return err({
+          kind: 'evidence_persistence_failed',
+          message: `Task-step evidence registration failed: ${evidence.error.kind}`,
+        });
+      }
+      const parsed = request.outputSchema.safeParse(
+        normalizeTaskStepEvidencePaths(stream.value.finalMessage, stepFilesystem.artifactsPath),
+      );
       if (!parsed.success) {
         return err({
           kind: 'invalid_output',
@@ -448,6 +465,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         stdout: execution.stdout,
         stderr: execution.stderr,
         finalMessage: parsed.data,
+        artifactIds: evidence.value,
         usage: {
           provider: profile.provider,
           profile: profile.name,
@@ -1053,11 +1071,12 @@ const persistAgentBlockedResult = (
   stderr: string,
   provider: AgentProvider,
   usage?: AgentInvocationUsage,
+  artifactIds: readonly string[] = [],
 ): ExecuteTaskStepResult => {
   const result = block(
     summary,
     blockingWaitKindFor(input.uses),
-    withRecoveryArtifact(recovery, []),
+    withRecoveryArtifact(recovery, artifactIds),
   );
   const persisted = traces.persistOutputArtifact({
     operationId: executionOperationId(input),
@@ -1443,6 +1462,7 @@ export const executeRegisteredTaskStep = async (
         provider.value.stderr,
         executionProfile.provider,
         provider.value.usage,
+        provider.value.artifactIds,
       );
     }
     const decision = decodedDecision.value;
@@ -1457,6 +1477,7 @@ export const executeRegisteredTaskStep = async (
         provider.value.stderr,
         executionProfile.provider,
         provider.value.usage,
+        provider.value.artifactIds,
       );
     }
     if (decision.status === 'workflow_change_required') {
@@ -1480,13 +1501,14 @@ export const executeRegisteredTaskStep = async (
           provider.value.stderr,
           executionProfile.provider,
           provider.value.usage,
+          provider.value.artifactIds,
         );
       }
       const result = ExecuteTaskStepResultSchema.parse({
         status: 'workflow_change_required',
         summary: `Agent execution for ${input.uses} requested a workflow change`,
         request: declared.value,
-        artifactIds: withRecoveryArtifact(recovery, []),
+        artifactIds: withRecoveryArtifact(recovery, provider.value.artifactIds),
         transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
       });
       const persisted = dependencies.traces.persistOutputArtifact({
@@ -1534,6 +1556,7 @@ export const executeRegisteredTaskStep = async (
         provider.value.stderr,
         executionProfile.provider,
         provider.value.usage,
+        provider.value.artifactIds,
       );
     }
     const outputRecord = validatedOutput.data as {
@@ -1546,7 +1569,7 @@ export const executeRegisteredTaskStep = async (
         typeof outputRecord.summary === 'string' && outputRecord.summary.trim().length > 0
           ? outputRecord.summary
           : `${input.uses} completed`,
-      artifactIds: withRecoveryArtifact(recovery, []),
+      artifactIds: withRecoveryArtifact(recovery, provider.value.artifactIds),
       transcriptId: dependencies.traces.transcriptIdFor(executionOperationId(input)),
     });
     const persisted = dependencies.traces.persistOutputArtifact({

@@ -37,6 +37,13 @@ export const WorkspaceRelativePathSchema = z
     message: 'Expected a path relative to the managed worktree',
   });
 
+export const ArtifactRelativePathSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !value.startsWith('/') && !value.split('/').includes('..'), {
+    message: 'Expected a path relative to the Tasker artifact root',
+  });
+
 export const pullRequestInputSchema = taskInputSchema.extend({
   draftPath: WorkspaceRelativePathSchema,
 });
@@ -80,21 +87,21 @@ const ReproductionEvidenceSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('video'),
-      path: WorkspaceRelativePathSchema,
+      path: ArtifactRelativePathSchema,
       mimeType: z.string().regex(/^video\/[a-z0-9][a-z0-9.+-]*$/u),
     })
     .strict(),
   z
     .object({
       kind: z.literal('image'),
-      path: WorkspaceRelativePathSchema,
+      path: ArtifactRelativePathSchema,
       mimeType: z.string().regex(/^image\/[a-z0-9][a-z0-9.+-]*$/u),
     })
     .strict(),
   z
     .object({
       kind: z.literal('log'),
-      path: WorkspaceRelativePathSchema,
+      path: ArtifactRelativePathSchema,
       mimeType: z.string().regex(/^(?:text|application)\/[a-z0-9][a-z0-9.+-]*$/u),
     })
     .strict(),

@@ -14,6 +14,7 @@ import {
   TemporalTaskStepTraceStore,
 } from '../../../src/temporal/activities/block-execution.js';
 import { TaskStepFilesystemStore } from '../../../src/temporal/activities/task-step-filesystem.js';
+import { TaskStepEvidenceStore } from '../../../src/temporal/activities/task-step-evidence.js';
 
 const codexStream = (finalMessage: string): string =>
   [
@@ -158,6 +159,7 @@ describe('subscription CLI task-step runner', () => {
           scratchRoot,
           artifactsRoot,
         });
+        writeFileSync(join(artifactsRoot, 'result.json'), '{"verified":true}\n', 'utf8');
         return Promise.resolve({
           status: 'exited',
           exitCode: 0,
@@ -174,6 +176,7 @@ describe('subscription CLI task-step runner', () => {
     const runner = new SubscriptionCliTaskStepAgentRunner(
       commands,
       new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
     );
 
     try {
@@ -205,6 +208,7 @@ describe('subscription CLI task-step runner', () => {
             cachedInputTokens: 2,
             outputTokens: 4,
           },
+          artifactIds: [expect.stringMatching(/^task-step-evidence:[a-f0-9]{64}$/u)],
         },
       });
       expect(observations).toHaveLength(1);
@@ -259,6 +263,7 @@ describe('subscription CLI task-step runner', () => {
     const runner = new SubscriptionCliTaskStepAgentRunner(
       commands,
       new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
     );
 
     try {
@@ -290,6 +295,7 @@ describe('subscription CLI task-step runner', () => {
             cachedInputTokens: 3,
             outputTokens: 4,
           },
+          artifactIds: [],
         },
       });
       expect(requests[1]?.args).toEqual(

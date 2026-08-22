@@ -87,6 +87,7 @@ import {
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
 import { TaskStepFilesystemStore } from './activities/task-step-filesystem.js';
+import { TaskStepEvidenceStore } from './activities/task-step-evidence.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { createBootstrapContextAssemblyActivity } from './activities/bootstrap-context-assembly-activity.js';
 import { createBootstrapInvestigationActivity } from './activities/bootstrap-investigation-activity.js';
@@ -283,6 +284,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       agentRunner: new SubscriptionCliTaskStepAgentRunner(
         dockerCommands,
         new TaskStepFilesystemStore(loadTaskStepFilesystemConfiguration().rootPath),
+        new TaskStepEvidenceStore(ledger.repository, systemClock),
       ),
       commands: dockerCommands,
       integrations: integrationAdapters,

@@ -231,6 +231,7 @@ describe('temporal block execution activity', () => {
         workspaceAccess.push(request.workspaceAccess);
         return Promise.resolve(
           ok({
+            artifactIds: [],
             stdout: '',
             stderr: '',
             usage: TEST_AGENT_USAGE,
@@ -306,6 +307,7 @@ describe('temporal block execution activity', () => {
     const run = vi.fn<TaskStepAgentRunner['run']>(() =>
       Promise.resolve(
         ok({
+          artifactIds: [],
           stdout: '',
           stderr: '',
           usage: TEST_AGENT_USAGE,
@@ -411,6 +413,7 @@ describe('temporal block execution activity', () => {
           run: () =>
             Promise.resolve(
               ok({
+                artifactIds: [`task-step-evidence:${'a'.repeat(64)}`],
                 stdout: '',
                 stderr: '',
                 usage: TEST_AGENT_USAGE,
@@ -447,8 +450,9 @@ describe('temporal block execution activity', () => {
     expect(result).toMatchObject({
       status: 'blocked',
       summary:
-        'Agent execution for bug.investigate@1 returned invalid output: evidence.0.path: Expected a path relative to the managed worktree',
+        'Agent execution for bug.investigate@1 returned invalid output: evidence.0.path: Expected a path relative to the Tasker artifact root',
     });
+    expect(result.artifactIds).toContain(`task-step-evidence:${'a'.repeat(64)}`);
   });
 
   it('turns an agent-reported infrastructure problem into an actionable durable wait', async () => {
@@ -489,6 +493,7 @@ describe('temporal block execution activity', () => {
           run: () =>
             Promise.resolve(
               ok({
+                artifactIds: [],
                 stdout: '',
                 stderr: '',
                 usage: TEST_AGENT_USAGE,
@@ -954,6 +959,7 @@ describe('temporal block execution activity', () => {
       calls.push('agent');
       return Promise.resolve(
         ok({
+          artifactIds: [],
           stdout: '',
           stderr: '',
           usage: TEST_AGENT_USAGE,
@@ -1063,6 +1069,7 @@ describe('temporal block execution activity', () => {
     const run = vi.fn<TaskStepAgentRunner['run']>(() =>
       Promise.resolve(
         ok({
+          artifactIds: [],
           stdout: '',
           stderr: '',
           usage: TEST_AGENT_USAGE,
@@ -1196,6 +1203,7 @@ describe('temporal block execution activity', () => {
     const run = vi.fn<TaskStepAgentRunner['run']>(() =>
       Promise.resolve(
         ok({
+          artifactIds: [],
           stdout: '',
           stderr: '',
           usage: TEST_AGENT_USAGE,
@@ -1367,6 +1375,7 @@ describe('temporal block execution activity', () => {
           run: () =>
             Promise.resolve(
               ok({
+                artifactIds: [],
                 stdout: '',
                 stderr: '',
                 usage: TEST_AGENT_USAGE,
