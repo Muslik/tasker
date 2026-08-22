@@ -10,11 +10,11 @@ Return an honest result:
 - `not_reproduced` when the tested scenario clearly behaves correctly;
 - `inconclusive` when prerequisites, environment, or task ambiguity prevent a reliable verdict.
 
-Record concise observations and durable evidence references. If a material ambiguity requires an
+Record concise observations and durable evidence references. Write temporary scripts only below
+`$TASKER_SCRATCH_ROOT` and final evidence only below `$TASKER_ARTIFACTS_ROOT`; the product worktree
+is physically read-only. If a material ambiguity requires an
 operator decision, block with one precise question instead of guessing.
 
-Every evidence `path` must be relative to the managed worktree, such as
-`.tasker/reproduction/result.png`. Never return the absolute workspace path shown by `pwd`.
-Executable scratch files must not match ordinary project test-discovery globs: never name them
-`*.spec.*` or `*.test.*`. Keep the final media and structured evidence, but do not leave a scratch
-runner that a later project validation command will execute accidentally.
+Every evidence `path` must be relative to `$TASKER_ARTIFACTS_ROOT`, such as `result.png`. Never
+return an absolute path shown by `pwd` or the artifact-root environment variable. Scratch is
+discarded after the attempt and can never enter a later project validation command.

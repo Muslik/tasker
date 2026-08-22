@@ -61,6 +61,7 @@ import {
   loadWorkspaceConfiguration,
   loadWorkspaceBootstrapConfiguration,
   loadDockerWorkspaceConfiguration,
+  loadTaskStepFilesystemConfiguration,
   assertWorkspaceHarnessSkillBindings,
   DockerWorkspaceCommandRunner,
   DockerWorkspaceRuntimeManager,
@@ -85,6 +86,7 @@ import {
   LedgerTaskRunEvidenceSource,
   TemporalTaskStepTraceStore,
 } from './activities/block-execution.js';
+import { TaskStepFilesystemStore } from './activities/task-step-filesystem.js';
 import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { createBootstrapContextAssemblyActivity } from './activities/bootstrap-context-assembly-activity.js';
 import { createBootstrapInvestigationActivity } from './activities/bootstrap-investigation-activity.js';
@@ -278,7 +280,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       mutationRecovery,
       receipts: blockReceipts,
       runtimes: dockerRuntimes,
-      agentRunner: new SubscriptionCliTaskStepAgentRunner(dockerCommands),
+      agentRunner: new SubscriptionCliTaskStepAgentRunner(
+        dockerCommands,
+        new TaskStepFilesystemStore(loadTaskStepFilesystemConfiguration().rootPath),
+      ),
       commands: dockerCommands,
       integrations: integrationAdapters,
       evidence: new LedgerTaskRunEvidenceSource(executionTraces, reviewEvidence),

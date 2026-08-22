@@ -1,7 +1,10 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { loadDockerWorkspaceConfiguration } from '../../../src/workspaces/configuration.js';
+import {
+  loadDockerWorkspaceConfiguration,
+  loadTaskStepFilesystemConfiguration,
+} from '../../../src/workspaces/configuration.js';
 
 describe('Docker workspace configuration', () => {
   it('stores runtime receipts beside the managed worktree store', () => {
@@ -21,5 +24,23 @@ describe('Docker workspace configuration', () => {
     });
 
     expect(configuration.runtimeStorePath).toBe(resolve('/tmp/tasker-explicit-runtimes'));
+  });
+});
+
+describe('task step filesystem configuration', () => {
+  it('stores scratch and artifacts beside the managed worktree store', () => {
+    const configuration = loadTaskStepFilesystemConfiguration({
+      TASKER_WORKSPACE_STORE: '/tmp/tasker-pilot/worktrees',
+    });
+
+    expect(configuration.rootPath).toBe(resolve('/tmp/tasker-pilot/step-data'));
+  });
+
+  it('honors an explicit task-step data store', () => {
+    const configuration = loadTaskStepFilesystemConfiguration({
+      TASKER_STEP_DATA_STORE: '/tmp/tasker-explicit-step-data',
+    });
+
+    expect(configuration.rootPath).toBe(resolve('/tmp/tasker-explicit-step-data'));
   });
 });

@@ -24,6 +24,10 @@ export interface DockerWorkspaceConfiguration {
   readonly workspaceStorePath: string;
 }
 
+export interface TaskStepFilesystemConfiguration {
+  readonly rootPath: string;
+}
+
 const defaultWorkspaceHarnessPackPath = (): string =>
   fileURLToPath(new URL('../../harness/workspace/', import.meta.url));
 
@@ -80,3 +84,12 @@ export const loadDockerWorkspaceConfiguration = (
     workspaceStorePath,
   };
 };
+
+export const loadTaskStepFilesystemConfiguration = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): TaskStepFilesystemConfiguration => ({
+  rootPath: resolve(
+    environment.TASKER_STEP_DATA_STORE?.trim() ||
+      resolve(dirname(defaultWorkspaceStorePath(environment)), 'step-data'),
+  ),
+});

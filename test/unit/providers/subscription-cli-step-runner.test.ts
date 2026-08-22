@@ -13,6 +13,7 @@ import {
   SubscriptionCliTaskStepAgentRunner,
   TemporalTaskStepTraceStore,
 } from '../../../src/temporal/activities/block-execution.js';
+import { TaskStepFilesystemStore } from '../../../src/temporal/activities/task-step-filesystem.js';
 
 const codexStream = (finalMessage: string): string =>
   [
@@ -97,6 +98,7 @@ const writeSkillCatalog = (repositoryPath: string): void => {
 describe('subscription CLI task-step runner', () => {
   it('invokes Codex with only the step-scoped skill view', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-codex-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-codex-step-data-'));
     writeSkillCatalog(repositoryPath);
     for (const skill of ['jira', 'pr-finalize']) {
       const directory = join(repositoryPath, '.tasker', 'harness', 'skills', skill);
@@ -115,6 +117,8 @@ describe('subscription CLI task-step runner', () => {
       outputSchema: string;
       args: readonly string[];
       workspaceAccess: CommandRequest['workspaceAccess'];
+      scratchRoot: string;
+      artifactsRoot: string;
     }[] = [];
     const commands: WorkspaceCommandRunner = {
       executionEnvironment: 'docker_workspace',
@@ -130,7 +134,14 @@ describe('subscription CLI task-step runner', () => {
         }
         const skillsRoot = request.env?.TASKER_SKILLS_ROOT;
         const codexHome = request.env?.CODEX_HOME;
-        if (skillsRoot === undefined || codexHome === undefined) {
+        const scratchRoot = request.env?.TASKER_SCRATCH_ROOT;
+        const artifactsRoot = request.env?.TASKER_ARTIFACTS_ROOT;
+        if (
+          skillsRoot === undefined ||
+          codexHome === undefined ||
+          scratchRoot === undefined ||
+          artifactsRoot === undefined
+        ) {
           throw new Error('Codex step environment was not prepared');
         }
         const schemaIndex = request.args.indexOf('--output-schema');
@@ -144,6 +155,8 @@ describe('subscription CLI task-step runner', () => {
           outputSchema: readFileSync(schemaPath, 'utf8'),
           args: request.args,
           workspaceAccess: request.workspaceAccess,
+          scratchRoot,
+          artifactsRoot,
         });
         return Promise.resolve({
           status: 'exited',
@@ -158,7 +171,10 @@ describe('subscription CLI task-step runner', () => {
     };
     const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
-    const runner = new SubscriptionCliTaskStepAgentRunner(commands);
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+    );
 
     try {
       const result = await runner.run({
@@ -201,13 +217,19 @@ describe('subscription CLI task-step runner', () => {
       expect(observations[0]?.outputSchema).toContain('additionalProperties');
       expect(observations[0]?.args).toContain('--dangerously-bypass-approvals-and-sandbox');
       expect(observations[0]?.workspaceAccess).toBe('read_write');
+      expect(observations[0]?.artifactsRoot).toMatch(/\/artifacts\/[a-f0-9]{64}$/u);
+      expect(existsSync(observations[0]?.artifactsRoot ?? '')).toBe(true);
+      expect(existsSync(observations[0]?.scratchRoot ?? '')).toBe(false);
     } finally {
       ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
     }
   });
 
   it('runs the same step contract through a selected Claude subscription profile', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-claude-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-claude-step-data-'));
     writeSkillCatalog(repositoryPath);
     const requests: CommandRequest[] = [];
     const commands: WorkspaceCommandRunner = {
@@ -234,7 +256,10 @@ describe('subscription CLI task-step runner', () => {
     };
     const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
-    const runner = new SubscriptionCliTaskStepAgentRunner(commands);
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+    );
 
     try {
       const result = await runner.run({
@@ -285,6 +310,7 @@ describe('subscription CLI task-step runner', () => {
     } finally {
       ledger.close();
       rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
     }
   });
 });

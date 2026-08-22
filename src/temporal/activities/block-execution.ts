@@ -85,6 +85,7 @@ import {
   type WorkspaceMutationRecoveryStore,
 } from './workspace-mutation-recovery.js';
 import { collectBlockCompletionEvidence } from './block-completion-evidence.js';
+import type { TaskStepFilesystemStore } from './task-step-filesystem.js';
 
 const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
   z
@@ -279,7 +280,10 @@ export interface TaskStepAgentRunner {
 }
 
 export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
-  public constructor(private readonly runner: WorkspaceCommandRunner) {}
+  public constructor(
+    private readonly runner: WorkspaceCommandRunner,
+    private readonly filesystems: TaskStepFilesystemStore,
+  ) {}
 
   public async run(
     request: TaskStepAgentRequest,
@@ -305,6 +309,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
     }
 
     const directory = await mkdtemp(join(tmpdir(), 'tasker-step-agent-'));
+    const stepFilesystem = await this.filesystems.prepare(request.operationId);
     const schemaPath = join(directory, 'task-step-output.schema.json');
     const isolatedConfigurationRoot = join(directory, 'provider-home');
     try {
@@ -389,8 +394,23 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             ? { CODEX_HOME: isolatedConfigurationRoot }
             : { HOME: isolatedConfigurationRoot }),
           ...harnessEnvironment,
+          TASKER_SCRATCH_ROOT: stepFilesystem.scratchPath,
+          TASKER_ARTIFACTS_ROOT: stepFilesystem.artifactsPath,
         },
-        mounts: [{ source: directory, target: directory, readOnly: false }, ...extraMounts],
+        mounts: [
+          { source: directory, target: directory, readOnly: false },
+          {
+            source: stepFilesystem.scratchPath,
+            target: stepFilesystem.scratchPath,
+            readOnly: false,
+          },
+          {
+            source: stepFilesystem.artifactsPath,
+            target: stepFilesystem.artifactsPath,
+            readOnly: false,
+          },
+          ...extraMounts,
+        ],
         stdin: request.prompt,
         timeoutMs: profile.timeoutMs,
       });
@@ -445,6 +465,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         },
       });
     } finally {
+      await this.filesystems.cleanupScratch(stepFilesystem);
       await rm(directory, { recursive: true, force: true });
     }
   }
