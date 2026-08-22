@@ -8,6 +8,7 @@ import {
   type CompletionEvaluator,
 } from '../blocks/contracts.js';
 import type { StepTypeContract } from '../workflow/contracts.js';
+import { SemanticExecutionRoleSchema } from '../workflow/semantic-schema.js';
 import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
 import {
   JsonValueSchema,
@@ -79,6 +80,7 @@ const HarnessBlockExecutorManifestSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('agent'),
       profile: z.string().min(1),
+      strategyRole: SemanticExecutionRoleSchema.nullable(),
       prompt: RelativePathSchema,
       skills: z.array(z.string().min(1)),
     })
@@ -205,6 +207,7 @@ export type HarnessBlockExecutorSource =
   | {
       readonly kind: 'agent';
       readonly profile: string;
+      readonly strategyRole: z.infer<typeof SemanticExecutionRoleSchema> | null;
       readonly prompt: string;
       readonly skills: readonly string[];
     }

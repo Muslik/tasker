@@ -9,7 +9,7 @@ import { RunPlanningSnapshotSchema } from '../../../src/planning/run-planning-sn
 const baseSnapshot = () => {
   const pack = loadHarnessPack();
   return {
-    schemaVersion: 9 as const,
+    schemaVersion: 10 as const,
     taskReference: 'jira:AVIA-12045',
     workflowRunId: 'run-test',
     task: {
@@ -57,6 +57,7 @@ describe('run planning snapshot', () => {
     const execution = RunPlanningSnapshotSchema.parse({
       ...baseSnapshot(),
       kind: 'execution',
+      executionStrategy: 'simple',
       workflowHash: 'a'.repeat(64),
       workflow: {},
       acceptedPlan: null,

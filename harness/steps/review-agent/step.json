@@ -22,6 +22,7 @@
   "executor": {
     "kind": "agent",
     "profile": "review",
+    "strategyRole": "review",
     "prompt": "prompt.md",
     "skills": []
   },

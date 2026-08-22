@@ -9,6 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "implementation",
+    "strategyRole": "implementation",
     "prompt": "prompt.md",
     "skills": ["jenkins"]
   },

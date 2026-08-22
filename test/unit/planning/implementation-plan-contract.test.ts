@@ -7,6 +7,7 @@ import {
 
 const decision = {
   status: 'ready',
+  executionStrategy: 'simple',
   plan: {
     schemaVersion: 2,
     title: 'Repair payment spacing',

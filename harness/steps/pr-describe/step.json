@@ -9,6 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "documentation",
+    "strategyRole": null,
     "prompt": "prompt.md",
     "skills": []
   },

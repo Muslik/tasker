@@ -9,6 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "review",
+    "strategyRole": "implementation",
     "prompt": "prompt.md",
     "skills": ["bitbucket"]
   },

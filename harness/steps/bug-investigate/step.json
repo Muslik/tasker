@@ -9,6 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "investigation",
+    "strategyRole": "context",
     "prompt": "prompt.md",
     "skills": ["playwright-demo", "jenkins"]
   },

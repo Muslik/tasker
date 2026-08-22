@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 import { renderPromptTemplate, type ResolvedExecutionProfile } from '../harness/index.js';
+import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
 import {
   ImplementationPlanFollowUpSchema,
   ImplementationPlanSchema,
@@ -152,6 +153,7 @@ const ProviderImplementationPlanningDecisionSchema = z.discriminatedUnion('statu
   z
     .object({
       status: z.literal('ready'),
+      executionStrategy: TaskExecutionStrategySchema,
       plan: ImplementationPlanSchema,
       followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
       workflow: ProviderWorkflowAnalyzerOutputSchema,

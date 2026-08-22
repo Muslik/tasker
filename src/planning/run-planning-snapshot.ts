@@ -7,7 +7,10 @@ import {
   HarnessProjectManifestSchema,
   ProcessExecutionPlanSchema,
 } from '../harness/contracts.js';
-import { ResolvedExecutionProfileSchema } from '../harness/execution-profile-contracts.js';
+import {
+  ResolvedExecutionProfileSchema,
+  TaskExecutionStrategySchema,
+} from '../harness/execution-profile-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import type { Outcome } from '../shared/outcome.js';
 import { JsonValueSchema, StepActivityDeliverySchema } from '../workflow/schema.js';
@@ -63,7 +66,7 @@ const SnapshottedHarnessSchema = z
   .strict();
 
 const RunSnapshotBaseSchema = z.object({
-  schemaVersion: z.literal(9),
+  schemaVersion: z.literal(10),
   taskReference: z.string().min(1),
   workflowRunId: z.string().min(1),
   task: PlanningTaskSnapshotSchema,
@@ -88,6 +91,7 @@ export const PlanningContextSnapshotSchema = RunSnapshotBaseSchema.extend({
 
 export const ExecutionRunSnapshotSchema = RunSnapshotBaseSchema.extend({
   kind: z.literal('execution'),
+  executionStrategy: TaskExecutionStrategySchema,
   workflowHash: ContentHashSchema,
   workflow: JsonValueSchema,
   acceptedPlan: JsonValueSchema,

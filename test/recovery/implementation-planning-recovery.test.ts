@@ -163,6 +163,24 @@ describe('implementation planning recovery', () => {
         if (!planned.ok || planned.value.status !== 'ready') {
           throw new Error('Expected a ready plan');
         }
+        const executionSnapshot = first.coordinator.readRunSnapshot(
+          planned.value.executionSnapshot,
+        );
+        expect(executionSnapshot.ok).toBe(true);
+        if (!executionSnapshot.ok || executionSnapshot.value.kind !== 'execution') {
+          throw new Error('Expected an execution snapshot');
+        }
+        expect(executionSnapshot.value.executionStrategy).toBe('simple');
+        expect(
+          executionSnapshot.value.harness.steps.find(
+            ({ reference }) => reference === 'code.implement@1',
+          )?.executionProfile,
+        ).toMatchObject({ model: 'gpt-5.6-luna', effort: 'medium' });
+        expect(
+          executionSnapshot.value.harness.steps.find(
+            ({ reference }) => reference === 'review.agent@1',
+          )?.executionProfile,
+        ).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high' });
         const firstDraft = first.coordinator.draftFor(planned.value);
         expect(firstDraft).toMatchObject({
           ok: true,

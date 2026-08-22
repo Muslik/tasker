@@ -164,8 +164,9 @@ const makeSnapshot = (
         : null,
   };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 9,
+    schemaVersion: 10,
     kind: 'execution',
+    executionStrategy: 'simple',
     taskReference: 'task-ref',
     workflowRunId: 'run-test',
     workflowHash: WORKFLOW_HASH,

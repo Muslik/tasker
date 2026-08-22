@@ -6,6 +6,7 @@ import {
   loadHarnessPack,
   resolveAgentExecutionProfile,
   resolveImplementationPlannerProfile,
+  resolveTaskExecutionProfile,
 } from '../harness/index.js';
 import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
@@ -21,6 +22,7 @@ import {
   type PlanningQuestionAnswer,
   type ImplementationPlanLink,
 } from '../planning/implementation-plan.js';
+import type { TaskExecutionStrategy } from '../harness/execution-profile-contracts.js';
 import type {
   EvidenceBundleReference,
   PlanningEvidenceCapture,
@@ -999,7 +1001,7 @@ export class ImplementationPlanningCoordinator {
       }),
     );
     const snapshot: PlanningContextSnapshot = PlanningContextSnapshotSchema.parse({
-      schemaVersion: 9,
+      schemaVersion: 10,
       kind: 'planning_context',
       taskReference,
       workflowRunId,
@@ -1025,6 +1027,7 @@ export class ImplementationPlanningCoordinator {
     expectedWorkflowHash: string,
     workflowOperationId: string,
     acceptedPlan: JsonValue,
+    executionStrategy: TaskExecutionStrategy,
     evidenceBundle: EvidenceBundleReference,
     workspace: PlanningSnapshotWorkspace,
     planningContextReference: PlanningSnapshotReference,
@@ -1057,8 +1060,9 @@ export class ImplementationPlanningCoordinator {
       CompiledWorkflowSchema.parse(graph.data).metadata.references.stepTypes,
     );
     const snapshot: ExecutionRunSnapshot = ExecutionRunSnapshotSchema.parse({
-      schemaVersion: 9,
+      schemaVersion: 10,
       kind: 'execution',
+      executionStrategy,
       taskReference,
       workflowRunId: planningContext.value.workflowRunId,
       workflowHash: expectedWorkflowHash,
@@ -1074,9 +1078,25 @@ export class ImplementationPlanningCoordinator {
       },
       harness: {
         ...planningContext.value.harness,
-        steps: planningContext.value.harness.steps.filter(({ reference }) =>
-          referencedSteps.has(reference),
-        ),
+        steps: planningContext.value.harness.steps
+          .filter(({ reference }) => referencedSteps.has(reference))
+          .map((step) => {
+            const role =
+              step.block.executor.kind === 'agent'
+                ? (step.block.executor.strategyRole ?? null)
+                : null;
+            return role === null || step.block.executor.kind !== 'agent'
+              ? step
+              : {
+                  ...step,
+                  executionProfile: resolveTaskExecutionProfile(
+                    planningContext.value.harness.company,
+                    planningContext.value.harness.project?.executionProfileOverrides ?? null,
+                    executionStrategy,
+                    role,
+                  ),
+                };
+          }),
       },
       createdAt: this.store.now(),
     });
@@ -1812,8 +1832,10 @@ export class ImplementationPlanningCoordinator {
         artifactId: `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}`,
         attempt: planning.attempt,
         selectedStrategy: planning.selectedStrategy,
+        executionStrategy: candidate.decision.executionStrategy,
         plan: candidate.decision.plan,
       }),
+      candidate.decision.executionStrategy,
       planning.evidenceBundle,
       workspace,
       planningContextReference,

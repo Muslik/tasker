@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { WorkflowStageDescriptorSchema } from '../workflow/contracts.js';
 import { JsonValueSchema, OutputPredicateMappingSchema } from '../workflow/schema.js';
+import { SemanticExecutionRoleSchema } from '../workflow/semantic-schema.js';
 import { AgentInvocationUsageSchema } from '../providers/agent-usage.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
@@ -14,6 +15,7 @@ export const BlockExecutorSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('agent'),
       profile: z.string().min(1),
+      strategyRole: SemanticExecutionRoleSchema.nullable(),
       prompt: z.string().min(1),
       skills: z.array(z.string().min(1)),
     })

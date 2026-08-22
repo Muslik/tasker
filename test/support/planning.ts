@@ -544,6 +544,7 @@ export const makeReadyPlanningDecision = (): ImplementationPlanningDecision => {
   const verificationStepId = firstStepId(workflow.source.root);
   return {
     status: 'ready',
+    executionStrategy: 'simple',
     plan: {
       schemaVersion: 2,
       title: 'Repair the reported behavior',

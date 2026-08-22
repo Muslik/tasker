@@ -5,6 +5,7 @@ import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import { BlockDefinitionSchema } from '../blocks/contracts.js';
+import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
 
 export const PlanningStrategyRequestSchema = z.enum(['auto', 'fast', 'ralplan']);
 export const PlanningStrategySchema = z.enum(['fast', 'ralplan']);
@@ -180,6 +181,7 @@ const workflowStepIds = (root: WorkflowNodeSource): ReadonlySet<string> => {
 export const ReadyImplementationPlanningDecisionSchema = z
   .object({
     status: z.literal('ready'),
+    executionStrategy: TaskExecutionStrategySchema,
     plan: ImplementationPlanSchema,
     followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
     workflow: WorkflowAnalyzerOutputSchema,

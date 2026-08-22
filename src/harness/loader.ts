@@ -189,6 +189,7 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
           ? {
               kind: 'agent' as const,
               profile: step.executor.profile,
+              strategyRole: step.executor.strategyRole,
               prompt: prompt?.content ?? '',
               skills: [...step.executor.skills],
             }

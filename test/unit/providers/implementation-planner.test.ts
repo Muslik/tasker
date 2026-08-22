@@ -88,6 +88,7 @@ if (verificationStepId === undefined) throw new Error('Planner fixture has no wo
 
 const readyDecision = {
   status: 'ready',
+  executionStrategy: 'simple',
   plan: {
     schemaVersion: 2,
     title: 'Repair the seat marker',

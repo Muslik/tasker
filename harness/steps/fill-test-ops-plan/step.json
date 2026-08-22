@@ -9,6 +9,7 @@
   "executor": {
     "kind": "agent",
     "profile": "verification",
+    "strategyRole": "verification",
     "prompt": "prompt.md",
     "skills": ["test-ops-planning"]
   },

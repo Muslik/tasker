@@ -4,6 +4,13 @@ import { JsonValueSchema, PredicateReferenceSchema, StepTypeReferenceSchema } fr
 
 export const SEMANTIC_WORKFLOW_SCHEMA_VERSION = 1;
 export const SEMANTIC_WORKFLOW_IR_VERSION = 'semantic-workflow-v1';
+export const SemanticExecutionRoleSchema = z.enum([
+  'context',
+  'implementation',
+  'verification',
+  'review',
+]);
+export type SemanticExecutionRole = z.infer<typeof SemanticExecutionRoleSchema>;
 
 const SemanticNodeIdSchema = z
   .string()
