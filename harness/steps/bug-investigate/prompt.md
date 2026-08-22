@@ -15,3 +15,6 @@ operator decision, block with one precise question instead of guessing.
 
 Every evidence `path` must be relative to the managed worktree, such as
 `.tasker/reproduction/result.png`. Never return the absolute workspace path shown by `pwd`.
+Executable scratch files must not match ordinary project test-discovery globs: never name them
+`*.spec.*` or `*.test.*`. Keep the final media and structured evidence, but do not leave a scratch
+runner that a later project validation command will execute accidentally.

@@ -190,6 +190,11 @@ diagnostic run. Reports live under the OS application-data `Tasker/smoke/reports
 command that fails on clean master must be fixed upstream or removed from the available block
 catalog; do not teach the planner to ignore it.
 
+Profile names are contracts. A project `full` profile includes every check the project claims as
+its complete local boundary; do not bind it to only one suite. Keep a cheaper `targeted` profile
+for bounded changes and instruct the planner to select the least expensive profile that honestly
+covers the accepted risk.
+
 ### Git and base-branch policy
 
 `projects/*/project.json.git` owns the exact remote base branch, task-branch format, and

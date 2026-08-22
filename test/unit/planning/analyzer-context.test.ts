@@ -61,6 +61,7 @@ describe('workflow analyzer context', () => {
     expect(implementationExecutor?.kind).toBe('agent');
     expect(implementationExecutor?.skills).toContain('ai-assistance');
     expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
+      'review-after-final-bug-proof',
       'publish-and-acknowledge-review-revision',
     ]);
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');

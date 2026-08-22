@@ -80,18 +80,20 @@ node. A bounded loop is not a terminal: when it is a branch arm, wrap it in a se
 a finalize node or place a finalize after the branch so every arm rejoins that terminal.
 
 Do not claim a bug is reproduced unless investigation evidence says so. Do not repeat bootstrap
-investigation inside execution. For a reproduced bug, execution normally implements the fix,
-runs a project-declared `validate.*` process block, and then uses `bug.validate_fix@1` to prove the
-bug no longer occurs with final demo evidence. Never invent validation commands: select only a
-registered validation block exposed for this project.
+investigation inside execution. For a reproduced bug, execution implements the fix, runs a
+project-declared `validate.*` process block, uses `bug.validate_fix@1` to prove the bug no longer
+occurs with final demo evidence, and only then runs `review.agent@1`. Any later workspace repair
+invalidates that proof: repeat the selected validation and `bug.validate_fix@1` before the next
+independent review. Never invent validation commands: select only a registered validation block
+exposed for this project.
 
 Every workspace-write path must reach an independent local-ready boundary before `pr.prepare@1`:
-declared validation, bounded `code.repair@1` retries until `validation.passed@1`, then
-`review.agent@1`, followed when necessary by a bounded repair/revalidation/re-review loop until
-`agent_review.accepted@1`. Exhaust both loops to `operator_guidance@1`. The independent agent
-review is separate from the later human `code_review@1` wait. Every plan step needs observable
-verification. Use exact paths only when evidence supports them; otherwise use a bounded search
-target.
+declared validation, bounded `code.repair@1` retries until `validation.passed@1`, task-specific bug
+proof when the task is a reproduced bug, then `review.agent@1`, followed when necessary by a
+bounded repair/revalidation/re-proof/re-review loop until `agent_review.accepted@1`. Exhaust both
+loops to `operator_guidance@1`. The independent agent review is separate from the later human
+`code_review@1` wait. Every plan step needs observable verification. Use exact paths only when
+evidence supports them; otherwise use a bounded search target.
 
 Every pull-request publication must prove `ci.passed@1` before `code_review@1`. After
 `pr.prepare@1`, run `ci.observe@1`, then a bounded loop with `checkBefore: true`,

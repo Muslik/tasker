@@ -379,6 +379,10 @@ code.implement/code.repair (agent judgment and workspace mutation)
 -> review.agent (independent typed review)
 ```
 
+The `quality-boundaries` policy enforces the final two markers on every compiled path that contains
+`bug.validate_fix@1`; prompt wording alone is not allowed to place independent review before the
+evidence it must judge.
+
 A non-zero `validate.*` command is accepted as diagnostic process evidence and maps to
 `validation.failed@1`; it is neither an Activity failure nor success inferred from agent prose.
 The frozen graph may enter a bounded `code.repair` plus revalidation loop.

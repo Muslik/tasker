@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "3",
+  "version": "4",
   "repository": "onetwotrip/front-avia",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -32,7 +32,14 @@
       ]
     },
     "validation.full@1": {
-      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--runInBand"] }]
+      "commands": [
+        { "command": "pnpm", "args": ["run", "typecheck"] },
+        { "command": "pnpm", "args": ["run", "lint:eslint"] },
+        { "command": "pnpm", "args": ["run", "lint:stylelint"] },
+        { "command": "pnpm", "args": ["run", "lint:circular"] },
+        { "command": "pnpm", "args": ["run", "test:unit", "--runInBand"] },
+        { "command": "pnpm", "args": ["run", "build"] }
+      ]
     },
     "validation.build@1": {
       "commands": [{ "command": "pnpm", "args": ["run", "build"] }]

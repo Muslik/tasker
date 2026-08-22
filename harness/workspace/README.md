@@ -43,7 +43,7 @@ stops at its first non-zero result.
 | --------------------- | ---------------------------------------------------------------- | -------------------------------- | -------------------------- | ----------- |
 | `front-railways`      | `pnpm run typecheck`                                             | unavailable                      | `pnpm run build`           | unavailable |
 | `front-bus`           | unavailable                                                      | unavailable                      | `pnpm run build`           | unavailable |
-| `front-avia`          | `typecheck` → `lint:eslint` → `lint:stylelint` → `lint:circular` | `pnpm run test:unit --runInBand` | `pnpm run build`           | unavailable |
+| `front-avia`          | `typecheck` → `lint:eslint` → `lint:stylelint` → `lint:circular` | targeted → `test:unit` → build   | `pnpm run build`           | unavailable |
 | `front-core-packages` | `node type-check.mjs` → `pnpm run linters`                       | `pnpm run test:unit --runInBand` | `pnpm run build-packages`  | unavailable |
 | `front-components`    | `pnpm run lint-no-fix`                                           | `pnpm run test:unit --runInBand` | `pnpm run storybook:build` | unavailable |
 | `front-backoffice`    | unavailable                                                      | unavailable                      | `pnpm run build`           | unavailable |
@@ -70,6 +70,11 @@ TASKER_SMOKE_PROJECTS=front-components pnpm harness:smoke
 Clones, worktrees, Docker runtimes, and JSON reports live under
 `~/Library/Application Support/Tasker/smoke`. The runner never reads or writes
 `~/Projects/work`. Any non-zero command or dirty worktree fails the profile.
+
+`front-avia` full validation is deliberately the union of its targeted checks, unit suite, and
+production build. The planner should select targeted validation for a bounded change and reserve
+full validation for a risk that justifies the additional time; the name `full` never means
+"unit tests only."
 
 ## Git policy
 

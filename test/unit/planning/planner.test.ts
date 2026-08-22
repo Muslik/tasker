@@ -115,4 +115,46 @@ describe('workflow proposal planning', () => {
       ]),
     );
   });
+
+  it('rejects a reproduced-bug graph that reviews before its final bug proof', () => {
+    const proposal = makeWorkflowProposal();
+    const result = planWorkflowProposal({
+      ...proposal,
+      source: {
+        id: 'review-before-bug-proof',
+        version: 1,
+        root: sequence('delivery', [
+          step('review-too-early', {
+            uses: 'review.agent@1',
+            with: {
+              objective: 'Review the change',
+              repository: proposal.task.repository,
+              taskId: proposal.task.taskId,
+            },
+          }),
+          step('prove-fix', {
+            uses: 'bug.validate_fix@1',
+            with: {
+              objective: 'Prove the bug is fixed',
+              phase: 'after',
+              repository: proposal.task.repository,
+              taskId: proposal.task.taskId,
+            },
+          }),
+          finalize('done', { outcome: 'accepted' }),
+        ]),
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') {
+      throw new Error('Expected quality-boundary rejection');
+    }
+    expect(result.error.validatorReport.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'unsatisfied_workflow_obligation',
+        details: { obligationId: 'review-after-final-bug-proof' },
+      }),
+    );
+  });
 });

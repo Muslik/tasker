@@ -38,6 +38,7 @@ describe('file-backed harness pack', () => {
   it('derives the production step catalog exclusively from step manifests', async () => {
     const root = await createTemporaryPack();
     await rm(join(root, 'steps/bug-validate-fix'), { recursive: true });
+    await rm(join(root, 'policies/quality-boundaries.json'));
 
     const pack = loadHarnessPack(root);
 
@@ -224,6 +225,16 @@ describe('file-backed harness pack', () => {
           agentSkills: [expect.objectContaining({ skill: 'ai-assistance' })],
         }),
         expect.objectContaining({
+          id: 'quality-boundaries',
+          version: '1',
+          obligations: [
+            expect.objectContaining({
+              id: 'review-after-final-bug-proof',
+              direction: 'after',
+            }),
+          ],
+        }),
+        expect.objectContaining({
           id: 'review-feedback',
           version: '1',
           obligations: [
@@ -343,7 +354,11 @@ describe('file-backed harness pack', () => {
     const pack = loadHarnessPack(root);
     const references = pack.steps.map(({ reference }) => reference);
 
-    expect(pack.policies.map(({ id }) => id)).toEqual(['jira-lifecycle', 'review-feedback']);
+    expect(pack.policies.map(({ id }) => id)).toEqual([
+      'jira-lifecycle',
+      'quality-boundaries',
+      'review-feedback',
+    ]);
     expect(references).not.toContain('ai.assistance.initialize@1');
     expect(references).not.toContain('ai.assistance.validate@1');
     const implementation = pack.steps.find(({ reference }) => reference === 'code.implement@1');
@@ -459,7 +474,14 @@ describe('file-backed harness pack', () => {
         ],
       },
       'validation.full@1': {
-        commands: [{ command: 'pnpm', args: ['run', 'test:unit', '--runInBand'] }],
+        commands: [
+          { command: 'pnpm', args: ['run', 'typecheck'] },
+          { command: 'pnpm', args: ['run', 'lint:eslint'] },
+          { command: 'pnpm', args: ['run', 'lint:stylelint'] },
+          { command: 'pnpm', args: ['run', 'lint:circular'] },
+          { command: 'pnpm', args: ['run', 'test:unit', '--runInBand'] },
+          { command: 'pnpm', args: ['run', 'build'] },
+        ],
       },
       'validation.build@1': {
         commands: [{ command: 'pnpm', args: ['run', 'build'] }],
