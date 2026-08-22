@@ -370,6 +370,83 @@ describe('temporal block execution activity', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes exact output-contract issues in the durable wait reason', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+
+    const result = await executeRegisteredTaskStep(
+      {
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        workflowHash: WORKFLOW_HASH,
+        nodeId: 'investigate-bug',
+        stepAttempt: 1,
+        uses: 'bug.investigate@1',
+        activityDelivery: { kind: 'workspace_reconciled' },
+        workspace: stubWorkspace,
+        planningSnapshot: {
+          artifactId: 'planning-snapshot:test',
+          checksum: 'd'.repeat(64),
+        },
+        operatorGuidance: null,
+        input: {
+          objective: 'Reproduce the reported bug',
+          repository: fixture.repository,
+          taskId: fixture.taskId,
+        },
+      },
+      {
+        snapshots: {
+          readRunSnapshot: () => ok(makeSnapshot('bug.investigate@1')),
+        },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        agentRunner: {
+          run: () =>
+            Promise.resolve(
+              ok({
+                stdout: '',
+                stderr: '',
+                usage: TEST_AGENT_USAGE,
+                finalMessage: {
+                  status: 'completed',
+                  outputJson: JSON.stringify({
+                    summary: 'Bug reproduced',
+                    outcome: 'reproduced',
+                    observations: ['The reported layout failed in the prepared scenario.'],
+                    evidence: [
+                      {
+                        kind: 'image',
+                        path: '/tmp/worktree/.tasker/reproduction/result.png',
+                        mimeType: 'image/png',
+                      },
+                    ],
+                  }),
+                  requestJson: null,
+                  blockingReason: null,
+                },
+              }),
+            ),
+        },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      {
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      summary:
+        'Agent execution for bug.investigate@1 returned invalid output: evidence.0.path: Expected a path relative to the managed worktree',
+    });
+  });
+
   it('turns an agent-reported infrastructure problem into an actionable durable wait', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

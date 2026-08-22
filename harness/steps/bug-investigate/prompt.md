@@ -12,3 +12,6 @@ Return an honest result:
 
 Record concise observations and durable evidence references. If a material ambiguity requires an
 operator decision, block with one precise question instead of guessing.
+
+Every evidence `path` must be relative to the managed worktree, such as
+`.tasker/reproduction/result.png`. Never return the absolute workspace path shown by `pwd`.

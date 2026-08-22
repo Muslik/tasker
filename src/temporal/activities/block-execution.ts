@@ -1490,16 +1490,20 @@ export const executeRegisteredTaskStep = async (
     }
     const validatedOutput = current.contract.outputSchema.safeParse(decision.output);
     if (!validatedOutput.success) {
+      const issues = validatedOutput.error.issues.map(
+        (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+      );
       return persistAgentBlockedResult(
         dependencies.traces,
         input,
         recovery,
-        `Agent execution for ${input.uses} returned output that does not match the registered contract`,
+        `Agent execution for ${input.uses} returned invalid output: ${issues.join('; ')}`.slice(
+          0,
+          1_000,
+        ),
         {
           kind: 'invalid_step_output',
-          issues: validatedOutput.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
+          issues,
         },
         provider.value.stdout,
         provider.value.stderr,
