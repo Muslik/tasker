@@ -222,11 +222,13 @@ describe('temporal block execution activity', () => {
     const prompts: string[] = [];
     const selectedSkills: (readonly string[])[] = [];
     const stepReferences: string[] = [];
+    const workspaceAccess: string[] = [];
     const agentRunner: TaskStepAgentRunner = {
       run: (request) => {
         prompts.push(request.prompt);
         selectedSkills.push(request.skills);
         stepReferences.push(request.stepReference);
+        workspaceAccess.push(request.workspaceAccess);
         return Promise.resolve(
           ok({
             stdout: '',
@@ -295,6 +297,7 @@ describe('temporal block execution activity', () => {
     expect(prompts[0]).toContain('VPN is enabled; retry the same verification');
     expect(selectedSkills).toEqual([[]]);
     expect(stepReferences).toEqual(['review.agent@1']);
+    expect(workspaceAccess).toEqual(['read_only']);
   });
 
   it('returns the durable result without invoking the agent again after response loss', async () => {
@@ -368,6 +371,7 @@ describe('temporal block execution activity', () => {
       'task-step-mutation-intent:test',
     ]);
     expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]?.[0].workspaceAccess).toBe('read_write');
   });
 
   it('exposes exact output-contract issues in the durable wait reason', async () => {

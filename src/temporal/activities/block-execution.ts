@@ -237,6 +237,7 @@ export interface TaskStepAgentRequest {
   readonly recovery: TaskStepRecoveryContext;
   readonly outputSchema: z.ZodType;
   readonly cwd: string;
+  readonly workspaceAccess: 'read_only' | 'read_write';
   readonly runtime: TaskStepActivityContext;
   readonly transcriptStore: TemporalTaskStepTraceStore;
 }
@@ -382,7 +383,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
                 ...preparedSkills.value.cliArguments,
               ],
         cwd: request.cwd,
-        workspaceAccess: 'read_write',
+        workspaceAccess: request.workspaceAccess,
         env: {
           ...(profile.provider === 'codex'
             ? { CODEX_HOME: isolatedConfigurationRoot }
@@ -1386,6 +1387,9 @@ export const executeRegisteredTaskStep = async (
       recovery,
       outputSchema: AgentStepProviderOutcomeSchema,
       cwd: input.workspace.path,
+      workspaceAccess: current.contract.allowedEffects.includes('workspace.write')
+        ? 'read_write'
+        : 'read_only',
       runtime,
       transcriptStore: dependencies.traces,
     });

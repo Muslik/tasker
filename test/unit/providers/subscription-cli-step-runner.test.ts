@@ -170,6 +170,7 @@ describe('subscription CLI task-step runner', () => {
         recovery: { kind: 'single_attempt' },
         outputSchema,
         cwd: repositoryPath,
+        workspaceAccess: 'read_write',
         runtime: {
           attempt: 1,
           cancellationSignal: new AbortController().signal,
@@ -245,6 +246,7 @@ describe('subscription CLI task-step runner', () => {
         recovery: { kind: 'single_attempt' },
         outputSchema,
         cwd: repositoryPath,
+        workspaceAccess: 'read_only',
         runtime: {
           attempt: 1,
           cancellationSignal: new AbortController().signal,
@@ -279,7 +281,7 @@ describe('subscription CLI task-step runner', () => {
       );
       expect(requests[1]?.env?.HOME).toMatch(/provider-home$/u);
       expect(requests[1]?.env?.CODEX_HOME).toBeUndefined();
-      expect(requests[1]?.workspaceAccess).toBe('read_write');
+      expect(requests[1]?.workspaceAccess).toBe('read_only');
     } finally {
       ledger.close();
       rmSync(repositoryPath, { recursive: true, force: true });
