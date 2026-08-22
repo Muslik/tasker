@@ -40,15 +40,29 @@ const compactDuration = (durationMs: number): string =>
     ? `${String(Math.round(durationMs / 1_000))}s`
     : `${String(Math.round(durationMs / 60_000))}m`;
 
-const WorkflowStep = ({ step }: { readonly step: OperatorWorkflowStep }) => {
+const WorkflowStep = ({
+  step,
+  onSelectAttempt,
+}: {
+  readonly step: OperatorWorkflowStep;
+  readonly onSelectAttempt: ((step: OperatorWorkflowStep, blockRun: number) => void) | undefined;
+}) => {
   const Icon = step.kind === 'agent' ? Bot : step.kind === 'process' ? Terminal : Pause;
   const usage = usageFor([step]);
+  const selectable = step.kind !== 'wait' && step.attempts > 0 && onSelectAttempt !== undefined;
   return (
     <li>
       <Tooltip>
         <TooltipTrigger
           render={
-            <span className="group flex min-h-8 w-full items-center gap-2 rounded px-2 text-left hover:bg-muted/60" />
+            <button
+              className="group flex min-h-8 w-full items-center gap-2 rounded px-2 text-left hover:bg-muted/60 disabled:cursor-default"
+              type="button"
+              disabled={!selectable}
+              onClick={() => {
+                if (selectable) onSelectAttempt(step, step.attempts);
+              }}
+            />
           }
         >
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -122,7 +136,13 @@ const StageHeader = ({
   );
 };
 
-const Stage = ({ stage }: { readonly stage: OperatorWorkflowStage }) => {
+const Stage = ({
+  stage,
+  onSelectAttempt,
+}: {
+  readonly stage: OperatorWorkflowStage;
+  readonly onSelectAttempt: ((step: OperatorWorkflowStep, blockRun: number) => void) | undefined;
+}) => {
   const [open, setOpen] = useState(true);
   const headerClass =
     stage.status === 'waiting'
@@ -158,7 +178,7 @@ const Stage = ({ stage }: { readonly stage: OperatorWorkflowStage }) => {
       </summary>
       <ol className="mb-2 ml-4 border-l border-border/70 pl-1.5" data-testid="workflow-stage-steps">
         {stage.steps.map((step) => (
-          <WorkflowStep key={step.id} step={step} />
+          <WorkflowStep key={step.id} step={step} onSelectAttempt={onSelectAttempt} />
         ))}
       </ol>
     </details>
@@ -167,8 +187,10 @@ const Stage = ({ stage }: { readonly stage: OperatorWorkflowStage }) => {
 
 export const WorkflowStages = ({
   stages,
+  onSelectAttempt,
 }: {
   readonly stages: readonly OperatorWorkflowStage[];
+  readonly onSelectAttempt?: (step: OperatorWorkflowStep, blockRun: number) => void;
 }) => {
   const usage = usageFor(stages.flatMap((stage) => stage.steps));
   return (
@@ -187,7 +209,7 @@ export const WorkflowStages = ({
         </div>
       ) : null}
       {stages.map((stage) => (
-        <Stage key={stage.key} stage={stage} />
+        <Stage key={stage.key} stage={stage} onSelectAttempt={onSelectAttempt} />
       ))}
     </div>
   );

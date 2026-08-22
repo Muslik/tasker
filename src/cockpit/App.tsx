@@ -30,8 +30,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type {
   OperatorInterventionAction,
   OperatorActivityResponse,
+  OperatorExecutionAttempt,
   OperatorTaskSummary,
   OperatorWorkflowProjection,
+  OperatorWorkflowStep,
   WorkflowResponse,
   WorkflowView,
 } from '../control-plane/operator-contracts.js';
@@ -61,6 +63,7 @@ import {
   loadWorkflowContinuation,
   loadJiraIssue,
   loadOperatorActivity,
+  loadOperatorExecutionAttempt,
   loadOperatorWorkflowProjection,
   loadWorkflow,
   reviewPlan,
@@ -106,6 +109,12 @@ type ActivityLoadState =
 type OperatorProjectionLoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly projection: OperatorWorkflowProjection }
+  | { readonly status: 'failed'; readonly message: string };
+
+type ExecutionAttemptLoadState =
+  | { readonly status: 'missing' }
+  | { readonly status: 'loading'; readonly nodeId: string; readonly blockRun: number }
+  | { readonly status: 'ready'; readonly attempt: OperatorExecutionAttempt }
   | { readonly status: 'failed'; readonly message: string };
 
 type ImplementationPlanLoadState =
@@ -2415,6 +2424,170 @@ const ExecutionProgressSurface = ({
   );
 };
 
+const ExecutionAttemptSurface = ({
+  state,
+  onClose,
+}: {
+  readonly state: ExecutionAttemptLoadState;
+  readonly onClose: () => void;
+}) => {
+  if (state.status === 'missing') return null;
+  if (state.status === 'loading') {
+    return (
+      <section className="border-b border-border px-5 py-4" aria-label="Execution attempt log">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" />
+          Loading {state.nodeId} attempt {state.blockRun}…
+        </div>
+      </section>
+    );
+  }
+  if (state.status === 'failed') {
+    return (
+      <section className="border-b border-border" aria-label="Execution attempt log">
+        <div className="flex items-center justify-between px-5 py-3">
+          <InlineError>{state.message}</InlineError>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
+  const attempt = state.attempt;
+  const output = attempt.output;
+  const log = attempt.transcript === null ? null : planningAgentLogFrom(attempt.transcript);
+  const events = log?.attempts.flatMap((providerAttempt) => providerAttempt.events) ?? [];
+  return (
+    <section className="border-b border-border bg-muted/5" aria-label="Execution attempt log">
+      <div className="flex items-start justify-between gap-4 border-b border-border/70 px-5 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Terminal className="size-4 text-primary" />
+            <strong className="text-sm">Run log</strong>
+            <StateBadge>{output?.status ?? 'running'}</StateBadge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {attempt.nodeId} · attempt {attempt.blockRun}
+            {output?.usage === null || output?.usage === undefined
+              ? ''
+              : ` · ${(output.usage.inputTokens + output.usage.outputTokens).toLocaleString()} tok · ${(output.usage.durationMs / 1_000).toFixed(1)}s`}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Close run log"
+          onClick={onClose}
+        >
+          <X />
+        </Button>
+      </div>
+      <ScrollArea className="max-h-[min(58vh,42rem)]">
+        <div className="divide-y divide-border/60 px-5">
+          {events.map((event, index) => {
+            if (event.kind === 'command') {
+              return (
+                <div className="py-3" key={`${event.id}:${String(index)}`}>
+                  <div className="flex items-start gap-2">
+                    <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs leading-5">
+                      {event.command}
+                    </code>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      {event.status === 'running'
+                        ? 'running'
+                        : `exit ${String(event.exitCode ?? 0)}`}
+                    </span>
+                  </div>
+                  {event.output.length === 0 ? null : (
+                    <details className="ml-5 mt-2 text-xs">
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                        Command output
+                      </summary>
+                      <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
+                        {event.output}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              );
+            }
+            if (event.kind === 'message') {
+              return (
+                <div className="flex gap-2 py-3 text-xs" key={`message:${String(index)}`}>
+                  <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                  <div>
+                    <strong className="font-medium">{event.title}</strong>
+                    {event.detail === null ? null : (
+                      <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+                        {event.detail}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div
+                className={cn(
+                  'flex gap-2 py-3 text-xs',
+                  event.kind === 'error'
+                    ? 'text-destructive'
+                    : 'text-amber-700 dark:text-amber-300',
+                )}
+                key={`${event.kind}:${String(index)}`}
+              >
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span className="whitespace-pre-wrap break-words">{event.message}</span>
+              </div>
+            );
+          })}
+          {output === null ? null : (
+            <div className="py-3 text-xs">
+              <div className="grid gap-1 text-muted-foreground sm:grid-cols-2">
+                <span>Runner: {output.runner}</span>
+                <span>Exit: {output.exitCode === null ? 'n/a' : output.exitCode}</span>
+                <span className="sm:col-span-2 break-all">cwd: {output.cwd}</span>
+              </div>
+              {output.result?.summary === undefined ? null : (
+                <p className="mt-2 text-foreground">{output.result.summary}</p>
+              )}
+              {output.stdout.length === 0 && output.stderr.length === 0 ? null : (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Full persisted stdout/stderr
+                  </summary>
+                  <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
+                    {[output.stdout, output.stderr].filter((value) => value.length > 0).join('\n')}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+          {attempt.evidence.length === 0 ? null : (
+            <div className="py-3">
+              <strong className="text-xs font-medium">Evidence · {attempt.evidence.length}</strong>
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {attempt.evidence.map((artifact) => (
+                  <li className="flex items-center justify-between gap-3" key={artifact.artifactId}>
+                    <span className="min-w-0 truncate">{artifact.relativePath}</span>
+                    <span className="shrink-0 tabular-nums">
+                      {artifact.mimeType} · {artifact.byteLength.toLocaleString()} B
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </section>
+  );
+};
+
 const WhyThisWorkflow = ({ view }: { readonly view: WorkflowView }) => (
   <Collapsible>
     <div className="border-t border-border" data-testid="workflow-decisions">
@@ -2486,10 +2659,12 @@ const WorkflowSidebar = ({
   workflow,
   projection,
   task,
+  onSelectAttempt,
 }: {
   readonly workflow: WorkflowLoadState;
   readonly projection: OperatorProjectionLoadState;
   readonly task: OperatorTaskSummary | null;
+  readonly onSelectAttempt: (step: OperatorWorkflowStep, blockRun: number) => void;
 }) => {
   if (workflow.status === 'loading' || projection.status === 'loading') {
     return (
@@ -2668,7 +2843,7 @@ const WorkflowSidebar = ({
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 py-2">
-        <WorkflowStages stages={projection.projection.stages} />
+        <WorkflowStages stages={projection.projection.stages} onSelectAttempt={onSelectAttempt} />
       </ScrollArea>
     </aside>
   );
@@ -2687,6 +2862,9 @@ export const App = () => {
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
   const [operatorProjectionState, setOperatorProjectionState] =
     useState<OperatorProjectionLoadState>({ status: 'loading' });
+  const [executionAttemptState, setExecutionAttemptState] = useState<ExecutionAttemptLoadState>({
+    status: 'missing',
+  });
   const [implementationPlanState, setImplementationPlanState] =
     useState<ImplementationPlanLoadState>({ status: 'missing' });
   const [planningTranscriptState, setPlanningTranscriptState] =
@@ -3202,8 +3380,27 @@ export const App = () => {
 
   const handleSelectTask = (taskId: string): void => {
     setRestartConfirmationTaskId(null);
+    setExecutionAttemptState({ status: 'missing' });
     setSelectedId(taskId);
     void refreshSelection(taskId);
+  };
+
+  const handleSelectExecutionAttempt = (step: OperatorWorkflowStep, blockRun: number): void => {
+    const taskReference = selectedIdRef.current;
+    if (taskReference.length === 0 || step.kind === 'wait') return;
+    setExecutionAttemptState({ status: 'loading', nodeId: step.id, blockRun });
+    void loadOperatorExecutionAttempt(taskReference, step.id, blockRun)
+      .then((attempt) => {
+        if (selectedIdRef.current !== taskReference) return;
+        setExecutionAttemptState({ status: 'ready', attempt });
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current !== taskReference) return;
+        setExecutionAttemptState({
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Execution attempt is unavailable',
+        });
+      });
   };
 
   const handleJiraSync = (issueKeyInput: string, repository?: string): void => {
@@ -3750,6 +3947,12 @@ export const App = () => {
                   jiraSync={jiraSyncState}
                 />
                 <ExecutionProgressSurface projection={operatorProjectionState} />
+                <ExecutionAttemptSurface
+                  state={executionAttemptState}
+                  onClose={() => {
+                    setExecutionAttemptState({ status: 'missing' });
+                  }}
+                />
                 {selectedTask.status === 'code_review' ? (
                   <CodeReviewControls
                     pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
@@ -3917,6 +4120,7 @@ export const App = () => {
               workflow={workflowState}
               projection={operatorProjectionState}
               task={selectedTask}
+              onSelectAttempt={handleSelectExecutionAttempt}
             />
           )}
         </div>
