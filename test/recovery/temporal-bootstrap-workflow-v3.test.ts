@@ -189,6 +189,104 @@ describe('Bootstrap Workflow v3 recovery', () => {
   });
 });
 
+describe('Bootstrap Jira admission recovery', () => {
+  it('resumes the same run and workspace after a Jira prerequisite is fixed', async () => {
+    const environment = await TestWorkflowEnvironment.createTimeSkipping();
+    const taskQueue = `tasker-bootstrap-admission-${String(process.pid)}`;
+    const runs = new TemporalTaskRunService(environment.client, {
+      address: 'test-server',
+      namespace: 'default',
+      taskQueue,
+      queryTimeoutMs: 5_000,
+      updateTimeoutMs: 5_000,
+    });
+    const attempts: Array<{
+      readonly workflowRunId: string;
+      readonly workspaceId: string;
+      readonly waitResolution: unknown;
+    }> = [];
+    const worker = await Worker.create({
+      connection: environment.nativeConnection,
+      taskQueue,
+      workflowsPath,
+      activities: {
+        ...testTemporalActivities,
+        admitTaskExecution: (input) => {
+          attempts.push({
+            workflowRunId: input.workflowRunId,
+            workspaceId: input.workspace.workspaceId,
+            waitResolution: input.waitResolution,
+          });
+          return Promise.resolve(
+            attempts.length === 1
+              ? {
+                  status: 'needs_input' as const,
+                  waitKind: 'jira.start-work@1.invalid_request@1',
+                  summary: 'Jira requires the Development estimate before transition',
+                }
+              : {
+                  status: 'completed' as const,
+                  summary: 'Jira task admitted after the missing field was filled',
+                },
+          );
+        },
+      } satisfies BootstrapWorkflowActivities,
+      maxCachedWorkflows: 0,
+    });
+    const workerRun = worker.run();
+    const taskReference = 'fixture:jira-admission-recovery';
+
+    try {
+      expect(await runs.start(inputFor(taskReference, 'automatic'))).toMatchObject({ ok: true });
+      await expect
+        .poll(
+          async () => {
+            const state = await runs.read(taskReference);
+            return state.ok && state.value?.status === 'waiting'
+              ? state.value.wait.waitKind
+              : 'running';
+          },
+          { interval: 50, timeout: 20_000 },
+        )
+        .toBe('jira.start-work@1.invalid_request@1');
+      const waiting = await runs.read(taskReference);
+      if (!waiting.ok || waiting.value?.runtime !== 'bootstrap') {
+        throw new Error('Expected bootstrap admission wait');
+      }
+      expect(
+        await runs.resolveWait(taskReference, {
+          runId: waiting.value.runId,
+          nodeId: 'admission',
+          waitKind: 'jira.start-work@1.invalid_request@1',
+          resolution: { guidance: 'Development estimate is now filled in Jira' },
+        }),
+      ).toMatchObject({ ok: true });
+      await expect
+        .poll(
+          async () => {
+            const state = await runs.read(taskReference);
+            return state.ok && state.value?.status === 'waiting'
+              ? state.value.wait.waitKind
+              : 'running';
+          },
+          { interval: 50, timeout: 20_000 },
+        )
+        .toBe('code_review@1');
+
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1]).toMatchObject({
+        workflowRunId: attempts[0]?.workflowRunId,
+        workspaceId: attempts[0]?.workspaceId,
+        waitResolution: { guidance: 'Development estimate is now filled in Jira' },
+      });
+    } finally {
+      worker.shutdown();
+      await workerRun;
+      await environment.teardown();
+    }
+  }, 60_000);
+});
+
 describe('Bootstrap infrastructure failure visibility', () => {
   it('surfaces the exhausted workspace activity cause in the durable operator wait', async () => {
     const environment = await TestWorkflowEnvironment.createTimeSkipping();

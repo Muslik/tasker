@@ -110,6 +110,11 @@ export const testTemporalActivities = {
         revision: 2,
       },
     }),
+  admitTaskExecution: () =>
+    Promise.resolve({
+      status: 'completed' as const,
+      summary: 'Task admitted for execution',
+    }),
   freezeTaskWorkflow: (input) =>
     Promise.resolve({
       ...input,

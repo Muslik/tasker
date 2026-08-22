@@ -190,7 +190,7 @@ const createBootstrapStages = (lifecycle: TaskRunLifecycle): readonly OperatorWo
       key: 'bootstrap:planning:3',
       id: 'planning',
       label: 'Plan',
-      status: bootstrapStatus(lifecycle, ['planning', 'plan_review', 'freeze']),
+      status: bootstrapStatus(lifecycle, ['planning', 'plan_review', 'admission', 'freeze']),
       steps: planningSteps,
     }),
   ];

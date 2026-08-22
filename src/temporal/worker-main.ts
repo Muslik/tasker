@@ -34,6 +34,7 @@ import {
   JiraPlanningEvidenceReader,
   JiraReviewReadyAdapter,
   JiraServerClient,
+  JiraStartWorkAdapter,
   JiraWorkflowGenerationSubjectResolver,
   LoopPlanningEvidenceReader,
   loadConfluencePlanningEvidenceConfiguration,
@@ -90,6 +91,7 @@ import { createWorkspaceActivity } from './activities/workspace-activity.js';
 import { createBootstrapContextAssemblyActivity } from './activities/bootstrap-context-assembly-activity.js';
 import { createBootstrapInvestigationActivity } from './activities/bootstrap-investigation-activity.js';
 import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activity.js';
+import { createTaskAdmissionActivity } from './activities/task-admission-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
@@ -166,6 +168,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
       ? null
       : new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects);
+  const jiraStartWork =
+    jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
+      ? null
+      : new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
     ...(bitbucketPullRequests === null || jenkinsBuildObserver === null
       ? []
@@ -314,6 +320,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         blockReceipts,
         evidenceBundles,
       ),
+      ...createTaskAdmissionActivity(planningStore, workspaceStore, jiraStartWork),
       ...createWorkflowFreezeActivity(workflowFreezes),
       ...executionActivities,
     });

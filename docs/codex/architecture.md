@@ -164,8 +164,9 @@ Examples of deterministic obligations:
 - terminal paths end in an allowed final state or explicit durable wait.
 
 Policy applicability is task-origin data, not a vendor branch in the compiler. A
-tracker policy may expose admission and review-ready blocks only to tasks from that
-tracker. Effect selectors protect future blocks without enumerating their names. Jira
+tracker policy configures bootstrap admission and Delivery operations only for tasks from that
+tracker; neither operation becomes a planner-visible block. Effect selectors protect future
+semantic blocks without enumerating their names. Jira
 does not receive Tasker's private before-reproduction evidence automatically; final
 demo evidence may be published during delivery when the task policy requests it.
 These obligations add no vendor branches to the compiler or Temporal Workflow.
@@ -291,8 +292,10 @@ ExecutionWorkflow(frozenExecutableIr, semanticWorkflowReference, runSettings, co
 ```
 
 The Bootstrap Workflow owns workspace/context preparation, investigation admission,
-mandatory planning, optional plan review, deterministic draft validation, and the
-immutable freeze receipt. The Execution Workflow receives only the accepted frozen
+mandatory planning, optional plan review, reconciled task-source admission, deterministic draft
+validation, and the immutable freeze receipt. Jira admission runs after plan acceptance and before
+freeze/Execution, so a 400/403 waits on the same run and worktree without becoming a semantic node.
+The Execution Workflow receives only the accepted frozen
 executable IR plus opaque semantic/artifact references. It never discovers planning
 nodes by name.
 
@@ -312,8 +315,8 @@ ledger. Provider output is appended while the process runs, so commands, message
 byte counts, and measured token usage survive reloads and worker restarts. The console
 does not synthesize progress, animate a timer as evidence, or retain a passive `planned`
 state between plan approval and execution. A failed runtime query is an operator-visible
-observability failure. Tracker admission is an integration effect inside the first
-semantic `Implement` stage, not a separate operator stage named `Start work`.
+observability failure. Tracker admission is a hidden Bootstrap operation owned by the task-source
+policy, not a separate operator stage named `Start work` and not part of the semantic workflow.
 
 The interpreter is deterministic. It may inspect only its input, prior Activity
 results, messages, and Workflow state. It must not read the filesystem, call an LLM,

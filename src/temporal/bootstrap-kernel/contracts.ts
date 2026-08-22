@@ -151,6 +151,7 @@ const BootstrapWorkflowStateBaseSchema = z
       'investigation',
       'planning',
       'plan_review',
+      'admission',
       'freezing',
       'execution',
     ]),
@@ -308,6 +309,30 @@ export const RunBootstrapInvestigationResultSchema = z.discriminatedUnion('statu
   }).strict(),
 ]);
 
+export const AdmitTaskExecutionInputSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    workflowId: z.string().min(1),
+    workflowRunId: z.string().min(1),
+    planningSnapshot: PlanningSnapshotReferenceSchema,
+    workspace: BootstrapWorkspaceHandleSchema,
+    operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
+    waitResolution: JsonValueSchema.nullable(),
+  })
+  .strict()
+  .readonly();
+
+export const AdmitTaskExecutionResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('completed'), summary: z.string().min(1) }).strict(),
+  z
+    .object({
+      status: z.literal('needs_input'),
+      summary: z.string().min(1),
+      waitKind: z.string().min(1),
+    })
+    .strict(),
+]);
+
 export const BootstrapWorkflowResultSchema = z
   .object({
     taskReference: z.string().min(1),
@@ -339,6 +364,8 @@ export type AssembleTaskPlanningContextResult = z.infer<
 >;
 export type RunBootstrapInvestigationInput = z.infer<typeof RunBootstrapInvestigationInputSchema>;
 export type RunBootstrapInvestigationResult = z.infer<typeof RunBootstrapInvestigationResultSchema>;
+export type AdmitTaskExecutionInput = z.infer<typeof AdmitTaskExecutionInputSchema>;
+export type AdmitTaskExecutionResult = z.infer<typeof AdmitTaskExecutionResultSchema>;
 export type BootstrapWorkflowResult = z.infer<typeof BootstrapWorkflowResultSchema>;
 export type { FreezeTaskWorkflowInput, WorkflowFreezeReceipt, PlanningSnapshotReference };
 
@@ -351,5 +378,6 @@ export interface BootstrapWorkflowActivities {
   runBootstrapInvestigation(
     input: RunBootstrapInvestigationInput,
   ): Promise<RunBootstrapInvestigationResult>;
+  admitTaskExecution(input: AdmitTaskExecutionInput): Promise<AdmitTaskExecutionResult>;
   freezeTaskWorkflow(input: FreezeTaskWorkflowInput): Promise<WorkflowFreezeReceipt>;
 }

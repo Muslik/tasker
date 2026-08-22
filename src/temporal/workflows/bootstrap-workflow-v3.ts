@@ -47,6 +47,7 @@ const STAGES = [
   'investigation',
   'planning',
   'plan_review',
+  'admission',
   'freeze',
 ] as const;
 const MAX_INVESTIGATION_ROUNDS = 3;
@@ -458,6 +459,39 @@ export async function bootstrapWorkflowV3(
     acceptedPlanning?.status !== 'ready'
   ) {
     throw ApplicationFailure.nonRetryable('Workflow freeze has no accepted candidate and plan');
+  }
+  let admissionGuidance: string | null = null;
+  let admissionResolution: JsonValue | null = null;
+  for (;;) {
+    markRunning('admission', 'admission');
+    attempts.admission = (attempts.admission ?? 0) + 1;
+    let admitted;
+    try {
+      admitted = await activities.admitTaskExecution({
+        taskReference: input.taskReference,
+        workflowId: execution.workflowId,
+        workflowRunId: execution.runId,
+        planningSnapshot: acceptedDraft.planningSnapshot,
+        workspace: acceptedWorkspaceContext.workspace,
+        operatorGuidance: admissionGuidance,
+        waitResolution: admissionResolution,
+      });
+    } catch (error) {
+      if (isCancellation(error)) throw error;
+      admissionResolution = await openWait(
+        'admission',
+        'admission.retry@1',
+        activityFailureReason('Task admission failed', error),
+      );
+      admissionGuidance = retryGuidanceFrom(admissionResolution);
+      continue;
+    }
+    if (admitted.status === 'completed') {
+      nodeStates.admission = 'succeeded';
+      break;
+    }
+    admissionResolution = await openWait('admission', admitted.waitKind, admitted.summary);
+    admissionGuidance = retryGuidanceFrom(admissionResolution);
   }
   for (;;) {
     markRunning('freeze', 'freezing');
