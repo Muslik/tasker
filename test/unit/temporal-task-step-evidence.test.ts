@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest';
 import { openSqliteLedger } from '../../src/ledger/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import {
-  TaskStepEvidenceArtifactSchema,
   TaskStepEvidenceStore,
   normalizeTaskStepEvidencePaths,
 } from '../../src/temporal/activities/task-step-evidence.js';
+import { TaskStepEvidenceArtifactSchema } from '../../src/temporal/task-step-evidence-contracts.js';
 
 describe('task step evidence store', () => {
   it('normalizes only absolute evidence paths inside the owned artifact root', () => {

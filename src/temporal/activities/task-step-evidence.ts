@@ -3,28 +3,13 @@ import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { z } from 'zod';
-
 import type { LedgerRepository } from '../../ledger/repository.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
+import { TaskStepEvidenceArtifactSchema } from '../task-step-evidence-contracts.js';
 
 const MAX_EVIDENCE_FILES = 100;
 const MAX_EVIDENCE_FILE_BYTES = 50 * 1024 * 1024;
-
-export const TaskStepEvidenceArtifactSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    operationId: z.string().min(1),
-    relativePath: z.string().min(1),
-    contentSha256: z.string().regex(/^[a-f0-9]{64}$/u),
-    byteLength: z.number().int().nonnegative(),
-    mimeType: z.string().min(1),
-    recordedAt: z.iso.datetime(),
-  })
-  .strict();
-
-export type TaskStepEvidenceArtifact = z.infer<typeof TaskStepEvidenceArtifactSchema>;
 
 export type TaskStepEvidenceError =
   | { readonly kind: 'artifact_conflict'; readonly artifactId: string }
