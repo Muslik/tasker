@@ -34,6 +34,8 @@ export const PlanningEvidenceRoundSchema = PlanningEvidencePendingObjectSchema.e
 export const ValidatedPlanningCandidateSchema = z
   .object({
     decision: ReadyImplementationPlanningDecisionSchema,
+    semanticHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    compilerVersion: z.string().min(1),
     workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
     workflowOperationId: z.string().min(1),
     receipt: ImplementationPlannerReceiptSchema,

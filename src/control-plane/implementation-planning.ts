@@ -51,6 +51,7 @@ import type {
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../workflow/schema.js';
+import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
 import {
   OperatorActivityEntrySchema,
   OperatorStreamEventSchema,
@@ -455,6 +456,8 @@ export class ImplementationPlanningStore {
       {
         taskReference: planning.taskReference,
         attempt: planning.attempt,
+        semanticHash: candidate.semanticHash,
+        compilerVersion: candidate.compilerVersion,
         workflowHash: candidate.workflowHash,
         artifactId,
         episodeId: planning.planningEpisodeId,
@@ -467,6 +470,8 @@ export class ImplementationPlanningStore {
         metadata: asJson({
           taskReference: planning.taskReference,
           attempt: planning.attempt,
+          semanticHash: candidate.semanticHash,
+          compilerVersion: candidate.compilerVersion,
           workflowHash: candidate.workflowHash,
           promptHash: candidate.receipt.promptHash,
         }),
@@ -991,6 +996,7 @@ export class ImplementationPlanningCoordinator {
       null,
       subject.value.task,
     );
+    const harnessHash = checksumString(JSON.stringify(harness));
     const contextHash = checksumString(
       JSON.stringify({
         task: subject.value.task,
@@ -1013,6 +1019,7 @@ export class ImplementationPlanningCoordinator {
         path: workspace.path,
       },
       harness,
+      harnessHash,
       createdAt: this.store.now(),
     });
     const stored = this.store.persistRunSnapshot(snapshot);
@@ -1047,6 +1054,14 @@ export class ImplementationPlanningCoordinator {
     }
     const graph = JsonValueSchema.safeParse(workflow.value.view.workflow.graph);
     if (!graph.success) return err({ kind: 'workflow_not_ready', taskReference });
+    const semanticSource = SemanticWorkflowSourceSchema.safeParse(
+      workflow.value.view.workflow.semanticSource,
+    );
+    const semanticHash = workflow.value.view.workflow.semanticHash;
+    const compilerVersion = workflow.value.view.workflow.compilerVersion;
+    if (!semanticSource.success || semanticHash === null || compilerVersion === null) {
+      return err({ kind: 'workflow_not_ready', taskReference });
+    }
     const planningContext = this.store.readRunSnapshot(planningContextReference);
     if (!planningContext.ok) return err({ kind: 'store', error: planningContext.error });
     if (
@@ -1062,6 +1077,9 @@ export class ImplementationPlanningCoordinator {
       schemaVersion: 10,
       kind: 'execution',
       executionStrategy,
+      semanticHash,
+      semanticSource: semanticSource.data,
+      compilerVersion,
       taskReference,
       workflowRunId: planningContext.value.workflowRunId,
       workflowHash: expectedWorkflowHash,
@@ -1097,6 +1115,7 @@ export class ImplementationPlanningCoordinator {
                 };
           }),
       },
+      harnessHash: planningContext.value.harnessHash,
       createdAt: this.store.now(),
     });
     const stored = this.store.persistRunSnapshot(snapshot);
@@ -1260,6 +1279,9 @@ export class ImplementationPlanningCoordinator {
   public draftFor(record: ReadyImplementationPlanningRecord): Outcome<
     {
       readonly workflowHash: string;
+      readonly semanticHash: string;
+      readonly compilerVersion: string;
+      readonly harnessSnapshotHash: string;
       readonly graph: z.infer<typeof CompiledWorkflowSchema>;
       readonly planningSnapshot: PlanningSnapshotReference;
       readonly evidenceBundle: EvidenceBundleReference;
@@ -1287,6 +1309,9 @@ export class ImplementationPlanningCoordinator {
     }
     return ok({
       workflowHash: record.workflowHash,
+      semanticHash: snapshot.value.semanticHash,
+      compilerVersion: snapshot.value.compilerVersion,
+      harnessSnapshotHash: snapshot.value.harnessHash,
       graph: graph.data,
       planningSnapshot: record.executionSnapshot,
       evidenceBundle: record.evidenceBundle,
@@ -1686,6 +1711,19 @@ export class ImplementationPlanningCoordinator {
             continue;
           }
           const workflowHash = assembled.value.view.workflow.graphHash;
+          const semanticHash = assembled.value.view.workflow.semanticHash;
+          const compilerVersion = assembled.value.view.workflow.compilerVersion;
+          if (semanticHash === null || compilerVersion === null) {
+            const failed = this.store.fail(
+              planning,
+              {
+                kind: 'invalid_planner_output',
+                issues: ['Semantic workflow provenance is absent from the compiled candidate.'],
+              },
+              result.value.receipt,
+            );
+            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+          }
           const graph = CompiledWorkflowSchema.safeParse(assembled.value.view.workflow.graph);
           if (!graph.success) {
             const failed = this.store.fail(
@@ -1724,6 +1762,8 @@ export class ImplementationPlanningCoordinator {
           }
           const checkpointed = this.store.recordValidatedCandidate(planning, {
             decision: result.value.decision,
+            semanticHash,
+            compilerVersion,
             workflowHash,
             workflowOperationId: operationId,
             receipt: result.value.receipt,

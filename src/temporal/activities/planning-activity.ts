@@ -49,6 +49,9 @@ export interface TemporalImplementationPlanningCoordinator {
   draftFor(record: Extract<ImplementationPlanningRecord, { readonly status: 'ready' }>): Outcome<
     {
       readonly workflowHash: string;
+      readonly semanticHash: string;
+      readonly compilerVersion: string;
+      readonly harnessSnapshotHash: string;
       readonly graph: CompiledWorkflow;
       readonly planningSnapshot: PlanningSnapshotReference;
       readonly evidenceBundle: EvidenceBundleReference;

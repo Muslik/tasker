@@ -15,6 +15,7 @@ import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import type { Outcome } from '../shared/outcome.js';
 import { JsonValueSchema, StepActivityDeliverySchema } from '../workflow/schema.js';
 import { EvidenceBundleReferenceSchema } from './evidence-bundle.js';
+import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
 
 const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -79,6 +80,7 @@ const RunSnapshotBaseSchema = z.object({
     })
     .strict(),
   harness: SnapshottedHarnessSchema,
+  harnessHash: ContentHashSchema,
   createdAt: z.iso.datetime(),
 });
 
@@ -92,6 +94,9 @@ export const PlanningContextSnapshotSchema = RunSnapshotBaseSchema.extend({
 export const ExecutionRunSnapshotSchema = RunSnapshotBaseSchema.extend({
   kind: z.literal('execution'),
   executionStrategy: TaskExecutionStrategySchema,
+  semanticHash: ContentHashSchema,
+  semanticSource: SemanticWorkflowSourceSchema,
+  compilerVersion: z.string().min(1),
   workflowHash: ContentHashSchema,
   workflow: JsonValueSchema,
   acceptedPlan: JsonValueSchema,

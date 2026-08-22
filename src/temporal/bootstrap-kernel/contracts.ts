@@ -96,6 +96,9 @@ export const BootstrapWorkspaceContextSchema = z
 export const BootstrapDraftStateSchema = z
   .object({
     workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    semanticHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    compilerVersion: z.string().min(1),
+    harnessSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/u),
     graph: CompiledWorkflowSchema,
     planningSnapshot: PlanningSnapshotReferenceSchema,
     evidenceBundle: EvidenceBundleReferenceSchema,

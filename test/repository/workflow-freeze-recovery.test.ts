@@ -9,6 +9,9 @@ const freezeInput = {
   workflowId: 'tasker:jira:AVIA-13235',
   workflowRunId: 'run-13235',
   workflowHash: 'a'.repeat(64),
+  semanticHash: 'e'.repeat(64),
+  compilerVersion: 'semantic-workflow-v1',
+  harnessSnapshotHash: 'f'.repeat(64),
   planningAttempt: 2,
   planningArtifactId: 'plan:jira:AVIA-13235:2',
   planningSnapshot: {
@@ -40,6 +43,9 @@ describe('workflow freeze recovery', () => {
         receiptId: 'workflow-freeze:tasker:jira:AVIA-13235:run-13235',
         frozenAt: '2026-08-05T12:00:00.000Z',
         workflowHash: freezeInput.workflowHash,
+        semanticHash: freezeInput.semanticHash,
+        compilerVersion: freezeInput.compilerVersion,
+        harnessSnapshotHash: freezeInput.harnessSnapshotHash,
         planningSnapshot: freezeInput.planningSnapshot,
       });
       expect(store.read(freezeInput.workflowId, freezeInput.workflowRunId)).toEqual(first);

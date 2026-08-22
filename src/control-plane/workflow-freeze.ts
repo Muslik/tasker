@@ -46,6 +46,9 @@ const matchesInput = (receipt: WorkflowFreezeReceipt, input: FreezeTaskWorkflowI
   receipt.workflowId === input.workflowId &&
   receipt.workflowRunId === input.workflowRunId &&
   receipt.workflowHash === input.workflowHash &&
+  receipt.semanticHash === input.semanticHash &&
+  receipt.compilerVersion === input.compilerVersion &&
+  receipt.harnessSnapshotHash === input.harnessSnapshotHash &&
   receipt.planningAttempt === input.planningAttempt &&
   receipt.planningArtifactId === input.planningArtifactId &&
   receipt.planningSnapshot.artifactId === input.planningSnapshot.artifactId &&
@@ -94,7 +97,11 @@ export class WorkflowFreezeStore {
             eventId: `event:${receiptId}:1`,
             eventType: 'TaskWorkflowFrozen',
             eventSchemaVersion: 1,
-            payload: asJson({ receiptId, workflowHash: receipt.workflowHash }),
+            payload: asJson({
+              receiptId,
+              semanticHash: receipt.semanticHash,
+              workflowHash: receipt.workflowHash,
+            }),
             actor: 'kernel',
           },
         ],
@@ -110,6 +117,9 @@ export class WorkflowFreezeStore {
             workflowId: receipt.workflowId,
             workflowRunId: receipt.workflowRunId,
             workflowHash: receipt.workflowHash,
+            semanticHash: receipt.semanticHash,
+            compilerVersion: receipt.compilerVersion,
+            harnessSnapshotHash: receipt.harnessSnapshotHash,
             planningArtifactId: receipt.planningArtifactId,
             evidenceBundleArtifactId: receipt.evidenceBundle.artifactId,
             approval: receipt.approval.kind,

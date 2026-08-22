@@ -11,6 +11,11 @@ import { CompiledWorkflowSchema } from '../../src/workflow/schema.js';
 import { makeWorkflowProposal } from '../support/planning.js';
 
 const resources: SqliteLedger[] = [];
+const draftProvenance = {
+  semanticHash: 'd'.repeat(64),
+  compilerVersion: 'semantic-workflow-v1',
+  harnessSnapshotHash: 'e'.repeat(64),
+} as const;
 
 const waitingLifecycleFor = (
   reference: 'code.implement@1' | 'jira.start-work@1',
@@ -51,6 +56,7 @@ const waitingLifecycleFor = (
       workspaceContext: null,
       context: null,
       draft: {
+        ...draftProvenance,
         workflowHash,
         graph,
         planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'b'.repeat(64) },
@@ -144,6 +150,7 @@ describe('operator workflow projection', () => {
         workspaceContext: null,
         context: null,
         draft: {
+          ...draftProvenance,
           workflowHash,
           graph,
           planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'a'.repeat(64) },
@@ -309,6 +316,7 @@ describe('operator workflow projection', () => {
         workspaceContext: null,
         context: null,
         draft: {
+          ...draftProvenance,
           workflowHash,
           graph,
           planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'b'.repeat(64) },
@@ -454,6 +462,7 @@ describe('operator workflow projection', () => {
         workspaceContext: null,
         context: null,
         draft: {
+          ...draftProvenance,
           workflowHash,
           graph,
           planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'b'.repeat(64) },

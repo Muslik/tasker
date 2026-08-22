@@ -15,7 +15,7 @@ import {
 import { JsonValueSchema } from '../workflow/schema.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 
-export const OPERATOR_VIEW_SCHEMA_VERSION = 6;
+export const OPERATOR_VIEW_SCHEMA_VERSION = 7;
 
 export const PlanningTaskSummarySchema = z
   .object({
@@ -231,6 +231,12 @@ export const WorkflowViewSchema = z
         proposalId: z.string().min(1),
         assemblyDecisions: z.array(WorkflowAssemblyDecisionViewSchema).min(1),
         status: z.enum(['valid', 'rejected']),
+        semanticHash: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/u)
+          .nullable(),
+        semanticSource: JsonValueSchema.nullable(),
+        compilerVersion: z.string().min(1).nullable(),
         graphHash: z.string().min(1).nullable(),
         graph: JsonValueSchema.nullable(),
         validatorReport: z

@@ -43,6 +43,7 @@ const baseSnapshot = () => {
       policies: [],
       steps: [],
     },
+    harnessHash: 'c'.repeat(64),
     createdAt: '2026-08-05T13:01:24.687Z',
   };
 };
@@ -58,6 +59,25 @@ describe('run planning snapshot', () => {
       ...baseSnapshot(),
       kind: 'execution',
       executionStrategy: 'simple',
+      semanticHash: 'd'.repeat(64),
+      semanticSource: {
+        schemaVersion: 1,
+        id: 'payment-spacing-workflow',
+        version: 1,
+        root: {
+          kind: 'sequence',
+          id: 'task-work',
+          children: [
+            {
+              kind: 'step',
+              id: 'verify-change',
+              uses: 'verify.acceptance@1',
+              with: {},
+            },
+          ],
+        },
+      },
+      compilerVersion: 'semantic-workflow-v1',
       workflowHash: 'a'.repeat(64),
       workflow: {},
       acceptedPlan: null,

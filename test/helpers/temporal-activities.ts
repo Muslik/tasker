@@ -50,6 +50,9 @@ export const testTemporalActivities = {
         input.requestedStrategy === 'ralplan' ? ('ralplan' as const) : ('fast' as const),
       draft: {
         workflowHash: 'a'.repeat(64),
+        semanticHash: 'b'.repeat(64),
+        compilerVersion: 'semantic-workflow-v1',
+        harnessSnapshotHash: 'c'.repeat(64),
         graph: {
           metadata: {
             compilerVersion: 4 as const,

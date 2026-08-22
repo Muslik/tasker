@@ -167,6 +167,18 @@ const makeSnapshot = (
     schemaVersion: 10,
     kind: 'execution',
     executionStrategy: 'simple',
+    semanticHash: '5'.repeat(64),
+    semanticSource: {
+      schemaVersion: 1,
+      id: 'test-semantic-workflow',
+      version: 1,
+      root: {
+        kind: 'sequence',
+        id: 'test-work',
+        children: [{ kind: 'step', id: 'test-step', uses: stepReference, with: {} }],
+      },
+    },
+    compilerVersion: 'semantic-workflow-v1',
     taskReference: 'task-ref',
     workflowRunId: 'run-test',
     workflowHash: WORKFLOW_HASH,
@@ -206,6 +218,7 @@ const makeSnapshot = (
       policies: pack.policies,
       steps: [step],
     },
+    harnessHash: '6'.repeat(64),
     createdAt: '2026-08-03T00:00:00.000Z',
   });
 };

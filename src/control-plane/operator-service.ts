@@ -48,7 +48,7 @@ export type OperatorServiceError =
     }
   | {
       readonly kind: 'non_json_artifact';
-      readonly artifact: 'compiled_graph' | 'proposal' | 'validator_report';
+      readonly artifact: 'compiled_graph' | 'proposal' | 'semantic_source' | 'validator_report';
     }
   | {
       readonly kind: 'store_failure';
@@ -93,7 +93,7 @@ const toTaskSummary = (task: PlanningTaskSnapshot): PlanningTaskSummary =>
 
 const toJson = (
   value: unknown,
-  artifact: 'compiled_graph' | 'proposal' | 'validator_report',
+  artifact: 'compiled_graph' | 'proposal' | 'semantic_source' | 'validator_report',
 ): Outcome<JsonValue, OperatorServiceError> => {
   const result = JsonValueSchema.safeParse(value);
   return result.success ? ok(result.data) : err({ kind: 'non_json_artifact', artifact });
@@ -193,10 +193,12 @@ const buildAcceptedView = (
 ): Outcome<BuiltView, OperatorServiceError> => {
   const graph = toJson(planned.compiled.graph, 'compiled_graph');
   const proposal = toJson(planned.proposal, 'proposal');
+  const semanticSource = toJson(planned.semantic.source, 'semantic_source');
   const validatorReport = toJson(planned.compiled.validatorReport, 'validator_report');
 
   if (!graph.ok) return graph;
   if (!proposal.ok) return proposal;
+  if (!semanticSource.ok) return semanticSource;
   if (!validatorReport.ok) return validatorReport;
 
   const common = baseWorkflowView(task, planned.proposal, persistedAt);
@@ -206,6 +208,9 @@ const buildAcceptedView = (
     workflow: {
       ...common.workflow,
       status: 'valid',
+      semanticHash: planned.semantic.semanticHash,
+      semanticSource: semanticSource.value,
+      compilerVersion: planned.semantic.semanticIrVersion,
       graphHash: planned.compiled.hash,
       graph: graph.value,
       validatorReport: planned.compiled.validatorReport,
@@ -247,6 +252,9 @@ const buildRejectedView = (
     workflow: {
       ...common.workflow,
       status: 'rejected',
+      semanticHash: null,
+      semanticSource: null,
+      compilerVersion: null,
       graphHash: null,
       graph: null,
       validatorReport: validatorReportValue,
