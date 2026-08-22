@@ -4,10 +4,10 @@ import { getHarnessPack } from '../harness/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   JsonValueSchema,
-  WorkflowSourceSchema,
+  SemanticWorkflowSourceSchema,
   type JsonValue,
-  type WorkflowNodeSource,
-  type WorkflowSource,
+  type SemanticNodeSource,
+  type SemanticWorkflowSource,
 } from '../workflow/index.js';
 import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
@@ -91,18 +91,13 @@ export const HARNESS_AVAILABLE_CAPABILITIES = Object.freeze([
 const sortedUnique = (values: readonly string[]): string[] =>
   [...new Set(values)].sort((left, right) => left.localeCompare(right));
 
-const collectProposalMetadata = (source: WorkflowSource) => {
+const collectProposalMetadata = (source: SemanticWorkflowSource) => {
   const expectedArtifacts: ExpectedArtifact[] = [];
   const requiredCapabilities: string[] = [];
-  const waits: WaitMetadata[] = [];
-  const visit = (node: WorkflowNodeSource): void => {
+  const visit = (node: SemanticNodeSource): void => {
     switch (node.kind) {
       case 'sequence':
         node.children.forEach(visit);
-        return;
-      case 'branch':
-        visit(node.then);
-        visit(node.otherwise);
         return;
       case 'bounded_loop':
         visit(node.body);
@@ -117,16 +112,6 @@ const collectProposalMetadata = (source: WorkflowSource) => {
         }
         return;
       }
-      case 'wait':
-        waits.push({
-          nodeId: node.id,
-          ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
-          waitKind: node.for,
-        });
-        return;
-      case 'finalize':
-      case 'gate':
-        return;
     }
   };
   visit(source.root);
@@ -135,7 +120,7 @@ const collectProposalMetadata = (source: WorkflowSource) => {
       `${left.nodeId}:${left.kind}`.localeCompare(`${right.nodeId}:${right.kind}`),
     ),
     requiredCapabilities: sortedUnique(requiredCapabilities),
-    waits: waits.sort((left, right) => left.nodeId.localeCompare(right.nodeId)),
+    waits: [],
   };
 };
 
@@ -166,7 +151,7 @@ export const createWorkflowProposalFromAnalyzerOutput = (
   if (!task.success) return err(toProposalInputFailure(task.error.issues));
   const output = WorkflowAnalyzerOutputSchema.safeParse(outputInput);
   if (!output.success) return err(toProposalInputFailure(output.error.issues));
-  const source = WorkflowSourceSchema.safeParse(output.data.source);
+  const source = SemanticWorkflowSourceSchema.safeParse(output.data.source);
   const metadata = source.success
     ? collectProposalMetadata(source.data)
     : { expectedArtifacts: [], requiredCapabilities: [], waits: [] };

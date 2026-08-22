@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-import { JsonValueSchema, NodeIdSchema, type WorkflowNodeSource } from '../workflow/schema.js';
+import { JsonValueSchema, NodeIdSchema } from '../workflow/schema.js';
+import type { SemanticNodeSource } from '../workflow/semantic-schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
@@ -151,9 +152,9 @@ export const WorkflowChangeRequestSchema = z
   })
   .strict();
 
-const workflowStepIds = (root: WorkflowNodeSource): ReadonlySet<string> => {
+const workflowStepIds = (root: SemanticNodeSource): ReadonlySet<string> => {
   const ids = new Set<string>();
-  const visit = (node: WorkflowNodeSource): void => {
+  const visit = (node: SemanticNodeSource): void => {
     switch (node.kind) {
       case 'step':
         ids.add(node.id);
@@ -161,16 +162,8 @@ const workflowStepIds = (root: WorkflowNodeSource): ReadonlySet<string> => {
       case 'sequence':
         node.children.forEach(visit);
         return;
-      case 'branch':
-        visit(node.then);
-        visit(node.otherwise);
-        return;
       case 'bounded_loop':
         visit(node.body);
-        return;
-      case 'wait':
-      case 'gate':
-      case 'finalize':
         return;
     }
   };

@@ -10,7 +10,10 @@ import {
   type WorkspaceCommandRunner,
 } from '../../../src/providers/index.js';
 import { getHarnessPack } from '../../../src/harness/index.js';
-import { WorkflowSourceSchema, type WorkflowNodeSource } from '../../../src/workflow/index.js';
+import {
+  SemanticWorkflowSourceSchema,
+  type SemanticNodeSource,
+} from '../../../src/workflow/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 import { makePlanningTaskSnapshot, makeWorkflowProposal } from '../../support/planning.js';
@@ -59,32 +62,24 @@ afterAll(() => {
   rmSync(plannerRepositoryPath, { recursive: true, force: true });
 });
 const proposal = makeWorkflowProposal();
-const workflowSource = WorkflowSourceSchema.parse(proposal.source);
-const workflowStepIds: string[] = [];
-const collectWorkflowStepIds = (node: WorkflowNodeSource): void => {
+const workflowSource = SemanticWorkflowSourceSchema.parse(proposal.source);
+const findVerificationStep = (node: SemanticNodeSource): string | null => {
   switch (node.kind) {
     case 'step':
-      workflowStepIds.push(node.id);
-      return;
-    case 'sequence':
-      node.children.forEach(collectWorkflowStepIds);
-      return;
-    case 'branch':
-      collectWorkflowStepIds(node.then);
-      collectWorkflowStepIds(node.otherwise);
-      return;
+      return node.uses === 'verify.acceptance@1' ? node.id : null;
+    case 'sequence': {
+      for (const child of node.children) {
+        const found = findVerificationStep(child);
+        if (found !== null) return found;
+      }
+      return null;
+    }
     case 'bounded_loop':
-      collectWorkflowStepIds(node.body);
-      return;
-    case 'wait':
-    case 'gate':
-    case 'finalize':
-      return;
+      return findVerificationStep(node.body);
   }
 };
-collectWorkflowStepIds(workflowSource.root);
-const verificationStepId = workflowStepIds[0];
-if (verificationStepId === undefined) throw new Error('Planner fixture has no workflow step');
+const verificationStepId = findVerificationStep(workflowSource.root);
+if (verificationStepId === null) throw new Error('Planner fixture has no Verify step');
 
 const readyDecision = {
   status: 'ready',
@@ -129,42 +124,7 @@ const readyDecision = {
   },
 } as const;
 
-const providerWorkflowNode = (node: WorkflowNodeSource): unknown => {
-  switch (node.kind) {
-    case 'sequence':
-      return { ...node, children: node.children.map(providerWorkflowNode) };
-    case 'branch':
-      return {
-        ...node,
-        then: providerWorkflowNode(node.then),
-        otherwise: providerWorkflowNode(node.otherwise),
-      };
-    case 'bounded_loop':
-      return {
-        ...node,
-        exhaustedWait: node.exhaustedWait ?? null,
-        body: providerWorkflowNode(node.body),
-      };
-    case 'wait':
-      return { ...node, resumeAt: node.resumeAt ?? null };
-    case 'gate':
-      return { ...node, with: node.with ?? null };
-    case 'step':
-    case 'finalize':
-      return node;
-  }
-};
-
-const providerReadyDecision = {
-  ...readyDecision,
-  workflow: {
-    ...readyDecision.workflow,
-    source: {
-      ...readyDecision.workflow.source,
-      root: providerWorkflowNode(readyDecision.workflow.source.root),
-    },
-  },
-};
+const providerReadyDecision = readyDecision;
 
 const codexJsonl = (finalMessage: string): string =>
   [

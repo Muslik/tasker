@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { WorkflowSourceSchema } from '../workflow/schema.js';
+import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
 
 export const VerificationProfileSchema = z.enum([
   'full',
@@ -30,7 +30,7 @@ export const WorkflowAssemblyDecisionSchema = z
 export const WorkflowAnalyzerOutputSchema = z
   .object({
     assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
-    source: WorkflowSourceSchema,
+    source: SemanticWorkflowSourceSchema,
     verificationPlan: VerificationPlanSchema,
   })
   .strict();

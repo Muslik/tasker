@@ -51,6 +51,7 @@ const decision = {
       },
     ],
     source: {
+      schemaVersion: 1,
       id: 'payment-spacing-repair',
       version: 1,
       root: {
@@ -60,15 +61,13 @@ const decision = {
           {
             kind: 'step',
             id: 'validate-fixed-spacing',
-            uses: 'bug.validate_fix@1',
+            uses: 'verify.acceptance@1',
             with: {
               objective: 'Verify the repair',
               repository: 'onetwotrip/front-avia',
               taskId: 'AVIA-12045',
-              phase: 'after',
             },
           },
-          { kind: 'finalize', id: 'finished', outcome: 'accepted' },
         ],
       },
     },

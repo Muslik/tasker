@@ -1,18 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  createWorkflowProposalFromAnalyzerOutput,
-  planWorkflowProposal,
-} from '../../../src/planning/index.js';
-import { finalize, sequence, step } from '../../../src/workflow/index.js';
-import {
-  makeAnalyzerOutput,
-  makePlanningTaskSnapshot,
-  makeWorkflowProposal,
-} from '../../support/planning.js';
+import { planWorkflowProposal } from '../../../src/planning/index.js';
+import { makeWorkflowProposal } from '../../support/planning.js';
 
-describe('workflow proposal planning', () => {
-  it('compiles an explicit agent proposal into a stable frozen candidate', () => {
+describe('semantic workflow proposal planning', () => {
+  it('compiles an explicit semantic proposal into stable semantic and executable artifacts', () => {
     const proposal = makeWorkflowProposal();
 
     const first = planWorkflowProposal(proposal);
@@ -21,60 +13,66 @@ describe('workflow proposal planning', () => {
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
     if (!first.ok || !second.ok) throw new Error('Expected proposal to compile');
+    expect(first.value.semantic.semanticHash).toBe(second.value.semantic.semanticHash);
     expect(first.value.compiled.hash).toBe(second.value.compiled.hash);
+    expect(first.value.semantic.source.root.children).toHaveLength(2);
     expect(first.value.proposal.task.reference).toBe('avia-13236-short-bug');
   });
 
-  it('rejects an unknown step before execution', () => {
+  it('rejects an unknown semantic block before execution', () => {
     const proposal = makeWorkflowProposal();
     const result = planWorkflowProposal({
       ...proposal,
       source: {
+        schemaVersion: 1,
         id: 'unknown-step',
         version: 1,
-        root: sequence('delivery', [
-          step('unknown', { uses: 'unknown.step@1', with: {} }),
-          finalize('done', { outcome: 'done' }),
-        ]),
-      },
-    });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected unknown step rejection');
-    expect(result.error.stage).toBe('workflow_validation');
-    if (result.error.stage !== 'workflow_validation') return;
-    expect(result.error.validatorReport.issues.map(({ code }) => code)).toContain(
-      'unknown_reference',
-    );
-  });
-
-  it('rejects a graph without a terminal node', () => {
-    const proposal = makeWorkflowProposal();
-    const result = planWorkflowProposal({
-      ...proposal,
-      source: {
-        id: 'missing-terminal',
-        version: 1,
-        root: sequence('delivery', [
-          step('implement', {
-            uses: 'code.implement@1',
-            with: {
-              objective: 'Implement the change',
-              repository: proposal.task.repository,
-              taskId: proposal.task.taskId,
-            },
-          }),
-        ]),
+        root: {
+          kind: 'sequence',
+          id: 'task-work',
+          children: [{ kind: 'step', id: 'unknown', uses: 'unknown.step@1', with: {} }],
+        },
       },
     });
 
     expect(result.ok).toBe(false);
     if (result.ok || result.error.stage !== 'workflow_validation') {
-      throw new Error('Expected graph validation rejection');
+      throw new Error('Expected unknown semantic block rejection');
     }
     expect(result.error.validatorReport.issues.map(({ code }) => code)).toContain(
-      'missing_terminal_path',
+      'unknown_reference',
     );
+  });
+
+  it('rejects speculative branch recovery at the semantic boundary', () => {
+    const proposal = makeWorkflowProposal();
+    const result = planWorkflowProposal({
+      ...proposal,
+      source: {
+        schemaVersion: 1,
+        id: 'speculative-recovery',
+        version: 1,
+        root: {
+          kind: 'sequence',
+          id: 'task-work',
+          children: [
+            {
+              kind: 'branch',
+              id: 'ci-recovery',
+              when: 'ci.passed@1',
+              then: { kind: 'sequence', id: 'passed', children: [] },
+              otherwise: { kind: 'sequence', id: 'failed', children: [] },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.stage !== 'workflow_validation') {
+      throw new Error('Expected semantic source rejection');
+    }
+    expect(result.error.validatorReport.issues.map(({ code }) => code)).toContain('invalid_source');
   });
 
   it('rejects capabilities unavailable in the active harness', () => {
@@ -94,67 +92,17 @@ describe('workflow proposal planning', () => {
     expect(result.error.missingCapabilities).toContain('missing.capability');
   });
 
-  it('applies source-specific policy after generic graph compilation', () => {
-    const task = makePlanningTaskSnapshot('avia-13236-short-bug', {
-      origin: 'jira',
-      reference: 'jira:AVIA-13236',
-    });
-    const output = makeAnalyzerOutput();
-    const proposal = createWorkflowProposalFromAnalyzerOutput(task, 'test-analyzer@1', output);
-    if (!proposal.ok) throw new Error('Expected proposal construction');
-
-    const result = planWorkflowProposal(proposal.value);
-
-    expect(result.ok).toBe(false);
-    if (result.ok || result.error.stage !== 'workflow_validation') {
-      throw new Error('Expected Jira policy rejection');
+  it('inserts one internal terminal instead of asking the planner to emit it', () => {
+    const result = planWorkflowProposal(makeWorkflowProposal());
+    if (!result.ok) throw new Error('Expected semantic proposal to compile');
+    if (result.value.compiled.graph.root.kind !== 'sequence') {
+      throw new Error('Expected compiled root sequence');
     }
-    expect(result.error.validatorReport.issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'unsatisfied_workflow_obligation' }),
-      ]),
-    );
-  });
 
-  it('rejects a reproduced-bug graph that reviews before its final bug proof', () => {
-    const proposal = makeWorkflowProposal();
-    const result = planWorkflowProposal({
-      ...proposal,
-      source: {
-        id: 'review-before-bug-proof',
-        version: 1,
-        root: sequence('delivery', [
-          step('review-too-early', {
-            uses: 'review.agent@1',
-            with: {
-              objective: 'Review the change',
-              repository: proposal.task.repository,
-              taskId: proposal.task.taskId,
-            },
-          }),
-          step('prove-fix', {
-            uses: 'bug.validate_fix@1',
-            with: {
-              objective: 'Prove the bug is fixed',
-              phase: 'after',
-              repository: proposal.task.repository,
-              taskId: proposal.task.taskId,
-            },
-          }),
-          finalize('done', { outcome: 'accepted' }),
-        ]),
-      },
+    expect(result.value.compiled.graph.root.children.at(-1)).toMatchObject({
+      kind: 'finalize',
+      id: '__tasker_complete',
+      outcome: 'accepted',
     });
-
-    expect(result.ok).toBe(false);
-    if (result.ok || result.error.stage !== 'workflow_validation') {
-      throw new Error('Expected quality-boundary rejection');
-    }
-    expect(result.error.validatorReport.issues).toContainEqual(
-      expect.objectContaining({
-        code: 'unsatisfied_workflow_obligation',
-        details: { obligationId: 'review-after-final-bug-proof' },
-      }),
-    );
   });
 });

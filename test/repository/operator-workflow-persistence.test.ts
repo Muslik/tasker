@@ -102,7 +102,6 @@ describe('operation-scoped workflow persistence', () => {
       receipt('session-run-a'),
       operationA,
     );
-    if (output.source.root.kind !== 'sequence') throw new Error('Expected sequence proposal');
     const invalidOutput = WorkflowAnalyzerOutputSchema.parse({
       ...output,
       source: {

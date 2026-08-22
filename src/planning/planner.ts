@@ -2,8 +2,9 @@ import { z } from 'zod';
 
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
-  compileWorkflow,
   CompiledWorkflowArtifactSchema,
+  compileSemanticWorkflow,
+  SemanticWorkflowArtifactSchema,
   ValidationReportSchema,
 } from '../workflow/index.js';
 import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
@@ -47,6 +48,7 @@ export const PlanningFailureSchema = z.discriminatedUnion('stage', [
 export const PlannedWorkflowSchema = z
   .object({
     compiled: CompiledWorkflowArtifactSchema,
+    semantic: SemanticWorkflowArtifactSchema,
     presentation: WorkflowPresentationTreeSchema,
     proposal: WorkflowProposalArtifactSchema,
     status: z.literal('accepted'),
@@ -72,21 +74,23 @@ const requiredCapabilitiesFromCompiledGraph = (
 const planParsedWorkflowProposal = (
   proposal: WorkflowProposalArtifact,
 ): Outcome<PlannedWorkflow, PlanningFailure> => {
-  const compiledResult = compileWorkflow({
+  const semanticResult = compileSemanticWorkflow({
     contracts: HARNESS_WORKFLOW_CONTRACTS,
     source: proposal.source,
+    loopExhaustedWait: 'operator_guidance@1',
   });
 
-  if (!compiledResult.ok) {
+  if (!semanticResult.ok) {
     return err({
       code: 'workflow_rejected',
       proposal,
       stage: 'workflow_validation',
-      validatorReport: compiledResult.error,
+      validatorReport: semanticResult.error,
     });
   }
+  const compiled = semanticResult.value.compiled;
 
-  const obligationReport = validateWorkflowObligations(compiledResult.value.graph, proposal.task);
+  const obligationReport = validateWorkflowObligations(compiled.graph, proposal.task);
   const policyIssues = [...obligationReport.issues];
   if (policyIssues.length > 0) {
     return err({
@@ -94,7 +98,7 @@ const planParsedWorkflowProposal = (
       proposal,
       stage: 'workflow_validation',
       validatorReport: {
-        workflowId: compiledResult.value.graph.metadata.workflowId,
+        workflowId: compiled.graph.metadata.workflowId,
         issues: policyIssues,
       },
     });
@@ -102,7 +106,7 @@ const planParsedWorkflowProposal = (
 
   const requiredCapabilities = requiredCapabilitiesFromCompiledGraph(
     proposal,
-    compiledResult.value.graph.metadata.references.stepTypes,
+    compiled.graph.metadata.references.stepTypes,
   );
   const available = new Set(proposal.capabilities.available);
   const missingCapabilities = requiredCapabilities.filter(
@@ -120,8 +124,9 @@ const planParsedWorkflowProposal = (
 
   return ok(
     PlannedWorkflowSchema.parse({
-      compiled: compiledResult.value,
-      presentation: createWorkflowPresentation(compiledResult.value, proposal),
+      compiled,
+      semantic: semanticResult.value,
+      presentation: createWorkflowPresentation(compiled, proposal),
       proposal,
       status: 'accepted',
     }),

@@ -178,8 +178,8 @@ describe('operator workflow projection', () => {
         workflowId: 'execution-workflow',
         runId: 'execution-run',
         workflowHash,
-        nodeStates: { 'implement-fix': 'succeeded' },
-        blockRuns: { 'implement-fix': 1 },
+        nodeStates: { 'implement-change': 'succeeded' },
+        blockRuns: { 'implement-change': 1 },
         loopIterations: {},
         status: 'running',
         currentNodeId: graph.root.id,
@@ -189,14 +189,14 @@ describe('operator workflow projection', () => {
     });
     const receipt = BlockReceiptSchema.parse({
       schemaVersion: 4,
-      receiptId: 'block-receipt:execution-workflow:execution-run:implement-fix:run-1',
-      blockReference: 'code.implement@1',
+      receiptId: 'block-receipt:execution-workflow:execution-run:implement-change:run-1',
+      blockReference: 'implement.change@1',
       blockDefinitionHash: 'block-definition-hash',
       taskReference: 'avia-13236-short-bug',
       workflowId: 'execution-workflow',
       workflowRunId: 'execution-run',
       workflowHash,
-      nodeId: 'implement-fix',
+      nodeId: 'implement-change',
       blockRun: 1,
       claim: {
         status: 'candidate_complete',
@@ -237,13 +237,13 @@ describe('operator workflow projection', () => {
     const projection = createOperatorWorkflowProjection('avia-13236-short-bug', lifecycle, {
       read: (receiptId) => ok(receiptId === receipt.receiptId ? receipt : null),
     });
-    const implementation = projection.stages.find(({ id }) => id === 'implementation');
+    const implementation = projection.stages.find(({ id }) => id === 'development');
 
     expect(projection.activeRuntime).toBe('execution');
     expect(implementation?.steps).toHaveLength(1);
     expect(implementation?.steps[0]).toMatchObject({
       kind: 'agent',
-      reference: 'code.implement@1',
+      reference: 'implement.change@1',
       attempts: 1,
       receipts: [
         {

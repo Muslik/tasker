@@ -95,7 +95,7 @@ const claudeJsonl = (finalMessage: unknown): string =>
 const providerMessage = (output: ReturnType<typeof validAnalyzerOutput>): string =>
   JSON.stringify({
     assemblyDecisions: output.assemblyDecisions,
-    sourceJson: JSON.stringify(output.source),
+    source: output.source,
     verificationPlan: output.verificationPlan,
   });
 
@@ -203,18 +203,10 @@ describe('subscription CLI workflow analyzer', () => {
     expect(executionRequest?.env?.CODEX_HOME).toMatch(
       /tasker-workflow-analyzer-.+\/provider-home$/u,
     );
-    expect(executionRequest?.stdin).toContain('Do not claim facts that require later execution');
-    expect(executionRequest?.stdin).toContain('MUST have exactly these top-level keys');
-    expect(executionRequest?.stdin).toContain(
-      '"root":{"kind":"sequence","id":"delivery","children"',
-    );
-    expect(executionRequest?.stdin).toContain('Do not omit node ids, sequence children, step with');
-    expect(executionRequest?.stdin).toContain('Construct the complete graph from an empty root');
-    expect(executionRequest?.stdin).toContain('NEVER return top-level keys such as schemaVersion');
-    expect(executionRequest?.stdin).not.toContain('copying plannerContext.baseTemplate');
-    expect(executionRequest?.stdin).toContain(
-      'Do not emit context discovery, implementation planning, or plan-review nodes',
-    );
+    expect(executionRequest?.stdin).toContain('return only a linked semantic suffix');
+    expect(executionRequest?.stdin).toContain('Never emit branch, wait, gate, finalize');
+    expect(executionRequest?.stdin).toContain('`code.repair`, `ci.repair`');
+    expect(executionRequest?.stdin).toContain('compiler inserts the terminal');
     expect(runner.requests[1]?.args).toEqual(
       expect.arrayContaining([
         'exec',
@@ -232,7 +224,8 @@ describe('subscription CLI workflow analyzer', () => {
       ]),
     );
     expect(executionRequest?.workspaceAccess).toBe('read_only');
-    expect(runner.schema).toContain('sourceJson');
+    expect(runner.schema).toContain('"source"');
+    expect(runner.schema).not.toContain('sourceJson');
   });
 
   it('runs the analyzer through a selected Claude subscription profile', async () => {

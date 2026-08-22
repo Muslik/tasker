@@ -143,29 +143,23 @@ describe('file-backed harness pack', () => {
   it('teaches the implementation planner the authoritative workflow source grammar', () => {
     const prompt = loadHarnessPack(join(process.cwd(), 'harness')).prompts.implementationPlanner;
 
+    expect(prompt.content).toContain('{"kind":"sequence","id":"...","children":[node,...]}');
     expect(prompt.content).toContain(
-      '{"kind":"branch","id":"...","when":"registered.predicate@version","then":node,"otherwise":node}',
+      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","body":sequence}',
     );
     expect(prompt.content).toContain(
-      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","checkBefore":true,"exhaustedWait":null,"body":node}',
+      '{"kind":"step","id":"...","uses":"registered.step@version","with":{}}',
     );
-    expect(prompt.content).toContain(
-      '{"kind":"wait","id":"...","for":"registered.wait@version","resumeAt":null}',
-    );
-    expect(prompt.content).toContain(
-      '{"kind":"gate","id":"...","reason":"...","resumeWhen":"registered.predicate@version","with":null}',
-    );
-    expect(prompt.content).toContain('{"kind":"finalize","id":"...","outcome":"accepted"}');
-    expect(prompt.content).toContain('Every acceptance criterion must have a unique kebab-case');
-    expect(prompt.content).toContain('"workflowStepIds":["..."]');
+    expect(prompt.content).toContain('Never emit branch, wait, gate, finalize');
+    expect(prompt.content).toContain('`code.implement`, `code.repair`, `ci.repair`');
+    expect(prompt.content).toContain('Every acceptance criterion has a unique kebab-case');
+    expect(prompt.content).toContain('`workflowStepIds`');
     expect(prompt.content).toContain('do not add a generic test-materialization step');
     expect(prompt.content).toContain('typed JSON values, not');
     expect(prompt.content).not.toContain('decisionJson');
     expect(prompt.content).not.toContain('evidenceRequestsJson');
-    expect(prompt.content).not.toContain('"maxIterations"');
-    expect(prompt.content).not.toContain('"onExhausted"');
-    expect(prompt.content).not.toContain('"cases"');
-    expect(prompt.content).not.toContain('"predicate"');
+    expect(prompt.content).not.toContain('"checkBefore"');
+    expect(prompt.content).not.toContain('"exhaustedWait"');
   });
 
   it('rejects obsolete step manifests instead of upcasting them', async () => {

@@ -33,9 +33,8 @@ describe('workflow analyzer context', () => {
       .loose()
       .parse(context.plannerContext);
 
-    expect(plannerContext.buildingBlocks.nodeKinds).toEqual(
-      expect.arrayContaining(['sequence', 'step', 'bounded_loop', 'wait']),
-    );
+    expect(plannerContext.buildingBlocks.nodeKinds).toEqual(['sequence', 'step', 'bounded_loop']);
+    expect(plannerContext.buildingBlocks).not.toHaveProperty('waits');
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toEqual(
       expect.arrayContaining([
         'bug.validate_fix@1',

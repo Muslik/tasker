@@ -4,15 +4,7 @@ import {
   createWorkflowProposalFromAnalyzerOutput,
 } from '../../src/planning/index.js';
 import { type ImplementationPlanner } from '../../src/providers/index.js';
-import {
-  branch,
-  bounded_loop,
-  finalize,
-  sequence,
-  step,
-  wait,
-  type WorkflowSource,
-} from '../../src/workflow/index.js';
+import { type SemanticNodeSource, type SemanticWorkflowSource } from '../../src/workflow/index.js';
 import {
   WorkflowGenerationSubjectSource,
   type PlanningTaskSnapshot,
@@ -195,273 +187,59 @@ export const makePlanningTaskSnapshot = (
   };
 };
 
-const shortBugWorkflow = (): WorkflowSource => ({
-  id: 'short-bugfix-delivery',
-  version: 1,
-  root: sequence('delivery', [
-    step('implement-fix', {
-      uses: 'code.implement@1',
-      with: {
-        objective: 'Implement the fix',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-13236',
-      },
-    }),
-    step('validate-targeted', {
-      uses: 'validate.targeted@1',
-      with: { profile: 'targeted', taskId: 'AVIA-13236' },
-    }),
-    bounded_loop('validation-repair-loop', {
-      maxAttempts: 3,
-      until: 'validation.passed@1',
-      checkBefore: true,
-      exhaustedWait: 'operator_guidance@1',
-      body: sequence('validation-repair', [
-        step('repair-validation', {
-          uses: 'code.repair@1',
-          with: {
-            objective: 'Repair validation failures',
-            repository: 'onetwotrip/front-avia',
-            taskId: 'AVIA-13236',
+const semanticWorkflow = (task: TestTaskFixture): SemanticWorkflowSource => {
+  const taskInput = (objective: string) => ({
+    objective,
+    repository: task.repository,
+    taskId: task.taskId,
+  });
+  return {
+    schemaVersion: 1,
+    id: `${task.fixtureId}-workflow`,
+    version: 1,
+    root: {
+      kind: 'sequence',
+      id: 'task-work',
+      children: [
+        {
+          kind: 'bounded_loop',
+          id: 'development',
+          maxAttempts: 3,
+          until: 'verification.accepted@1',
+          body: {
+            kind: 'sequence',
+            id: 'development-attempt',
+            children: [
+              {
+                kind: 'step',
+                id: 'implement-change',
+                uses: 'implement.change@1',
+                with: taskInput(`Implement ${task.title}`),
+              },
+              {
+                kind: 'step',
+                id: 'verify-change',
+                uses: 'verify.acceptance@1',
+                with: taskInput(`Verify ${task.title}`),
+              },
+            ],
           },
-        }),
-        step('revalidate-targeted', {
-          uses: 'validate.targeted@1',
-          with: { profile: 'targeted', taskId: 'AVIA-13236' },
-        }),
-      ]),
-    }),
-    step('validate-bug-fix', {
-      uses: 'bug.validate_fix@1',
-      with: {
-        objective: 'Repeat bug scenario after the fix',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-13236',
-        phase: 'after',
-      },
-    }),
-    step('agent-review', {
-      uses: 'review.agent@1',
-      with: {
-        objective: 'Review the change',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-13236',
-      },
-    }),
-    bounded_loop('agent-review-repair-loop', {
-      maxAttempts: 3,
-      until: 'agent_review.accepted@1',
-      checkBefore: true,
-      exhaustedWait: 'operator_guidance@1',
-      body: sequence('agent-review-repair', [
-        step('repair-agent-review', {
-          uses: 'code.repair@1',
-          with: {
-            objective: 'Repair review findings',
-            repository: 'onetwotrip/front-avia',
-            taskId: 'AVIA-13236',
-          },
-        }),
-        step('review-validate-targeted', {
-          uses: 'validate.targeted@1',
-          with: { profile: 'targeted', taskId: 'AVIA-13236' },
-        }),
-        step('repeat-agent-review', {
-          uses: 'review.agent@1',
-          with: {
-            objective: 'Repeat the review',
-            repository: 'onetwotrip/front-avia',
-            taskId: 'AVIA-13236',
-          },
-        }),
-      ]),
-    }),
-    step('describe-pr', {
-      uses: 'pr.describe@1',
-      with: {
-        objective: 'Describe the PR',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-13236',
-        draftPath: '.tasker/pull-request/draft.json',
-      },
-    }),
-    step('prepare-pr', {
-      uses: 'pr.prepare@1',
-      with: {
-        objective: 'Prepare the PR',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-13236',
-        draftPath: '.tasker/pull-request/draft.json',
-      },
-    }),
-    step('observe-ci', {
-      uses: 'ci.observe@1',
-      with: { objective: 'Observe CI', repository: 'onetwotrip/front-avia', taskId: 'AVIA-13236' },
-    }),
-    bounded_loop('ci-recovery-loop', {
-      maxAttempts: 3,
-      until: 'ci.passed@1',
-      checkBefore: true,
-      exhaustedWait: 'operator_guidance@1',
-      body: branch('ci-classification', {
-        when: 'ci.change_failure@1',
-        then: step('repair-ci-failure', {
-          uses: 'ci.repair@1',
-          with: {
-            objective: 'Repair the CI failure',
-            repository: 'onetwotrip/front-avia',
-            taskId: 'AVIA-13236',
-          },
-        }),
-        otherwise: wait('wait-for-flaky-ci-retry', { for: 'ci_retry@1' }),
-      }),
-    }),
-    wait('wait-for-code-review', { for: 'code_review@1' }),
-    finalize('finished', { outcome: 'done' }),
-  ]),
-});
-
-const featureWorkflow = (includeVisual: boolean): WorkflowSource => ({
-  id: 'feature-delivery',
-  version: 1,
-  root: sequence('delivery', [
-    step('implement-feature', {
-      uses: 'code.implement@1',
-      with: {
-        objective: 'Implement the feature',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-12536',
-      },
-    }),
-    step('validate-full', {
-      uses: 'validate.full@1',
-      with: { profile: 'full', taskId: 'AVIA-12536' },
-    }),
-    ...(includeVisual
-      ? [
-          step('validate-visual', {
-            uses: 'validate.visual@1',
-            with: { profile: 'visual', taskId: 'AVIA-12536' },
-          }),
-        ]
-      : []),
-    step('agent-review', {
-      uses: 'review.agent@1',
-      with: {
-        objective: 'Review the feature',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-12536',
-      },
-    }),
-    step('describe-pr', {
-      uses: 'pr.describe@1',
-      with: {
-        objective: 'Describe the PR',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-12536',
-        draftPath: '.tasker/pull-request/draft.json',
-      },
-    }),
-    step('prepare-pr', {
-      uses: 'pr.prepare@1',
-      with: {
-        objective: 'Prepare the PR',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-12536',
-        draftPath: '.tasker/pull-request/draft.json',
-      },
-    }),
-    step('observe-ci', {
-      uses: 'ci.observe@1',
-      with: { objective: 'Observe CI', repository: 'onetwotrip/front-avia', taskId: 'AVIA-12536' },
-    }),
-    wait('wait-for-code-review', { for: 'code_review@1' }),
-    finalize('finished', { outcome: 'done' }),
-  ]),
-});
-
-const sharedComponentWorkflow = (): WorkflowSource => ({
-  id: 'shared-component-delivery',
-  version: 1,
-  root: sequence('delivery', [
-    step('implement-component-copy', {
-      uses: 'code.implement@1',
-      with: {
-        objective: 'Implement the shared component copy',
-        repository: 'twiket/ui-kit',
-        taskId: 'AVIA-14001',
-      },
-    }),
-    step('extract-translation-keys', {
-      uses: 'translations.extract@1',
-      with: { repository: 'twiket/ui-kit', taskId: 'AVIA-14001' },
-    }),
-    wait('wait-for-translator', { for: 'translation_complete@1' }),
-    step('pull-translations', {
-      uses: 'translations.pull@1',
-      with: { repository: 'twiket/ui-kit', taskId: 'AVIA-14001' },
-    }),
-    step('publish-development-package', {
-      uses: 'component.dev_publish@1',
-      with: { repository: 'twiket/ui-kit', taskId: 'AVIA-14001' },
-    }),
-    wait('wait-for-final-publish', { for: 'final_publish@1' }),
-    step('consume-published-version', {
-      uses: 'component.consume_published@1',
-      with: {
-        objective: 'Consume the published version',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-14001',
-      },
-    }),
-    step('validate-targeted', {
-      uses: 'validate.targeted@1',
-      with: { profile: 'targeted', taskId: 'AVIA-14001' },
-    }),
-    step('agent-review', {
-      uses: 'review.agent@1',
-      with: {
-        objective: 'Review the cross-repository change',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-14001',
-      },
-    }),
-    step('describe-pr', {
-      uses: 'pr.describe@1',
-      with: {
-        objective: 'Describe the PR',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-14001',
-        draftPath: '.tasker/pull-request/draft.json',
-      },
-    }),
-    step('prepare-pr', {
-      uses: 'pr.prepare@1',
-      with: {
-        objective: 'Prepare the PR',
-        repository: 'onetwotrip/front-avia',
-        taskId: 'AVIA-14001',
-        draftPath: '.tasker/pull-request/draft.json',
-      },
-    }),
-    step('observe-ci', {
-      uses: 'ci.observe@1',
-      with: { objective: 'Observe CI', repository: 'onetwotrip/front-avia', taskId: 'AVIA-14001' },
-    }),
-    wait('wait-for-code-review', { for: 'code_review@1' }),
-    finalize('finished', { outcome: 'done' }),
-  ]),
-});
+        },
+        {
+          kind: 'step',
+          id: 'review-change',
+          uses: 'review.change@1',
+          with: taskInput(`Review ${task.title}`),
+        },
+      ],
+    },
+  };
+};
 
 export const makeAnalyzerOutput = (
   task: TestTaskFixture = makeTaskFixture(),
 ): WorkflowAnalyzerOutput => {
-  const source =
-    task.family === 'short_bugfix'
-      ? shortBugWorkflow()
-      : task.family === 'shared_component'
-        ? sharedComponentWorkflow()
-        : featureWorkflow(task.verification === 'full_with_visual');
+  const source = semanticWorkflow(task);
 
   const verificationPlan =
     task.family === 'short_bugfix'
@@ -522,26 +300,25 @@ export const makeWorkflowProposal = (
   return proposal.value;
 };
 
-const firstStepId = (node: WorkflowSource['root']): string => {
+const stepIdByUse = (node: SemanticNodeSource, reference: string): string | null => {
   switch (node.kind) {
     case 'step':
-      return node.id;
+      return node.uses === reference ? node.id : null;
     case 'sequence':
-      return firstStepId(node.children[0] ?? finalize('missing', { outcome: 'missing' }));
-    case 'branch':
-      return firstStepId(node.then);
+      for (const child of node.children) {
+        const found = stepIdByUse(child, reference);
+        if (found !== null) return found;
+      }
+      return null;
     case 'bounded_loop':
-      return firstStepId(node.body);
-    case 'wait':
-    case 'gate':
-    case 'finalize':
-      throw new Error('Test workflow has no executable step');
+      return stepIdByUse(node.body, reference);
   }
 };
 
 export const makeReadyPlanningDecision = (): ImplementationPlanningDecision => {
   const workflow = makeAnalyzerOutput();
-  const verificationStepId = firstStepId(workflow.source.root);
+  const verificationStepId = stepIdByUse(workflow.source.root, 'verify.acceptance@1');
+  if (verificationStepId === null) throw new Error('Test workflow has no Verify block');
   return {
     status: 'ready',
     executionStrategy: 'simple',

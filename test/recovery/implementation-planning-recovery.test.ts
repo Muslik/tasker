@@ -106,32 +106,30 @@ const withPlanningFixture = async (
 
 describe('implementation planning recovery', () => {
   it('rejects obsolete planning activity payloads instead of inferring missing identity', async () => {
-    await withPlanningFixture(
-      'tasker-plan-obsolete-activity-',
-      async ({ directory, clock, ledger }) => {
-        const fixture = planningFixture(ledger, clock, directory, makeTestImplementationPlanner());
-        const aggregateId = `implementation-plan:${PLANNING_EPISODE_ID}`;
-        const recorded = ledger.repository.transact({
-          aggregate: {
-            aggregateId,
-            expectedVersion: 0,
-            events: [
-              {
-                eventId: `event:${aggregateId}:1`,
-                eventType: 'ImplementationPlanningStarted',
-                eventSchemaVersion: 1,
-                payload: { attempt: 1, strategy: 'fast' },
-              },
-            ],
-          },
-        });
+    await withPlanningFixture('tasker-plan-obsolete-activity-', ({ directory, clock, ledger }) => {
+      const fixture = planningFixture(ledger, clock, directory, makeTestImplementationPlanner());
+      const aggregateId = `implementation-plan:${PLANNING_EPISODE_ID}`;
+      const recorded = ledger.repository.transact({
+        aggregate: {
+          aggregateId,
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: `event:${aggregateId}:1`,
+              eventType: 'ImplementationPlanningStarted',
+              eventSchemaVersion: 1,
+              payload: { attempt: 1, strategy: 'fast' },
+            },
+          ],
+        },
+      });
 
-        expect(recorded.ok).toBe(true);
-        expect(() => fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toThrow(
-          'Invalid implementation planning event payload: ImplementationPlanningStarted',
-        );
-      },
-    );
+      expect(recorded.ok).toBe(true);
+      expect(() => fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toThrow(
+        'Invalid implementation planning event payload: ImplementationPlanningStarted',
+      );
+      return Promise.resolve();
+    });
   });
 
   it('never supplies a plan from another run of the same task as previousDecision', async () => {
@@ -202,12 +200,12 @@ describe('implementation planning recovery', () => {
         expect(executionSnapshot.value.executionStrategy).toBe('simple');
         expect(
           executionSnapshot.value.harness.steps.find(
-            ({ reference }) => reference === 'code.implement@1',
+            ({ reference }) => reference === 'implement.change@1',
           )?.executionProfile,
         ).toMatchObject({ model: 'gpt-5.6-luna', effort: 'medium' });
         expect(
           executionSnapshot.value.harness.steps.find(
-            ({ reference }) => reference === 'review.agent@1',
+            ({ reference }) => reference === 'review.change@1',
           )?.executionProfile,
         ).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high' });
         const firstDraft = first.coordinator.draftFor(planned.value);
@@ -538,7 +536,6 @@ describe('implementation planning recovery', () => {
             if (!base.ok || base.value.decision?.status !== 'ready') return base;
             if (calls === 1) {
               const source = base.value.decision.workflow.source;
-              if (source.root.kind !== 'sequence') throw new Error('Expected sequence fixture');
               return ok({
                 ...base.value,
                 decision: {
@@ -617,7 +614,6 @@ describe('implementation planning recovery', () => {
             if (!base.ok || base.value.decision?.status !== 'ready') return base;
             if (request.operationId === firstCommand) {
               const source = base.value.decision.workflow.source;
-              if (source.root.kind !== 'sequence') throw new Error('Expected sequence fixture');
               return ok({
                 ...base.value,
                 decision: {

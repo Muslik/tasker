@@ -104,7 +104,7 @@ export const createWorkflowAnalyzerContext = (
         })),
       ),
       buildingBlocks: {
-        nodeKinds: ['sequence', 'step', 'branch', 'bounded_loop', 'wait', 'gate', 'finalize'],
+        nodeKinds: ['sequence', 'step', 'bounded_loop'],
         predicates: HARNESS_WORKFLOW_CONTRACTS.predicates.entries.map((contract) => ({
           reference: toContractReference(contract),
           inputSchema: inputContract(contract.inputSchema),
@@ -126,17 +126,6 @@ export const createWorkflowAnalyzerContext = (
               : { outputPredicates: contract.outputPredicates }),
             ...stepHarnessMetadata(toContractReference(contract), policies),
           })),
-        waits: HARNESS_WORKFLOW_CONTRACTS.waits.entries.map((contract) => ({
-          reference: toContractReference(contract),
-          artifactContracts: contract.artifactContracts ?? [],
-          ...(contract.resolutionSchema === undefined
-            ? {}
-            : { resolutionSchema: inputContract(contract.resolutionSchema) }),
-          ...(contract.resolutionMapping === undefined
-            ? {}
-            : { resolutionMapping: contract.resolutionMapping }),
-          ...(contract.description === undefined ? {} : { description: contract.description }),
-        })),
       },
     }),
   };

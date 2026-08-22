@@ -17,6 +17,7 @@ import {
   type WorkflowAnalyzerContext,
   type WorkflowAnalyzerOutput,
 } from '../planning/index.js';
+import { SemanticWorkflowSourceSchema } from '../workflow/index.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
@@ -38,7 +39,7 @@ import { estimateApiCost } from './api-cost.js';
 const WorkflowAnalyzerProviderOutputSchema = z
   .object({
     assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
-    sourceJson: z.string().min(1),
+    source: SemanticWorkflowSourceSchema,
     verificationPlan: VerificationPlanSchema,
   })
   .strict();
@@ -236,19 +237,9 @@ export class SubscriptionCliWorkflowAnalyzer {
         });
       }
 
-      let sourceInput: unknown;
-      try {
-        sourceInput = JSON.parse(providerOutput.data.sourceJson) as unknown;
-      } catch {
-        return err({
-          kind: 'invalid_analyzer_output',
-          issues: ['sourceJson: expected serialized WorkflowSource JSON'],
-        });
-      }
-
       const output = WorkflowAnalyzerOutputSchema.safeParse({
         assemblyDecisions: providerOutput.data.assemblyDecisions,
-        source: sourceInput,
+        source: providerOutput.data.source,
         verificationPlan: providerOutput.data.verificationPlan,
       });
       if (!output.success) {
