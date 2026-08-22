@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "reference": "implement.change@1",
+  "description": "Implement or repair one bounded accepted-plan change in the managed worktree.",
+  "stage": { "id": "development", "label": "Development" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "agent_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "implementation",
+    "strategyRole": "implementation",
+    "prompt": "prompt.md",
+    "skills": []
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": { "kind": "workspace_mutation" },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["workspace.write"],
+  "requiredCapabilities": ["repository.read", "workspace.write"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["source-diff"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [
+    "cross_repository_dependency",
+    "external_process_required",
+    "task_scope_changed",
+    "verification_scope_changed"
+  ],
+  "reconciliation": { "strategy": "receipt" }
+}

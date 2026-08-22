@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "reference": "review.change@1",
+  "description": "Review the accepted plan, exact change set, commits, and accepted verification evidence.",
+  "stage": { "id": "agent_review", "label": "Agent review" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "agent_review_output",
+  "outputPredicates": {
+    "discriminator": "decision",
+    "cases": {
+      "accepted": {
+        "agent_review.accepted@1": true,
+        "agent_review.changes_requested@1": false
+      },
+      "changes_requested": {
+        "agent_review.accepted@1": false,
+        "agent_review.changes_requested@1": true
+      }
+    }
+  },
+  "executor": {
+    "kind": "agent",
+    "profile": "review",
+    "strategyRole": "review",
+    "prompt": "prompt.md",
+    "skills": []
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["agent-review"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "attempt",
+  "idempotency": "none",
+  "waitKinds": [],
+  "artifactContracts": ["agent-review"],
+  "requiredArtifactContracts": ["source-diff", "acceptance-verification"],
+  "workflowChanges": []
+}

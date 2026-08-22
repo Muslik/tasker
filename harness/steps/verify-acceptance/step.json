@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "reference": "verify.acceptance@1",
+  "description": "Independently execute the accepted verification strategy and judge task acceptance.",
+  "stage": { "id": "development", "label": "Development" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "agent_review_output",
+  "outputPredicates": {
+    "discriminator": "decision",
+    "cases": {
+      "accepted": {
+        "verification.accepted@1": true,
+        "verification.changes_requested@1": false
+      },
+      "changes_requested": {
+        "verification.accepted@1": false,
+        "verification.changes_requested@1": true
+      }
+    }
+  },
+  "executor": {
+    "kind": "agent",
+    "profile": "verification",
+    "strategyRole": "verification",
+    "prompt": "prompt.md",
+    "skills": ["playwright-demo", "test-design"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["acceptance-verification"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": ["command.run"],
+  "requiredCapabilities": ["repository.read", "command.run"],
+  "resumeBoundary": "attempt",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["acceptance-verification"],
+  "requiredArtifactContracts": ["source-diff"],
+  "workflowChanges": [
+    "cross_repository_dependency",
+    "external_process_required",
+    "task_scope_changed",
+    "verification_scope_changed"
+  ],
+  "reconciliation": { "strategy": "receipt" }
+}

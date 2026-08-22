@@ -17,6 +17,7 @@
       "skill": "ai-assistance",
       "steps": [
         "code.implement@1",
+        "implement.change@1",
         "code.repair@1",
         "ci.repair@1",
         "component.consume_published@1",
