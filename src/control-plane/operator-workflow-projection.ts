@@ -468,7 +468,9 @@ export const createOperatorWorkflowProjection = (
           transcript:
             activeContinuation === undefined
               ? execution === null
-                ? null
+                ? lifecycle.bootstrap.activeTranscriptOperationId === null
+                  ? null
+                  : readContinuationTranscript(lifecycle.bootstrap.activeTranscriptOperationId)
                 : readExecutionTranscript(execution)
               : readContinuationTranscript(activeContinuation.transcriptOperationId),
         };

@@ -138,6 +138,7 @@ export async function bootstrapWorkflowV3(
   let planningContext: BootstrapContextState | null = null;
   let draft: BootstrapDraftState | null = null;
   let planning: BootstrapPlanningState | null = null;
+  let activeTranscriptOperationId: string | null = null;
   let freezeReceipt: WorkflowFreezeReceipt | null = null;
   let pendingResolution: ResolveBootstrapWaitCommand | null = null;
   let planningCommandSequence = 0;
@@ -162,6 +163,7 @@ export async function bootstrapWorkflowV3(
     context: null,
     draft: null,
     planning: null,
+    activeTranscriptOperationId: null,
     freezeReceipt: null,
     executionWorkflowId: null,
     nodeStates,
@@ -189,6 +191,7 @@ export async function bootstrapWorkflowV3(
   });
 
   const markRunning = (stage: Stage, phase: AvailableBootstrapState['phase']): void => {
+    if (stage !== 'planning' && stage !== 'plan_review') activeTranscriptOperationId = null;
     nodeStates[stage] = 'running';
     state = {
       ...state,
@@ -198,6 +201,7 @@ export async function bootstrapWorkflowV3(
       context: planningContext,
       draft,
       planning,
+      activeTranscriptOperationId,
       freezeReceipt,
       status: 'running',
       currentNodeId: stage,
@@ -215,6 +219,7 @@ export async function bootstrapWorkflowV3(
       context: planningContext,
       draft,
       planning,
+      activeTranscriptOperationId,
       freezeReceipt,
       status: 'waiting',
       currentNodeId: stage,
@@ -286,6 +291,7 @@ export async function bootstrapWorkflowV3(
     for (;;) {
       planningCommandSequence += 1;
       const commandId = `${execution.workflowId}:${execution.runId}:planning:${String(planningCommandSequence)}`;
+      activeTranscriptOperationId = commandId;
       let result: BootstrapPlanningState;
       for (;;) {
         markRunning('planning', 'planning');

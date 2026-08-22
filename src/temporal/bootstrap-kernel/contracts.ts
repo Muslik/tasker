@@ -159,6 +159,7 @@ const BootstrapWorkflowStateBaseSchema = z
     context: BootstrapContextStateSchema.nullable(),
     draft: BootstrapDraftStateSchema.nullable(),
     planning: BootstrapPlanningStateSchema.nullable(),
+    activeTranscriptOperationId: z.string().min(1).nullable(),
     freezeReceipt: WorkflowFreezeReceiptSchema.nullable(),
     executionWorkflowId: z.string().min(1).nullable(),
     nodeStates: z.record(z.string(), BootstrapStageStatusSchema),

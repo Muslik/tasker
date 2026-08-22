@@ -63,6 +63,7 @@ const waitingLifecycleFor = (
         evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'c'.repeat(64), revision: 1 },
       },
       planning: null,
+      activeTranscriptOperationId: null,
       freezeReceipt: null,
       executionWorkflowId: 'execution-workflow',
       nodeStates: {},
@@ -96,6 +97,57 @@ afterEach(() => {
 });
 
 describe('operator workflow projection', () => {
+  it('projects the active bootstrap planner transcript before the planner returns', () => {
+    const operationId = 'bootstrap-workflow:bootstrap-run:planning:1';
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: 'AVIA-1',
+        workflowId: 'bootstrap-workflow',
+        runId: 'bootstrap-run',
+        workflowHash: null,
+        settings: { planReview: 'required', planningStrategy: 'fast' },
+        phase: 'planning',
+        workspaceContext: null,
+        context: null,
+        draft: null,
+        planning: null,
+        activeTranscriptOperationId: operationId,
+        freezeReceipt: null,
+        executionWorkflowId: null,
+        nodeStates: { workspace: 'succeeded', planning: 'running' },
+        attempts: { planning: 1 },
+        status: 'running',
+        currentNodeId: 'planning',
+        wait: null,
+        outcome: null,
+      },
+      execution: null,
+    });
+
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      lifecycle,
+      { read: () => ok(null) },
+      () => null,
+      () => null,
+      (activeOperationId) => ({
+        transcriptId: `planning-transcript:${activeOperationId}`,
+        operationId: activeOperationId,
+        chunks: [],
+        totalBytes: 42,
+        truncated: false,
+      }),
+    );
+
+    expect(projection.current).toMatchObject({
+      status: 'running',
+      nodeId: 'planning',
+      transcript: { operationId, totalBytes: 42 },
+    });
+  });
+
   it('classifies an integration failure as an external prerequisite', () => {
     const projection = createOperatorWorkflowProjection(
       'AVIA-1',
@@ -278,6 +330,7 @@ describe('operator workflow projection', () => {
           },
         },
         planning: null,
+        activeTranscriptOperationId: null,
         freezeReceipt: null,
         executionWorkflowId: 'execution-workflow',
         nodeStates: {
@@ -441,6 +494,7 @@ describe('operator workflow projection', () => {
           evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'c'.repeat(64), revision: 1 },
         },
         planning: null,
+        activeTranscriptOperationId: null,
         freezeReceipt: null,
         executionWorkflowId: 'execution-workflow',
         nodeStates: {},
@@ -588,6 +642,7 @@ describe('operator workflow projection', () => {
           evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'c'.repeat(64), revision: 1 },
         },
         planning: null,
+        activeTranscriptOperationId: null,
         freezeReceipt: null,
         executionWorkflowId: 'execution-workflow',
         nodeStates: {},

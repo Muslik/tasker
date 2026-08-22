@@ -38,6 +38,7 @@ const waitingRun = (input: BootstrapWorkflowInput, runId: string): TaskRunPublic
     context: null,
     draft: null,
     planning: null,
+    activeTranscriptOperationId: null,
     freezeReceipt: null,
     executionWorkflowId: null,
     nodeStates: { plan_review: 'waiting' },
