@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "caseId": "simple-bug-expanded-recovery",
+  "taskClass": "simple_frontend_bug",
+  "observed": {
+    "semanticIntent": [
+      "intake",
+      "workspace",
+      "investigate",
+      "plan",
+      "development_loop",
+      "agent_review",
+      "pull_request"
+    ],
+    "compiledGraph": {
+      "nodes": 114,
+      "steps": 62,
+      "loops": 15,
+      "waits": 8,
+      "branches": 6
+    },
+    "validation": {
+      "transportStatus": "succeeded",
+      "domainPassed": false,
+      "domainFailed": true,
+      "projectedStageStatus": "succeeded",
+      "nextMaterializedWork": "validation_repair"
+    },
+    "qualityOrder": ["implement", "project_validation", "agent_review", "post_fix_evidence"],
+    "usage": {
+      "initialPlanningTokens": 71005,
+      "investigationTokens": 4047080,
+      "finalPlanningTokens": 415948,
+      "implementationTokens": 429920,
+      "validationRepairTokens": 648147,
+      "agentReviewTokens": 231452,
+      "totalTokens": 5843552
+    }
+  },
+  "requiredCutover": {
+    "maximumSimpleSemanticNodes": 10,
+    "maximumInitialDevelopmentLoops": 1,
+    "validationDomainStatus": "failed",
+    "causalNextWork": "development_loop_attempt",
+    "completedAttemptTranscriptAddressable": true,
+    "agentAuthoredEvidencePaths": false,
+    "readOnlyInvestigationWorkspace": true
+  }
+}
