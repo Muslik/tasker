@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 
 export interface TaskStepFilesystemPaths {
   readonly artifactsPath: string;
+  readonly inputsPath: string;
   readonly scratchPath: string;
 }
 
@@ -18,15 +19,23 @@ export class TaskStepFilesystemStore {
     const key = createHash('sha256').update(operationId).digest('hex');
     const artifactsPath = join(this.rootPath, 'artifacts', key);
     const scratchPath = join(this.rootPath, 'scratch', key);
-    await rm(scratchPath, { recursive: true, force: true });
+    const inputsPath = join(this.rootPath, 'inputs', key);
+    await Promise.all([
+      rm(scratchPath, { recursive: true, force: true }),
+      rm(inputsPath, { recursive: true, force: true }),
+    ]);
     await Promise.all([
       mkdir(artifactsPath, { recursive: true, mode: 0o700 }),
       mkdir(scratchPath, { recursive: true, mode: 0o700 }),
+      mkdir(inputsPath, { recursive: true, mode: 0o700 }),
     ]);
-    return { artifactsPath, scratchPath };
+    return { artifactsPath, inputsPath, scratchPath };
   }
 
   public cleanupScratch(paths: TaskStepFilesystemPaths): Promise<void> {
-    return rm(paths.scratchPath, { recursive: true, force: true });
+    return Promise.all([
+      rm(paths.scratchPath, { recursive: true, force: true }),
+      rm(paths.inputsPath, { recursive: true, force: true }),
+    ]).then(() => undefined);
   }
 }

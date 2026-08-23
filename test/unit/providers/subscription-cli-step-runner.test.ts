@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -120,6 +128,8 @@ describe('subscription CLI task-step runner', () => {
       workspaceAccess: CommandRequest['workspaceAccess'];
       scratchRoot: string;
       artifactsRoot: string;
+      stdin: string;
+      mounts: CommandRequest['mounts'];
     }[] = [];
     const commands: WorkspaceCommandRunner = {
       executionEnvironment: 'docker_workspace',
@@ -158,6 +168,8 @@ describe('subscription CLI task-step runner', () => {
           workspaceAccess: request.workspaceAccess,
           scratchRoot,
           artifactsRoot,
+          stdin: request.stdin,
+          mounts: request.mounts,
         });
         writeFileSync(join(artifactsRoot, 'result.json'), '{"verified":true}\n', 'utf8');
         return Promise.resolve({
@@ -173,14 +185,22 @@ describe('subscription CLI task-step runner', () => {
     };
     const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const inputRoot = mkdtempSync(join(tmpdir(), 'tasker-step-input-'));
+    writeFileSync(join(inputRoot, 'verification.json'), '{"accepted":true}\n', 'utf8');
+    const evidenceStore = new TaskStepEvidenceStore(ledger.repository, systemClock);
+    const registeredInput = await evidenceStore.register('workflow:verify:attempt-1', inputRoot);
+    if (!registeredInput.ok || registeredInput.value[0] === undefined) {
+      throw new Error('Input evidence fixture was not registered');
+    }
     const runner = new SubscriptionCliTaskStepAgentRunner(
       commands,
       new TaskStepFilesystemStore(stepDataPath),
-      new TaskStepEvidenceStore(ledger.repository, systemClock),
+      evidenceStore,
     );
 
     try {
       const result = await runner.run({
+        inputArtifactIds: [registeredInput.value[0]],
         operationId: 'workflow:step:attempt-1',
         stepReference: 'implement.change@1',
         profile: TEST_CODEX_PROFILE,
@@ -222,12 +242,24 @@ describe('subscription CLI task-step runner', () => {
       expect(observations[0]?.args).toContain('--dangerously-bypass-approvals-and-sandbox');
       expect(observations[0]?.workspaceAccess).toBe('read_write');
       expect(observations[0]?.artifactsRoot).toMatch(/\/artifacts\/[a-f0-9]{64}$/u);
+      expect(observations[0]?.stdin).toContain('Mounted immutable input evidence:');
+      expect(observations[0]?.stdin).toContain('verification.json');
+      expect(observations[0]?.mounts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: realpathSync(join(inputRoot, 'verification.json')),
+            target: realpathSync(join(inputRoot, 'verification.json')),
+            readOnly: true,
+          }),
+        ]),
+      );
       expect(existsSync(observations[0]?.artifactsRoot ?? '')).toBe(true);
       expect(existsSync(observations[0]?.scratchRoot ?? '')).toBe(false);
     } finally {
       ledger.close();
       rmSync(repositoryPath, { recursive: true, force: true });
       rmSync(stepDataPath, { recursive: true, force: true });
+      rmSync(inputRoot, { recursive: true, force: true });
     }
   });
 
@@ -268,6 +300,7 @@ describe('subscription CLI task-step runner', () => {
 
     try {
       const result = await runner.run({
+        inputArtifactIds: [],
         operationId: 'workflow:claude-step:attempt-1',
         stepReference: 'implement.change@1',
         profile: TEST_CLAUDE_PROFILE,

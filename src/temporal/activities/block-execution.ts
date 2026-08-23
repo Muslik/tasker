@@ -232,6 +232,7 @@ export interface TaskStepActivityContext {
 }
 
 export interface TaskStepAgentRequest {
+  readonly inputArtifactIds: readonly string[];
   readonly operationId: string;
   readonly stepReference: string;
   readonly profile: ResolvedExecutionProfile;
@@ -267,6 +268,7 @@ export type TaskStepAgentFailure =
     }
   | { readonly kind: 'skill_materialization_failed'; readonly message: string }
   | { readonly kind: 'evidence_persistence_failed'; readonly message: string }
+  | { readonly kind: 'input_evidence_unavailable'; readonly message: string }
   | { readonly kind: 'invalid_skill_selection'; readonly issues: readonly string[] }
   | { readonly kind: 'provider_timed_out'; readonly durationMs: number; readonly stderr: string }
   | {
@@ -315,9 +317,19 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
 
     const directory = await mkdtemp(join(tmpdir(), 'tasker-step-agent-'));
     const stepFilesystem = await this.filesystems.prepare(request.operationId);
-    const schemaPath = join(directory, 'task-step-output.schema.json');
-    const isolatedConfigurationRoot = join(directory, 'provider-home');
     try {
+      const inputArtifacts = await this.evidence.materializeInputs(
+        request.inputArtifactIds,
+        stepFilesystem.inputsPath,
+      );
+      if (!inputArtifacts.ok) {
+        return err({
+          kind: 'input_evidence_unavailable',
+          message: `Immutable input evidence is unavailable: ${inputArtifacts.error.kind}`,
+        });
+      }
+      const schemaPath = join(directory, 'task-step-output.schema.json');
+      const isolatedConfigurationRoot = join(directory, 'provider-home');
       if (profile.provider === 'codex') {
         await prepareIsolatedCodexHome(isolatedConfigurationRoot);
       } else {
@@ -345,6 +357,11 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         preparedSkills.value.skillsRoot,
       );
       const harnessEnvironmentFile = harnessEnvironment.TASKER_HARNESS_ENV_FILE;
+      const inputEvidenceMounts: readonly CommandMount[] = inputArtifacts.value.map(({ path }) => ({
+        source: path,
+        target: path,
+        readOnly: true,
+      }));
       const extraMounts: readonly CommandMount[] =
         harnessEnvironmentFile !== undefined && harnessEnvironmentFile !== '/dev/null'
           ? [
@@ -415,8 +432,15 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             readOnly: false,
           },
           ...extraMounts,
+          ...inputEvidenceMounts,
         ],
-        stdin: request.prompt,
+        stdin: [
+          request.prompt,
+          '',
+          'Mounted immutable input evidence:',
+          JSON.stringify(inputArtifacts.value, null, 2),
+          'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
+        ].join('\n'),
         timeoutMs: profile.timeoutMs,
       });
       if (execution.status === 'spawn_failed') {
@@ -1470,6 +1494,9 @@ export const executeRegisteredTaskStep = async (
       evidence,
     });
     const provider = await dependencies.agentRunner.run({
+      inputArtifactIds: evidence.completedSteps
+        .filter(({ status }) => status === 'completed')
+        .flatMap(({ artifactIds }) => artifactIds),
       operationId: executionOperationId(input),
       stepReference: input.uses,
       profile: executionProfile,

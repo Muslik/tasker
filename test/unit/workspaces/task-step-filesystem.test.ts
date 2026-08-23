@@ -24,6 +24,7 @@ describe('task step filesystem store', () => {
 
       await store.cleanupScratch(redelivered);
       expect(existsSync(redelivered.scratchPath)).toBe(false);
+      expect(existsSync(redelivered.inputsPath)).toBe(false);
       expect(existsSync(redelivered.artifactsPath)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { LedgerRepository } from '../../ledger/repository.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import { TaskStepEvidenceArtifactSchema } from '../task-step-evidence-contracts.js';
+import { TaskStepOutputArtifactSchema } from '../task-step-output.js';
 
 const MAX_EVIDENCE_FILES = 100;
 const MAX_EVIDENCE_FILE_BYTES = 50 * 1024 * 1024;
@@ -20,7 +21,17 @@ export type TaskStepEvidenceError =
       readonly maximumBytes: number;
     }
   | { readonly kind: 'invalid_entry'; readonly relativePath: string }
+  | { readonly kind: 'artifact_missing'; readonly artifactId: string }
+  | { readonly kind: 'artifact_corrupt'; readonly artifactId: string }
   | { readonly kind: 'root_unavailable'; readonly message: string };
+
+export interface TaskStepInputArtifact {
+  readonly artifactId: string;
+  readonly mimeType: string;
+  readonly path: string;
+  readonly relativePath: string;
+  readonly source: 'evidence' | 'receipt';
+}
 
 const inside = (root: string, candidate: string): boolean => {
   const difference = relative(root, candidate);
@@ -187,5 +198,77 @@ export class TaskStepEvidenceStore {
       artifactIds.push(artifactId);
     }
     return ok(artifactIds);
+  }
+
+  public async materializeInputs(
+    artifactIds: readonly string[],
+    inputsPath: string,
+  ): Promise<Outcome<readonly TaskStepInputArtifact[], TaskStepEvidenceError>> {
+    await mkdir(inputsPath, { recursive: true, mode: 0o700 });
+    const inputs: TaskStepInputArtifact[] = [];
+    for (const artifactId of [...new Set(artifactIds)].slice(0, MAX_EVIDENCE_FILES)) {
+      const artifact = this.ledger.readArtifact(artifactId);
+      if (artifact === null) return err({ kind: 'artifact_missing', artifactId });
+      if (artifact.artifactKind === 'task_step_evidence') {
+        const payload = TaskStepEvidenceArtifactSchema.safeParse(artifact.payload);
+        if (!payload.success || !artifact.storageUri.startsWith('file:')) {
+          return err({ kind: 'artifact_corrupt', artifactId });
+        }
+        const path = await realpath(fileURLToPath(artifact.storageUri));
+        const bytes = await readFile(path);
+        const contentSha256 = createHash('sha256').update(bytes).digest('hex');
+        if (contentSha256 !== payload.data.contentSha256) {
+          return err({ kind: 'artifact_corrupt', artifactId });
+        }
+        inputs.push({
+          artifactId,
+          path,
+          relativePath: payload.data.relativePath,
+          mimeType: payload.data.mimeType,
+          source: 'evidence',
+        });
+        continue;
+      }
+      if (artifact.artifactKind !== 'task_step_output') continue;
+      const payload = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
+      if (!payload.success) return err({ kind: 'artifact_corrupt', artifactId });
+      const filename = `${createHash('sha256').update(artifactId).digest('hex')}.receipt.json`;
+      const path = join(inputsPath, filename);
+      await writeFile(
+        path,
+        `${JSON.stringify(
+          {
+            schemaVersion: 1,
+            artifactId,
+            operationId: payload.data.operationId,
+            nodeId: payload.data.nodeId,
+            stepReference: payload.data.stepReference,
+            stepAttempt: payload.data.stepAttempt,
+            runner: payload.data.runner,
+            command: payload.data.command,
+            args: payload.data.args,
+            exitCode: payload.data.exitCode,
+            status: payload.data.status,
+            details: payload.data.details,
+            usage: payload.data.usage,
+            result: payload.data.result,
+            stdoutTail: payload.data.stdout.slice(-8_000),
+            stderrTail: payload.data.stderr.slice(-8_000),
+            recordedAt: payload.data.recordedAt,
+          },
+          null,
+          2,
+        )}\n`,
+        { encoding: 'utf8', mode: 0o600 },
+      );
+      inputs.push({
+        artifactId,
+        path,
+        relativePath: `${payload.data.nodeId}-attempt-${String(payload.data.stepAttempt)}.receipt.json`,
+        mimeType: 'application/json',
+        source: 'receipt',
+      });
+    }
+    return ok(inputs);
   }
 }
