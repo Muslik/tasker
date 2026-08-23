@@ -154,6 +154,17 @@ describe('Jenkins build observation', () => {
     ).toMatchObject({ baseUrl: 'https://build.example' });
   });
 
+  it('does not inherit an unrelated Jenkins endpoint used by interactive tools', () => {
+    expect(
+      loadJenkinsBuildConfiguration({
+        TASKER_HARNESS_WORK_PATH: '/missing-harness',
+        JENKINS_BASE_URL: 'https://jenkins.example',
+        JENKINS_USER: 'developer@example.com',
+        JENKINS_TOKEN: 'token',
+      }),
+    ).toMatchObject({ baseUrl: 'https://build.twiket.com' });
+  });
+
   it('waits for the exact branch revision and completes only after it passes', async () => {
     const heartbeat = vi.fn();
     const port = sequencedPort([

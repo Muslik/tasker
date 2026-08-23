@@ -152,11 +152,7 @@ export const loadJenkinsBuildConfiguration = (
   const defaults = loadHarnessEnvironmentDefaults(environment);
   const parsed = JenkinsBuildConfigurationSchema.safeParse({
     baseUrl:
-      environment.TASKER_JENKINS_BASE_URL ??
-      environment.JENKINS_BASE_URL ??
-      defaults.TASKER_JENKINS_BASE_URL ??
-      defaults.JENKINS_BASE_URL ??
-      DEFAULT_BASE_URL,
+      environment.TASKER_JENKINS_BASE_URL ?? defaults.TASKER_JENKINS_BASE_URL ?? DEFAULT_BASE_URL,
     user: environment.JENKINS_USER ?? defaults.JENKINS_USER,
     token: environment.JENKINS_TOKEN ?? defaults.JENKINS_TOKEN,
     requestTimeoutMs: positiveInteger(environment.TASKER_JENKINS_REQUEST_TIMEOUT_MS, 15_000),

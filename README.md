@@ -77,10 +77,12 @@ hooks see the same corporate author as an interactive commit. If it is absent or
 invalid, the PR step pauses with operator guidance and resumes the same worktree after
 the configuration is fixed.
 
-Set `TASKER_JENKINS_BASE_URL` when Tasker's pull-request CI lives on a different Jenkins
-instance than the generic `JENKINS_BASE_URL` used by local tools. The Tasker-specific
-endpoint has priority; `JENKINS_USER` and `JENKINS_TOKEN` remain the shared credentials.
-An authorization failure pauses the CI step without losing the pushed branch or PR.
+Tasker's pull-request CI defaults to `https://build.twiket.com`. Set
+`TASKER_JENKINS_BASE_URL` only when Tasker must observe another CI instance. Tasker does
+not inherit the generic `JENKINS_BASE_URL` used by interactive tools because that variable
+may point at a different Jenkins product. `JENKINS_USER` and `JENKINS_TOKEN` remain the
+shared credentials. An authorization failure pauses the CI step without losing the pushed
+branch or PR.
 
 The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:cockpit` commands remain
 available for diagnosing one process in isolation. They are components of the same
