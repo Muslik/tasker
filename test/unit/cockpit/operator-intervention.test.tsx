@@ -25,7 +25,7 @@ describe('operator intervention', () => {
     const html = renderIntervention('external_prerequisite');
 
     expect(html).toContain('Prerequisite required');
-    expect(html).toContain('does not read free-form guidance');
+    expect(html).toContain('Fix the prerequisite, then click Resume');
     expect(html).not.toContain('<textarea');
   });
 

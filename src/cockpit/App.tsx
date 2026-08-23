@@ -861,7 +861,7 @@ export const OperatorIntervention = ({
           <p className="mt-1 text-xs text-muted-foreground">
             {acceptsGuidance
               ? 'Tell the agent what changed or how to approach the same step. Completed work will not repeat.'
-              : 'Resolve this requirement in its owning system, then resume the same step. This step does not read free-form guidance.'}
+              : 'Fix the prerequisite, then click Resume. Completed work will not repeat.'}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
