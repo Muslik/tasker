@@ -57,6 +57,24 @@ describe('Bitbucket pull request client', () => {
     );
   });
 
+  it('reconciles an existing PR when Bitbucket canonicalizes the project key casing', async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        Response.json({ values: [rawPullRequest], isLastPage: true }, { status: 200 }),
+      ),
+    );
+    const client = new BitbucketPullRequestClient(configuration, fetchImplementation);
+
+    const result = await client.findOpen({
+      projectKey: 'onetwotrip',
+      repositorySlug: 'front-avia',
+      sourceRef: 'refs/heads/tasker/avia-13236',
+      targetRef: 'refs/heads/main',
+    });
+
+    expect(result).toMatchObject({ status: 'found', pullRequest: { id: 73 } });
+  });
+
   it('creates a PR with explicit repository refs and bearer authentication', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(() =>
       Promise.resolve(Response.json(rawPullRequest, { status: 201 })),

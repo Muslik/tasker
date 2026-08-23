@@ -107,6 +107,9 @@ const pullRequestFrom = (raw: z.infer<typeof RawPullRequestSchema>): BitbucketPu
     url: raw.links?.self[0]?.href ?? null,
   });
 
+const sameRepositoryIdentifier = (left: string, right: string): boolean =>
+  left.toLocaleLowerCase('en-US') === right.toLocaleLowerCase('en-US');
+
 const problemForStatus = (status: number): BitbucketPullRequestProblem => {
   if (status === 400) {
     return {
@@ -190,8 +193,8 @@ export class BitbucketPullRequestClient implements BitbucketPullRequestPort {
           raw.state === 'OPEN' &&
           raw.fromRef.id === input.sourceRef &&
           raw.toRef.id === input.targetRef &&
-          raw.fromRef.repository.slug === input.repositorySlug &&
-          raw.fromRef.repository.project.key === input.projectKey
+          sameRepositoryIdentifier(raw.fromRef.repository.slug, input.repositorySlug) &&
+          sameRepositoryIdentifier(raw.fromRef.repository.project.key, input.projectKey)
         ) {
           matches.push(pullRequestFrom(raw));
         }
