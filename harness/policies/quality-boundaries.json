@@ -17,6 +17,31 @@
         { "kind": "step", "reference": "deliver.pull-request@1" }
       ],
       "reason": "A changed worktree must have accepted task evidence and independent review before remote delivery."
+    },
+    {
+      "id": "delivery-feedback-is-frozen",
+      "kind": "feedback_loops",
+      "trigger": { "kind": "step", "reference": "deliver.pull-request@1" },
+      "loops": [
+        {
+          "until": "delivery.accepted@1",
+          "requiredSteps": [
+            "implement.change@1",
+            "verify.acceptance@1",
+            "review.change@1",
+            "deliver.pull-request@1"
+          ]
+        },
+        {
+          "until": "agent_review.accepted@1",
+          "requiredSteps": ["implement.change@1", "verify.acceptance@1", "review.change@1"]
+        },
+        {
+          "until": "verification.accepted@1",
+          "requiredSteps": ["implement.change@1", "verify.acceptance@1"]
+        }
+      ],
+      "reason": "Expected verification, review, and CI feedback must repeat the frozen workflow instead of creating a continuation."
     }
   ]
 }

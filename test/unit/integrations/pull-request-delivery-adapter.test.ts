@@ -158,24 +158,40 @@ describe('pull-request semantic delivery', () => {
     });
   });
 
-  it('keeps task-caused CI evidence on the Delivery block instead of emitting ci.repair', async () => {
+  it('returns task-caused CI as a frozen-loop repair outcome', async () => {
     const fixture = adapter('likely_caused_by_change');
 
     const result = await fixture.delivery.execute(request());
 
     expect(result).toMatchObject({
-      status: 'continuation_required',
-      request: { discoveredAtNodeId: 'deliver-change' },
+      status: 'completed',
+      output: {
+        outcome: 'repair_required',
+        repair: { kind: 'ci', summary: 'Jenkins build #73 classified the failure as task-caused' },
+        ci: {
+          build: { number: 73 },
+          failures: [{ name: 'Flight card with 2+ transfers: desktop' }],
+        },
+      },
     });
-    if (result.status !== 'continuation_required') {
-      throw new Error('Expected task-caused CI continuation');
-    }
-    expect(result.request.changes[0]).toMatchObject({ kind: 'task_scope_changed' });
-    const change = result.request.changes[0];
-    if (change?.kind !== 'task_scope_changed') throw new Error('Expected task scope change');
-    expect(change.objective).toContain('Jenkins build #73');
-    expect(change.objective).toContain('Flight card with 2+ transfers: desktop');
-    expect(change.objective).toContain('543 pixels differ');
-    expect(change.objective).toContain('flight-card.imagediff');
+  });
+
+  it('returns human review changes as the same frozen-loop repair outcome', async () => {
+    const fixture = adapter();
+
+    const result = await fixture.delivery.execute(
+      request({ decision: 'changes_requested', reviewId: 'bitbucket:review-7' }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: {
+        outcome: 'repair_required',
+        repair: {
+          kind: 'human_review',
+          reviewId: 'bitbucket:review-7',
+        },
+      },
+    });
   });
 });

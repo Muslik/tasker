@@ -250,9 +250,10 @@ history, but none of its mutable artifacts can become current state for the repl
   Agent review, Delivery, or Human review. It groups semantic work but is not schedulable.
   Expanding a stage reveals the selected semantic blocks, their attempts, and their
   internal events. A command, integration call, local commit, retry, reconciliation
-  probe, receipt validator, compiler container, or unmaterialized recovery path is not a
-  task step. Planned future stages remain compact headers. Conditional repair, CI, and
-  review continuations remain absent until an observed fact materializes them.
+  probe, receipt validator, compiler container, or unselected outcome is not a task
+  step. Planned future stages remain compact headers. Expected Verify, agent-review,
+  CI, and human-review feedback paths are frozen as bounded loops and reuse the same
+  operator stages when selected; they never appear as duplicated continuation stages.
   Bootstrap stages come from the complete Bootstrap lifecycle; execution stage state
   comes from Execution node state. Attempts, receipts, evidence, and the raw immutable
   graph remain available from the agent/process transcript and diagnostic surfaces.
@@ -414,9 +415,9 @@ review.
 A non-zero verification command is accepted as diagnostic operation evidence and maps
 to a failed Verify domain verdict; it is neither an Activity failure nor success inferred
 from agent prose. The current Development loop advances to another Implement attempt.
-Agent-review changes materialize one linked revision continuation rather than a
-precompiled nested recovery tree. Exhaustion opens operator guidance while preserving
-the same worktree and completed prefix.
+Agent-review changes set a typed `repair_required` outcome and repeat the frozen review
+feedback loop. Exhaustion opens operator guidance while preserving the same worktree and
+completed evidence. It does not invoke the workflow-continuation planner.
 
 Activities may be non-deterministic. They must be independently retryable at their
 declared boundary and persist useful evidence before returning. Long CLI calls
@@ -502,6 +503,11 @@ Initial assembly cannot know everything. Reproduction or implementation may disc
 a shared component in another repository, an external translation process, new visual
 verification, or a missing human publication gate.
 
+Expected feedback is not graph evolution. Verification rejection, agent-review changes,
+task-caused CI failure, and actionable PR review are typed outcomes of bounded loops
+already frozen into the task workflow. They repeat the same semantic blocks with durable
+evidence and no workflow-change review.
+
 A step returns typed `workflow_change_required` with evidence and proposed intent. It
 does not mutate the accepted graph. The parent Workflow:
 
@@ -581,10 +587,12 @@ transport, configuration, or timeout — blocks the operation itself.
 
 The semantic Delivery block owns the PR/CI/human-review protocol. It persists each remote
 intent and receipt separately and can reach human review only after exact-revision CI
-proof. Task-caused failures materialize one linked implementation continuation. Flaky,
-infrastructure, and unknown outcomes remain typed states of the active CI operation and
-re-observe after resume; they are not predeclared sibling wait nodes. Automatic Jenkins
-retriggering remains an explicit reconciled operation, never a hidden side effect.
+proof. Task-caused failures and actionable PR review complete Delivery with a strict
+`repair_required` result; `delivery.accepted@1` remains false and the frozen delivery
+feedback loop repeats Development, Verify, Review, and Delivery. Flaky, infrastructure,
+and unknown outcomes remain typed states of the active CI operation and re-observe after
+resume. Automatic Jenkins retriggering remains an explicit reconciled operation, never a
+hidden side effect.
 
 Validation scope is task-specific. Project policy and changed-surface evidence may
 select build-only, targeted tests, full validation, Allure inspection, post-fix

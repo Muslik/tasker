@@ -511,10 +511,11 @@ it does not require a Temporal Workflow branch.
 
 Delivery control flow consumes provider-neutral CI facts. The observation contract maps
 every terminal result to one typed outcome so a later observation replaces, rather than
-leaks, the previous verdict. Task-caused failure materializes one implementation
-continuation; flaky, infrastructure, and unknown outcomes remain typed states of the
-active Delivery block. The semantic validator requires exact-revision CI proof before
-human review. A provider-specific retry mutation needs its own reconciled internal
+leaks, the previous verdict. Task-caused failure returns `repair_required` evidence and
+repeats the frozen Delivery feedback loop; flaky, infrastructure, and unknown outcomes
+remain typed states of the active Delivery block. The semantic validator rejects PR
+delivery outside a bounded `delivery.accepted@1` loop containing Implement, Verify, and
+Review feedback. A provider-specific retry mutation needs its own reconciled internal
 operation; it must not be hidden inside the read observer.
 
 Moving to GitLab Issues and GitLab CI should require:

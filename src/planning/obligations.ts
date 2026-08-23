@@ -95,6 +95,113 @@ const markerMatches = (marker: ExecutionMarker, required: HarnessPolicyMarker): 
   return marker.kind === required.kind && marker.reference === required.reference;
 };
 
+const compiledStepReferences = (node: CompiledWorkflowNode): ReadonlySet<string> => {
+  if (node.kind === 'step') return new Set([node.uses]);
+  if (node.kind === 'wait' || node.kind === 'gate' || node.kind === 'finalize') return new Set();
+  const children =
+    node.kind === 'sequence'
+      ? node.children
+      : node.kind === 'branch'
+        ? [node.then, node.otherwise]
+        : [node.body];
+  return new Set(children.flatMap((child) => [...compiledStepReferences(child)]));
+};
+
+const compiledLoops = (
+  node: CompiledWorkflowNode,
+): readonly Extract<CompiledWorkflowNode, { readonly kind: 'bounded_loop' }>[] => {
+  if (
+    node.kind === 'step' ||
+    node.kind === 'wait' ||
+    node.kind === 'gate' ||
+    node.kind === 'finalize'
+  ) {
+    return [];
+  }
+  const children =
+    node.kind === 'sequence'
+      ? node.children
+      : node.kind === 'branch'
+        ? [node.then, node.otherwise]
+        : [node.body];
+  return [...(node.kind === 'bounded_loop' ? [node] : []), ...children.flatMap(compiledLoops)];
+};
+
+const loopSatisfies = (
+  loop: Extract<CompiledWorkflowNode, { readonly kind: 'bounded_loop' }>,
+  requirement: { readonly until: string; readonly requiredSteps: readonly string[] },
+): boolean => {
+  if (loop.until !== requirement.until) return false;
+  const references = compiledStepReferences(loop.body);
+  return requirement.requiredSteps.every((reference) => references.has(reference));
+};
+
+const validateFeedbackLoops = (
+  root: CompiledWorkflowNode,
+  policy: HarnessPolicyManifest,
+): readonly ValidationIssue[] => {
+  const obligations = policy.obligations.filter(
+    (obligation) => obligation.kind === 'feedback_loops',
+  );
+  if (obligations.length === 0) return [];
+  const issues: ValidationIssue[] = [];
+  const visit = (
+    node: CompiledWorkflowNode,
+    ancestors: readonly Extract<CompiledWorkflowNode, { readonly kind: 'bounded_loop' }>[],
+  ): void => {
+    if (node.kind === 'step') {
+      const marker: ExecutionMarker = {
+        id: node.id,
+        kind: 'step',
+        reference: node.uses,
+        input: node.with,
+      };
+      for (const obligation of obligations) {
+        if (!markerMatches(marker, obligation.trigger)) continue;
+        const [outerRequirement, ...nestedRequirements] = obligation.loops;
+        let current =
+          outerRequirement === undefined
+            ? undefined
+            : ancestors.findLast((loop) => loopSatisfies(loop, outerRequirement));
+        if (current === undefined) {
+          issues.push(
+            issue(
+              obligation.id,
+              `Policy ${policy.id}@${policy.version} requires ${node.uses} inside feedback loop ${outerRequirement?.until ?? 'unknown'}`,
+              ['root', node.id],
+            ),
+          );
+          continue;
+        }
+        for (const requirement of nestedRequirements) {
+          current = compiledLoops(current.body).find((loop) => loopSatisfies(loop, requirement));
+          if (current !== undefined) continue;
+          issues.push(
+            issue(
+              obligation.id,
+              `Policy ${policy.id}@${policy.version} requires nested feedback loop ${requirement.until} for ${node.uses}`,
+              ['root', node.id],
+            ),
+          );
+          break;
+        }
+      }
+      return;
+    }
+    if (node.kind === 'wait' || node.kind === 'gate' || node.kind === 'finalize') return;
+    const nextAncestors = node.kind === 'bounded_loop' ? [...ancestors, node] : ancestors;
+    const children =
+      node.kind === 'sequence'
+        ? node.children
+        : node.kind === 'branch'
+          ? [node.then, node.otherwise]
+          : [node.body];
+    for (const child of children) visit(child, nextAncestors);
+  };
+  visit(root, []);
+  return issues;
+};
+
 const validateRequiredArtifacts = (
   paths: readonly (readonly ExecutionMarker[])[],
 ): readonly ValidationIssue[] => {
@@ -135,6 +242,7 @@ const validatePolicySequence = (
 ): readonly ValidationIssue[] => {
   const issues: ValidationIssue[] = [];
   for (const obligation of policy.obligations) {
+    if (obligation.kind !== 'path_sequence') continue;
     paths.forEach((path, pathIndex) => {
       const triggerPositions = path.flatMap((marker, index) =>
         markerMatches(marker, obligation.trigger) ? [index] : [],
@@ -198,6 +306,7 @@ export const validateWorkflowObligations = (
 
   for (const policy of applicablePolicies) {
     issues.push(...validatePolicySequence(paths, policy));
+    issues.push(...validateFeedbackLoops(graph.root, policy));
   }
 
   return { workflowId: graph.metadata.workflowId, issues };

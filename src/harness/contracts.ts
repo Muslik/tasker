@@ -59,6 +59,7 @@ export const HarnessContractNameSchema = z.enum([
   'agent_output',
   'agent_review_output',
   'ci_observation_output',
+  'delivery_output',
   'integration_output',
   'investigation_input',
   'investigation_output',
@@ -175,6 +176,25 @@ const HarnessPathSequenceObligationSchema = z
   })
   .strict();
 
+const HarnessFeedbackLoopObligationSchema = z
+  .object({
+    id: PolicyIdSchema,
+    kind: z.literal('feedback_loops'),
+    trigger: HarnessPolicyMarkerSchema,
+    loops: z
+      .array(
+        z
+          .object({
+            until: VersionedReferenceSchema,
+            requiredSteps: z.array(VersionedReferenceSchema).min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+    reason: z.string().min(1),
+  })
+  .strict();
+
 export const HarnessPolicyManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -189,7 +209,9 @@ export const HarnessPolicyManifestSchema = z
       .strict()
       .optional(),
     configuration: JsonValueSchema,
-    obligations: z.array(HarnessPathSequenceObligationSchema).default([]),
+    obligations: z
+      .array(z.union([HarnessPathSequenceObligationSchema, HarnessFeedbackLoopObligationSchema]))
+      .default([]),
     agentSkills: z
       .array(
         z

@@ -34,7 +34,7 @@ acceptance. Never guess merely because plan review is automatic:
 
 Use `ready` only when the plan and complete task-specific semantic workflow are honest:
 
-{"status":"ready","executionStrategy":"simple|standard|complex","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"observable-outcome","expected":"...","verification":[{"kind":"process","profile":"targeted","scenario":"...","workflowStepIds":["verify-change"]}]}]},"followUps":[],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"schemaVersion":1,"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence","id":"task-work","children":[{"kind":"bounded_loop","id":"development","maxAttempts":3,"until":"verification.accepted@1","body":{"kind":"sequence","id":"development-attempt","children":[{"kind":"step","id":"implement-change","uses":"implement.change@1","with":{"objective":"...","repository":"...","taskId":"..."}},{"kind":"step","id":"verify-change","uses":"verify.acceptance@1","with":{"objective":"...","repository":"...","taskId":"..."}}]}},{"kind":"step","id":"review-change","uses":"review.change@1","with":{"objective":"...","repository":"...","taskId":"..."}}]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
+{"status":"ready","executionStrategy":"simple|standard|complex","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"observable-outcome","expected":"...","verification":[{"kind":"process","profile":"targeted","scenario":"...","workflowStepIds":["verify-change"]}]}]},"followUps":[],"workflow":{"assemblyDecisions":[{"id":"...","title":"...","source":"task/evidence/policy locator","reason":"...","effect":"..."}],"source":{"schemaVersion":1,"id":"task-specific-workflow-id","version":1,"root":{"kind":"sequence","id":"task-work","children":[{"kind":"bounded_loop","id":"delivery-feedback","maxAttempts":3,"until":"delivery.accepted@1","body":{"kind":"sequence","id":"delivery-attempt","children":[{"kind":"bounded_loop","id":"review-feedback","maxAttempts":3,"until":"agent_review.accepted@1","body":{"kind":"sequence","id":"review-attempt","children":[{"kind":"bounded_loop","id":"development","maxAttempts":3,"until":"verification.accepted@1","body":{"kind":"sequence","id":"development-attempt","children":[{"kind":"step","id":"implement-change","uses":"implement.change@1","with":{"objective":"...","repository":"...","taskId":"..."}},{"kind":"step","id":"verify-change","uses":"verify.acceptance@1","with":{"objective":"...","repository":"...","taskId":"..."}}]}},{"kind":"step","id":"review-change","uses":"review.change@1","with":{"objective":"...","repository":"...","taskId":"..."}}]}},{"kind":"step","id":"deliver-change","uses":"deliver.pull-request@1","with":{"objective":"...","repository":"...","taskId":"..."}}]}}]}},"verificationPlan":{"checks":["..."],"profile":"targeted","rationale":"..."}}}
 
 Select `simple` only for one-repository bounded low-risk work with clear acceptance and no material
 architecture or product decision. Select `standard` for ordinary multi-surface implementation or
@@ -52,15 +52,19 @@ node kinds:
 - bounded loop: `{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","body":sequence}`
 
 The source has exactly `schemaVersion`, `id`, `version`, and `root`; `root` is a sequence. Every node
-has a unique id. The `__tasker_` prefix is reserved. Use a bounded loop only for genuine repeated
-semantic work such as Implement + Verify. Keep a simple task at roughly 3-8 semantic nodes and one
-initial Development loop.
+has a unique id. The `__tasker_` prefix is reserved. Use bounded loops only for genuine repeated
+semantic work. Any workflow containing `deliver.pull-request@1` must freeze the registered delivery
+feedback path up front: Delivery is inside a `delivery.accepted@1` loop that contains Implementation,
+Verification, and Review. Task-caused CI failures and actionable human review return
+`repair_required` evidence and repeat that frozen path without a workflow change.
 
 Never emit branch, wait, gate, finalize, retry, transport, Jira transition, Git push, PR mutation,
 CI classification, CI repair, validation-command, or review-reply nodes. In particular, never emit
-`code.implement`, `code.repair`, `ci.repair`, duplicated validation suffixes, or speculative recovery
-paths. Registered semantic blocks own those internal operations. Runtime facts may re-enter a block
-or create a linked continuation later; the initial planner does not predict every failure branch.
+`code.implement`, `code.repair`, `ci.repair`, duplicated validation suffixes, or technical retry
+nodes. Registered semantic blocks own those internal operations. Expected Delivery outcomes are
+represented by the frozen feedback loop, not linked continuations. A linked workflow continuation is
+reserved for genuinely new work shape discovered at runtime, such as another repository, external
+publication, translation, or a new human dependency.
 
 Select only blocks supplied in plannerContext and available for the current lifecycle. Do not infer
 a hidden base template. Include translation, component publication, cross-repository work, visual

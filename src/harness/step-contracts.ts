@@ -202,10 +202,50 @@ export const ciObservationOutputSchema = z
   })
   .strict();
 
+export const deliveryOutputSchema = pullRequestOutputSchema
+  .extend({
+    outcome: z.enum(['accepted', 'repair_required']),
+    ci: ciObservationOutputSchema,
+    repair: z
+      .discriminatedUnion('kind', [
+        z
+          .object({
+            kind: z.literal('ci'),
+            summary: z.string().min(1),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal('human_review'),
+            reviewId: z.string().min(1),
+            summary: z.string().min(1),
+          })
+          .strict(),
+      ])
+      .nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.outcome === 'accepted' && value.repair !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['repair'],
+        message: 'Accepted delivery has no repair',
+      });
+    }
+    if (value.outcome === 'repair_required' && value.repair === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['repair'],
+        message: 'Repair-required delivery must describe the repair input',
+      });
+    }
+  });
+
 const contractSchemas = {
   agent_output: agentOutputSchema,
   agent_review_output: agentReviewOutputSchema,
   ci_observation_output: ciObservationOutputSchema,
+  delivery_output: deliveryOutputSchema,
   integration_output: integrationOutputSchema,
   investigation_input: investigationInputSchema,
   investigation_output: investigationOutputSchema,

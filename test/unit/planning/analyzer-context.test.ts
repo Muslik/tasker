@@ -59,7 +59,10 @@ describe('workflow analyzer context', () => {
     )?.executor;
     expect(implementationExecutor?.kind).toBe('agent');
     expect(implementationExecutor?.skills).toContain('ai-assistance');
-    expect(plannerContext.obligations.map(({ id }) => id)).toEqual(['local-ready-before-delivery']);
+    expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
+      'local-ready-before-delivery',
+      'delivery-feedback-is-frozen',
+    ]);
     expect(JSON.stringify(context.plannerContext)).not.toContain('baseTemplate');
     expect(JSON.stringify(context.plannerContext)).not.toContain('workflowTemplates');
   });
@@ -84,7 +87,10 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
       'deliver.pull-request@1',
     );
-    expect(plannerContext.obligations.map(({ id }) => id)).toEqual(['local-ready-before-delivery']);
+    expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
+      'local-ready-before-delivery',
+      'delivery-feedback-is-frozen',
+    ]);
   });
 
   it('does not expose bug reproduction policy to a Jira feature task', () => {

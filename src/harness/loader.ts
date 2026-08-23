@@ -230,6 +230,13 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       step.block.executor.kind === 'agent' ? [step.block.executor.profile] : [],
     ),
   );
+  const seenPredicates = new Set(
+    steps.flatMap((step) =>
+      Object.values(step.block.outputPredicates?.cases ?? {}).flatMap((facts) =>
+        Object.keys(facts),
+      ),
+    ),
+  );
 
   for (const policy of policies) {
     for (const binding of policy.agentSkills) {
@@ -248,11 +255,29 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       }
     }
     for (const obligation of policy.obligations) {
-      for (const marker of [obligation.trigger, ...obligation.ordered]) {
+      const markers =
+        obligation.kind === 'path_sequence'
+          ? [obligation.trigger, ...obligation.ordered]
+          : [
+              obligation.trigger,
+              ...obligation.loops.flatMap(({ requiredSteps }) =>
+                requiredSteps.map((reference) => ({ kind: 'step' as const, reference })),
+              ),
+            ];
+      for (const marker of markers) {
         if (marker.kind === 'step' && !seenSteps.has(marker.reference)) {
           throw new Error(
             `Harness policy ${policy.id}@${policy.version} references unavailable step ${marker.reference}`,
           );
+        }
+      }
+      if (obligation.kind === 'feedback_loops') {
+        for (const loop of obligation.loops) {
+          if (!seenPredicates.has(loop.until)) {
+            throw new Error(
+              `Harness policy ${policy.id}@${policy.version} references unavailable predicate ${loop.until}`,
+            );
+          }
         }
       }
     }

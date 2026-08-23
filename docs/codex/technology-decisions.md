@@ -246,8 +246,11 @@ Only an accepted semantic source plus its compiled executable IR can be frozen.
 
 After freeze, an execution Activity may return `workflow_change_required`. A planning
 Activity then produces a new semantic continuation and compiled executable artifact.
-The Workflow records both hashes and the decision. Review/CI repair continuations are
-created only after a real changes-requested/task-caused fact.
+The Workflow records both hashes and the decision. This mechanism is reserved for a new
+work shape absent from the frozen graph, such as another repository, external
+publication, translation, or a newly discovered human dependency. Verify rejection,
+agent-review changes, task-caused CI, and actionable PR review are expected feedback
+outcomes and repeat precompiled bounded loops instead.
 
 An accepted same-repository continuation is interpreted as a separately hashed suffix
 inside the same Execution Workflow and workspace. Its nodes are namespaced and its

@@ -106,9 +106,10 @@ hash, and a versioned price-table, provider-reported, or explicitly unrated API-
 hard-coded `gpt-5.4` path, or silent provider fallback.
 
 The former Phase 8 expanded CI slice is superseded by semantic Delivery. Exact-revision
-Jenkins observations remain provider-neutral typed operations; task-caused failures
-materialize one linked implementation continuation, while flaky, infrastructure, and
-unknown results remain states of the active Delivery block and re-observe on resume.
+Jenkins observations remain provider-neutral typed operations; task-caused failures set
+`delivery.repair_required@1` and repeat the frozen delivery feedback loop, while flaky,
+infrastructure, and unknown results remain states of the active Delivery block and
+re-observe on resume.
 Automatic Jenkins retrigger remains a later reconciled effect rather than a hidden read-side mutation.
 
 Jira lifecycle transitions now preflight provider-owned field requirements for both

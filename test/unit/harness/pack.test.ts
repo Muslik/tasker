@@ -221,12 +221,6 @@ describe('file-backed harness pack', () => {
         expect.objectContaining({
           id: 'quality-boundaries',
           version: '1',
-          obligations: [
-            expect.objectContaining({
-              id: 'local-ready-before-delivery',
-              direction: 'after',
-            }),
-          ],
         }),
         expect.objectContaining({
           id: 'review-feedback',
@@ -235,6 +229,11 @@ describe('file-backed harness pack', () => {
         }),
       ]),
     );
+    const quality = pack.policies.find(({ id }) => id === 'quality-boundaries');
+    expect(quality?.obligations.map(({ id }) => id)).toEqual([
+      'local-ready-before-delivery',
+      'delivery-feedback-is-frozen',
+    ]);
   });
 
   it('keeps mise configuration inside the writable workspace home volume', () => {
@@ -313,7 +312,14 @@ describe('file-backed harness pack', () => {
       'ci_unknown@1',
       'code_review@1',
     ]);
-    expect(delivery?.contract.workflowChanges).toEqual(['task_scope_changed']);
+    expect(delivery?.contract.workflowChanges).toEqual([]);
+    expect(delivery?.block.outputPredicates).toMatchObject({
+      discriminator: 'outcome',
+      cases: {
+        accepted: { 'delivery.accepted@1': true },
+        repair_required: { 'delivery.accepted@1': false },
+      },
+    });
   });
 
   it('binds company AI guidance to semantic implementation without adding workflow blocks', () => {

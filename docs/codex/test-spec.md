@@ -420,8 +420,8 @@ Playwright acceptance scenarios:
 - Jira/Bitbucket effects reconcile response loss and 400/403 without repeating local
   work;
 - CI distinguishes passed, caused-by-change, flaky, infrastructure, and unknown;
-- review and task-caused CI revisions materialize one linked semantic continuation on the
-  same PR and worktree instead of precompiling nested recovery trees;
+- review and task-caused CI set `repair_required` and repeat the same frozen delivery
+  feedback loop on the same PR and worktree without workflow-change review;
 - before-reproduction evidence remains private; only an explicit final-demo policy may
   publish run media.
 

@@ -15,7 +15,11 @@ describe('semantic workflow proposal planning', () => {
     if (!first.ok || !second.ok) throw new Error('Expected proposal to compile');
     expect(first.value.semantic.semanticHash).toBe(second.value.semantic.semanticHash);
     expect(first.value.compiled.hash).toBe(second.value.compiled.hash);
-    expect(first.value.semantic.source.root.children).toHaveLength(3);
+    expect(first.value.semantic.source.root.children).toHaveLength(1);
+    expect(first.value.semantic.source.root.children[0]).toMatchObject({
+      kind: 'bounded_loop',
+      until: 'delivery.accepted@1',
+    });
     expect(first.value.proposal.task.reference).toBe('avia-13236-short-bug');
   });
 

@@ -2,11 +2,11 @@ import { z } from 'zod';
 
 import {
   ciObservationOutputSchema,
+  deliveryOutputSchema,
   pullRequestOutputSchema,
 } from '../../harness/step-contracts.js';
 import { ImplementationPlanSchema } from '../../planning/implementation-plan.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
-import { WorkflowChangeRequestSchema } from '../../workflow/execution-result.js';
 import type { BitbucketPullRequestAdapter } from '../bitbucket/pull-request-adapter.js';
 import type { PullRequestReviewEvidence } from '../bitbucket/review.js';
 import type {
@@ -33,6 +33,7 @@ const ReviewResolutionSchema = z
 
 type PullRequestOutput = z.infer<typeof pullRequestOutputSchema>;
 type CiObservationOutput = z.infer<typeof ciObservationOutputSchema>;
+type DeliveryOutput = z.infer<typeof deliveryOutputSchema>;
 
 const combineArtifacts = (
   current: readonly string[],
@@ -107,44 +108,17 @@ const waitingDetails = (
   extra: Readonly<Record<string, JsonValue>> = {},
 ): JsonValue => JsonValueSchema.parse({ phase, output: pullRequest, ...extra });
 
-const continuationRequest = (
-  request: IntegrationStepExecutionRequest,
-  summary: string,
-  objective: string,
-  artifactIds: readonly string[],
-) =>
-  WorkflowChangeRequestSchema.parse({
-    schemaVersion: 1,
-    discoveredAtNodeId: request.nodeId,
-    summary,
-    evidenceArtifactIds: [...artifactIds],
-    changes: [{ kind: 'task_scope_changed', objective }],
+const deliveryOutput = (
+  pullRequest: PullRequestOutput,
+  ci: CiObservationOutput,
+  repair: DeliveryOutput['repair'],
+): DeliveryOutput =>
+  deliveryOutputSchema.parse({
+    ...pullRequest,
+    outcome: repair === null ? 'accepted' : 'repair_required',
+    ci,
+    repair,
   });
-
-const ciRepairObjective = (ci: CiObservationOutput): string => {
-  const failedStages = ci.stages
-    .filter(({ status }) => ['FAILED', 'ABORTED'].includes(status.toLocaleUpperCase('en-US')))
-    .map(({ name }) => name);
-  const failures = ci.failures.slice(0, 10).map((failure) => {
-    const attachments = failure.attachments
-      .map(({ name, type, source }) => `${name} [${type}] ${source}`)
-      .join(', ');
-    return [
-      `${failure.name} (${failure.uid}): ${failure.message ?? 'no failure message'}`,
-      attachments.length === 0 ? null : `attachments: ${attachments}`,
-    ]
-      .filter((value) => value !== null)
-      .join('; ');
-  });
-  return [
-    `Repair Jenkins build #${String(ci.build.number)} for revision ${ci.build.revision} (${ci.build.url}).`,
-    failedStages.length === 0 ? null : `Failed stages: ${failedStages.join(', ')}.`,
-    failures.length === 0 ? null : `Failures: ${failures.join(' | ')}`,
-    'Re-run acceptance verification and independent review, then update the same pull request.',
-  ]
-    .filter((value) => value !== null)
-    .join(' ');
-};
 
 export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
   public readonly id = 'delivery.pull-request@1';
@@ -197,7 +171,18 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
       );
     }
     const ci = parsedCi.data;
-    const ciWait = this.ciWait(request, ci, pullRequest, artifactIds);
+    if (ci.status === 'likely_caused_by_change') {
+      return {
+        status: 'completed',
+        summary: `Jenkins build #${String(ci.build.number)} requires a task repair`,
+        output: deliveryOutput(pullRequest, ci, {
+          kind: 'ci',
+          summary: `Jenkins build #${String(ci.build.number)} classified the failure as task-caused`,
+        }),
+        artifactIds,
+      };
+    }
+    const ciWait = this.ciWait(ci, pullRequest, artifactIds);
     if (ciWait !== null) return ciWait;
 
     if (request.task.origin === 'jira') {
@@ -222,20 +207,19 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
       return {
         status: 'completed',
         summary: `Pull request ${pullRequest.externalId} passed CI and human review`,
-        output: pullRequest,
+        output: deliveryOutput(pullRequest, ci, null),
         artifactIds,
       };
     }
     if (decision === 'changes_requested') {
       return {
-        status: 'continuation_required',
+        status: 'completed',
         summary: `Pull request ${pullRequest.externalId} has actionable human review feedback`,
-        request: continuationRequest(
-          request,
-          `Human review ${resolution.success ? resolution.data.reviewId : (review?.reviewId ?? 'unknown')} requested changes`,
-          'Address the actionable human review findings, re-run acceptance verification and independent review, then update the same pull request.',
-          artifactIds,
-        ),
+        output: deliveryOutput(pullRequest, ci, {
+          kind: 'human_review',
+          reviewId: resolution.success ? resolution.data.reviewId : (review?.reviewId ?? 'unknown'),
+          summary: 'Address the actionable human review findings on the same pull request',
+        }),
         artifactIds,
       };
     }
@@ -249,25 +233,11 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
   }
 
   private ciWait(
-    request: IntegrationStepExecutionRequest,
     ci: CiObservationOutput,
     pullRequest: PullRequestOutput,
     artifactIds: readonly string[],
   ): IntegrationStepExecutionResult | null {
     if (ci.status === 'passed') return null;
-    if (ci.status === 'likely_caused_by_change') {
-      return {
-        status: 'continuation_required',
-        summary: `Jenkins build #${String(ci.build.number)} failed because of the task change`,
-        request: continuationRequest(
-          request,
-          `Jenkins build #${String(ci.build.number)} classified the failure as task-caused`,
-          ciRepairObjective(ci),
-          artifactIds,
-        ),
-        artifactIds,
-      };
-    }
     const waitKind =
       ci.status === 'likely_flaky'
         ? 'ci_retry@1'

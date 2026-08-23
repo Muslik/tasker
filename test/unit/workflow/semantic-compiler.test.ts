@@ -12,6 +12,8 @@ import {
 const contracts = () => ({
   predicates: createPredicateRegistry([
     { id: 'verification.accepted', version: '1', inputSchema: z.object({}) },
+    { id: 'agent_review.accepted', version: '1', inputSchema: z.object({}) },
+    { id: 'delivery.accepted', version: '1', inputSchema: z.object({}) },
   ]),
   stepTypes: createStepTypeRegistry([
     {
@@ -74,38 +76,62 @@ const simpleBugSource = (reordered = false): SemanticWorkflowSource => ({
     children: [
       {
         kind: 'bounded_loop',
-        id: 'development-loop',
+        id: 'delivery-feedback',
         maxAttempts: 3,
-        until: 'verification.accepted@1',
+        until: 'delivery.accepted@1',
         body: {
           kind: 'sequence',
-          id: 'development-attempt',
+          id: 'delivery-attempt',
           children: [
             {
-              kind: 'step',
-              id: 'implement',
-              uses: 'implement.change@1',
-              with: reordered
-                ? {
-                    nested: { alpha: ['a', 'b'], zeta: 1 },
-                    objective: 'Fix the reproduced defect',
-                  }
-                : {
-                    objective: 'Fix the reproduced defect',
-                    nested: { zeta: 1, alpha: ['a', 'b'] },
+              kind: 'bounded_loop',
+              id: 'review-feedback',
+              maxAttempts: 3,
+              until: 'agent_review.accepted@1',
+              body: {
+                kind: 'sequence',
+                id: 'review-attempt',
+                children: [
+                  {
+                    kind: 'bounded_loop',
+                    id: 'development-loop',
+                    maxAttempts: 3,
+                    until: 'verification.accepted@1',
+                    body: {
+                      kind: 'sequence',
+                      id: 'development-attempt',
+                      children: [
+                        {
+                          kind: 'step',
+                          id: 'implement',
+                          uses: 'implement.change@1',
+                          with: reordered
+                            ? {
+                                nested: { alpha: ['a', 'b'], zeta: 1 },
+                                objective: 'Fix the reproduced defect',
+                              }
+                            : {
+                                objective: 'Fix the reproduced defect',
+                                nested: { zeta: 1, alpha: ['a', 'b'] },
+                              },
+                        },
+                        {
+                          kind: 'step',
+                          id: 'verify',
+                          uses: 'verify.acceptance@1',
+                          with: { profile: 'targeted_visual' },
+                        },
+                      ],
+                    },
                   },
+                  { kind: 'step', id: 'review', uses: 'review.change@1', with: {} },
+                ],
+              },
             },
-            {
-              kind: 'step',
-              id: 'verify',
-              uses: 'verify.acceptance@1',
-              with: { profile: 'targeted_visual' },
-            },
+            { kind: 'step', id: 'pull-request', uses: 'deliver.pull-request@1', with: {} },
           ],
         },
       },
-      { kind: 'step', id: 'review', uses: 'review.change@1', with: {} },
-      { kind: 'step', id: 'pull-request', uses: 'deliver.pull-request@1', with: {} },
     ],
   },
 });
@@ -122,7 +148,7 @@ describe('semantic workflow compiler', () => {
     if (!result.ok) return;
 
     expect(result.value.semanticHash).toMatch(/^[a-f0-9]{64}$/u);
-    expect(result.value.source.root.children).toHaveLength(3);
+    expect(result.value.source.root.children).toHaveLength(1);
     expect(result.value.semanticCanonicalJson).not.toContain('operator_guidance');
     expect(result.value.semanticCanonicalJson).not.toContain('finalize');
     expect(result.value.compiled.canonicalJson).toContain('operator_guidance@1');

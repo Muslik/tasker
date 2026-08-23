@@ -203,39 +203,63 @@ const semanticWorkflow = (task: TestTaskFixture): SemanticWorkflowSource => {
       children: [
         {
           kind: 'bounded_loop',
-          id: 'development',
+          id: 'delivery-feedback',
           maxAttempts: 3,
-          until: 'verification.accepted@1',
+          until: 'delivery.accepted@1',
           body: {
             kind: 'sequence',
-            id: 'development-attempt',
+            id: 'delivery-attempt',
             children: [
               {
-                kind: 'step',
-                id: 'implement-change',
-                uses: 'implement.change@1',
-                with: taskInput(`Implement ${task.title}`),
+                kind: 'bounded_loop',
+                id: 'review-feedback',
+                maxAttempts: 3,
+                until: 'agent_review.accepted@1',
+                body: {
+                  kind: 'sequence',
+                  id: 'review-attempt',
+                  children: [
+                    {
+                      kind: 'bounded_loop',
+                      id: 'development',
+                      maxAttempts: 3,
+                      until: 'verification.accepted@1',
+                      body: {
+                        kind: 'sequence',
+                        id: 'development-attempt',
+                        children: [
+                          {
+                            kind: 'step',
+                            id: 'implement-change',
+                            uses: 'implement.change@1',
+                            with: taskInput(`Implement ${task.title}`),
+                          },
+                          {
+                            kind: 'step',
+                            id: 'verify-change',
+                            uses: 'verify.acceptance@1',
+                            with: taskInput(`Verify ${task.title}`),
+                          },
+                        ],
+                      },
+                    },
+                    {
+                      kind: 'step',
+                      id: 'review-change',
+                      uses: 'review.change@1',
+                      with: taskInput(`Review ${task.title}`),
+                    },
+                  ],
+                },
               },
               {
                 kind: 'step',
-                id: 'verify-change',
-                uses: 'verify.acceptance@1',
-                with: taskInput(`Verify ${task.title}`),
+                id: 'deliver-change',
+                uses: 'deliver.pull-request@1',
+                with: taskInput(`Deliver ${task.title}`),
               },
             ],
           },
-        },
-        {
-          kind: 'step',
-          id: 'review-change',
-          uses: 'review.change@1',
-          with: taskInput(`Review ${task.title}`),
-        },
-        {
-          kind: 'step',
-          id: 'deliver-change',
-          uses: 'deliver.pull-request@1',
-          with: taskInput(`Deliver ${task.title}`),
         },
       ],
     },
