@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { loadHarnessPack } from '../../../src/harness/index.js';
@@ -12,7 +14,10 @@ import {
   type JenkinsObserverTime,
 } from '../../../src/integrations/index.js';
 import type { WorkspaceCommandRunner } from '../../../src/providers/command-runner.js';
-import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
+import type {
+  IntegrationEvidenceFile,
+  IntegrationStepExecutionRequest,
+} from '../../../src/integrations/execution.js';
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
 const revision = 'a'.repeat(40);
@@ -101,6 +106,7 @@ const sequencedPort = (observations: readonly JenkinsBuildObservation[]): Jenkin
       Promise.resolve(
         observations[Math.min(index++, observations.length - 1)] as JenkinsBuildObservation,
       ),
+    readAttachment: () => Promise.resolve({ status: 'not_found' }),
   };
 };
 
@@ -218,6 +224,70 @@ describe('Jenkins build observation', () => {
         failures: [{ uid: 'fare-card-test', message: 'Expected card to be visible' }],
       },
     });
+  });
+
+  it('persists CI-rendered image-diff evidence for the next repair attempt', async () => {
+    const image = `data:image/png;base64,${Buffer.from('png-bytes').toString('base64')}`;
+    const readAttachment = vi.fn(() =>
+      Promise.resolve({
+        status: 'found' as const,
+        bytes: new TextEncoder().encode(
+          JSON.stringify({ expected: image, actual: image, diff: image }),
+        ),
+      }),
+    );
+    const persist = vi.fn((operationId: string, files: readonly IntegrationEvidenceFile[]) => {
+      void operationId;
+      void files;
+      return Promise.resolve({ ok: true as const, artifactIds: ['ci-evidence:actual'] });
+    });
+    const adapter = new JenkinsBuildObserverAdapter(
+      configuration,
+      commands,
+      {
+        observe: () =>
+          Promise.resolve({
+            status: 'finished' as const,
+            build: build({
+              result: 'FAILURE',
+              failures: [
+                {
+                  uid: 'visual-case',
+                  name: 'Flight card',
+                  status: 'failed',
+                  message: 'snapshot mismatch',
+                  flaky: false,
+                  attachments: [
+                    {
+                      name: 'flight-card',
+                      type: 'application/vnd.allure.image.diff',
+                      source: 'flight-card.imagediff',
+                    },
+                  ],
+                },
+              ],
+            }),
+          }),
+        readAttachment,
+      },
+      advancingTime(),
+      { persist },
+    );
+
+    const result = await adapter.execute(requestFor());
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      artifactIds: ['ci-evidence:actual'],
+      output: { status: 'likely_caused_by_change' },
+    });
+    expect(readAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'flight-card.imagediff' }),
+    );
+    expect(persist.mock.calls[0]?.[0]).toBe('tasker:test:observe-ci:attempt-1');
+    expect(
+      persist.mock.calls[0]?.[1].some(({ relativePath }) => relativePath.endsWith('-actual.png')),
+    ).toBe(true);
   });
 
   it('returns flaky failures as classified observations outside the implementation budget', async () => {

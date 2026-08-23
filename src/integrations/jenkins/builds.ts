@@ -128,6 +128,11 @@ export type JenkinsBuildObservation =
   | { readonly status: 'finished'; readonly build: JenkinsFinishedBuild }
   | { readonly status: 'failed'; readonly problem: JenkinsBuildProblem };
 
+export type JenkinsAttachmentObservation =
+  | { readonly status: 'found'; readonly bytes: Uint8Array }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'failed'; readonly problem: JenkinsBuildProblem };
+
 export interface JenkinsBuildPort {
   observe(input: {
     readonly job: string;
@@ -135,6 +140,11 @@ export interface JenkinsBuildPort {
     readonly expectedRevision: string;
     readonly signal: AbortSignal;
   }): Promise<JenkinsBuildObservation>;
+  readAttachment(input: {
+    readonly buildUrl: string;
+    readonly source: string;
+    readonly signal: AbortSignal;
+  }): Promise<JenkinsAttachmentObservation>;
 }
 
 type FetchImplementation = typeof fetch;
@@ -336,6 +346,37 @@ export class JenkinsBuildClient implements JenkinsBuildPort {
         failures: failures.value,
       },
     };
+  }
+
+  public async readAttachment(input: {
+    readonly buildUrl: string;
+    readonly source: string;
+    readonly signal: AbortSignal;
+  }): Promise<JenkinsAttachmentObservation> {
+    const url = `${input.buildUrl.replace(/\/$/u, '')}/allure/data/attachments/${encodeURIComponent(input.source)}`;
+    if (!this.sameOrigin(url)) return this.invalidResponse('attachment URL');
+    const timeoutSignal = AbortSignal.timeout(this.configuration.requestTimeoutMs);
+    try {
+      const response = await this.fetchImplementation(url, {
+        headers: {
+          accept: '*/*',
+          authorization: `Basic ${Buffer.from(`${this.configuration.user}:${this.configuration.token}`).toString('base64')}`,
+        },
+        signal: AbortSignal.any([input.signal, timeoutSignal]),
+      });
+      if (response.status === 404) return { status: 'not_found' };
+      if (!response.ok) return { status: 'failed', problem: problemForStatus(response.status) };
+      return { status: 'found', bytes: new Uint8Array(await response.arrayBuffer()) };
+    } catch {
+      return {
+        status: 'failed',
+        problem: {
+          kind: 'unavailable',
+          message: 'Jenkins attachment is unreachable',
+          retryable: true,
+        },
+      };
+    }
   }
 
   private async readStages(

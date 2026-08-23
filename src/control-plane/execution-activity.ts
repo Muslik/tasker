@@ -33,11 +33,25 @@ const JenkinsEvidenceSchema = z
   })
   .loose();
 
+const DeliveryEvidenceSchema = z
+  .object({
+    outcome: z.enum(['accepted', 'repair_required']),
+    ci: JenkinsEvidenceSchema,
+  })
+  .loose();
+
+const deliveryEvidenceFrom = (details: unknown): z.infer<typeof DeliveryEvidenceSchema> | null => {
+  const wrapped = z.object({ output: DeliveryEvidenceSchema }).loose().safeParse(details);
+  return wrapped.success ? wrapped.data.output : null;
+};
+
 const jenkinsEvidenceFrom = (details: unknown): z.infer<typeof JenkinsEvidenceSchema> | null => {
   const direct = JenkinsEvidenceSchema.safeParse(details);
   if (direct.success) return direct.data;
   const wrapped = z.object({ output: JenkinsEvidenceSchema }).loose().safeParse(details);
   if (wrapped.success) return wrapped.data.output;
+  const completedDelivery = deliveryEvidenceFrom(details);
+  if (completedDelivery !== null) return completedDelivery.ci;
   const delivery = z.object({ ci: JenkinsEvidenceSchema }).loose().safeParse(details);
   if (delivery.success) return delivery.data.ci;
   const blocked = z.object({ details: JenkinsEvidenceSchema }).loose().safeParse(details);
@@ -242,6 +256,7 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
           return [];
         }
         const evidence = jenkinsEvidenceFrom(output.data.details);
+        const delivery = deliveryEvidenceFrom(output.data.details);
         return [
           OperatorActivityEntrySchema.parse({
             sequence: event.sequence,
@@ -251,7 +266,9 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
             title: output.data.result?.summary ?? 'Jenkins observation recorded',
             detail:
               output.data.status === 'completed'
-                ? 'Jenkins verified the exact commit prepared by this task.'
+                ? delivery?.outcome === 'repair_required'
+                  ? 'CI produced repair evidence; the frozen delivery feedback loop will repeat with the same worktree and pull request.'
+                  : 'Jenkins verified the exact commit prepared by this task.'
                 : 'The task is paused with its completed work preserved. Resume it after the CI condition is resolved.',
             ...(evidence === null ? {} : { externalUrl: evidence.build.url }),
           }),

@@ -214,15 +214,22 @@ export class BitbucketPullRequestAdapter {
     options: { readonly authenticated?: boolean; readonly timeoutMs?: number } = {},
   ): Promise<CommandResult> {
     request.runtime.heartbeat({ phase: 'git', operation });
-    return this.commands.run({
-      command: 'git',
-      args,
-      cwd: request.workspace.path,
-      ...(options.authenticated === true ? { env: this.gitEnvironment() } : {}),
-      stdin: '',
-      timeoutMs: options.timeoutMs ?? 60_000,
-      cancellationSignal: request.runtime.cancellationSignal,
-    });
+    const heartbeat = setInterval(() => {
+      request.runtime.heartbeat({ phase: 'git', operation });
+    }, 10_000);
+    return this.commands
+      .run({
+        command: 'git',
+        args,
+        cwd: request.workspace.path,
+        ...(options.authenticated === true ? { env: this.gitEnvironment() } : {}),
+        stdin: '',
+        timeoutMs: options.timeoutMs ?? 60_000,
+        cancellationSignal: request.runtime.cancellationSignal,
+      })
+      .finally(() => {
+        clearInterval(heartbeat);
+      });
   }
 
   private gitFailure(

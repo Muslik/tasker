@@ -1,8 +1,14 @@
+import { Buffer } from 'node:buffer';
+import { extname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+
+import { z } from 'zod';
 
 import type { WorkspaceCommandRunner } from '../../providers/command-runner.js';
 import { JsonValueSchema } from '../../workflow/schema.js';
 import type {
+  IntegrationEvidenceFile,
+  IntegrationEvidenceSink,
   IntegrationStepAdapter,
   IntegrationStepExecutionRequest,
   IntegrationStepExecutionResult,
@@ -16,6 +22,16 @@ import type {
 
 type JenkinsVerdict =
   'passed' | 'likely_caused_by_change' | 'likely_flaky' | 'infrastructure' | 'unknown';
+
+const AllureImageDiffSchema = z
+  .object({
+    expected: z.string().optional(),
+    actual: z.string().optional(),
+    diff: z.string().optional(),
+  })
+  .loose();
+
+const ALLURE_IMAGE_DIFF = 'application/vnd.allure.image.diff';
 
 export interface JenkinsObserverTime {
   now(): number;
@@ -72,7 +88,10 @@ const outputFor = (build: JenkinsFinishedBuild, status: JenkinsVerdict) =>
     failures: build.failures,
   });
 
-const terminalResult = (build: JenkinsFinishedBuild): IntegrationStepExecutionResult => {
+const terminalResult = (
+  build: JenkinsFinishedBuild,
+  artifactIds: readonly string[] = [],
+): IntegrationStepExecutionResult => {
   const verdict = classify(build);
   const output = outputFor(build, verdict);
   return {
@@ -82,8 +101,50 @@ const terminalResult = (build: JenkinsFinishedBuild): IntegrationStepExecutionRe
         ? `Jenkins build #${String(build.number)} passed for ${build.revision.slice(0, 12)}`
         : `Jenkins build #${String(build.number)} classified as ${verdict.replaceAll('_', ' ')}`,
     output,
-    artifactIds: [],
+    artifactIds,
   };
+};
+
+const safeFilename = (value: string): string =>
+  value
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9._-]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 100) || 'attachment';
+
+const dataUriBytes = (value: string): Uint8Array | null => {
+  const match = /^data:[^;,]+;base64,(.+)$/u.exec(value);
+  return match?.[1] === undefined ? null : new Uint8Array(Buffer.from(match[1], 'base64'));
+};
+
+const imageDiffFiles = (
+  build: JenkinsFinishedBuild,
+  failureUid: string,
+  attachmentName: string,
+  bytes: Uint8Array,
+): readonly IntegrationEvidenceFile[] | null => {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown;
+  } catch {
+    return null;
+  }
+  const parsed = AllureImageDiffSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  const root = `jenkins/build-${String(build.number)}/${safeFilename(failureUid)}`;
+  return (['expected', 'actual', 'diff'] as const).flatMap((kind) => {
+    const value = parsed.data[kind];
+    if (value === undefined) return [];
+    const decoded = dataUriBytes(value);
+    return decoded === null
+      ? []
+      : [
+          {
+            relativePath: `${root}/${safeFilename(attachmentName)}-${kind}.png`,
+            bytes: decoded,
+          },
+        ];
+  });
 };
 
 const problemResult = (
@@ -107,6 +168,7 @@ export class JenkinsBuildObserverAdapter implements IntegrationStepAdapter {
     private readonly commands: WorkspaceCommandRunner,
     private readonly builds: JenkinsBuildPort,
     private readonly time: JenkinsObserverTime = systemTime,
+    private readonly evidence: IntegrationEvidenceSink | null = null,
   ) {}
 
   public async execute(
@@ -174,7 +236,12 @@ export class JenkinsBuildObserverAdapter implements IntegrationStepAdapter {
         expectedRevision,
         signal: request.runtime.cancellationSignal,
       });
-      if (observation.status === 'finished') return terminalResult(observation.build);
+      if (observation.status === 'finished') {
+        const evidence = await this.persistRepairEvidence(request, observation.build);
+        return evidence.ok
+          ? terminalResult(observation.build, evidence.artifactIds)
+          : evidence.result;
+      }
       if (observation.status === 'failed') {
         if (observation.problem.kind !== 'unavailable' || !observation.problem.retryable) {
           return problemResult(observation);
@@ -201,5 +268,78 @@ export class JenkinsBuildObserverAdapter implements IntegrationStepAdapter {
       },
       artifactIds: [],
     };
+  }
+
+  private async persistRepairEvidence(
+    request: IntegrationStepExecutionRequest,
+    build: JenkinsFinishedBuild,
+  ): Promise<
+    | { readonly ok: true; readonly artifactIds: readonly string[] }
+    | { readonly ok: false; readonly result: IntegrationStepExecutionResult }
+  > {
+    if (classify(build) !== 'likely_caused_by_change' || this.evidence === null) {
+      return { ok: true, artifactIds: [] };
+    }
+    const files: IntegrationEvidenceFile[] = [];
+    for (const failure of build.failures) {
+      for (const attachment of failure.attachments) {
+        const read = await this.builds.readAttachment({
+          buildUrl: build.url,
+          source: attachment.source,
+          signal: request.runtime.cancellationSignal,
+        });
+        if (read.status !== 'found') {
+          return {
+            ok: false,
+            result: {
+              status: 'blocked',
+              kind: 'infrastructure',
+              summary: 'Cannot preserve Jenkins repair evidence',
+              details:
+                read.status === 'failed'
+                  ? JsonValueSchema.parse(read.problem)
+                  : { source: attachment.source, problem: 'attachment_not_found' },
+              artifactIds: [],
+            },
+          };
+        }
+        if (attachment.type === ALLURE_IMAGE_DIFF) {
+          const expanded = imageDiffFiles(build, failure.uid, attachment.name, read.bytes);
+          if (expanded === null || expanded.length === 0) {
+            return {
+              ok: false,
+              result: {
+                status: 'blocked',
+                kind: 'configuration',
+                summary: 'Jenkins returned an invalid Allure image-diff attachment',
+                details: { source: attachment.source, failureUid: failure.uid },
+                artifactIds: [],
+              },
+            };
+          }
+          files.push(...expanded);
+          continue;
+        }
+        const suffix = extname(attachment.source);
+        files.push({
+          relativePath: `jenkins/build-${String(build.number)}/${safeFilename(failure.uid)}/${safeFilename(attachment.name)}${suffix}`,
+          bytes: read.bytes,
+        });
+      }
+    }
+    if (files.length === 0) return { ok: true, artifactIds: [] };
+    const persisted = await this.evidence.persist(request.operationId, files);
+    return persisted.ok
+      ? { ok: true, artifactIds: persisted.artifactIds }
+      : {
+          ok: false,
+          result: {
+            status: 'blocked',
+            kind: 'infrastructure',
+            summary: 'Cannot persist Jenkins repair evidence',
+            details: { message: persisted.message },
+            artifactIds: [],
+          },
+        };
   }
 }

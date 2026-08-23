@@ -28,6 +28,21 @@ export interface IntegrationStepRuntime {
   heartbeat(details: unknown): void;
 }
 
+export interface IntegrationEvidenceFile {
+  readonly relativePath: string;
+  readonly bytes: Uint8Array;
+}
+
+export interface IntegrationEvidenceSink {
+  persist(
+    operationId: string,
+    files: readonly IntegrationEvidenceFile[],
+  ): Promise<
+    | { readonly ok: true; readonly artifactIds: readonly string[] }
+    | { readonly ok: false; readonly message: string }
+  >;
+}
+
 export interface IntegrationStepExecutionRequest {
   readonly operationId: string;
   readonly nodeId: string;
