@@ -391,6 +391,78 @@ describe('Jenkins build observation', () => {
     );
   });
 
+  it('strips provider-only Allure attachment fields at the Jenkins boundary', async () => {
+    const fetchImplementation: typeof fetch = vi.fn((input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const body = url.includes('tree=jobs')
+        ? {
+            jobs: [
+              {
+                name: 'tasker%2FAVIA-13236%2Frun-1',
+                url: 'https://jenkins.example/job/front-avia/job/tasker%252FAVIA-13236/',
+              },
+            ],
+          }
+        : url.endsWith('/lastBuild/api/json')
+          ? {
+              number: 73,
+              url: 'https://jenkins.example/job/front-avia/job/tasker%252FAVIA-13236/73/',
+              building: false,
+              result: 'FAILURE',
+              duration: 12_000,
+              actions: [{ lastBuiltRevision: { SHA1: revision } }],
+            }
+          : url.endsWith('/wfapi/describe')
+            ? { stages: [{ name: 'Tests', status: 'FAILED' }] }
+            : url.endsWith('/data/suites.json')
+              ? {
+                  uid: 'root',
+                  name: 'root',
+                  status: 'failed',
+                  children: [{ uid: 'case-1', name: 'visual test', status: 'failed' }],
+                }
+              : {
+                  statusMessage: 'snapshot mismatch',
+                  attachments: [
+                    {
+                      uid: 'attachment-1',
+                      name: 'actual',
+                      type: 'image/png',
+                      source: 'actual.png',
+                      size: 4_096,
+                    },
+                  ],
+                };
+      return Promise.resolve(Response.json(body));
+    });
+    const client = new JenkinsBuildClient(configuration, fetchImplementation);
+
+    const result = await client.observe({
+      job: 'front-avia',
+      branch: 'tasker/AVIA-13236/run-1',
+      expectedRevision: revision,
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      status: 'finished',
+      build: {
+        failures: [
+          {
+            uid: 'case-1',
+            attachments: [{ name: 'actual', type: 'image/png', source: 'actual.png' }],
+          },
+        ],
+      },
+    });
+    if (result.status !== 'finished') throw new Error('Expected a finished Jenkins build');
+    expect(result.build.failures[0]?.attachments[0]).toEqual({
+      name: 'actual',
+      type: 'image/png',
+      source: 'actual.png',
+    });
+  });
+
   it('keeps polling while a new build has not published its revision action yet', async () => {
     const fetchImplementation: typeof fetch = vi.fn((input: string | URL | Request) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;

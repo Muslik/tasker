@@ -75,13 +75,11 @@ const RawAllureCaseSchema = z
   })
   .loose();
 
-const RawAttachmentSchema = z
-  .object({
-    name: z.string().min(1),
-    type: z.string().min(1),
-    source: z.string().min(1),
-  })
-  .loose();
+const RawAttachmentSchema = z.object({
+  name: z.string().min(1),
+  type: z.string().min(1),
+  source: z.string().min(1),
+});
 
 export type JenkinsBuildConfiguration = z.infer<typeof JenkinsBuildConfigurationSchema>;
 
