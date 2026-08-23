@@ -31,6 +31,7 @@ import type {
   OperatorInterventionAction,
   OperatorActivityResponse,
   OperatorExecutionAttempt,
+  OperatorRunLogResponse,
   OperatorTaskSummary,
   OperatorWorkflowContinuation,
   OperatorWorkflowProjection,
@@ -63,6 +64,7 @@ import {
   loadJiraIssue,
   loadOperatorActivity,
   loadOperatorExecutionAttempt,
+  loadOperatorRunLog,
   loadOperatorWorkflowProjection,
   loadWorkflow,
   reviewPlan,
@@ -89,7 +91,11 @@ import {
 } from './components/ui/tooltip.js';
 import { cn } from './lib/utils.js';
 import { MarkdownText } from './MarkdownText.js';
-import { planningAgentLogFrom, type PlanningAgentEvent } from './planning-agent-log.js';
+import {
+  planningAgentLogFrom,
+  planningAgentLogFromRaw,
+  type PlanningAgentEvent,
+} from './planning-agent-log.js';
 import { implementationPlanMarkdownFrom } from './implementation-plan-markdown.js';
 import { WorkflowStages } from './WorkflowStages.js';
 
@@ -113,6 +119,12 @@ type ExecutionAttemptLoadState =
   | { readonly status: 'missing' }
   | { readonly status: 'loading'; readonly nodeId: string; readonly blockRun: number }
   | { readonly status: 'ready'; readonly attempt: OperatorExecutionAttempt }
+  | { readonly status: 'failed'; readonly message: string };
+
+type RunLogLoadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'missing' }
+  | { readonly status: 'ready'; readonly response: OperatorRunLogResponse }
   | { readonly status: 'failed'; readonly message: string };
 
 type ImplementationPlanLoadState =
@@ -2343,6 +2355,211 @@ const ExecutionProgressSurface = ({
   );
 };
 
+const RunLogSurface = ({ state }: { readonly state: RunLogLoadState }) => {
+  if (state.status === 'missing') return null;
+  if (state.status === 'loading') {
+    return (
+      <section className="border-b border-border px-5 py-3" aria-label="Run log">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" />
+          Loading run log…
+        </div>
+      </section>
+    );
+  }
+  if (state.status === 'failed') {
+    return (
+      <section className="border-b border-border px-5 py-3" aria-label="Run log">
+        <InlineError>{state.message}</InlineError>
+      </section>
+    );
+  }
+
+  const tokens = state.response.entries.reduce((total, entry) => {
+    if (entry.usage !== null) return total + entry.usage.inputTokens + entry.usage.outputTokens;
+    if (entry.runtime !== 'bootstrap') return total;
+    return (
+      total +
+      planningAgentLogFromRaw(entry.rawLog).attempts.reduce(
+        (attemptTotal, attempt) =>
+          attemptTotal +
+          (attempt.usage === null ? 0 : attempt.usage.inputTokens + attempt.usage.outputTokens),
+        0,
+      )
+    );
+  }, 0);
+  return (
+    <Collapsible defaultOpen>
+      <section className="border-b border-border bg-background" aria-label="Run log">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
+          <div className="flex items-center gap-2">
+            <Terminal className="size-4 text-primary" />
+            <strong className="text-sm">Run log</strong>
+            <span className="text-[11px] text-muted-foreground">
+              {state.response.entries.length} attempts
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {tokens.toLocaleString()} measured tokens
+            </span>
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="border-t border-border/60">
+          {state.response.entries.length === 0 ? (
+            <p className="px-5 py-4 text-sm text-muted-foreground">
+              No agent or process attempts yet.
+            </p>
+          ) : (
+            <div
+              className="max-h-[min(62vh,48rem)] divide-y divide-border overflow-y-auto overscroll-contain"
+              data-testid="run-log-transcript"
+            >
+              {state.response.entries.map((entry) => {
+                const parsed = planningAgentLogFromRaw(entry.rawLog);
+                const events = parsed.attempts.flatMap((attempt) => attempt.events);
+                const entryTokens =
+                  entry.usage === null ? null : entry.usage.inputTokens + entry.usage.outputTokens;
+                return (
+                  <article className="px-5 py-4" key={entry.id}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <strong className="text-sm">
+                            {entry.reference.replaceAll('.', ' ')}
+                          </strong>
+                          <span className="text-[11px] text-muted-foreground">
+                            attempt {entry.blockRun}
+                          </span>
+                          {entry.status === 'running' ? (
+                            <span className="size-2 animate-pulse rounded-full bg-primary" />
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {entry.runtime}
+                          {entry.runner === null ? '' : ` · ${entry.runner}`}
+                          {entryTokens === null ? '' : ` · ${entryTokens.toLocaleString()} tok`}
+                          {entry.usage === null
+                            ? ''
+                            : ` · ${(entry.usage.durationMs / 1_000).toFixed(1)}s`}
+                        </p>
+                      </div>
+                      <StateBadge>{entry.status.replaceAll('_', ' ')}</StateBadge>
+                    </div>
+
+                    {events.length === 0 ? null : (
+                      <div className="mt-3 divide-y divide-border/50 border-t border-border/60">
+                        {events.map((event, index) => {
+                          if (event.kind === 'command') {
+                            return (
+                              <div
+                                className="py-3"
+                                key={`${entry.id}:${event.id}:${String(index)}`}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                                  <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs leading-5">
+                                    {event.command}
+                                  </code>
+                                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                                    {event.status === 'running'
+                                      ? 'running'
+                                      : `exit ${String(event.exitCode ?? 0)}`}
+                                  </span>
+                                </div>
+                                {event.output.length === 0 ? null : (
+                                  <details
+                                    className="ml-5 mt-2 text-xs"
+                                    open={event.status !== 'completed'}
+                                  >
+                                    <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
+                                      Command output · {event.output.length.toLocaleString()}{' '}
+                                      characters
+                                    </summary>
+                                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
+                                      {event.output}
+                                    </pre>
+                                  </details>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (event.kind === 'message') {
+                            return (
+                              <div
+                                className="flex items-start gap-2 py-3 text-xs"
+                                key={`${entry.id}:message:${String(index)}`}
+                              >
+                                <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                                <div>
+                                  <strong className="font-medium">{event.title}</strong>
+                                  {event.detail === null ? null : (
+                                    <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+                                      {event.detail}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div
+                              className={cn(
+                                'flex items-start gap-2 py-3 text-xs',
+                                event.kind === 'error'
+                                  ? 'text-destructive'
+                                  : 'text-amber-700 dark:text-amber-300',
+                              )}
+                              key={`${entry.id}:${event.kind}:${String(index)}`}
+                            >
+                              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                              <span className="whitespace-pre-wrap break-words">
+                                {event.message}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {entry.resultSummary === null ? null : (
+                      <p className="mt-3 border-t border-border/60 pt-3 text-xs leading-5">
+                        {entry.resultSummary}
+                      </p>
+                    )}
+                    {entry.workspaceChanges === null ||
+                    entry.workspaceChanges.paths.length === 0 ? null : (
+                      <ul className="mt-2 space-y-1 font-mono text-xs text-muted-foreground">
+                        {entry.workspaceChanges.paths.map((file) => (
+                          <li key={`${entry.id}:${file.status}:${file.path}`}>
+                            {file.status} {file.path}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {entry.evidence.length === 0 ? null : (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        Evidence:{' '}
+                        {entry.evidence.map(({ relativePath }) => relativePath).join(', ')}
+                      </p>
+                    )}
+                    {entry.truncated ? (
+                      <p className="mt-2 text-xs text-destructive">
+                        Live transcript storage was truncated for this attempt.
+                      </p>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+};
+
 const ExecutionAttemptSurface = ({
   state,
   onClose,
@@ -2384,7 +2601,7 @@ const ExecutionAttemptSurface = ({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Terminal className="size-4 text-primary" />
-            <strong className="text-sm">Run log</strong>
+            <strong className="text-sm">Focused attempt</strong>
             <StateBadge>{output?.status ?? 'running'}</StateBadge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -2813,6 +3030,7 @@ export const App = () => {
   const [activityState, setActivityState] = useState<ActivityLoadState>({ status: 'loading' });
   const [operatorProjectionState, setOperatorProjectionState] =
     useState<OperatorProjectionLoadState>({ status: 'loading' });
+  const [runLogState, setRunLogState] = useState<RunLogLoadState>({ status: 'missing' });
   const [executionAttemptState, setExecutionAttemptState] = useState<ExecutionAttemptLoadState>({
     status: 'missing',
   });
@@ -2984,6 +3202,25 @@ export const App = () => {
     }
   };
 
+  const refreshSelectedRunLog = async (
+    taskReference: string,
+    refreshSequence: number,
+    showLoading = true,
+  ): Promise<void> => {
+    if (showLoading) setRunLogState({ status: 'loading' });
+    try {
+      const response = await loadOperatorRunLog(taskReference);
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
+      setRunLogState(response === null ? { status: 'missing' } : { status: 'ready', response });
+    } catch (error) {
+      if (refreshSequence !== selectionRefreshSequenceRef.current) return;
+      setRunLogState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Unexpected run log failure',
+      });
+    }
+  };
+
   const refreshSelectedImplementationPlan = async (
     taskReference: string,
     refreshSequence: number,
@@ -3076,6 +3313,7 @@ export const App = () => {
     await Promise.all([
       refreshSelectedWorkflow(taskReference, refreshSequence),
       refreshSelectedOperatorProjection(taskReference, refreshSequence),
+      refreshSelectedRunLog(taskReference, refreshSequence),
       refreshSelectedActivity(taskReference, refreshSequence),
       refreshSelectedImplementationPlan(taskReference, refreshSequence),
       refreshSelectedPlanningTranscript(taskReference, refreshSequence),
@@ -3089,9 +3327,10 @@ export const App = () => {
   ): Promise<OperatorWorkflowProjection | null> => {
     const sequence = runtimeRefreshSequenceRef.current + 1;
     runtimeRefreshSequenceRef.current = sequence;
-    const [projection, activity] = await Promise.allSettled([
+    const [projection, activity, runLog] = await Promise.allSettled([
       loadOperatorWorkflowProjection(taskReference),
       loadOperatorActivity(taskReference),
+      loadOperatorRunLog(taskReference),
     ]);
     if (sequence !== runtimeRefreshSequenceRef.current || selectedIdRef.current !== taskReference) {
       return null;
@@ -3116,6 +3355,17 @@ export const App = () => {
               activity.reason instanceof Error
                 ? activity.reason.message
                 : 'Runtime activity is unavailable',
+          },
+    );
+    setRunLogState(
+      runLog.status === 'fulfilled'
+        ? runLog.value === null
+          ? { status: 'missing' }
+          : { status: 'ready', response: runLog.value }
+        : {
+            status: 'failed',
+            message:
+              runLog.reason instanceof Error ? runLog.reason.message : 'Run log is unavailable',
           },
     );
     return projection.status === 'fulfilled' ? projection.value : null;
@@ -3235,7 +3485,7 @@ export const App = () => {
     void refreshRuntimeProjection().catch(() => undefined);
     const poll = window.setInterval(
       () => void refreshRuntimeProjection().catch(() => undefined),
-      750,
+      2_000,
     );
     return () => {
       lifecycle.active = false;
@@ -3818,6 +4068,7 @@ export const App = () => {
                   jiraSync={jiraSyncState}
                 />
                 <ExecutionProgressSurface projection={operatorProjectionState} />
+                <RunLogSurface state={runLogState} />
                 <ExecutionAttemptSurface
                   state={executionAttemptState}
                   onClose={() => {
@@ -3945,10 +4196,12 @@ export const App = () => {
                     />
                   ) : null}
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
-                  <PlanningTranscriptSurface
-                    transcript={planningTranscriptState}
-                    live={planningInProgress}
-                  />
+                  {runLogState.status === 'missing' ? (
+                    <PlanningTranscriptSurface
+                      transcript={planningTranscriptState}
+                      live={planningInProgress}
+                    />
+                  ) : null}
                   {selectedTask.status === 'plan_review' ? null : (
                     <ImplementationPlanSurface
                       planning={implementationPlanState}

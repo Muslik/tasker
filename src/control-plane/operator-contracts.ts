@@ -79,6 +79,19 @@ export const OperatorEvidenceArtifactSchema = TaskStepEvidenceArtifactSchema.ext
   artifactId: z.string().min(1),
 }).strict();
 
+const OperatorWorkspaceChangesSchema = z
+  .object({
+    changed: z.boolean(),
+    fingerprint: z.string().min(1),
+    trackedDiffSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .nullable(),
+    paths: z.array(z.object({ status: z.string().length(2), path: z.string().min(1) }).strict()),
+    truncated: z.boolean(),
+  })
+  .strict();
+
 export const OperatorExecutionAttemptSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -90,21 +103,39 @@ export const OperatorExecutionAttemptSchema = z
     transcript: PlanningTranscriptViewSchema.nullable(),
     output: TaskStepOutputArtifactSchema.nullable(),
     evidence: z.array(OperatorEvidenceArtifactSchema),
-    workspaceChanges: z
-      .object({
-        changed: z.boolean(),
-        fingerprint: z.string().min(1),
-        trackedDiffSha256: z
-          .string()
-          .regex(/^[a-f0-9]{64}$/u)
-          .nullable(),
-        paths: z.array(
-          z.object({ status: z.string().length(2), path: z.string().min(1) }).strict(),
-        ),
-        truncated: z.boolean(),
-      })
-      .strict()
-      .nullable(),
+    workspaceChanges: OperatorWorkspaceChangesSchema.nullable(),
+  })
+  .strict()
+  .readonly();
+
+export const OperatorRunLogEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    runtime: z.enum(['bootstrap', 'execution']),
+    nodeId: z.string().min(1),
+    reference: z.string().min(1),
+    blockRun: z.number().int().positive(),
+    status: z.enum(['running', 'completed', 'blocked', 'workflow_change_required']),
+    startedAt: z.iso.datetime().nullable(),
+    completedAt: z.iso.datetime().nullable(),
+    rawLog: z.string(),
+    truncated: z.boolean(),
+    runner: z.string().min(1).nullable(),
+    resultSummary: z.string().min(1).nullable(),
+    usage: AgentInvocationUsageSchema.nullable(),
+    evidence: z.array(OperatorEvidenceArtifactSchema),
+    workspaceChanges: OperatorWorkspaceChangesSchema.nullable(),
+  })
+  .strict()
+  .readonly();
+
+export const OperatorRunLogResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    taskReference: z.string().min(1),
+    bootstrapRunId: z.string().min(1),
+    executionRunId: z.string().min(1).nullable(),
+    entries: z.array(OperatorRunLogEntrySchema),
   })
   .strict()
   .readonly();
@@ -477,6 +508,8 @@ export const OperatorStreamEventSchema = z
 export type PlanningTaskSummary = z.infer<typeof PlanningTaskSummarySchema>;
 export type WorkflowNodeStatus = z.infer<typeof WorkflowNodeStatusSchema>;
 export type OperatorExecutionAttempt = z.infer<typeof OperatorExecutionAttemptSchema>;
+export type OperatorRunLogEntry = z.infer<typeof OperatorRunLogEntrySchema>;
+export type OperatorRunLogResponse = z.infer<typeof OperatorRunLogResponseSchema>;
 export type BlockReceiptSummary = z.infer<typeof BlockReceiptSummarySchema>;
 export type OperatorWorkflowStep = z.infer<typeof OperatorWorkflowStepSchema>;
 export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;

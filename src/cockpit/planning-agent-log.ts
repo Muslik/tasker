@@ -118,6 +118,41 @@ const recordCommand = (attempt: MutableAttempt, item: Readonly<Record<string, un
 const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'message' }> => {
   try {
     const value: unknown = JSON.parse(text);
+    if (isRecord(value) && typeof value.status === 'string') {
+      const blockingReason = stringField(value, 'blockingReason');
+      if (blockingReason !== null && blockingReason.trim().length > 0) {
+        return {
+          kind: 'message',
+          title: 'Agent blocked',
+          detail: compactWhitespace(blockingReason),
+        };
+      }
+      for (const key of ['outputJson', 'requestJson']) {
+        const payload = stringField(value, key);
+        if (payload === null || payload.trim().length === 0) continue;
+        try {
+          const decoded: unknown = JSON.parse(payload);
+          if (isRecord(decoded)) {
+            const summary = stringField(decoded, 'summary');
+            return {
+              kind: 'message',
+              title: key === 'requestJson' ? 'Workflow change requested' : 'Agent message',
+              detail:
+                summary === null || summary.trim().length === 0
+                  ? 'Structured step result returned'
+                  : compactWhitespace(summary),
+            };
+          }
+        } catch {
+          return {
+            kind: 'message',
+            title: 'Agent message',
+            detail: compactWhitespace(payload),
+          };
+        }
+      }
+      return { kind: 'message', title: 'Agent message', detail: value.status.replaceAll('_', ' ') };
+    }
     if (isRecord(value) && isRecord(value.decision)) {
       return {
         kind: 'message',
@@ -255,3 +290,27 @@ export const planningAgentLogFrom = (transcript: PlanningTranscriptView): Planni
     raw: orderedChunks.map((chunk) => chunk.content).join(''),
   };
 };
+
+export const planningAgentLogFromRaw = (raw: string): PlanningAgentLog =>
+  planningAgentLogFrom({
+    transcriptId: 'operator-run-log',
+    operationId: 'operator-run-log',
+    chunks:
+      raw.length === 0
+        ? []
+        : [
+            {
+              schemaVersion: 1,
+              transcriptId: 'operator-run-log',
+              operationId: 'operator-run-log',
+              sequence: 1,
+              providerAttempt: 1,
+              stream: 'stdout',
+              content: raw,
+              byteLength: new TextEncoder().encode(raw).byteLength,
+              recordedAt: '1970-01-01T00:00:00.000Z',
+            },
+          ],
+    totalBytes: new TextEncoder().encode(raw).byteLength,
+    truncated: false,
+  });

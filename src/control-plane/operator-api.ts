@@ -25,6 +25,7 @@ import {
   ExpectedRunCommandSchema,
   OperatorActivityResponseSchema,
   OperatorExecutionAttemptSchema,
+  OperatorRunLogResponseSchema,
   PlanningClarificationSubmissionSchema,
   OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
@@ -411,6 +412,26 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
           },
         ),
       ),
+    );
+  });
+
+  api.get('/api/operator/tasks/:taskReference/run-log', async (request, reply) => {
+    if (options.executionActivity === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('execution_activity_unavailable', 'Run log is unavailable'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
+    if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
+    if (lifecycle.value === null) {
+      return reply.code(404).send(apiError('run_not_found', 'This workflow has not started'));
+    }
+    return reply.send(
+      OperatorRunLogResponseSchema.parse(options.executionActivity.readRunLog(lifecycle.value)),
     );
   });
 

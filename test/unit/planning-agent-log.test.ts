@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { planningAgentLogFrom } from '../../src/cockpit/planning-agent-log.js';
+import {
+  planningAgentLogFrom,
+  planningAgentLogFromRaw,
+} from '../../src/cockpit/planning-agent-log.js';
 import type { PlanningTranscriptView } from '../../src/control-plane/planning-transcript.js';
 
 const chunk = (
@@ -118,5 +121,54 @@ describe('planning agent log', () => {
       { kind: 'message', title: 'Implementation plan returned', detail: 'ready' },
     ]);
     expect(log.raw).toContain('thread.started');
+  });
+
+  it('parses a complete persisted execution stdout without an attempt click', () => {
+    const raw = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'execution-thread' }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          command: 'pnpm run lint:stylelint',
+          aggregated_output: 'Done',
+          exit_code: 0,
+          status: 'completed',
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'message-1',
+          type: 'agent_message',
+          text: JSON.stringify({
+            status: 'completed',
+            outputJson: JSON.stringify({ summary: 'Verification accepted' }),
+            requestJson: null,
+            blockingReason: null,
+          }),
+        },
+      }),
+      JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 20 },
+      }),
+    ].join('\n');
+
+    const log = planningAgentLogFromRaw(raw);
+
+    expect(log.attempts).toHaveLength(1);
+    expect(log.attempts[0]?.events).toEqual([
+      {
+        kind: 'command',
+        id: 'command-1',
+        command: 'pnpm run lint:stylelint',
+        output: 'Done',
+        exitCode: 0,
+        status: 'completed',
+      },
+      { kind: 'message', title: 'Agent message', detail: 'Verification accepted' },
+    ]);
   });
 });

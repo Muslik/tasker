@@ -10,6 +10,7 @@ import {
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
   OperatorExecutionAttemptSchema,
+  OperatorRunLogResponseSchema,
   OperatorWorkflowProjectionSchema,
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
@@ -22,6 +23,7 @@ import type {
   WorkflowChangeReviewCommand,
   OperatorActivityResponse,
   OperatorExecutionAttempt,
+  OperatorRunLogResponse,
   OperatorStreamEvent,
   OperatorTaskListResponse,
   OperatorWorkflowProjection,
@@ -182,6 +184,19 @@ export const loadOperatorExecutionAttempt = async (
   if (!parsed.success) {
     throw new Error('Operator execution attempt does not match the cockpit contract');
   }
+  return parsed.data;
+};
+
+export const loadOperatorRunLog = async (
+  taskReference: string,
+): Promise<OperatorRunLogResponse | null> => {
+  const result = await fetchJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/run-log`,
+  );
+  if (result.response.status === 404) return null;
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = OperatorRunLogResponseSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Operator run log does not match the cockpit contract');
   return parsed.data;
 };
 

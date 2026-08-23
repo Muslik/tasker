@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { LedgerExecutionActivityReader } from '../../src/control-plane/execution-activity.js';
+import { PlanningTranscriptStore } from '../../src/control-plane/planning-transcript.js';
 import { BlockReceiptSchema, blockReceiptId } from '../../src/blocks/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { systemClock } from '../../src/shared/clock.js';
 import { TemporalTaskStepTraceStore } from '../../src/temporal/activities/block-execution.js';
 import { JsonValueSchema } from '../../src/workflow/schema.js';
+import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
 
 describe('execution activity', () => {
   let ledger: SqliteLedger | null = null;
@@ -301,6 +303,62 @@ describe('execution activity', () => {
         paths: [{ status: ' M', path: 'src/TripInfo.scss' }],
         truncated: false,
       },
+    });
+
+    const bootstrapWorkflowId = 'tasker:v3:jira:AVIA-12045';
+    const bootstrapRunId = 'bootstrap-run';
+    const planningOperationId = `${bootstrapWorkflowId}:${bootstrapRunId}:planning:1`;
+    const planningTranscripts = new PlanningTranscriptStore(ledger.repository, systemClock);
+    planningTranscripts.append(
+      planningOperationId,
+      1,
+      'stdout',
+      '{"type":"thread.started","thread_id":"planning-thread"}\n',
+    );
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: execution.taskReference,
+        workflowId: bootstrapWorkflowId,
+        runId: bootstrapRunId,
+        workflowHash: execution.workflowHash,
+        settings: { planReview: 'required', planningStrategy: 'fast' },
+        phase: 'execution',
+        workspaceContext: null,
+        context: null,
+        draft: null,
+        planning: null,
+        activeTranscriptOperationId: null,
+        freezeReceipt: null,
+        executionWorkflowId: execution.workflowId,
+        nodeStates: {},
+        attempts: {},
+        status: 'completed',
+        currentNodeId: null,
+        wait: null,
+        outcome: 'execution_started',
+      },
+      execution,
+    });
+    const runLog = new LedgerExecutionActivityReader(ledger.repository).readRunLog(lifecycle);
+
+    expect(runLog).toMatchObject({
+      taskReference: 'jira:AVIA-12045',
+      bootstrapRunId,
+      executionRunId: runId,
+    });
+    expect(
+      runLog.entries.map(({ runtime, nodeId, blockRun }) => ({ runtime, nodeId, blockRun })),
+    ).toEqual([
+      { runtime: 'execution', nodeId, blockRun: 1 },
+      { runtime: 'bootstrap', nodeId: 'planning', blockRun: 1 },
+      { runtime: 'execution', nodeId: 'review', blockRun: 1 },
+    ]);
+    expect(runLog.entries.find((entry) => entry.nodeId === nodeId)).toMatchObject({
+      rawLog: 'full provider output',
+      resultSummary: 'Implemented',
+      workspaceChanges: { paths: [{ path: 'src/TripInfo.scss' }] },
     });
   });
 });

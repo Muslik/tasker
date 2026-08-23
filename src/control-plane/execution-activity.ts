@@ -3,19 +3,22 @@ import { z } from 'zod';
 import { BlockReceiptSchema, blockReceiptId } from '../blocks/index.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import { TaskStepOutputArtifactSchema } from '../temporal/task-step-output.js';
-import type { ExecutionWorkflowPublicState } from '../temporal/index.js';
+import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../temporal/index.js';
 import {
   executionOperationIdFor,
   TemporalTaskStepTraceStore,
 } from '../temporal/activities/block-execution.js';
 import { TaskStepEvidenceArtifactSchema } from '../temporal/task-step-evidence-contracts.js';
 import { systemClock } from '../shared/clock.js';
-import type { PlanningTranscriptView } from './planning-transcript.js';
+import { PlanningTranscriptStore, type PlanningTranscriptView } from './planning-transcript.js';
 import {
   OperatorExecutionAttemptSchema,
   OperatorActivityEntrySchema,
+  OperatorRunLogEntrySchema,
+  OperatorRunLogResponseSchema,
   type OperatorExecutionAttempt,
   type OperatorActivityResponse,
+  type OperatorRunLogResponse,
 } from './operator-contracts.js';
 
 const ArtifactPointerSchema = z.object({ artifactId: z.string().min(1) }).strict();
@@ -49,6 +52,7 @@ export interface ExecutionActivityReader {
     nodeId: string,
     blockRun: number,
   ): OperatorExecutionAttempt | null;
+  readRunLog(lifecycle: TaskRunLifecycle): OperatorRunLogResponse;
 }
 
 export class LedgerExecutionActivityReader implements ExecutionActivityReader {
@@ -123,6 +127,97 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
               paths: mutation.changedPaths ?? [],
               truncated: mutation.changedPathsTruncated ?? false,
             },
+    });
+  }
+
+  public readRunLog(lifecycle: TaskRunLifecycle): OperatorRunLogResponse {
+    const entries = [];
+    const planningOperationPrefix = `${lifecycle.bootstrap.workflowId}:${lifecycle.bootstrap.runId}:planning:`;
+    const planningTranscriptPrefix = `planning-transcript:${planningOperationPrefix}`;
+    const planningOperationIds = [
+      ...new Set(
+        this.ledger
+          .listEvents()
+          .filter(({ aggregateId }) => aggregateId.startsWith(planningTranscriptPrefix))
+          .map(({ aggregateId }) => aggregateId.slice('planning-transcript:'.length)),
+      ),
+    ].sort();
+    const planningTranscripts = new PlanningTranscriptStore(this.ledger, systemClock);
+    for (const operationId of planningOperationIds) {
+      const transcript = planningTranscripts.read(operationId);
+      if (!transcript.ok) continue;
+      const chunks = transcript.value.chunks;
+      const blockRun = Number(operationId.slice(planningOperationPrefix.length));
+      const running =
+        lifecycle.execution === null &&
+        lifecycle.bootstrap.status !== 'completed' &&
+        lifecycle.bootstrap.activeTranscriptOperationId === operationId;
+      entries.push(
+        OperatorRunLogEntrySchema.parse({
+          id: `bootstrap:${operationId}`,
+          runtime: 'bootstrap',
+          nodeId: 'planning',
+          reference: 'implementation.plan',
+          blockRun: Number.isSafeInteger(blockRun) && blockRun > 0 ? blockRun : 1,
+          status: running ? 'running' : 'completed',
+          startedAt: chunks[0]?.recordedAt ?? null,
+          completedAt: running ? null : (chunks.at(-1)?.recordedAt ?? null),
+          rawLog: chunks.map(({ content }) => content).join(''),
+          truncated: transcript.value.truncated,
+          runner: 'planner',
+          resultSummary: null,
+          usage: null,
+          evidence: [],
+          workspaceChanges: null,
+        }),
+      );
+    }
+
+    const execution = lifecycle.execution;
+    if (execution !== null) {
+      for (const [nodeId, attempts] of Object.entries(execution.blockRuns)) {
+        for (let blockRun = 1; blockRun <= attempts; blockRun += 1) {
+          const attempt = this.readAttempt(execution, nodeId, blockRun);
+          if (attempt === null) continue;
+          const output = attempt.output;
+          const chunks = attempt.transcript?.chunks ?? [];
+          const rawTranscript = chunks.map(({ content }) => content).join('');
+          entries.push(
+            OperatorRunLogEntrySchema.parse({
+              id: `execution:${execution.runId}:${nodeId}:${String(blockRun)}`,
+              runtime: 'execution',
+              nodeId,
+              reference: output?.stepReference ?? nodeId,
+              blockRun,
+              status: output?.status ?? 'running',
+              startedAt: chunks[0]?.recordedAt ?? output?.recordedAt ?? null,
+              completedAt: output?.recordedAt ?? null,
+              rawLog:
+                output === null
+                  ? rawTranscript
+                  : [output.stdout, output.stderr].filter((value) => value.length > 0).join('\n'),
+              truncated: output === null ? (attempt.transcript?.truncated ?? false) : false,
+              runner: output?.runner ?? null,
+              resultSummary: output?.result?.summary ?? null,
+              usage: output?.usage ?? null,
+              evidence: attempt.evidence,
+              workspaceChanges: attempt.workspaceChanges,
+            }),
+          );
+        }
+      }
+    }
+
+    return OperatorRunLogResponseSchema.parse({
+      schemaVersion: 1,
+      taskReference: lifecycle.bootstrap.taskReference,
+      bootstrapRunId: lifecycle.bootstrap.runId,
+      executionRunId: lifecycle.execution?.runId ?? null,
+      entries: entries.sort((left, right) => {
+        if (left.startedAt === null) return right.startedAt === null ? 0 : 1;
+        if (right.startedAt === null) return -1;
+        return left.startedAt.localeCompare(right.startedAt);
+      }),
     });
   }
 

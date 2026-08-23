@@ -611,8 +611,8 @@ export class TemporalTaskStepTraceStore {
     private readonly clock: Clock,
     options: { readonly maxBytes?: number; readonly chunkBytes?: number } = {},
   ) {
-    this.maxBytes = options.maxBytes ?? 64 * 1024;
-    this.chunkBytes = options.chunkBytes ?? 8 * 1024;
+    this.maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
+    this.chunkBytes = options.chunkBytes ?? 32 * 1024;
     if (this.maxBytes < 1 || this.chunkBytes < 1 || this.chunkBytes > this.maxBytes) {
       throw new Error('Task step transcript limits are invalid');
     }
