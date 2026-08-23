@@ -121,6 +121,31 @@ const continuationRequest = (
     changes: [{ kind: 'task_scope_changed', objective }],
   });
 
+const ciRepairObjective = (ci: CiObservationOutput): string => {
+  const failedStages = ci.stages
+    .filter(({ status }) => ['FAILED', 'ABORTED'].includes(status.toLocaleUpperCase('en-US')))
+    .map(({ name }) => name);
+  const failures = ci.failures.slice(0, 10).map((failure) => {
+    const attachments = failure.attachments
+      .map(({ name, type, source }) => `${name} [${type}] ${source}`)
+      .join(', ');
+    return [
+      `${failure.name} (${failure.uid}): ${failure.message ?? 'no failure message'}`,
+      attachments.length === 0 ? null : `attachments: ${attachments}`,
+    ]
+      .filter((value) => value !== null)
+      .join('; ');
+  });
+  return [
+    `Repair Jenkins build #${String(ci.build.number)} for revision ${ci.build.revision} (${ci.build.url}).`,
+    failedStages.length === 0 ? null : `Failed stages: ${failedStages.join(', ')}.`,
+    failures.length === 0 ? null : `Failures: ${failures.join(' | ')}`,
+    'Re-run acceptance verification and independent review, then update the same pull request.',
+  ]
+    .filter((value) => value !== null)
+    .join(' ');
+};
+
 export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
   public readonly id = 'delivery.pull-request@1';
 
@@ -237,7 +262,7 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
         request: continuationRequest(
           request,
           `Jenkins build #${String(ci.build.number)} classified the failure as task-caused`,
-          'Repair the exact CI failure, re-run acceptance verification and independent review, then update the same pull request.',
+          ciRepairObjective(ci),
           artifactIds,
         ),
         artifactIds,

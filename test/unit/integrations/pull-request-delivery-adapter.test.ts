@@ -36,8 +36,26 @@ const ciOutput = (status: 'passed' | 'likely_caused_by_change') => ({
     result: status === 'passed' ? 'SUCCESS' : 'FAILURE',
     durationMs: 1_000,
   },
-  stages: [],
-  failures: [],
+  stages: status === 'passed' ? [] : [{ name: 'UI tests', status: 'FAILED' }],
+  failures:
+    status === 'passed'
+      ? []
+      : [
+          {
+            uid: 'visual-case-1',
+            name: 'Flight card with 2+ transfers: desktop',
+            status: 'failed',
+            message: '543 pixels differ from the stored snapshot',
+            flaky: false,
+            attachments: [
+              {
+                name: 'Flight card diff',
+                type: 'application/vnd.allure.image.diff',
+                source: 'flight-card.imagediff',
+              },
+            ],
+          },
+        ],
 });
 
 const request = (
@@ -155,6 +173,9 @@ describe('pull-request semantic delivery', () => {
     expect(result.request.changes[0]).toMatchObject({ kind: 'task_scope_changed' });
     const change = result.request.changes[0];
     if (change?.kind !== 'task_scope_changed') throw new Error('Expected task scope change');
-    expect(change.objective).toContain('Repair the exact CI failure');
+    expect(change.objective).toContain('Jenkins build #73');
+    expect(change.objective).toContain('Flight card with 2+ transfers: desktop');
+    expect(change.objective).toContain('543 pixels differ');
+    expect(change.objective).toContain('flight-card.imagediff');
   });
 });
