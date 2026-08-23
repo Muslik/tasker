@@ -11,7 +11,7 @@ import {
   type JenkinsFinishedBuild,
   type JenkinsObserverTime,
 } from '../../../src/integrations/index.js';
-import type { CommandRunner } from '../../../src/providers/command-runner.js';
+import type { WorkspaceCommandRunner } from '../../../src/providers/command-runner.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
@@ -30,7 +30,8 @@ const configuration: JenkinsBuildConfiguration = {
   observationTimeoutMs: 100,
 };
 
-const commands: CommandRunner = {
+const commands: WorkspaceCommandRunner = {
+  executionEnvironment: 'docker_workspace',
   run: () =>
     Promise.resolve({
       status: 'exited',
@@ -115,6 +116,32 @@ const advancingTime = (): JenkinsObserverTime => {
 };
 
 describe('Jenkins build observation', () => {
+  it('resolves the expected revision inside the prepared Docker workspace', async () => {
+    const run = vi.fn((input: Parameters<WorkspaceCommandRunner['run']>[0]) => commands.run(input));
+    const workspaceCommands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run,
+    };
+    const adapter = new JenkinsBuildObserverAdapter(
+      configuration,
+      workspaceCommands,
+      sequencedPort([{ status: 'finished', build: build() }]),
+      advancingTime(),
+    );
+
+    await adapter.execute(requestFor());
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: 'tasker:test:observe-ci:attempt-1:resolve-revision',
+        command: 'git',
+        args: ['rev-parse', 'HEAD'],
+        cwd: '/tmp/worktree',
+        workspaceAccess: 'read_only',
+      }),
+    );
+  });
+
   it('prefers the Tasker CI endpoint over a legacy Jenkins endpoint', () => {
     expect(
       loadJenkinsBuildConfiguration({

@@ -156,7 +156,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ? null
       : new JenkinsBuildObserverAdapter(
           jenkinsConfiguration,
-          nodeCommandRunner,
+          dockerCommands,
           new JenkinsBuildClient(jenkinsConfiguration),
         );
   const bitbucketPullRequests =

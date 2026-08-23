@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { CommandRunner } from '../../providers/command-runner.js';
+import type { WorkspaceCommandRunner } from '../../providers/command-runner.js';
 import { JsonValueSchema } from '../../workflow/schema.js';
 import type {
   IntegrationStepAdapter,
@@ -27,7 +27,7 @@ const systemTime: JenkinsObserverTime = {
   sleep: (durationMs, signal) => delay(durationMs, undefined, { signal }),
 };
 
-const commandMessage = (result: Awaited<ReturnType<CommandRunner['run']>>): string => {
+const commandMessage = (result: Awaited<ReturnType<WorkspaceCommandRunner['run']>>): string => {
   switch (result.status) {
     case 'spawn_failed':
       return result.message;
@@ -104,7 +104,7 @@ export class JenkinsBuildObserverAdapter implements IntegrationStepAdapter {
 
   public constructor(
     private readonly configuration: JenkinsBuildConfiguration,
-    private readonly commands: CommandRunner,
+    private readonly commands: WorkspaceCommandRunner,
     private readonly builds: JenkinsBuildPort,
     private readonly time: JenkinsObserverTime = systemTime,
   ) {}
@@ -122,9 +122,11 @@ export class JenkinsBuildObserverAdapter implements IntegrationStepAdapter {
       };
     }
     const revision = await this.commands.run({
+      operationId: `${request.operationId}:resolve-revision`,
       command: 'git',
       args: ['rev-parse', 'HEAD'],
       cwd: request.workspace.path,
+      workspaceAccess: 'read_only',
       stdin: '',
       timeoutMs: 10_000,
       cancellationSignal: request.runtime.cancellationSignal,
