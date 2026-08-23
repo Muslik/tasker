@@ -1,9 +1,10 @@
-import { Bot, ChevronRight, Pause, Terminal } from 'lucide-react';
+import { Bot, ChevronRight, GitBranch, Pause, Terminal } from 'lucide-react';
 import { useState } from 'react';
 
 import type {
   OperatorWorkflowStage,
   OperatorWorkflowStep,
+  OperatorWorkflowContinuation,
   WorkflowNodeStatus,
 } from '../control-plane/operator-contracts.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from './components/ui/tooltip.js';
@@ -187,12 +188,24 @@ const Stage = ({
 
 export const WorkflowStages = ({
   stages,
+  continuation = null,
   onSelectAttempt,
 }: {
   readonly stages: readonly OperatorWorkflowStage[];
+  readonly continuation?: OperatorWorkflowContinuation | null;
   readonly onSelectAttempt?: (step: OperatorWorkflowStep, blockRun: number) => void;
 }) => {
   const usage = usageFor(stages.flatMap((stage) => stage.steps));
+  const primaryStages = stages.filter(({ key }) => !key.startsWith('continuation:'));
+  const continuationStages = stages.filter(({ key }) => key.startsWith('continuation:'));
+  const continuationLabel =
+    continuation?.status === 'awaiting_review'
+      ? 'Proposed workflow change'
+      : continuation?.status === 'running'
+        ? 'Active continuation'
+        : continuation?.status === 'completed'
+          ? 'Completed continuation'
+          : 'Workflow continuation';
   return (
     <div className="border-y border-border/70" data-testid="workflow-stages">
       {usage.tokens > 0 ? (
@@ -208,9 +221,37 @@ export const WorkflowStages = ({
           ) : null}
         </div>
       ) : null}
-      {stages.map((stage) => (
+      {primaryStages.map((stage) => (
         <Stage key={stage.key} stage={stage} onSelectAttempt={onSelectAttempt} />
       ))}
+      {continuationStages.length === 0 ? null : (
+        <section
+          className="border-t border-primary/25 bg-primary/3"
+          data-testid="workflow-continuation-stages"
+        >
+          <div className="px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <GitBranch className="size-3.5 text-primary" />
+              <strong className="text-xs">{continuationLabel}</strong>
+              {continuation === null ? null : (
+                <span className="ml-auto text-[10px] text-muted-foreground">
+                  attempt {continuation.attempt}
+                </span>
+              )}
+            </div>
+            {continuation === null ? null : (
+              <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+                {continuation.reason}
+              </p>
+            )}
+          </div>
+          <div className="ml-3 border-l-2 border-primary/25 pl-1">
+            {continuationStages.map((stage) => (
+              <Stage key={stage.key} stage={stage} onSelectAttempt={onSelectAttempt} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

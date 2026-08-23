@@ -569,7 +569,10 @@ const SelectedTaskHeader = ({
     task.planning.status === 'available';
 
   return (
-    <section className="border-b border-border px-5 py-3.5" data-testid="selected-task">
+    <section
+      className="sticky top-0 z-30 border-b border-border bg-background px-5 py-3.5"
+      data-testid="selected-task"
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex min-w-0 items-center gap-1.5">
@@ -2333,7 +2336,9 @@ const ExecutionProgressSurface = ({
           )}
         </div>
       </div>
-      {latestAttempt === null || latestAttempt.events.length === 0 ? null : (
+      {current.status === 'waiting' ||
+      latestAttempt === null ||
+      latestAttempt.events.length === 0 ? null : (
         <div className="mt-2 border-t border-border/60 pt-2 text-xs">
           {latestAttempt.events.slice(-3).map((event, index) => (
             <div className="flex min-w-0 gap-2 py-0.5" key={`${event.kind}:${String(index)}`}>
@@ -2355,7 +2360,13 @@ const ExecutionProgressSurface = ({
   );
 };
 
-const RunLogSurface = ({ state }: { readonly state: RunLogLoadState }) => {
+const RunLogSurface = ({
+  state,
+  defaultOpen = true,
+}: {
+  readonly state: RunLogLoadState;
+  readonly defaultOpen?: boolean;
+}) => {
   if (state.status === 'missing') return null;
   if (state.status === 'loading') {
     return (
@@ -2389,7 +2400,7 @@ const RunLogSurface = ({ state }: { readonly state: RunLogLoadState }) => {
     );
   }, 0);
   return (
-    <Collapsible defaultOpen>
+    <Collapsible defaultOpen={defaultOpen}>
       <section className="border-b border-border bg-background" aria-label="Run log">
         <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
           <div className="flex items-center gap-2">
@@ -2412,10 +2423,7 @@ const RunLogSurface = ({ state }: { readonly state: RunLogLoadState }) => {
               No agent or process attempts yet.
             </p>
           ) : (
-            <div
-              className="max-h-[min(62vh,48rem)] divide-y divide-border overflow-y-auto overscroll-contain"
-              data-testid="run-log-transcript"
-            >
+            <div className="divide-y divide-border" data-testid="run-log-transcript">
               {state.response.entries.map((entry) => {
                 const parsed = planningAgentLogFromRaw(entry.rawLog);
                 const events = parsed.attempts.flatMap((attempt) => attempt.events);
@@ -3011,7 +3019,11 @@ const WorkflowSidebar = ({
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 py-2">
-        <WorkflowStages stages={projection.projection.stages} onSelectAttempt={onSelectAttempt} />
+        <WorkflowStages
+          stages={projection.projection.stages}
+          continuation={projection.projection.continuations.at(-1) ?? null}
+          onSelectAttempt={onSelectAttempt}
+        />
       </ScrollArea>
     </aside>
   );
@@ -3384,11 +3396,14 @@ export const App = () => {
         if (projection.status === 'waiting') {
           const planReview = projection.current?.waitKind === 'plan.approved@1';
           const codeReview = projection.current?.waitKind === 'code_review@1';
+          const workflowChangeReview = projection.current?.waitKind === 'workflow_change.review@1';
           return {
             ...task,
             status: planReview ? 'plan_review' : codeReview ? 'code_review' : 'waiting',
             attention: 'operator',
-            currentStage: projection.current?.reason ?? 'Waiting for operator action',
+            currentStage: workflowChangeReview
+              ? 'Review proposed workflow change'
+              : (projection.current?.reason ?? 'Waiting for operator action'),
           };
         }
         return {
@@ -4041,7 +4056,7 @@ export const App = () => {
             />
           )}
 
-          <main className="flex min-h-0 flex-col border-r border-border">
+          <main className="min-h-0 overflow-y-auto border-r border-border">
             {selectedTask === null ? (
               <EmptyState>{tasksStatus === 'loading' ? 'Loading tasks…' : 'No tasks'}</EmptyState>
             ) : (
@@ -4066,14 +4081,6 @@ export const App = () => {
                   onSyncJira={handleJiraSync}
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
-                />
-                <ExecutionProgressSurface projection={operatorProjectionState} />
-                <RunLogSurface state={runLogState} />
-                <ExecutionAttemptSurface
-                  state={executionAttemptState}
-                  onClose={() => {
-                    setExecutionAttemptState({ status: 'missing' });
-                  }}
                 />
                 {selectedTask.status === 'code_review' ? (
                   <CodeReviewControls
@@ -4112,8 +4119,6 @@ export const App = () => {
                     onRestartConfirm={handleRestart}
                   />
                 ) : null}
-                {view === null ? null : <ValidationSurface view={view} />}
-                <JiraPlanningSurface task={selectedTask} />
                 <WorkflowContinuationSurface
                   continuation={selectedWorkflowContinuation}
                   guidance={continuationGuidanceDrafts.get(selectedTask.id) ?? ''}
@@ -4130,7 +4135,34 @@ export const App = () => {
                     handleWorkflowContinuationReview('reject');
                   }}
                 />
-                <ScrollArea className="min-h-0 flex-1">
+                {selectedIntervention !== null ||
+                selectedWorkflowContinuation?.status === 'awaiting_review' ? null : (
+                  <ExecutionProgressSurface projection={operatorProjectionState} />
+                )}
+                {view === null ? null : <ValidationSurface view={view} />}
+                <JiraPlanningSurface task={selectedTask} />
+                <RunLogSurface
+                  key={
+                    selectedIntervention !== null ||
+                    selectedWorkflowContinuation?.status === 'awaiting_review' ||
+                    selectedTask.status === 'code_review'
+                      ? 'run-log-attention'
+                      : 'run-log-active'
+                  }
+                  state={runLogState}
+                  defaultOpen={
+                    selectedIntervention === null &&
+                    selectedWorkflowContinuation?.status !== 'awaiting_review' &&
+                    selectedTask.status !== 'code_review'
+                  }
+                />
+                <ExecutionAttemptSurface
+                  state={executionAttemptState}
+                  onClose={() => {
+                    setExecutionAttemptState({ status: 'missing' });
+                  }}
+                />
+                <div>
                   {selectedTask.status === 'plan_review' ? (
                     <ImplementationPlanSurface
                       planning={implementationPlanState}
@@ -4228,7 +4260,7 @@ export const App = () => {
                       <WorkflowDiagnostics view={view} />
                     </>
                   )}
-                </ScrollArea>
+                </div>
               </>
             )}
           </main>

@@ -160,6 +160,13 @@ const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'mes
         detail: stringField(value.decision, 'status')?.replaceAll('_', ' ') ?? null,
       };
     }
+    if (isRecord(value) && Array.isArray(value.assemblyDecisions) && isRecord(value.source)) {
+      return {
+        kind: 'message',
+        title: 'Workflow proposal returned',
+        detail: `${String(value.assemblyDecisions.length)} assembly decision(s)`,
+      };
+    }
     if (
       isRecord(value) &&
       Array.isArray(value.evidenceRequests) &&

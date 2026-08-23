@@ -196,17 +196,19 @@ const applyTemporalRunToTask = (
     case 'waiting': {
       const codeReview = run.wait.waitKind === 'code_review@1';
       const planReview = run.wait.waitKind === 'plan.approved@1';
+      const workflowChangeReview = run.wait.waitKind === 'workflow_change.review@1';
       return OperatorTaskSummarySchema.parse({
         ...task,
         status: codeReview ? 'code_review' : planReview ? 'plan_review' : 'waiting',
         attention: 'operator',
-        currentStage:
-          run.wait.reason ??
-          (codeReview
-            ? 'Waiting for code review'
-            : planReview
-              ? 'Plan review required'
-              : `Waiting for ${run.wait.waitKind.replace('@1', '').replaceAll('_', ' ')}`),
+        currentStage: workflowChangeReview
+          ? 'Review proposed workflow change'
+          : (run.wait.reason ??
+            (codeReview
+              ? 'Waiting for code review'
+              : planReview
+                ? 'Plan review required'
+                : `Waiting for ${run.wait.waitKind.replace('@1', '').replaceAll('_', ' ')}`)),
       });
     }
     case 'completed':
