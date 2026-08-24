@@ -44,6 +44,51 @@ describe('execution activity', () => {
     }
   });
 
+  it('closes the planning log when bootstrap is waiting for plan review', () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const workflowId = 'tasker:v3:jira:AVIA-13417';
+    const runId = 'bootstrap-run';
+    const operationId = `${workflowId}:${runId}:planning:1`;
+    new PlanningTranscriptStore(ledger.repository, systemClock).append(
+      operationId,
+      1,
+      'stdout',
+      '{"type":"turn.completed"}\n',
+    );
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: 'jira:AVIA-13417',
+        workflowId,
+        runId,
+        workflowHash: null,
+        settings: { planReview: 'required', planningStrategy: 'fast' },
+        phase: 'plan_review',
+        workspaceContext: null,
+        context: null,
+        draft: null,
+        planning: null,
+        activeTranscriptOperationId: operationId,
+        freezeReceipt: null,
+        executionWorkflowId: null,
+        nodeStates: { planning: 'succeeded', plan_review: 'waiting' },
+        attempts: { planning: 1 },
+        status: 'waiting',
+        currentNodeId: 'plan_review',
+        wait: { nodeId: 'plan_review', waitKind: 'plan.approved@1' },
+        outcome: null,
+      },
+      execution: null,
+    });
+
+    const entry = new LedgerExecutionActivityReader(ledger.repository).readRunLog(lifecycle)
+      .entries[0];
+
+    expect(entry).toMatchObject({ nodeId: 'planning', status: 'completed' });
+    expect(entry?.completedAt).not.toBeNull();
+  });
+
   it('surfaces one useful linked entry for a terminal Jenkins observation', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

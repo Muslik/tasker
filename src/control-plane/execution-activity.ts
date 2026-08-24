@@ -169,8 +169,8 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
       const chunks = transcript.value.chunks;
       const blockRun = Number(operationId.slice(planningOperationPrefix.length));
       const running =
-        lifecycle.execution === null &&
-        lifecycle.bootstrap.status !== 'completed' &&
+        lifecycle.bootstrap.status === 'running' &&
+        lifecycle.bootstrap.currentNodeId === 'planning' &&
         lifecycle.bootstrap.activeTranscriptOperationId === operationId;
       entries.push(
         OperatorRunLogEntrySchema.parse({
