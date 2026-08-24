@@ -167,11 +167,26 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
       'tasker.managed=true',
     ];
     if (runtime !== null) {
+      const commandNetworkServiceId = runtime.policy.commandNetworkService ?? null;
+      let commandNetwork = runtime.networkName;
+      if (commandNetworkServiceId !== null) {
+        const commandNetworkService = runtime.services.find(
+          ({ id }) => id === commandNetworkServiceId,
+        );
+        if (commandNetworkService === undefined) {
+          return {
+            status: 'spawn_failed',
+            message: `Managed workspace ${runtime.workspaceId} has no command network service ${commandNetworkServiceId}`,
+            durationMs: 0,
+          };
+        }
+        commandNetwork = `container:${commandNetworkService.containerName}`;
+      }
       args.push(
         '--label',
         `tasker.workspace-id=${runtime.workspaceId}`,
         '--network',
-        runtime.networkName,
+        commandNetwork,
       );
       for (const volume of runtime.volumes.filter(({ serviceIds }) => serviceIds.length === 0)) {
         args.push('--volume', volumeArgument(volume.name, volume.mountPath));

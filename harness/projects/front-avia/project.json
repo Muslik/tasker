@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "5",
+  "version": "6",
   "repository": "onetwotrip/front-avia",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -11,6 +11,7 @@
     "commit": { "kind": "task_key_subject" }
   },
   "workspaceRuntime": {
+    "commandNetworkService": "front-avia-app",
     "bootstrap": [
       "pnpm install --frozen-lockfile",
       "pnpm exec playwright install chromium",

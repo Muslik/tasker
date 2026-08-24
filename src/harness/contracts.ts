@@ -330,6 +330,11 @@ export const WorkspaceRuntimeSchema = z
     engine: z.literal('docker'),
     image: WorkspaceRuntimeImageSchema,
     workspaceMountPath: z.string().trim().min(1).default('/workspace'),
+    commandNetworkService: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]*$/u)
+      .nullable()
+      .default(null),
     environment: z.record(z.string(), z.string()).default({}),
     bootstrap: z.array(z.string().trim().min(1)).default([]),
     cacheVolumes: z.array(WorkspaceRuntimeCacheVolumeSchema).default([]),

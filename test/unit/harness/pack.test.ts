@@ -285,6 +285,9 @@ describe('file-backed harness pack', () => {
     expect(normalized).toContain('preserve the visible route/state, card kind, viewport, and');
     expect(normalized).toContain('block instead of accepting a different screenshot');
     expect(normalized).toContain('must close its browser in `finally`');
+    expect(normalized).toContain(
+      'reuse the accepted runtime evidence and verify only the repair delta',
+    );
   });
 
   it('exposes only the reviewed validation surface for the six frontend repositories', () => {
@@ -313,6 +316,8 @@ describe('file-backed harness pack', () => {
     const backoffice = pack.projects.find(
       ({ repository }) => repository === 'onetwotrip/front-backoffice',
     );
+    const avia = pack.projects.find(({ repository }) => repository === 'onetwotrip/front-avia');
+    expect(avia?.workspaceRuntime?.commandNetworkService).toBe('front-avia-app');
     expect(backoffice?.processCommands['validation.targeted@1']).toBeUndefined();
     expect(backoffice?.processCommands['validation.build@1']).toBeDefined();
   });

@@ -61,6 +61,12 @@ Git common directory, named cache volumes, network, and declared service contain
 durable across attempts. This gives cancellation a concrete container boundary while
 preserving all useful work.
 
+A project may set `workspaceRuntime.commandNetworkService` to one of its declared services.
+Command containers then share that service's network namespace instead of merely joining the task
+bridge. This is required when a repository test runner probes `localhost` before deciding whether
+to reuse its configured web server: the probe reaches the already-running task service without
+changing repository commands, hostnames, or Playwright configuration.
+
 Provider containers are started with an interactive stdin pipe because Codex and Claude
 receive their task prompt through stdin. The provider's own process sandbox is disabled:
 Docker is the external sandbox boundary, and attempting to nest bubblewrap inside the

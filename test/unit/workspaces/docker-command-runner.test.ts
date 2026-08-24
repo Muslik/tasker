@@ -12,6 +12,7 @@ import {
   DockerWorkspaceCommandRunner,
   DockerWorkspaceRuntimeStore,
   type DockerWorkspaceConfiguration,
+  type DockerWorkspaceRuntimeReceipt,
 } from '../../../src/workspaces/index.js';
 
 const roots: string[] = [];
@@ -192,5 +193,78 @@ describe('Docker workspace command runner', () => {
 
     const execution = requests.find(({ args }) => args[0] === 'run');
     expect(execution?.args).toEqual(expect.arrayContaining(['--volume', `${cwd}:${cwd}:ro`]));
+  });
+
+  it('shares a configured app service network namespace with task commands', async () => {
+    const path = root();
+    const config = configuration(path);
+    const workspaceId = 'a'.repeat(24);
+    const cwd = join(config.workspaceStorePath, workspaceId);
+    const repositoryPath = join(path, 'repository');
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(repositoryPath, { recursive: true });
+    const store = new DockerWorkspaceRuntimeStore(config.runtimeStorePath);
+    const receipt: DockerWorkspaceRuntimeReceipt = {
+      schemaVersion: 2,
+      workspaceId,
+      workspacePath: cwd,
+      repositorySourcePath: repositoryPath,
+      policyHash: 'b'.repeat(64),
+      policy: {
+        engine: 'docker',
+        image: { kind: 'prebuilt', reference: config.defaultImage },
+        workspaceMountPath: '/workspace',
+        commandNetworkService: 'app',
+        environment: {},
+        bootstrap: [],
+        cacheVolumes: [],
+        services: [
+          {
+            id: 'app',
+            command: 'pnpm start',
+            shell: 'bash',
+            privileged: false,
+            aliases: ['local.example'],
+            environment: {},
+          },
+        ],
+      },
+      image: config.defaultImage,
+      imageId: 'sha256:workspace-image',
+      networkName: `tasker-network-${workspaceId}`,
+      volumes: [],
+      services: [
+        {
+          id: 'app',
+          containerName: `tasker-service-${workspaceId}-app`,
+          image: config.defaultImage,
+          imageId: 'sha256:workspace-image',
+        },
+      ],
+      environment: {},
+      toolchain: { node: 'v22.18.0', pnpm: '11.1.2' },
+      initializedVolumes: [],
+      completedBootstrap: [],
+      status: 'ready',
+      preparedAt: '2026-08-24T00:00:00.000Z',
+      updatedAt: '2026-08-24T00:00:00.000Z',
+    };
+    await store.write(receipt);
+    const requests: CommandRequest[] = [];
+    const runner = new DockerWorkspaceCommandRunner(config, successfulHost(requests), store);
+
+    await runner.run({
+      command: 'pnpm',
+      args: ['test:ui'],
+      cwd,
+      workspaceAccess: 'read_only',
+      stdin: '',
+      timeoutMs: 10_000,
+    });
+
+    const execution = requests.find(({ args }) => args[0] === 'run');
+    expect(execution?.args).toEqual(
+      expect.arrayContaining(['--network', `container:tasker-service-${workspaceId}-app`]),
+    );
   });
 });

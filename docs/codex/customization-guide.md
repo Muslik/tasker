@@ -475,6 +475,9 @@ its managed application-data clone. Add future company setup as data under
 
 `harness/company.json` declares the default prebuilt image, environment and cache
 volumes. `harness/projects/*/project.json` may extend bootstrap commands and services.
+When repository commands must discover an existing app on localhost, bind
+`commandNetworkService` to that declared service; Tasker then shares its network namespace with
+ephemeral command containers instead of teaching agents an alternative start command.
 The resolved policy is pinned on first preparation, so editing it affects future runs
 without changing or destabilizing an active run. See
 [`docker-execution.md`](docker-execution.md) for the manifest behavior and recovery

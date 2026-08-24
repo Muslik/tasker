@@ -29,6 +29,10 @@ export const resolveWorkspaceRuntimePolicy = (
     engine: 'docker',
     image: overrides?.image ?? defaults.image,
     workspaceMountPath: overrides?.workspaceMountPath ?? defaults.workspaceMountPath,
+    commandNetworkService:
+      overrides?.commandNetworkService !== undefined
+        ? overrides.commandNetworkService
+        : defaults.commandNetworkService,
     environment: { ...defaults.environment, ...overrides?.environment },
     bootstrap: [...defaults.bootstrap, ...(overrides?.bootstrap ?? [])],
     cacheVolumes: [...mergeById(defaults.cacheVolumes, overrides?.cacheVolumes ?? [])],

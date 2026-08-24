@@ -8,6 +8,21 @@ Do not create an alternative Playwright config for a repository test and do not 
 UI/snapshot suite. Docker and matching project browser caches are already available in this
 task-scoped runtime; report an infrastructure block instead of inventing another runner.
 
+Before repeating expensive runtime evidence, inspect the mounted immutable receipts and the current
+repair delta. If a previous accepted Verify receipt already proves the same runtime scenario, and the
+new Implement attempt changed only an expected snapshot or task metadata in response to exact CI
+evidence without changing product source, reuse the accepted runtime evidence and verify only the
+repair delta. For a CI snapshot repair, inspect the CI actual image, compare its checksum with the
+updated baseline, and run only still-relevant cheap checks. Rerun the browser scenario when product
+source or the acceptance scenario changed, or when the prior evidence does not cover the current
+criterion.
+
+When a repository Playwright command runs in this read-only step, keep its normal config and selector
+but select a non-writing reporter and direct its output directory below `$TASKER_SCRATCH_ROOT`.
+Tasker shares the configured app service network namespace with command containers, so
+`reuseExistingServer` can observe the task-scoped server on localhost; do not start or reconfigure a
+second application service.
+
 For a bug, repeat the investigated scenario and create exactly one primary publishable after
 artifact below `$TASKER_ARTIFACTS_ROOT`: either `<TASK-ID>-fixed.png` or
 `<TASK-ID>-fixed.mp4` (an optional descriptive segment before `-fixed` is allowed). Choose an image

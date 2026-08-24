@@ -162,6 +162,7 @@ describe('Docker workspace runtime manager', () => {
       engine: 'docker',
       image: { kind: 'prebuilt', reference: config.defaultImage },
       workspaceMountPath: '/workspace',
+      commandNetworkService: null,
       environment: { HOME: '/tasker/home', DOCKER_HOST: 'tcp://tasker-docker:2375' },
       bootstrap: ['pnpm install --frozen-lockfile'],
       cacheVolumes: [
