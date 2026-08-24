@@ -30,6 +30,9 @@ Environment variables required:
 3. Handle common follow-ups.
    - Comments: run with `--comments --max-results 10`.
    - Changelog: run with `--expand changelog`.
+   - Attachment evidence: select an attachment ID from the issue snapshot and download it with
+     `--download-attachment ID --output PATH`. The script verifies that the attachment belongs to
+     the requested issue and that its byte length matches Jira metadata.
 
 ## Examples
 
@@ -56,6 +59,17 @@ Latest comments:
 ```bash
 python3 "${TASKER_SKILLS_ROOT}/jira/scripts/jira_get_issue.py" PROJ-123 --comments --max-results 10
 ```
+
+Download one immutable issue attachment into the current step's private artifact directory:
+
+```bash
+python3 "${TASKER_SKILLS_ROOT}/jira/scripts/jira_get_issue.py" PROJ-123 \
+  --download-attachment 12345 \
+  --output "$TASKER_ARTIFACTS_ROOT/PROJ-123-before.png"
+```
+
+Do not publish a `before` attachment back to Jira. It is private comparison evidence for the
+current run. A final publishable artifact uses the step's separate `-fixed` naming contract.
 
 ## Output
 After fetching, summarize the issue in a clear format:

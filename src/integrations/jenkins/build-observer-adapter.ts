@@ -33,6 +33,9 @@ const AllureImageDiffSchema = z
 
 const ALLURE_IMAGE_DIFF = 'application/vnd.allure.image.diff';
 
+const isVisualDiffFailure = (failure: JenkinsFinishedBuild['failures'][number]): boolean =>
+  failure.attachments.some(({ type }) => type === ALLURE_IMAGE_DIFF);
+
 export interface JenkinsObserverTime {
   now(): number;
   sleep(durationMs: number, signal: AbortSignal): Promise<void>;
@@ -57,9 +60,11 @@ const commandMessage = (result: Awaited<ReturnType<WorkspaceCommandRunner['run']
 const classify = (build: JenkinsFinishedBuild): JenkinsVerdict => {
   const result = build.result.toLocaleUpperCase('en-US');
   if (result === 'SUCCESS') return 'passed';
-  if (result === 'UNSTABLE' || build.failures.some(({ flaky }) => flaky)) return 'likely_flaky';
   if (result === 'ABORTED' || result === 'NOT_BUILT') return 'infrastructure';
-  if (build.failures.length > 0) return 'likely_caused_by_change';
+  if (build.failures.some((failure) => isVisualDiffFailure(failure) || !failure.flaky)) {
+    return 'likely_caused_by_change';
+  }
+  if (build.failures.length > 0 || result === 'UNSTABLE') return 'likely_flaky';
   const failedStages = build.stages
     .filter(({ status }) => ['FAILED', 'ABORTED'].includes(status.toLocaleUpperCase('en-US')))
     .map(({ name }) => name.toLocaleLowerCase('en-US'));

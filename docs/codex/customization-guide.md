@@ -524,6 +524,11 @@ delivery outside a bounded `delivery.accepted@1` loop containing Implement, Veri
 Review feedback. A provider-specific retry mutation needs its own reconciled internal
 operation; it must not be hidden inside the read observer.
 
+An Allure `flaky` label is evidence, not the final CI decision. A terminal visual diff is
+repair evidence even when the test carries that label: the observer persists its expected,
+actual, and diff images and returns a task-repair outcome. Only failures whose available
+evidence is exclusively flaky remain on the `ci_retry@1` boundary.
+
 Moving to GitLab Issues and GitLab CI should require:
 
 1. a tracker adapter that produces the normalized task snapshot;

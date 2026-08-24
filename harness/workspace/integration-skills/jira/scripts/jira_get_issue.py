@@ -15,7 +15,6 @@ import os
 import sys
 from urllib import request, parse
 
-import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -47,6 +46,46 @@ def fetch_json(url: str, headers: dict[str, str]) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def download_attachment(
+    base_url: str,
+    headers: dict[str, str],
+    issue_key: str,
+    attachment_id: str,
+    output: Path,
+) -> dict[str, object]:
+    issue = fetch_json(
+        f"{base_url}/rest/api/2/issue/{issue_key}?fields=attachment",
+        headers,
+    )
+    attachments = issue.get("fields", {}).get("attachment", [])
+    attachment = next(
+        (item for item in attachments if str(item.get("id")) == attachment_id),
+        None,
+    )
+    if attachment is None:
+        raise RuntimeError(
+            f"Attachment {attachment_id} does not belong to {issue_key}"
+        )
+    req = request.Request(str(attachment["content"]), headers=headers)
+    with request.urlopen(req) as response:
+        content = response.read()
+        content_type = response.headers.get_content_type()
+    expected_size = int(attachment.get("size", len(content)))
+    if len(content) != expected_size:
+        raise RuntimeError(
+            f"Attachment size mismatch: expected {expected_size}, received {len(content)}"
+        )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(content)
+    return {
+        "attachmentId": attachment_id,
+        "filename": attachment.get("filename"),
+        "contentType": content_type,
+        "byteLength": len(content),
+        "output": str(output),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fetch Jira issue details")
     parser.add_argument("issue_key", help="Issue key like PROJ-123")
@@ -69,13 +108,35 @@ def main() -> int:
         default=50,
         help="Max comments to return when using --comments",
     )
+    parser.add_argument(
+        "--download-attachment",
+        metavar="ID",
+        help="Download an attachment that belongs to the issue",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Destination for --download-attachment",
+    )
     args = parser.parse_args()
 
     try:
         base_url = build_base_url()
         headers = build_headers()
 
-        if args.comments:
+        if args.download_attachment:
+            if args.output is None:
+                raise RuntimeError("--output is required with --download-attachment")
+            data = download_attachment(
+                base_url,
+                headers,
+                args.issue_key,
+                args.download_attachment,
+                args.output,
+            )
+            print(json.dumps(data, indent=2, ensure_ascii=True))
+            return 0
+        elif args.comments:
             query = parse.urlencode({"maxResults": args.max_results})
             url = (
                 f"{base_url}/rest/api/2/issue/{args.issue_key}/comment?{query}"

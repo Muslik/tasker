@@ -256,6 +256,37 @@ describe('file-backed harness pack', () => {
     );
   });
 
+  it('ships source-faithful Jira attachment access with the workspace harness', async () => {
+    const skill = await readFile(
+      join(process.cwd(), 'harness/workspace/integration-skills/jira/SKILL.md'),
+      'utf8',
+    );
+    const script = await readFile(
+      join(process.cwd(), 'harness/workspace/integration-skills/jira/scripts/jira_get_issue.py'),
+      'utf8',
+    );
+
+    expect(skill).toContain('--download-attachment ID --output PATH');
+    expect(skill).toContain('${TASKER_SKILLS_ROOT}/jira/scripts/jira_get_issue.py');
+    expect(script).toContain('def download_attachment(');
+    expect(script).toContain('Attachment size mismatch');
+  });
+
+  it('requires bug verification to preserve the investigated Jira scenario', async () => {
+    const prompt = await readFile(
+      join(process.cwd(), 'harness/steps/verify-acceptance/prompt.md'),
+      'utf8',
+    );
+    const normalized = prompt.replace(/\s+/gu, ' ');
+
+    expect(normalized).toContain(
+      'download the relevant attachment by its exact issue key and attachment ID',
+    );
+    expect(normalized).toContain('preserve the visible route/state, card kind, viewport, and');
+    expect(normalized).toContain('block instead of accepting a different screenshot');
+    expect(normalized).toContain('must close its browser in `finally`');
+  });
+
   it('exposes only the reviewed validation surface for the six frontend repositories', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
 

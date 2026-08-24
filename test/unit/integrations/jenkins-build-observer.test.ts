@@ -290,11 +290,82 @@ describe('Jenkins build observation', () => {
     ).toBe(true);
   });
 
+  it('treats a flaky-labelled visual diff as task repair evidence', async () => {
+    const image = `data:image/png;base64,${Buffer.from('png-bytes').toString('base64')}`;
+    const persist = vi.fn(() =>
+      Promise.resolve({ ok: true as const, artifactIds: ['ci-evidence:visual-diff'] }),
+    );
+    const adapter = new JenkinsBuildObserverAdapter(
+      configuration,
+      commands,
+      {
+        observe: () =>
+          Promise.resolve({
+            status: 'finished' as const,
+            build: build({
+              result: 'FAILURE',
+              failures: [
+                {
+                  uid: 'flight-card-with-transfers',
+                  name: 'Flight card with 2+ transfers: desktop',
+                  status: 'failed',
+                  message: '543 pixels differ from the stored snapshot',
+                  flaky: true,
+                  attachments: [
+                    {
+                      name: 'flight-card',
+                      type: 'application/vnd.allure.image.diff',
+                      source: 'flight-card.imagediff',
+                    },
+                  ],
+                },
+              ],
+            }),
+          }),
+        readAttachment: () =>
+          Promise.resolve({
+            status: 'found' as const,
+            bytes: new TextEncoder().encode(
+              JSON.stringify({ expected: image, actual: image, diff: image }),
+            ),
+          }),
+      },
+      advancingTime(),
+      { persist },
+    );
+
+    const result = await adapter.execute(requestFor());
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      artifactIds: ['ci-evidence:visual-diff'],
+      output: { status: 'likely_caused_by_change' },
+    });
+    expect(persist).toHaveBeenCalledOnce();
+  });
+
   it('returns flaky failures as classified observations outside the implementation budget', async () => {
     const adapter = new JenkinsBuildObserverAdapter(
       configuration,
       commands,
-      sequencedPort([{ status: 'finished', build: build({ result: 'UNSTABLE' }) }]),
+      sequencedPort([
+        {
+          status: 'finished',
+          build: build({
+            result: 'FAILURE',
+            failures: [
+              {
+                uid: 'known-flaky-case',
+                name: 'unrelated timing-sensitive case',
+                status: 'failed',
+                message: 'timed out waiting for an unrelated service',
+                flaky: true,
+                attachments: [],
+              },
+            ],
+          }),
+        },
+      ]),
       advancingTime(),
     );
 
