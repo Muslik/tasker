@@ -24,6 +24,8 @@ const isSuccessful = (
 ): result is Extract<CommandResult, { status: 'exited' }> =>
   result.status === 'exited' && result.exitCode === 0;
 
+const CONTAINER_ONLY_DOCKER_ENV = new Set(['DOCKER_CERT_PATH', 'DOCKER_HOST', 'DOCKER_TLS_VERIFY']);
+
 const volumeArgument = (source: string, target: string, readOnly = false): string =>
   `${source}:${target}${readOnly ? ':ro' : ''}`;
 
@@ -171,7 +173,7 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
         '--network',
         runtime.networkName,
       );
-      for (const volume of runtime.volumes) {
+      for (const volume of runtime.volumes.filter(({ serviceIds }) => serviceIds.length === 0)) {
         args.push('--volume', volumeArgument(volume.name, volume.mountPath));
       }
     }
@@ -185,8 +187,17 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
       );
     }
     args.push('--workdir', request.cwd);
-    for (const name of Object.keys(environment).sort()) args.push('--env', name);
+    for (const name of Object.keys(environment).sort()) {
+      args.push(
+        '--env',
+        CONTAINER_ONLY_DOCKER_ENV.has(name) ? `${name}=${environment[name] ?? ''}` : name,
+      );
+    }
     args.push(image, request.command, ...request.args);
+    const hostEnvironment = Object.fromEntries(
+      Object.entries(environment).filter(([name]) => !CONTAINER_ONLY_DOCKER_ENV.has(name)),
+    );
+    const unsetEnv = [...new Set([...(request.unsetEnv ?? []), ...CONTAINER_ONLY_DOCKER_ENV])];
 
     let result: CommandResult;
     try {
@@ -195,8 +206,8 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
         command: this.configuration.executable,
         args,
         cwd: request.cwd,
-        env: environment,
-        ...(request.unsetEnv === undefined ? {} : { unsetEnv: request.unsetEnv }),
+        env: hostEnvironment,
+        unsetEnv,
         stdin: request.stdin,
         timeoutMs: request.timeoutMs,
         ...(request.cancellationSignal === undefined

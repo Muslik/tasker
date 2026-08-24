@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { loadHarnessPack } from '../../src/harness/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { nodeCommandRunner } from '../../src/providers/command-runner.js';
+import { prepareAgentSkills } from '../../src/providers/agent-skills.js';
 import type { WorkspaceLocator } from '../../src/workspaces/contracts.js';
 import {
   assertWorkspaceHarnessSkillBindings,
@@ -124,9 +125,13 @@ describe('workspace harness bootstrap', () => {
     expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
       'Руководство для AI-агентов',
     );
-    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).not.toContain(
       '# Repository agents',
     );
+    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+      'Задачи, которые заканчиваются пул-реквестом',
+    );
+    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain('## Comments');
     expect(existsSync(join(repository.path, '.codex/skills/localization/SKILL.md'))).toBe(false);
     expect(existsSync(join(repository.path, '.claude/skills/localization/SKILL.md'))).toBe(false);
     expect(
@@ -144,6 +149,15 @@ describe('workspace harness bootstrap', () => {
         'utf8',
       ),
     ).toContain('make invalid states unrepresentable');
+    expect(
+      readFileSync(join(repository.path, '.tasker/harness/skills/ai-assistance/SKILL.md'), 'utf8'),
+    ).toContain('agent-assisted development');
+    expect(
+      readFileSync(
+        join(repository.path, '.tasker/harness/skills/effector-design/SKILL.md'),
+        'utf8',
+      ),
+    ).toContain('effector');
     expect(existsSync(join(repository.path, '.codex/skills/jira/SKILL.md'))).toBe(false);
     expect(existsSync(join(repository.path, '.claude/skills/pr-finalize/SKILL.md'))).toBe(false);
     expect(
@@ -151,6 +165,29 @@ describe('workspace harness bootstrap', () => {
     ).toBe(true);
     expect(existsSync(join(repository.path, '.codex/skills/feature-review/SKILL.md'))).toBe(false);
     expect(existsSync(join(repository.path, '.claude/skills/feature-review/SKILL.md'))).toBe(false);
+    for (const provider of ['codex', 'claude'] as const) {
+      const prepared = await prepareAgentSkills({
+        provider,
+        repositoryPath: repository.path,
+        configurationRoot: mkdtempSync(join(tmpdir(), `tasker-${provider}-skills-`)),
+        selection: { kind: 'step', reference: 'implement.change@1', skills: ['jenkins'] },
+      });
+      expect(prepared).toMatchObject({ ok: true });
+      if (!prepared.ok) throw new Error(JSON.stringify(prepared.error));
+      expect(prepared.value.skills).toEqual(
+        expect.arrayContaining([
+          'ai-assistance',
+          'effector-design',
+          'feature-review',
+          'jenkins',
+          'typescript-design',
+          'ui-kit',
+        ]),
+      );
+      expect(
+        readFileSync(join(prepared.value.skillsRoot, 'ai-assistance/SKILL.md'), 'utf8'),
+      ).toContain('agent-assisted development');
+    }
     const environmentFile = join(snapshotStore, 'test.env');
     writeFileSync(environmentFile, 'TASKER_TEST_VALUE=loaded\n', 'utf8');
     expect(
@@ -216,10 +253,17 @@ describe('workspace harness bootstrap', () => {
           'utf8',
         );
         if (file === 'AGENTS.md' || file === 'CLAUDE.md') {
-          expect(actual).toContain(
-            file === 'AGENTS.md' ? '# Repository agents' : '# Repository Claude',
-          );
+          if (['front-avia', 'front-bus', 'front-railways'].includes(profile)) {
+            expect(actual).not.toContain(
+              file === 'AGENTS.md' ? '# Repository agents' : '# Repository Claude',
+            );
+          } else {
+            expect(actual).toContain(
+              file === 'AGENTS.md' ? '# Repository agents' : '# Repository Claude',
+            );
+          }
           expect(actual).toContain(managed.trim());
+          expect(actual).toContain('Задачи, которые заканчиваются пул-реквестом');
           expect(actual).toContain('tasker managed guidance');
         } else {
           expect(actual).toBe(managed);
@@ -246,11 +290,11 @@ describe('workspace harness bootstrap', () => {
     expect(readFileSync(join(repository.path, '.ai/index.md'), 'utf8')).toBe(
       '# Repository AI index\n',
     );
-    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+    expect(readFileSync(join(repository.path, '.ai/tasker.md'), 'utf8')).toContain(
       'pnpm run agent:typecheck',
     );
     expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
-      'Tasker уже выбрал workflow',
+      'Tasker уже подготовил workflow',
     );
     expect(git(repository.path, 'status', '--porcelain')).toBe('');
   });
@@ -285,10 +329,15 @@ describe('workspace harness bootstrap', () => {
     const repository = createRepository();
     const workspace = locatorFor(repository);
     const sourcePack = mkdtempSync(join(tmpdir(), 'tasker-harness-source-'));
-    cpSync(resolve('harness/workspace'), sourcePack, { recursive: true });
-    rmSync(join(sourcePack, 'imports'), { recursive: true, force: true });
+    cpSync(resolve('harness/workspace'), sourcePack, { recursive: true, dereference: true });
     const imported = mkdtempSync(join(tmpdir(), 'tasker-imported-skills-'));
-    for (const skill of ['typescript-design', 'test-design']) {
+    for (const skill of [
+      'effector-design',
+      'react-design',
+      'rust-design',
+      'test-design',
+      'typescript-design',
+    ]) {
       const directory = join(imported, skill);
       mkdirSync(directory, { recursive: true });
       writeFileSync(
@@ -297,7 +346,7 @@ describe('workspace harness bootstrap', () => {
         'utf8',
       );
     }
-    mkdirSync(join(sourcePack, 'imports'), { recursive: true });
+    rmSync(join(sourcePack, 'imports', 'global-skills'), { recursive: true, force: true });
     symlinkSync(imported, join(sourcePack, 'imports', 'global-skills'), 'dir');
     const adapter = createAdapter(
       sourcePack,

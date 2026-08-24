@@ -1,6 +1,6 @@
 # Tasker technical architecture
 
-Status: canonical implementation map, 2026-08-13
+Status: canonical implementation map, 2026-08-24
 
 This document maps the architecture to concrete files. It intentionally distinguishes
 the durable core from the product shell and from external adapters.
@@ -247,13 +247,16 @@ Other extension surfaces are:
 - [`harness/company.json`](../../harness/company.json): provider/model profiles, routing,
   capabilities, Docker defaults, and company facts;
 - [`harness/projects`](../../harness/projects): repository-specific workflow facts,
-  commands, services, translation/publication mode, and validation policy;
-- [`harness/policies`](../../harness/policies): optional company obligations and skill
-  bindings applied to existing steps;
+  services, translation/publication mode, and explicitly deterministic processes. Repository
+  `package.json` scripts and configs remain the authority for commands selected and run by agents;
+- [`harness/policies`](../../harness/policies): optional structural company obligations applied to
+  existing steps. Agent guidance such as `ai-assistance` comes from the workspace rules/skills
+  pack, not from kernel or policy-specific branches;
 - [`harness/prompts`](../../harness/prompts): the mandatory planner and continuation
   analyzer prompts;
-- [`harness/workspace`](../../harness/workspace): the versioned skills/config pack
-  materialized into managed worktrees.
+- [`harness/workspace`](../../harness/workspace): the versioned skills/rules/override pack
+  assembled from global, selected shared, and project sources, then materialized into managed
+  worktrees for both Codex and Claude.
 
 Changing a prompt, skill selection, profile, command, or policy affects future frozen
 runs. Adding a new agent step normally adds one `step.json` and `prompt.md`. TypeScript

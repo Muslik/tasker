@@ -1,3 +1,5 @@
+FROM docker:29-cli AS docker-cli
+
 FROM mcr.microsoft.com/playwright:v1.58.1-jammy
 
 ARG MISE_VERSION=v2026.8.2
@@ -5,6 +7,8 @@ ARG CODEX_VERSION=0.146.1
 ARG CLAUDE_CODE_VERSION=2.1.222
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

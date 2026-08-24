@@ -7,3 +7,9 @@
   точного selector, явно полученного от шага.
 - Если не хватает контекста, доступа, окружения или задача требует другой репозиторий,
   верни typed blocked/continuation result вместо самостоятельной смены процесса.
+
+## Проверки
+
+- `pnpm run agent:typecheck` — безопасная инкрементальная проверка TypeScript.
+- Не используй `agent:eslint-for-changed` как validation: этот script запускает ESLint с
+  `--fix` и изменяет workspace.

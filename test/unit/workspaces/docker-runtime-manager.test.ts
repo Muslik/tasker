@@ -45,7 +45,7 @@ describe('Docker workspace runtime manager', () => {
     };
     const requests: CommandRequest[] = [];
     const existing = new Set<string>();
-    let serviceRunning = false;
+    const runningServices = new Set<string>();
     let bootstrapFails = true;
     const host: HostControlPlaneCommandRunner = {
       executionEnvironment: 'host_control_plane',
@@ -80,6 +80,8 @@ describe('Docker workspace runtime manager', () => {
           operation === '--format' &&
           request.args.includes('{{.State.Running}}')
         ) {
+          const containerName = request.args.at(-1) ?? '';
+          const serviceRunning = runningServices.has(containerName);
           return Promise.resolve({
             status: 'exited' as const,
             exitCode: serviceRunning ? 0 : 1,
@@ -88,8 +90,13 @@ describe('Docker workspace runtime manager', () => {
             durationMs: 1,
           });
         }
-        if (kind === 'rm' && operation === '--force') serviceRunning = false;
-        if (kind === 'run' && request.args.includes('--detach')) serviceRunning = true;
+        if (kind === 'rm' && operation === '--force') {
+          runningServices.delete(request.args.at(-1) ?? '');
+        }
+        if (kind === 'run' && request.args.includes('--detach')) {
+          const nameIndex = request.args.indexOf('--name');
+          runningServices.add(request.args[nameIndex + 1] ?? '');
+        }
         if (
           bootstrapFails &&
           kind === 'run' &&
@@ -100,6 +107,18 @@ describe('Docker workspace runtime manager', () => {
             status: 'exited' as const,
             exitCode: 1,
             stdout: '[ERR_PNPM_FETCH_403] Private registry access is forbidden',
+            stderr: '',
+            durationMs: 1,
+          });
+        }
+        if (
+          kind === 'run' &&
+          request.args.some((argument) => argument.includes('node --version'))
+        ) {
+          return Promise.resolve({
+            status: 'exited' as const,
+            exitCode: 0,
+            stdout: 'v22.18.0\n11.1.2\n',
             stderr: '',
             durationMs: 1,
           });
@@ -143,13 +162,32 @@ describe('Docker workspace runtime manager', () => {
       engine: 'docker',
       image: { kind: 'prebuilt', reference: config.defaultImage },
       workspaceMountPath: '/workspace',
-      environment: { HOME: '/tasker/home' },
+      environment: { HOME: '/tasker/home', DOCKER_HOST: 'tcp://tasker-docker:2375' },
       bootstrap: ['pnpm install --frozen-lockfile'],
-      cacheVolumes: [{ id: 'node-modules', mountPath: '/workspace/node_modules' }],
+      cacheVolumes: [
+        { id: 'node-modules', mountPath: '/workspace/node_modules', serviceIds: [] },
+        {
+          id: 'nested-docker-data',
+          mountPath: '/var/lib/docker',
+          serviceIds: ['tasker-docker'],
+        },
+      ],
       services: [
+        {
+          id: 'tasker-docker',
+          image: { kind: 'prebuilt', reference: 'docker:29-dind' },
+          command: 'dockerd-entrypoint.sh --host=tcp://0.0.0.0:2375 --tls=false',
+          shell: 'sh',
+          privileged: true,
+          aliases: ['tasker-docker'],
+          readyCheck: 'docker info',
+          environment: { DOCKER_TLS_CERTDIR: '' },
+        },
         {
           id: 'app',
           command: 'pnpm start',
+          shell: 'bash',
+          privileged: false,
           aliases: ['local.example'],
           environment: {},
         },
@@ -182,7 +220,7 @@ describe('Docker workspace runtime manager', () => {
       initializedVolumes: [],
       status: 'preparing',
     });
-    serviceRunning = false;
+    runningServices.clear();
 
     const recovered = await manager.prepare(workspace, policy);
     expect(recovered).toMatchObject({ ok: true, value: { status: 'ready' } });
@@ -196,7 +234,7 @@ describe('Docker workspace runtime manager', () => {
     ).toHaveLength(2);
     expect(
       requests.filter(({ args }) => args[0] === 'run' && args.includes('--detach')),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
     const repeated = await manager.prepare(workspace, policy);
     expect(repeated).toMatchObject({ ok: true, value: { status: 'ready' } });
     expect(
@@ -204,7 +242,7 @@ describe('Docker workspace runtime manager', () => {
     ).toHaveLength(2);
     expect(
       requests.filter(({ args }) => args[0] === 'run' && args.includes('--detach')),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
     expect(
       requests.some(({ args }) =>
         args.includes(
@@ -213,7 +251,9 @@ describe('Docker workspace runtime manager', () => {
       ),
     ).toBe(true);
     expect(
-      requests.find(({ args }) => args[0] === 'run' && args.includes('--detach'))?.args,
+      requests.find(
+        ({ args }) => args[0] === 'run' && args.includes('--detach') && args.includes('pnpm start'),
+      )?.args,
     ).toEqual(
       expect.arrayContaining([
         '--network-alias',
@@ -222,13 +262,55 @@ describe('Docker workspace runtime manager', () => {
         'local.example:0.0.0.0',
       ]),
     );
+    const nestedDocker = requests.find(
+      ({ args }) =>
+        args[0] === 'run' && args.includes('--detach') && args.includes('docker:29-dind'),
+    );
+    expect(nestedDocker?.args).toEqual(
+      expect.arrayContaining([
+        '--privileged',
+        '--network-alias',
+        'tasker-docker',
+        'docker:29-dind',
+        'sh',
+        '-lc',
+        'dockerd-entrypoint.sh --host=tcp://0.0.0.0:2375 --tls=false',
+      ]),
+    );
+    expect(nestedDocker?.args).not.toContain('--user');
+    const bootstrapCommand = requests.find(
+      ({ args }) => args[0] === 'run' && args.includes('mise install'),
+    );
+    expect(bootstrapCommand?.args).toEqual(
+      expect.arrayContaining(['--env', 'DOCKER_HOST=tcp://tasker-docker:2375']),
+    );
+    expect(bootstrapCommand?.env).not.toHaveProperty('DOCKER_HOST');
+    expect(bootstrapCommand?.args.join(' ')).not.toContain('nested-docker-data');
     const receipt = await store.read(workspaceId);
     expect(receipt).toMatchObject({
       workspaceId,
       policyHash: policy.policyHash,
       imageId: 'sha256:workspace-image',
       status: 'ready',
-      volumes: [{ id: 'node-modules', mountPath: join(workspacePath, 'node_modules') }],
+      toolchain: { node: 'v22.18.0', pnpm: '11.1.2' },
+      volumes: [
+        {
+          id: 'node-modules',
+          mountPath: join(workspacePath, 'node_modules'),
+          serviceIds: [],
+        },
+        {
+          id: 'nested-docker-data',
+          mountPath: '/var/lib/docker',
+          serviceIds: ['tasker-docker'],
+        },
+      ],
+    });
+    expect(receipt?.services.find(({ id }) => id === 'tasker-docker')).toEqual({
+      id: 'tasker-docker',
+      containerName: 'tasker-service-aaaaaaaaaaaaaaaaaaaaaaaa-tasker-docker',
+      image: 'docker:29-dind',
+      imageId: 'sha256:workspace-image',
     });
   });
 });

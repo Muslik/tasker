@@ -18,3 +18,6 @@ operator decision, block with one precise question instead of guessing.
 Every evidence `path` must be relative to `$TASKER_ARTIFACTS_ROOT`, such as `result.png`. Never
 return an absolute path shown by `pwd` or the artifact-root environment variable. Scratch is
 discarded after the attempt and can never enter a later project validation command.
+
+Investigation evidence is private Tasker evidence. Do not upload it to Jira or any other external
+system; Delivery publishes only the fresh after artifact produced by Verify.

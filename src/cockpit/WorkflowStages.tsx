@@ -196,16 +196,25 @@ export const WorkflowStages = ({
   readonly onSelectAttempt?: (step: OperatorWorkflowStep, blockRun: number) => void;
 }) => {
   const usage = usageFor(stages.flatMap((stage) => stage.steps));
-  const primaryStages = stages.filter(({ key }) => !key.startsWith('continuation:'));
-  const continuationStages = stages.filter(({ key }) => key.startsWith('continuation:'));
+  const journeyById = new Map<string, OperatorWorkflowStage>();
+  const journeyOrder: string[] = [];
+  for (const stage of stages) {
+    if (!journeyById.has(stage.id)) journeyOrder.push(stage.id);
+    journeyById.set(stage.id, stage);
+  }
+  const journeyStages = journeyOrder
+    .filter((id) => id !== 'complete')
+    .flatMap((id) => journeyById.get(id) ?? []);
+  const complete = journeyById.get('complete');
+  if (complete !== undefined) journeyStages.push(complete);
   const continuationLabel =
     continuation?.status === 'awaiting_review'
-      ? 'Proposed workflow change'
+      ? 'Additional work proposed'
       : continuation?.status === 'running'
-        ? 'Active continuation'
+        ? 'Additional work in progress'
         : continuation?.status === 'completed'
-          ? 'Completed continuation'
-          : 'Workflow continuation';
+          ? 'Additional work completed'
+          : 'Additional work';
   return (
     <div className="border-y border-border/70" data-testid="workflow-stages">
       {usage.tokens > 0 ? (
@@ -221,37 +230,24 @@ export const WorkflowStages = ({
           ) : null}
         </div>
       ) : null}
-      {primaryStages.map((stage) => (
+      {continuation === null || continuation.status === 'completed' ? null : (
+        <div
+          className="border-b border-primary/25 bg-primary/5 px-3 py-2.5"
+          data-testid="workflow-continuation-summary"
+        >
+          <div className="flex items-center gap-2">
+            <GitBranch className="size-3.5 text-primary" />
+            <strong className="text-xs">{continuationLabel}</strong>
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              attempt {continuation.attempt}
+            </span>
+          </div>
+          <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{continuation.reason}</p>
+        </div>
+      )}
+      {journeyStages.map((stage) => (
         <Stage key={stage.key} stage={stage} onSelectAttempt={onSelectAttempt} />
       ))}
-      {continuationStages.length === 0 ? null : (
-        <section
-          className="border-t border-primary/25 bg-primary/3"
-          data-testid="workflow-continuation-stages"
-        >
-          <div className="px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <GitBranch className="size-3.5 text-primary" />
-              <strong className="text-xs">{continuationLabel}</strong>
-              {continuation === null ? null : (
-                <span className="ml-auto text-[10px] text-muted-foreground">
-                  attempt {continuation.attempt}
-                </span>
-              )}
-            </div>
-            {continuation === null ? null : (
-              <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-                {continuation.reason}
-              </p>
-            )}
-          </div>
-          <div className="ml-3 border-l-2 border-primary/25 pl-1">
-            {continuationStages.map((stage) => (
-              <Stage key={stage.key} stage={stage} onSelectAttempt={onSelectAttempt} />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 };

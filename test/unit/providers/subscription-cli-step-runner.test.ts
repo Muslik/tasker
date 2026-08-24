@@ -241,6 +241,12 @@ describe('subscription CLI task-step runner', () => {
       expect(observations[0]?.outputSchema).toContain('additionalProperties');
       expect(observations[0]?.args).toContain('--dangerously-bypass-approvals-and-sandbox');
       expect(observations[0]?.workspaceAccess).toBe('read_write');
+      expect(observations[0]?.scratchRoot).toMatch(
+        new RegExp(
+          `^${repositoryPath.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}/\\.tasker/scratch/[a-f0-9]{64}$`,
+          'u',
+        ),
+      );
       expect(observations[0]?.artifactsRoot).toMatch(/\/artifacts\/[a-f0-9]{64}$/u);
       expect(observations[0]?.stdin).toContain('Mounted immutable input evidence:');
       expect(observations[0]?.stdin).toContain('verification.json');
@@ -250,6 +256,10 @@ describe('subscription CLI task-step runner', () => {
             source: realpathSync(join(inputRoot, 'verification.json')),
             target: realpathSync(join(inputRoot, 'verification.json')),
             readOnly: true,
+          }),
+          expect.objectContaining({
+            target: observations[0]?.scratchRoot,
+            readOnly: false,
           }),
         ]),
       );

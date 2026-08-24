@@ -2,11 +2,8 @@ import { z } from 'zod';
 
 import { PlanningSnapshotReferenceSchema } from '../../planning/run-planning-snapshot.js';
 import { WorkspaceLocatorSchema } from '../../workspaces/contracts.js';
-import {
-  JsonValueSchema,
-  StepActivityDeliverySchema,
-  WorkflowChangeRequestSchema,
-} from '../../workflow/index.js';
+import { JsonValueSchema, StepActivityDeliverySchema } from '../../workflow/schema.js';
+import { WorkflowChangeRequestSchema } from '../../workflow/execution-result.js';
 
 export const ExecuteTaskStepInputSchema = z
   .object({

@@ -183,7 +183,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jiraReviewReady =
     jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
       ? null
-      : new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects);
+      : new JiraReviewReadyAdapter(jiraLifecycleClient, externalEffects, taskStepEvidence);
   const jiraStartWork =
     jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
       ? null

@@ -4,6 +4,7 @@ import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { LedgerRepository } from '../../ledger/repository.js';
+import type { IntegrationEvidenceReader } from '../../integrations/execution.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import { TaskStepEvidenceArtifactSchema } from '../task-step-evidence-contracts.js';
@@ -118,7 +119,7 @@ const listFiles = async (
   return failure === null ? ok(files.sort()) : err(failure);
 };
 
-export class TaskStepEvidenceStore {
+export class TaskStepEvidenceStore implements IntegrationEvidenceReader {
   public constructor(
     private readonly ledger: LedgerRepository,
     private readonly clock: Clock,
@@ -198,6 +199,40 @@ export class TaskStepEvidenceStore {
       artifactIds.push(artifactId);
     }
     return ok(artifactIds);
+  }
+
+  public async read(artifactId: string): ReturnType<IntegrationEvidenceReader['read']> {
+    const artifact = this.ledger.readArtifact(artifactId);
+    if (artifact === null)
+      return { status: 'failed', message: `Artifact ${artifactId} is missing` };
+    if (artifact.artifactKind !== 'task_step_evidence') return { status: 'not_evidence' };
+    const payload = TaskStepEvidenceArtifactSchema.safeParse(artifact.payload);
+    if (!payload.success || !artifact.storageUri.startsWith('file:')) {
+      return { status: 'failed', message: `Artifact ${artifactId} is corrupt` };
+    }
+    try {
+      const path = await realpath(fileURLToPath(artifact.storageUri));
+      const content = await readFile(path);
+      const contentSha256 = createHash('sha256').update(content).digest('hex');
+      if (contentSha256 !== payload.data.contentSha256) {
+        return { status: 'failed', message: `Artifact ${artifactId} content changed` };
+      }
+      return {
+        status: 'found',
+        artifact: {
+          artifactId,
+          relativePath: payload.data.relativePath,
+          mimeType: payload.data.mimeType,
+          contentSha256,
+          content,
+        },
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        message: error instanceof Error ? error.message : `Artifact ${artifactId} cannot be read`,
+      };
+    }
   }
 
   public async materializeInputs(

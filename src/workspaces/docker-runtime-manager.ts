@@ -26,6 +26,8 @@ const succeeded = (
 ): result is Extract<typeof result, { status: 'exited' }> =>
   result.status === 'exited' && result.exitCode === 0;
 
+const CONTAINER_ONLY_DOCKER_ENV = new Set(['DOCKER_CERT_PATH', 'DOCKER_HOST', 'DOCKER_TLS_VERIFY']);
+
 const resolveWorkspaceMount = (
   workspace: WorkspaceLocator,
   workspaceMountPath: string,
@@ -100,15 +102,28 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         id: volume.id,
         name: dockerResourceName('volume', workspace.workspaceId, volume.id),
         mountPath: resolveWorkspaceMount(workspace, policy.workspaceMountPath, volume.mountPath),
+        serviceIds: volume.serviceIds,
       }));
       for (const volume of volumes) {
         await this.ensureVolume(volume.name, workspace.workspaceId);
+      }
+      const services = [];
+      for (const service of policy.services) {
+        const image = service.image?.reference ?? policy.image.reference;
+        const serviceImageId =
+          image === policy.image.reference ? imageId : await this.ensureExternalImage(image);
+        services.push({
+          id: service.id,
+          containerName: dockerResourceName('service', workspace.workspaceId, service.id),
+          image,
+          imageId: serviceImageId,
+        });
       }
 
       const now = this.clock.now();
       const { policyHash, ...pinnedPolicy } = policy;
       let receipt: DockerWorkspaceRuntimeReceipt = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         workspaceId: workspace.workspaceId,
         workspacePath: workspace.path,
         repositorySourcePath: workspace.repository.sourcePath,
@@ -118,11 +133,9 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         imageId,
         networkName,
         volumes,
-        services: policy.services.map((service) => ({
-          id: service.id,
-          containerName: dockerResourceName('service', workspace.workspaceId, service.id),
-        })),
+        services,
         environment: policy.environment,
+        toolchain: existing?.toolchain ?? null,
         initializedVolumes: existing?.initializedVolumes ?? [],
         completedBootstrap: existing?.completedBootstrap ?? [],
         status: 'preparing',
@@ -131,6 +144,31 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
       };
       await this.writeReceipt(receipt);
       receipt = await this.initializeVolumeOwnership(receipt, options);
+
+      const versionSource = await this.commands.runInRuntime(
+        {
+          command: 'sh',
+          args: [
+            '-c',
+            'test -f .nvmrc || test -f .tool-versions || test -f mise.toml || test -f .mise.toml',
+          ],
+          cwd: workspace.path,
+          stdin: '',
+          timeoutMs: 10_000,
+          ...(options.cancellationSignal === undefined
+            ? {}
+            : { cancellationSignal: options.cancellationSignal }),
+        },
+        receipt,
+        policy.image.reference,
+      );
+      if (!succeeded(versionSource)) {
+        return err({
+          kind: 'bootstrap_failed',
+          command: 'resolve project toolchain version',
+          message: 'Project has no .nvmrc, .tool-versions, mise.toml, or .mise.toml',
+        });
+      }
 
       const systemBootstrap = [
         'mise settings add idiomatic_version_file_enable_tools node',
@@ -174,6 +212,38 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         options.cancellationSignal?.throwIfAborted();
         options.onProgress?.({ phase: 'service', detail: service.id });
         await this.ensureService(workspace, receipt, service, options);
+      }
+      if (receipt.toolchain === null) {
+        const toolchain = await this.commands.runInRuntime(
+          {
+            command: 'sh',
+            args: ['-c', 'printf \'%s\\n\' "$(node --version)" "$(pnpm --version)"'],
+            cwd: workspace.path,
+            stdin: '',
+            timeoutMs: 30_000,
+            ...(options.cancellationSignal === undefined
+              ? {}
+              : { cancellationSignal: options.cancellationSignal }),
+          },
+          receipt,
+          policy.image.reference,
+        );
+        if (!succeeded(toolchain)) {
+          return err({
+            kind: 'bootstrap_failed',
+            command: 'read project toolchain versions',
+            message: messageFrom(toolchain),
+          });
+        }
+        const [node, pnpm] = toolchain.stdout.trim().split(/\r?\n/u);
+        if (node === undefined || pnpm === undefined) {
+          return err({
+            kind: 'bootstrap_failed',
+            command: 'read project toolchain versions',
+            message: 'Project toolchain probe returned incomplete output',
+          });
+        }
+        receipt = { ...receipt, toolchain: { node, pnpm } };
       }
       receipt = { ...receipt, status: 'ready', updatedAt: this.clock.now() };
       await this.writeReceipt(receipt);
@@ -252,6 +322,28 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
     return inspected.imageId;
   }
 
+  private async ensureExternalImage(image: string): Promise<string> {
+    const inspected = await this.commands.inspectImage(image);
+    if (inspected.ok) return inspected.imageId;
+    const pulled = await this.docker(['pull', image], 20 * 60_000);
+    if (!succeeded(pulled)) {
+      return fail({
+        kind: 'image_unavailable',
+        image,
+        message: `Docker image ${image} cannot be pulled: ${messageFrom(pulled)}`,
+      });
+    }
+    const resolved = await this.commands.inspectImage(image);
+    if (!resolved.ok) {
+      return fail({
+        kind: 'image_unavailable',
+        image,
+        message: `Pulled Docker image ${image} cannot be inspected: ${resolved.message}`,
+      });
+    }
+    return resolved.imageId;
+  }
+
   private async ensureNetwork(name: string, workspaceId: string): Promise<void> {
     const inspected = await this.docker(['network', 'inspect', name], 30_000);
     if (succeeded(inspected)) return;
@@ -296,7 +388,7 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
   ): Promise<DockerWorkspaceRuntimeReceipt> {
     if (typeof process.getuid !== 'function') return receipt;
     let current = receipt;
-    for (const volume of receipt.volumes) {
+    for (const volume of receipt.volumes.filter(({ serviceIds }) => serviceIds.length === 0)) {
       if (current.initializedVolumes.includes(volume.id)) continue;
       options.cancellationSignal?.throwIfAborted();
       options.onProgress?.({ phase: 'initialize_volume', detail: volume.id });
@@ -342,6 +434,14 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
     const containerName =
       receipt.services.find((candidate) => candidate.id === service.id)?.containerName ??
       dockerResourceName('service', workspace.workspaceId, service.id);
+    const serviceReceipt = receipt.services.find((candidate) => candidate.id === service.id);
+    if (serviceReceipt === undefined) {
+      fail({
+        kind: 'runtime_conflict',
+        message: `Docker service ${service.id} is absent from the runtime receipt`,
+      });
+    }
+    const serviceImage = serviceReceipt?.image ?? receipt.image;
     const running = await this.docker(
       ['inspect', '--format', '{{.State.Running}}', containerName],
       30_000,
@@ -361,6 +461,7 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         '--network',
         receipt.networkName,
       ];
+      if (service.privileged) args.push('--privileged');
       for (const alias of service.aliases) {
         args.push('--network-alias', alias, '--add-host', `${alias}:0.0.0.0`);
       }
@@ -370,23 +471,33 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
         '--volume',
         `${workspace.repository.sourcePath}:${workspace.repository.sourcePath}`,
       );
-      for (const volume of receipt.volumes) {
+      for (const volume of receipt.volumes.filter(
+        ({ serviceIds }) => serviceIds.length === 0 || serviceIds.includes(service.id),
+      )) {
         args.push('--volume', `${volume.name}:${volume.mountPath}`);
       }
-      if (typeof process.getuid === 'function') {
+      if (!service.privileged && typeof process.getuid === 'function') {
         args.push(
           '--user',
           `${String(process.getuid())}:${String(process.getgid?.() ?? process.getuid())}`,
         );
       }
       const environment = { ...receipt.environment, ...service.environment };
-      for (const name of Object.keys(environment).sort()) args.push('--env', name);
-      args.push('--workdir', workspace.path, receipt.image, 'bash', '-lc', service.command);
+      for (const name of Object.keys(environment).sort()) {
+        args.push(
+          '--env',
+          CONTAINER_ONLY_DOCKER_ENV.has(name) ? `${name}=${environment[name] ?? ''}` : name,
+        );
+      }
+      args.push('--workdir', workspace.path, serviceImage, service.shell, '-lc', service.command);
       const started = await this.host.run({
         command: this.configuration.executable,
         args,
         cwd: workspace.path,
-        env: environment,
+        env: Object.fromEntries(
+          Object.entries(environment).filter(([name]) => !CONTAINER_ONLY_DOCKER_ENV.has(name)),
+        ),
+        unsetEnv: [...CONTAINER_ONLY_DOCKER_ENV],
         stdin: '',
         timeoutMs: 120_000,
         ...(options.cancellationSignal === undefined

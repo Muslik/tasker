@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { getHarnessPack } from '../../../src/harness/index.js';
 import {
   PullRequestDeliveryAdapter,
   type IntegrationStepExecutionRequest,
+  type IntegrationStepExecutionResult,
 } from '../../../src/integrations/index.js';
+import type { PullRequestDraft } from '../../../src/integrations/pull-request-draft.js';
 import { makePlanningTaskSnapshot, makeReadyPlanningDecision } from '../../support/planning.js';
 
 const task = makePlanningTaskSnapshot('avia-13236-short-bug');
@@ -14,6 +20,26 @@ const project = getHarnessPack().projects.find(
 if (project === undefined) throw new Error(`Missing harness project ${task.repository}`);
 const planningDecision = makeReadyPlanningDecision();
 if (planningDecision.status !== 'ready') throw new Error('Expected ready planning fixture');
+const workspacePath = mkdtempSync(join(tmpdir(), 'tasker-delivery-draft-'));
+mkdirSync(join(workspacePath, '.tasker', 'pull-request'), { recursive: true });
+writeFileSync(
+  join(workspacePath, '.tasker', 'pull-request', 'draft.json'),
+  `${JSON.stringify(
+    {
+      title: `${task.taskId}: ${task.title}`,
+      description: 'Repair the reported behavior\n\n## AI assistance\n\nFull Generation (>80%)',
+      commit: { kind: 'subject', subject: 'Repair the reported behavior' },
+      branchArtifacts: ['.ai/workspace/AVIA-13236/README.md'],
+    },
+    null,
+    2,
+  )}\n`,
+  'utf8',
+);
+
+afterAll(() => {
+  rmSync(workspacePath, { recursive: true, force: true });
+});
 
 const pullRequestOutput = {
   externalId: '42',
@@ -81,7 +107,7 @@ const request = (
       baseCommit: 'b'.repeat(40),
     },
     runnerId: 'test',
-    path: '/tmp/worktree',
+    path: workspacePath,
     branch: task.taskId,
     preparedAt: '2026-08-23T00:00:00.000Z',
   },
@@ -102,7 +128,11 @@ const request = (
 });
 
 const adapter = (ciStatus: 'passed' | 'likely_caused_by_change' = 'passed') => {
-  const executeDraft = vi.fn(() =>
+  type ExecuteDraft = (
+    request: IntegrationStepExecutionRequest,
+    draft: PullRequestDraft,
+  ) => Promise<IntegrationStepExecutionResult>;
+  const executeDraft = vi.fn<ExecuteDraft>(() =>
     Promise.resolve({
       status: 'completed' as const,
       summary: 'PR published',
@@ -136,13 +166,14 @@ describe('pull-request semantic delivery', () => {
       details: { phase: 'human_review', output: pullRequestOutput },
       artifactIds: ['pull-request-receipt', 'ci-observation'],
     });
-    expect(fixture.executeDraft).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        title: `${task.taskId}: ${task.title}`,
-        commit: { kind: 'subject', subject: 'Repair the reported behavior' },
-      }),
-    );
+    expect(fixture.executeDraft).toHaveBeenCalledOnce();
+    const draft = fixture.executeDraft.mock.calls[0]?.[1];
+    expect(draft).toMatchObject({
+      title: `${task.taskId}: ${task.title}`,
+      commit: { kind: 'subject', subject: 'Repair the reported behavior' },
+      branchArtifacts: ['.ai/workspace/AVIA-13236/README.md'],
+    });
+    expect(draft?.description).toContain('## AI assistance');
   });
 
   it('completes the same semantic block from a typed approval resolution', async () => {

@@ -1,36 +1,35 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "4",
+  "version": "5",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
       "id": "global-design",
-      "path": "shared-skills",
+      "path": "sources/global-skills",
       "importPath": "imports/global-skills",
       "scope": "global_ambient",
-      "skills": ["typescript-design", "test-design"]
-    },
-    {
-      "id": "shared-step",
-      "path": "shared-skills",
-      "scope": "step_bound",
       "skills": [
-        "fix-bug",
-        "investigate-bug",
-        "playwright",
-        "playwright-demo",
-        "pr-finalize",
-        "review-process",
-        "system-analysis",
-        "test-ops-planning"
+        "effector-design",
+        "react-design",
+        "rust-design",
+        "test-design",
+        "typescript-design"
       ]
     },
     {
-      "id": "company-policy",
-      "path": "shared-skills",
-      "scope": "policy_bound",
+      "id": "shared-agent-policy",
+      "path": "sources/work-shared-agent-policy",
+      "importPath": "imports/work-shared-skills",
+      "scope": "global_ambient",
       "skills": ["ai-assistance"]
+    },
+    {
+      "id": "shared-step",
+      "path": "sources/work-shared-skills",
+      "importPath": "imports/work-shared-skills",
+      "scope": "step_bound",
+      "skills": ["playwright", "playwright-demo", "review-process"]
     },
     {
       "id": "integrations",
@@ -48,6 +47,18 @@
       ]
     }
   ],
+  "ruleSources": [
+    {
+      "id": "global-rules",
+      "path": "sources/global-rules",
+      "importPath": "imports/global-rules"
+    },
+    {
+      "id": "work-shared-rules",
+      "path": "sources/work-shared-rules",
+      "importPath": "imports/work-shared-rules"
+    }
+  ],
   "supportFiles": "lib",
   "commands": "bin",
   "profiles": [
@@ -57,44 +68,48 @@
       "skillSources": [
         {
           "id": "front-avia-implementation",
-          "path": "profiles/front-avia/skills",
-          "scope": "step_bound",
-          "skills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
-        {
-          "id": "front-avia-review",
-          "path": "profiles/front-avia/step-skills",
-          "scope": "step_bound",
-          "skills": ["feature-review"]
+          "path": "sources/profiles/front-avia/skills",
+          "importPath": "imports/project-skills/front-avia",
+          "scope": "project_ambient",
+          "skills": ["feature-review", "localization", "state-data", "tracking", "ui-kit"]
         }
       ],
-      "stepBindings": {
-        "implement.change@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
-        "review.change@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        },
-        "verify.acceptance@1": {
-          "addSkills": ["localization", "state-data", "tracking", "ui-kit"]
-        }
-      },
-      "guidance": "profiles/front-avia/guidance"
+      "guidance": "profiles/front-avia/guidance",
+      "overrides": {
+        "id": "front-avia-overrides",
+        "path": "sources/profiles/front-avia/overrides",
+        "importPath": "imports/project-overrides/front-avia"
+      }
     },
     {
       "id": "front-backoffice",
       "repositoryAliases": ["front-backoffice", "onetwotrip/front-backoffice"],
-      "guidance": "profiles/front-backoffice/guidance"
+      "guidance": "profiles/front-backoffice/guidance",
+      "overrides": {
+        "id": "front-backoffice-overrides",
+        "path": "sources/profiles/front-backoffice/overrides",
+        "importPath": "imports/project-overrides/front-backoffice"
+      }
     },
     {
       "id": "front-bus",
       "repositoryAliases": ["front-bus", "onetwotrip/front-bus"],
-      "guidance": "profiles/front-bus/guidance"
+      "guidance": "profiles/front-bus/guidance",
+      "overrides": {
+        "id": "front-bus-overrides",
+        "path": "sources/profiles/front-bus/overrides",
+        "importPath": "imports/project-overrides/front-bus"
+      }
     },
     {
       "id": "front-core-packages",
       "repositoryAliases": ["front-core-packages", "onetwotrip/front-core-packages"],
-      "guidance": "profiles/front-core-packages/guidance"
+      "guidance": "profiles/front-core-packages/guidance",
+      "overrides": {
+        "id": "front-core-packages-overrides",
+        "path": "sources/profiles/front-core-packages/overrides",
+        "importPath": "imports/project-overrides/front-core-packages"
+      }
     },
     {
       "id": "front-components",
@@ -104,7 +119,12 @@
     {
       "id": "front-railways",
       "repositoryAliases": ["front-railways", "onetwotrip/front-railways"],
-      "guidance": "profiles/front-railways/guidance"
+      "guidance": "profiles/front-railways/guidance",
+      "overrides": {
+        "id": "front-railways-overrides",
+        "path": "sources/profiles/front-railways/overrides",
+        "importPath": "imports/project-overrides/front-railways"
+      }
     }
   ]
 }

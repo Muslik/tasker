@@ -115,7 +115,7 @@ const recordCommand = (attempt: MutableAttempt, item: Readonly<Record<string, un
   }
 };
 
-const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'message' }> => {
+const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'message' }> | null => {
   try {
     const value: unknown = JSON.parse(text);
     if (isRecord(value) && typeof value.status === 'string') {
@@ -151,7 +151,7 @@ const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'mes
           };
         }
       }
-      return { kind: 'message', title: 'Agent message', detail: value.status.replaceAll('_', ' ') };
+      return null;
     }
     if (isRecord(value) && isRecord(value.decision)) {
       return {
@@ -220,7 +220,10 @@ const processProviderEvent = (attempt: MutableAttempt, value: unknown): void => 
     }
     if (itemType === 'agent_message') {
       const text = stringField(value.item, 'text');
-      if (text !== null) attempt.events.push(planningMessage(text));
+      if (text !== null) {
+        const message = planningMessage(text);
+        if (message !== null) attempt.events.push(message);
+      }
     }
   }
 };

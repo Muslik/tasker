@@ -1,6 +1,6 @@
 # Context, planning, and workflow freeze lifecycle
 
-Status: **canonical implemented architecture**, 2026-08-13.
+Status: **canonical implemented architecture**, 2026-08-24.
 
 This document defines how Tasker goes from an admitted task to one immutable execution
 workflow. No task graph exists before mandatory planning has enough evidence to propose
@@ -230,6 +230,12 @@ repository, external process, or verification requirement returns a typed runtim
 `workflow_change_required` proposal with durable evidence. Tasker validates a
 continuation and preserves the completed parent prefix and worktree. It never edits the
 accepted parent graph or restarts the Jira task.
+
+Expected Verify findings, task-caused CI failures, and human PR comments do not qualify. The
+planner freezes bounded Development, Agent-review, and Delivery feedback loops up front; these
+events carry new evidence into another iteration of the same semantic journey and same PR.
+Continuation is reserved for a genuinely new work shape such as another repository, translation,
+publication, or a newly discovered external dependency.
 
 Initial investigation/planning and runtime continuation are separate concepts:
 

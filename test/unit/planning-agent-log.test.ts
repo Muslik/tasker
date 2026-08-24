@@ -129,6 +129,19 @@ describe('planning agent log', () => {
       JSON.stringify({
         type: 'item.completed',
         item: {
+          id: 'empty-protocol-message',
+          type: 'agent_message',
+          text: JSON.stringify({
+            status: 'completed',
+            outputJson: null,
+            requestJson: null,
+            blockingReason: null,
+          }),
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
           id: 'command-1',
           type: 'command_execution',
           command: 'pnpm run lint:stylelint',

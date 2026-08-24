@@ -1,6 +1,6 @@
 # Docker-only workspace execution
 
-Status: canonical execution boundary, 2026-08-13
+Status: canonical execution boundary, 2026-08-24
 
 ## What runs where
 
@@ -16,6 +16,10 @@ task-scoped Docker runtime
   Codex/Claude CLI, mise toolchains, project bootstrap, agent blocks,
   process blocks, task commits/hooks, branch publication, Playwright,
   build/tests, and project dev services
+                         |
+                         v
+task-scoped Docker daemon
+  docker-pw and repository-owned nested container workflows
 ```
 
 There is no selectable host execution backend and no host fallback. If Docker or the
@@ -37,7 +41,7 @@ The preparation Activity performs this sequence:
 3. materialize the pinned workspace harness profile;
 4. resolve and pin the company/project Docker policy;
 5. build or inspect the workspace image;
-6. create the task network and named cache volumes;
+6. create the task network, named cache volumes, and isolated Docker-daemon data volume;
 7. run idempotent system and project bootstrap commands;
 8. start/reconcile declared project services and wait for their readiness checks;
 9. snapshot planning input and run mandatory implementation planning.
@@ -63,7 +67,10 @@ Docker is the external sandbox boundary, and attempting to nest bubblewrap insid
 container fails on standard Docker Desktop kernels. Tasker still enforces the effect
 boundary at the mount layer: analyzer/planner repository mounts are read-only, while an
 executable task block receives the read/write worktree declared by its contract. The
-Docker socket and arbitrary host paths are never exposed to the provider.
+The host Docker socket and arbitrary host paths are never exposed to the provider. Repository
+commands that need Docker receive `DOCKER_HOST` for a privileged DinD service living only on that
+task network. The host control-plane Docker CLI explicitly removes that variable, so inner-daemon
+configuration cannot redirect Tasker's own resource management.
 
 ## Pinned policy and recovery
 
@@ -76,8 +83,9 @@ The first successful preparation stores a runtime receipt under Tasker applicati
 data, beside the configured managed-worktree store by default. The repository cache may
 live elsewhere and does not determine runtime-state placement. An explicit runtime-store
 setting can still relocate receipts. A receipt contains the exact policy/hash, image ID,
-worktree/source paths, network, volumes, initialized-volume IDs, service identities,
-completed bootstrap command hashes, and timestamps. It contains no credentials.
+worktree/source paths, network, volumes, initialized-volume IDs, service image identities,
+resolved Node/pnpm versions, completed bootstrap command hashes, and timestamps. It contains no
+credentials.
 
 The receipt advances monotonically for volume initialization and bootstrap progress and
 pins the active run. Editing the harness changes future runs; a retry of an existing run
@@ -108,11 +116,12 @@ run, worktree, volumes, and bootstrap receipt. It does not recreate the task.
 
 ## Toolchain and project setup
 
-The image in `docker/runner/Dockerfile` contains stable system dependencies,
-Playwright browsers, `mise`, Codex CLI, and Claude Code. Project language versions do
-not accumulate in the image. `mise` reads the repository's `.mise.toml`, `.tool-versions`,
-or enabled idiomatic files such as `.nvmrc`, installs the declared toolchain into the
-task cache, and exposes it through shims.
+The image in `docker/runner/Dockerfile` contains stable system/browser dependencies, Docker CLI,
+`mise`, Codex CLI, and Claude Code. Project language and Playwright versions do not become Tasker
+configuration. `mise` reads the repository's `.mise.toml`, `.tool-versions`, or enabled idiomatic
+files such as `.nvmrc`, installs the declared toolchain into the task cache, and exposes it through
+shims. A repository with no supported version file blocks during workspace preparation instead of
+falling back to the image's Node. Corepack then resolves pnpm from `packageManager`.
 
 `mise` does not guess project bootstrap. The project policy explicitly declares steps
 such as `pnpm install --frozen-lockfile` and `pnpm run dicts`. The `front-avia` policy
@@ -120,10 +129,12 @@ also declares `pnpm start`, network aliases, and the HTTPS readiness probe. Ther
 Playwright and reproduction run against the service from the same managed worktree,
 not an unrelated server that happened to be listening on the host.
 
-The workflow analyzer receives this resolved runtime policy as planning context. It can
-therefore know that a repository has a provisioned web service and Playwright-capable
-runtime when it chooses reproduction/visual-verification blocks. Runtime preparation
-itself remains kernel infrastructure and is not emitted as fake workflow steps.
+The writable Playwright cache is task-scoped. Agent-generated browser scripts are mounted at
+`<worktree>/.tasker/scratch/<operation>` so Node module resolution starts inside the project.
+Repository tests and snapshot updates use existing package scripts/configs directly; Tasker does
+not generate replacements. `playwright-demo` may install the Chromium revision matching the
+current project package into that cache. Runtime preparation itself remains kernel infrastructure
+and is not emitted as fake workflow steps.
 
 ## Mount and security rules
 
@@ -134,6 +145,8 @@ itself remains kernel infrastructure and is not emitted as fake workflow steps.
 - credentials are copied into an isolated provider directory or mounted through the
   existing exact harness env-file boundary;
 - the Docker socket is never mounted into an agent container;
+- `DOCKER_HOST` addresses only the task-scoped daemon; two run networks cannot resolve each
+  other's daemon alias;
 - environment values are passed to Docker through the control process, while Docker
   arguments contain environment names rather than secret values;
 - resource cleanup/reconciliation targets exact Tasker labels and deterministic names,

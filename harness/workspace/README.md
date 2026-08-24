@@ -118,8 +118,10 @@ a worktree or content snapshot.
    `.tasker/harness/skills`. The resolved manifest is pinned beside it. Nothing is
    installed in repository `.codex/skills` or `.claude/skills`: each analyzer, planner,
    or step attempt receives only its resolved ambient and bound packages in a temporary
-   provider home. Profile guidance is composed with repository rules and copied to
-   repository paths. No managed worktree symlink points back to a live source.
+   provider home. A declared project override replaces the matching repository guidance;
+   otherwise the repository file remains the base. Global/shared/project rules and the
+   Tasker execution overlay are then composed on top. No managed worktree symlink points
+   back to a live source.
 5. Generated untracked files are placed in the managed clone's Git exclude file;
    tracked guidance uses that worktree's `skip-worktree` bit. The task branch therefore
    contains code and task artifacts, not operator configuration.
@@ -129,7 +131,8 @@ a worktree or content snapshot.
 
 Every task step container also receives isolated runtime surfaces. `/workspace` is the
 product worktree and is mounted read-only unless the frozen semantic block owns
-`workspace.write`. `/tasker/scratch` is disposable step-scoped storage,
+`workspace.write`. `<worktree>/.tasker/scratch/<operation>` is a nested writable,
+disposable step-scoped mount so generated project scripts resolve project dependencies,
 `/tasker/artifacts` is durable evidence pending import, and `/tasker/cache` owns writable
 tool caches. Prompt wording and `.gitignore` are not security boundaries.
 
@@ -156,10 +159,9 @@ The block catalog does that. In particular:
   only when accepted criteria require runtime/visual evidence. Exact project commands
   are internal Verify operations and do not gain agent skills. An ordinary non-visual
   feature gains neither behavior merely because the package exists.
-- `pr-finalize` is retained from the old harness as migration/reference material, not as
-  Tasker's final PR executor. Its useful rules are expressed as separately receipted
-  operations owned by one semantic Delivery block; one operator row does not mean one
-  opaque remote mutation.
+- `fix-bug` and `pr-finalize` are not imported as end-to-end Tasker skills. Their stable
+  requirements are distributed into investigation, implementation, verification, and Delivery;
+  interactive worktree/finalization mechanics do not become a second orchestration layer.
 - read/write integrations are typed Activities. A prompt or skill can draft input and
   interpret evidence; it cannot grant itself `git.write`, `jira.write`, or another
   outward-facing capability.
@@ -174,9 +176,7 @@ into an isolated provider view:
 
 Both views originate from the same `SKILL.md` package and supporting files. Scripts use
 `TASKER_SKILLS_ROOT`, which points at the selected provider view instead of a hard-coded
-`.codex` or `.claude` path. A missing logical package blocks before the subscription CLI
-starts. Thus `pr-finalize` can remain in the pinned migration catalog without becoming
-visible to `implement.change@1` or another unrelated step.
+`.codex` or `.claude` path. A missing logical package blocks before the subscription CLI starts.
 
 The four scopes have distinct selection rules:
 
@@ -186,23 +186,23 @@ The four scopes have distinct selection rules:
 - `policy_bound` can only be named by an enabled company policy.
 
 Duplicate logical names and scope-incompatible dependencies fail pack loading. A
-project binding cannot remove a global or policy skill. `front-avia` currently binds
-`localization`, `state-data`, `tracking`, and `ui-kit` to implementation, repair, and
-review steps; it does not expose them during unrelated planning operations.
+project binding cannot remove a global or policy skill. `front-avia` installs its reviewed project
+skills as project-ambient guidance, matching the interactive harness.
 
 ## Local imports from the interactive harness
 
-Run `pnpm harness:setup` once per machine. It creates the ignored symlink
-`imports/global-skills` to `../harness/global/skills` (override the source with
-`TASKER_INTERACTIVE_HARNESS_PATH`). `global-design` explicitly allowlists only
-`typescript-design` and `test-design` from that source.
+Run `pnpm harness:setup` once per machine. It creates ignored authoring symlinks for global
+skills/rules, selected `work/shared` skills/rules, and available project skills/overrides (override
+the source with `TASKER_INTERACTIVE_HARNESS_PATH`). The manifest allowlists all global skills,
+only `ai-assistance`, `playwright-demo`, `playwright`, and `review-process` from shared, and the
+declared project packages.
 
 The symlink is an authoring input, never a run dependency. Bootstrap follows the
 allowlisted source once, rejects nested symlinks and secrets, copies ordinary files into
 the content-addressed snapshot, and materializes that snapshot into the managed
-worktree. Changing the interactive skill affects a later run but cannot change
-resume/retry of an existing run. When the local import is absent, the checked-in package
-copy remains the portable fallback.
+worktree. Rules are rebuilt into both `AGENTS.md` and `CLAUDE.md`; a declared project override is
+the base, and the Tasker execution overlay is appended last. Changing an interactive source affects
+a later run but cannot change resume/retry of an existing run.
 
 ## Setup lifecycle
 
@@ -230,9 +230,9 @@ changes. Planning reads the same configured filesystem that later execution uses
   repository aliases, scoped `skillSources`, and `stepBindings` in `manifest.json`. No
   orchestrator or Temporal code changes are required.
 - Put Tasker-only operational rules in `.ai/tasker.md`. Keep repository architecture in
-  the repository's own `.ai`. Use profile `AGENTS.md`/`CLAUDE.md` as managed-run deltas;
-  bootstrap composes them with tracked repository files instead of replacing their
-  content.
+  the repository's own `.ai`. Imported project overrides own the complete base content
+  of `AGENTS.md`, `CLAUDE.md`, and matching `.ai/*.md`; profile guidance contains only
+  the managed-run delta appended after that base.
 - Add a package under `shared-skills`, `integration-skills`, or a profile directory and
   explicitly list its logical name in one `skillSources` entry. Directory placement
   alone grants no visibility.

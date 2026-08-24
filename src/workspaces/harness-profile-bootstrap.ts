@@ -38,6 +38,8 @@ const EXCLUDE_BEGIN = '# >>> tasker workspace harness >>>';
 const EXCLUDE_END = '# <<< tasker workspace harness <<<';
 const GUIDANCE_BEGIN = '<!-- >>> tasker managed guidance >>>';
 const GUIDANCE_END = '<!-- <<< tasker managed guidance <<< -->';
+const RULES_BEGIN = '<!-- >>> harness rules (bootstrap) >>> -->';
+const RULES_END = '<!-- <<< harness rules (bootstrap) <<< -->';
 
 const SelectionSchema = z
   .object({
@@ -55,6 +57,9 @@ type Selection = z.infer<typeof SelectionSchema>;
 interface MaterializedFile extends WorkspaceHarnessSourceFile {
   readonly destination: string;
   readonly kind: 'skill' | 'support' | 'command' | 'guidance';
+  readonly override?: WorkspaceHarnessSourceFile;
+  readonly overlay?: WorkspaceHarnessSourceFile;
+  readonly rules?: readonly WorkspaceHarnessSourceFile[];
 }
 
 class BootstrapFailure extends Error {
@@ -90,6 +95,23 @@ const sha256File = async (path: string): Promise<string | null> => {
 const sha256 = (content: Buffer | string): string =>
   createHash('sha256').update(content).digest('hex');
 
+const stripManagedBlock = (content: string, begin: string, end: string): string => {
+  const retained: string[] = [];
+  let inside = false;
+  for (const line of content.split(/\r?\n/u)) {
+    if (line === begin) {
+      inside = true;
+      continue;
+    }
+    if (line === end) {
+      inside = false;
+      continue;
+    }
+    if (!inside) retained.push(line);
+  }
+  return retained.join('\n').trimEnd();
+};
+
 const commandMessage = (result: CommandResult): string => {
   if (result.status === 'spawn_failed') return result.message;
   if (result.status === 'timed_out') return result.stderr.trim() || 'Git command timed out';
@@ -106,13 +128,26 @@ const tailUnder = (relativePath: string, directory: string): string | null => {
 
 const skillName = (tail: string): string => tail.split('/')[0] ?? '';
 
+const filesUnder = (
+  files: readonly WorkspaceHarnessSourceFile[],
+  directory: string,
+): ReadonlyMap<string, WorkspaceHarnessSourceFile> =>
+  new Map(
+    files.flatMap((file) => {
+      const tail = tailUnder(file.relativePath, directory);
+      return tail === null || tail.endsWith('/.gitkeep') || tail === '.gitkeep'
+        ? []
+        : [[tail, file] as const];
+    }),
+  );
+
 const buildMaterializationPlan = (
   pack: LoadedWorkspaceHarnessPack,
   profile: WorkspaceHarnessProfile,
 ): readonly MaterializedFile[] => {
   const destinations = new Map<string, MaterializedFile>();
   const add = (
-    file: WorkspaceHarnessSourceFile,
+    file: WorkspaceHarnessSourceFile & Pick<MaterializedFile, 'override' | 'overlay' | 'rules'>,
     destination: string,
     kind: MaterializedFile['kind'],
   ) => {
@@ -145,8 +180,32 @@ const buildMaterializationPlan = (
     if (commandTail !== null) {
       add(file, `${WORKSPACE_HARNESS_BIN_DIRECTORY}/${commandTail}`, 'command');
     }
-    const guidanceTail = tailUnder(file.relativePath, profile.guidance);
-    if (guidanceTail !== null) add(file, guidanceTail, 'guidance');
+  }
+
+  const overlays = filesUnder(pack.files, profile.guidance);
+  const overrides =
+    profile.overrides === undefined
+      ? new Map<string, WorkspaceHarnessSourceFile>()
+      : filesUnder(pack.files, profile.overrides.path);
+  const rules = [...pack.manifest.ruleSources, ...profile.ruleSources]
+    .flatMap((source) => [...filesUnder(pack.files, source.path).values()])
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  const guidanceDestinations = new Set([...overlays.keys(), ...overrides.keys()]);
+  for (const destination of guidanceDestinations) {
+    const overlay = overlays.get(destination);
+    const override = overrides.get(destination);
+    const source = overlay ?? override;
+    if (source === undefined) continue;
+    add(
+      {
+        ...source,
+        ...(override === undefined ? {} : { override }),
+        ...(overlay === undefined ? {} : { overlay }),
+        ...(destination === 'AGENTS.md' || destination === 'CLAUDE.md' ? { rules } : {}),
+      },
+      destination,
+      'guidance',
+    );
   }
 
   return [...destinations.values()].sort((left, right) =>
@@ -463,28 +522,47 @@ export class HarnessProfileWorkspaceBootstrapAdapter implements WorkspaceBootstr
     file: MaterializedFile,
     tracked: boolean,
   ): Promise<Buffer> {
-    const managed = await readFile(file.absolutePath);
-    if (!tracked) return managed;
-    const original = await this.gitResult(workspace, [
-      'show',
-      `${workspace.repository.baseCommit}:${file.destination}`,
-    ]);
-    if (original.status !== 'exited' || original.exitCode !== 0) {
-      throw new BootstrapFailure(
-        `Cannot read repository guidance ${file.destination} from ${workspace.repository.baseCommit}: ${commandMessage(original)}`,
-        false,
-      );
+    const overlay =
+      file.overlay === undefined ? '' : await readFile(file.overlay.absolutePath, 'utf8');
+    if (file.destination !== 'AGENTS.md' && file.destination !== 'CLAUDE.md') {
+      const content =
+        file.override === undefined ? overlay : await readFile(file.override.absolutePath, 'utf8');
+      return Buffer.from(content.endsWith('\n') ? content : `${content}\n`, 'utf8');
     }
-    if (original.stdout.includes(GUIDANCE_BEGIN) || original.stdout.includes(GUIDANCE_END)) {
-      throw new BootstrapFailure(
-        `Repository guidance already contains Tasker markers: ${file.destination}`,
-        false,
-      );
+    let base: string;
+    if (file.override !== undefined) {
+      base = await readFile(file.override.absolutePath, 'utf8');
+    } else if (tracked) {
+      const original = await this.gitResult(workspace, [
+        'show',
+        `${workspace.repository.baseCommit}:${file.destination}`,
+      ]);
+      if (original.status !== 'exited' || original.exitCode !== 0) {
+        throw new BootstrapFailure(
+          `Cannot read repository guidance ${file.destination} from ${workspace.repository.baseCommit}: ${commandMessage(original)}`,
+          false,
+        );
+      }
+      base = original.stdout;
+    } else {
+      base = '';
     }
-    return Buffer.from(
-      `${original.stdout.trimEnd()}\n\n${GUIDANCE_BEGIN}\n${managed.toString('utf8').trim()}\n${GUIDANCE_END}\n`,
-      'utf8',
+    base = stripManagedBlock(
+      stripManagedBlock(base, RULES_BEGIN, RULES_END),
+      GUIDANCE_BEGIN,
+      GUIDANCE_END,
     );
+    const rules = await Promise.all(
+      (file.rules ?? []).map((rule) => readFile(rule.absolutePath, 'utf8')),
+    );
+    const sections = [
+      base.trim(),
+      rules.length === 0
+        ? ''
+        : `${RULES_BEGIN}\n${rules.map((rule) => rule.trim()).join('\n\n')}\n${RULES_END}`,
+      overlay.trim() === '' ? '' : `${GUIDANCE_BEGIN}\n${overlay.trim()}\n${GUIDANCE_END}`,
+    ].filter((section) => section !== '');
+    return Buffer.from(`${sections.join('\n\n')}\n`, 'utf8');
   }
 
   private async gitStateIsReady(

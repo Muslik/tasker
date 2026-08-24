@@ -6,7 +6,7 @@ const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 export const DockerWorkspaceRuntimeReceiptSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     workspaceId: z.string().regex(/^[a-f0-9]{24}$/u),
     workspacePath: z.string().min(1),
     repositorySourcePath: z.string().min(1),
@@ -21,6 +21,7 @@ export const DockerWorkspaceRuntimeReceiptSchema = z
           id: z.string().min(1),
           name: z.string().min(1),
           mountPath: z.string().min(1),
+          serviceIds: z.array(z.string().min(1)),
         })
         .strict(),
     ),
@@ -29,10 +30,19 @@ export const DockerWorkspaceRuntimeReceiptSchema = z
         .object({
           id: z.string().min(1),
           containerName: z.string().min(1),
+          image: z.string().min(1),
+          imageId: z.string().min(1),
         })
         .strict(),
     ),
     environment: z.record(z.string(), z.string()),
+    toolchain: z
+      .object({
+        node: z.string().min(1),
+        pnpm: z.string().min(1),
+      })
+      .strict()
+      .nullable(),
     initializedVolumes: z.array(z.string().min(1)),
     completedBootstrap: z.array(ContentHashSchema),
     status: z.enum(['preparing', 'ready']),

@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { Context } from '@temporalio/activity';
 import { z } from 'zod';
@@ -317,6 +317,13 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
 
     const directory = await mkdtemp(join(tmpdir(), 'tasker-step-agent-'));
     const stepFilesystem = await this.filesystems.prepare(request.operationId);
+    const workspaceScratchPath = join(
+      request.cwd,
+      '.tasker',
+      'scratch',
+      basename(stepFilesystem.scratchPath),
+    );
+    await mkdir(workspaceScratchPath, { recursive: true, mode: 0o700 });
     try {
       const inputArtifacts = await this.evidence.materializeInputs(
         request.inputArtifactIds,
@@ -416,14 +423,14 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             ? { CODEX_HOME: isolatedConfigurationRoot }
             : { HOME: isolatedConfigurationRoot }),
           ...harnessEnvironment,
-          TASKER_SCRATCH_ROOT: stepFilesystem.scratchPath,
+          TASKER_SCRATCH_ROOT: workspaceScratchPath,
           TASKER_ARTIFACTS_ROOT: stepFilesystem.artifactsPath,
         },
         mounts: [
           { source: directory, target: directory, readOnly: false },
           {
             source: stepFilesystem.scratchPath,
-            target: stepFilesystem.scratchPath,
+            target: workspaceScratchPath,
             readOnly: false,
           },
           {
@@ -508,6 +515,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
       });
     } finally {
       await this.filesystems.cleanupScratch(stepFilesystem);
+      await rm(workspaceScratchPath, { recursive: true, force: true });
       await rm(directory, { recursive: true, force: true });
     }
   }

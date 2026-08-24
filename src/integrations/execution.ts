@@ -43,6 +43,24 @@ export interface IntegrationEvidenceSink {
   >;
 }
 
+export interface IntegrationEvidenceArtifact {
+  readonly artifactId: string;
+  readonly relativePath: string;
+  readonly mimeType: string;
+  readonly contentSha256: string;
+  readonly content: Uint8Array;
+}
+
+export interface IntegrationEvidenceReader {
+  read(
+    artifactId: string,
+  ): Promise<
+    | { readonly status: 'found'; readonly artifact: IntegrationEvidenceArtifact }
+    | { readonly status: 'not_evidence' }
+    | { readonly status: 'failed'; readonly message: string }
+  >;
+}
+
 export interface IntegrationStepExecutionRequest {
   readonly operationId: string;
   readonly nodeId: string;

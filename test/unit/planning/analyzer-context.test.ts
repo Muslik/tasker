@@ -58,7 +58,7 @@ describe('workflow analyzer context', () => {
       ({ reference }) => reference === 'implement.change@1',
     )?.executor;
     expect(implementationExecutor?.kind).toBe('agent');
-    expect(implementationExecutor?.skills).toContain('ai-assistance');
+    expect(implementationExecutor?.skills).not.toContain('ai-assistance');
     expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
       'local-ready-before-delivery',
       'delivery-feedback-is-frozen',

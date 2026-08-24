@@ -308,13 +308,17 @@ const WorkspaceRuntimeCacheVolumeSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
     mountPath: z.string().trim().min(1),
+    serviceIds: z.array(z.string().regex(/^[a-z][a-z0-9-]*$/u)).default([]),
   })
   .strict();
 
 const WorkspaceRuntimeServiceSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
+    image: WorkspaceRuntimeImageSchema.optional(),
     command: z.string().trim().min(1),
+    shell: z.enum(['bash', 'sh']).default('bash'),
+    privileged: z.boolean().default(false),
     aliases: z.array(z.string().trim().min(1)).default([]),
     readyCheck: z.string().trim().min(1).optional(),
     environment: z.record(z.string(), z.string()).default({}),

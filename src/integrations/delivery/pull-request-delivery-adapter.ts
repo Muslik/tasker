@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { z } from 'zod';
 
 import {
@@ -5,7 +8,6 @@ import {
   deliveryOutputSchema,
   pullRequestOutputSchema,
 } from '../../harness/step-contracts.js';
-import { ImplementationPlanSchema } from '../../planning/implementation-plan.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import type { BitbucketPullRequestAdapter } from '../bitbucket/pull-request-adapter.js';
 import type { PullRequestReviewEvidence } from '../bitbucket/review.js';
@@ -16,13 +18,7 @@ import type {
 } from '../execution.js';
 import type { JenkinsBuildObserverAdapter } from '../jenkins/build-observer-adapter.js';
 import type { JiraReviewReadyAdapter } from '../jira/review-ready-adapter.js';
-import { PullRequestDraftSchema, type PullRequestDraft } from '../pull-request-draft.js';
-
-const AcceptedPlanArtifactSchema = z
-  .object({
-    plan: ImplementationPlanSchema,
-  })
-  .loose();
+import { PullRequestDraftSchema } from '../pull-request-draft.js';
 
 const ReviewResolutionSchema = z
   .object({
@@ -63,39 +59,29 @@ const invalidOutput = (
   artifactIds,
 });
 
-const pullRequestDraft = (request: IntegrationStepExecutionRequest): PullRequestDraft | null => {
-  const accepted = AcceptedPlanArtifactSchema.safeParse(request.evidence.acceptedPlan);
-  const gitPolicy = request.project?.git;
-  if (!accepted.success || gitPolicy === undefined) return null;
-  const plan = accepted.data.plan;
-  const description = [
-    plan.summary,
-    '',
-    '## Implementation plan',
-    ...plan.steps.map((step) => `- **${step.title}** — ${step.objective}`),
-    '',
-    '## Acceptance',
-    ...plan.acceptanceCriteria.map((criterion) => `- ${criterion.expected}`),
-  ].join('\n');
-  const commit =
-    gitPolicy.commit.kind === 'task_key_subject'
-      ? ({ kind: 'subject', subject: plan.title } as const)
-      : ({
-          kind: 'conventional',
-          type:
-            request.task.kind === 'bug' && gitPolicy.commit.allowedTypes.includes('fix')
-              ? 'fix'
-              : (gitPolicy.commit.allowedTypes[0] ?? 'chore'),
-          scope: null,
-          subject: plan.title,
-        } as const);
-  const parsed = PullRequestDraftSchema.safeParse({
-    title: `${request.task.taskId}: ${request.task.title}`,
-    description,
-    commit,
-    branchArtifacts: [],
-  });
-  return parsed.success ? parsed.data : null;
+const readPullRequestDraft = async (
+  request: IntegrationStepExecutionRequest,
+): Promise<
+  | { readonly ok: true; readonly draft: z.infer<typeof PullRequestDraftSchema> }
+  | { readonly ok: false; readonly reason: string }
+> => {
+  const path = join(request.workspace.path, '.tasker', 'pull-request', 'draft.json');
+  try {
+    const parsed = PullRequestDraftSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+    return parsed.success
+      ? { ok: true, draft: parsed.data }
+      : {
+          ok: false,
+          reason: parsed.error.issues
+            .map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`)
+            .join('; '),
+        };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : 'Pull-request draft cannot be read',
+    };
+  }
 };
 
 const latestReview = (
@@ -132,19 +118,17 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
   public async execute(
     request: IntegrationStepExecutionRequest,
   ): Promise<IntegrationStepExecutionResult> {
-    const draft = pullRequestDraft(request);
-    if (draft === null) {
+    const preparedDraft = await readPullRequestDraft(request);
+    if (!preparedDraft.ok) {
       return {
         status: 'blocked',
         kind: 'configuration',
-        summary: 'Delivery requires an accepted plan and snapshotted project Git policy',
-        details: {
-          acceptedPlan: request.evidence.acceptedPlan !== null,
-          projectConfigured: request.project !== null,
-        },
+        summary: 'Delivery requires the agent-authored pull-request draft',
+        details: { path: '.tasker/pull-request/draft.json', reason: preparedDraft.reason },
         artifactIds: [],
       };
     }
+    const draft = preparedDraft.draft;
 
     const published = await this.pullRequests.executeDraft(request, draft);
     if (published.status !== 'completed') return published;

@@ -14,6 +14,14 @@ const RelativePathSchema = z
     message: 'Expected a path relative to the workspace harness pack',
   });
 
+const ImportedDirectorySchema = z
+  .object({
+    id: SourceIdSchema,
+    path: RelativePathSchema,
+    importPath: RelativePathSchema.optional(),
+  })
+  .strict();
+
 export const WorkspaceHarnessSkillScopeSchema = z.enum([
   'global_ambient',
   'project_ambient',
@@ -56,6 +64,8 @@ const WorkspaceHarnessProfileSchema = z
     skillSources: z.array(ProjectSkillSourceSchema).default([]),
     stepBindings: z.record(VersionedReferenceSchema, ProjectStepBindingSchema).default({}),
     guidance: RelativePathSchema,
+    overrides: ImportedDirectorySchema.optional(),
+    ruleSources: z.array(ImportedDirectorySchema).default([]),
   })
   .strict();
 
@@ -66,6 +76,7 @@ export const WorkspaceHarnessManifestSchema = z
     version: z.string().min(1),
     engines: z.array(z.string().regex(/^[a-z][a-z0-9-]*$/u)).min(1),
     skillSources: z.array(CommonSkillSourceSchema).min(1),
+    ruleSources: z.array(ImportedDirectorySchema).default([]),
     supportFiles: RelativePathSchema,
     commands: RelativePathSchema,
     profiles: z.array(WorkspaceHarnessProfileSchema).min(1),
@@ -78,6 +89,7 @@ export type WorkspaceHarnessSkillScope = z.infer<typeof WorkspaceHarnessSkillSco
 type WorkspaceHarnessSkillSource =
   | WorkspaceHarnessManifest['skillSources'][number]
   | WorkspaceHarnessProfile['skillSources'][number];
+type WorkspaceHarnessDirectorySource = z.infer<typeof ImportedDirectorySchema>;
 
 export interface WorkspaceHarnessSourceFile {
   readonly relativePath: string;
@@ -133,7 +145,10 @@ const resolvePackDirectory = (root: string, relativePath: string): string => {
   return realCandidate;
 };
 
-const resolveSkillSourceDirectory = (root: string, source: WorkspaceHarnessSkillSource): string => {
+const resolveImportedDirectory = (
+  root: string,
+  source: WorkspaceHarnessDirectorySource,
+): string => {
   if (source.importPath !== undefined) {
     const imported = resolve(root, source.importPath);
     if (existsSync(imported)) {
@@ -146,6 +161,9 @@ const resolveSkillSourceDirectory = (root: string, source: WorkspaceHarnessSkill
   }
   return resolvePackDirectory(root, source.path);
 };
+
+const resolveSkillSourceDirectory = (root: string, source: WorkspaceHarnessSkillSource): string =>
+  resolveImportedDirectory(root, source);
 
 const sourceFile = (relativePath: string, absolutePath: string): WorkspaceHarnessSourceFile => {
   const content = readFileSync(absolutePath);
@@ -238,6 +256,41 @@ const validateGuidanceFiles = (
   return files;
 };
 
+const validateImportedGuidanceFiles = (
+  root: string,
+  source: WorkspaceHarnessDirectorySource,
+): WorkspaceHarnessSourceFile[] => {
+  const files = listFiles(resolveImportedDirectory(root, source), source.path);
+  const prefix = `${source.path.replace(/\/$/u, '')}/`;
+  for (const file of files) {
+    const destination = file.relativePath.slice(prefix.length);
+    const allowed =
+      destination === '.gitkeep' ||
+      destination === 'AGENTS.md' ||
+      destination === 'CLAUDE.md' ||
+      (destination.startsWith('.ai/') && destination.endsWith('.md'));
+    if (!allowed) {
+      throw new Error(
+        `Workspace harness overrides may only target .ai/*.md, AGENTS.md, or CLAUDE.md: ${file.relativePath}`,
+      );
+    }
+  }
+  return files;
+};
+
+const validateRuleFiles = (
+  root: string,
+  source: WorkspaceHarnessDirectorySource,
+): WorkspaceHarnessSourceFile[] => {
+  const files = listFiles(resolveImportedDirectory(root, source), source.path);
+  for (const file of files) {
+    if (!file.relativePath.endsWith('.md')) {
+      throw new Error(`Workspace harness rules must be Markdown: ${file.relativePath}`);
+    }
+  }
+  return files;
+};
+
 const dependencyScopeAllowed = (
   owner: WorkspaceHarnessSkillScope,
   dependency: WorkspaceHarnessSkillScope,
@@ -288,7 +341,7 @@ const validateSkillDependencies = (
 };
 
 const assertUniqueSourceIds = (
-  sources: readonly WorkspaceHarnessSkillSource[],
+  sources: readonly { readonly id: string }[],
   context: string,
 ): void => {
   const ids = new Set<string>();
@@ -352,6 +405,7 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
     JSON.parse(manifestContent.toString('utf8')),
   );
   assertUniqueSourceIds(manifest.skillSources, 'common sources');
+  assertUniqueSourceIds(manifest.ruleSources, 'common rule sources');
   const profileIds = new Set<string>();
   const aliases = new Set<string>();
   for (const profile of manifest.profiles) {
@@ -359,6 +413,7 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
       throw new Error(`Duplicate workspace harness profile ${profile.id}`);
     profileIds.add(profile.id);
     assertUniqueSourceIds(profile.skillSources, `profile ${profile.id}`);
+    assertUniqueSourceIds(profile.ruleSources, `profile ${profile.id} rule sources`);
     for (const alias of profile.repositoryAliases) {
       const normalized = normalizeAlias(alias);
       if (aliases.has(normalized)) throw new Error(`Duplicate workspace harness alias ${alias}`);
@@ -378,9 +433,18 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
   for (const source of manifest.skillSources) {
     for (const file of listSkillSourceFiles(rootPath, source)) addFile(file);
   }
+  for (const source of manifest.ruleSources) {
+    for (const file of validateRuleFiles(rootPath, source)) addFile(file);
+  }
   for (const profile of manifest.profiles) {
     for (const source of profile.skillSources) {
       for (const file of listSkillSourceFiles(rootPath, source)) addFile(file);
+    }
+    if (profile.overrides !== undefined) {
+      for (const file of validateImportedGuidanceFiles(rootPath, profile.overrides)) addFile(file);
+    }
+    for (const source of profile.ruleSources) {
+      for (const file of validateRuleFiles(rootPath, source)) addFile(file);
     }
     for (const file of validateGuidanceFiles(rootPath, profile.guidance)) addFile(file);
   }

@@ -30,7 +30,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type {
   OperatorInterventionAction,
   OperatorActivityResponse,
-  OperatorExecutionAttempt,
   OperatorRunLogResponse,
   OperatorTaskSummary,
   OperatorWorkflowContinuation,
@@ -63,7 +62,6 @@ import {
   loadPlanReviewHistory,
   loadJiraIssue,
   loadOperatorActivity,
-  loadOperatorExecutionAttempt,
   loadOperatorRunLog,
   loadOperatorWorkflowProjection,
   loadWorkflow,
@@ -113,12 +111,6 @@ type ActivityLoadState =
 type OperatorProjectionLoadState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly projection: OperatorWorkflowProjection }
-  | { readonly status: 'failed'; readonly message: string };
-
-type ExecutionAttemptLoadState =
-  | { readonly status: 'missing' }
-  | { readonly status: 'loading'; readonly nodeId: string; readonly blockRun: number }
-  | { readonly status: 'ready'; readonly attempt: OperatorExecutionAttempt }
   | { readonly status: 'failed'; readonly message: string };
 
 type RunLogLoadState =
@@ -2360,13 +2352,54 @@ const ExecutionProgressSurface = ({
   );
 };
 
+const runLogEntryId = (nodeId: string, blockRun: number): string =>
+  `run-log-${nodeId.replace(/[^a-zA-Z0-9_-]/gu, '-')}-${String(blockRun)}`;
+
+export const compactCommand = (command: string): string =>
+  command
+    .replace(/^\/usr\/bin\/bash\s+-lc\s+/u, '')
+    .replace(
+      /\/Users\/[^/]+\/Library\/Application Support\/Tasker\/worktrees\/[a-f0-9]+/gu,
+      '$WORKSPACE',
+    )
+    .replace(
+      /\/Users\/[^/]+\/Library\/Application Support\/Tasker\/step-data\/scratch\/[a-f0-9]+/gu,
+      '$SCRATCH',
+    )
+    .replace(
+      /\/Users\/[^/]+\/Library\/Application Support\/Tasker\/step-data\/artifacts\/[a-f0-9]+/gu,
+      '$ARTIFACTS',
+    )
+    .replace(
+      /\/var\/folders\/[^\s'"/]+(?:\/[^\s'"/]+)*\/tasker-step-agent-[^\s'"/]+\/provider-home\/skills/gu,
+      '$SKILLS',
+    )
+    .replace(/\s+/gu, ' ')
+    .trim();
+
 const RunLogSurface = ({
   state,
-  defaultOpen = true,
+  open,
+  focusedAttempt,
+  onOpenChange,
 }: {
   readonly state: RunLogLoadState;
-  readonly defaultOpen?: boolean;
+  readonly open: boolean;
+  readonly focusedAttempt: { readonly nodeId: string; readonly blockRun: number } | null;
+  readonly onOpenChange: (open: boolean) => void;
 }) => {
+  useEffect(() => {
+    if (!open || focusedAttempt === null || state.status !== 'ready') return;
+    const frame = requestAnimationFrame(() => {
+      document
+        .getElementById(runLogEntryId(focusedAttempt.nodeId, focusedAttempt.blockRun))
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [focusedAttempt, open, state]);
+
   if (state.status === 'missing') return null;
   if (state.status === 'loading') {
     return (
@@ -2400,7 +2433,7 @@ const RunLogSurface = ({
     );
   }, 0);
   return (
-    <Collapsible defaultOpen={defaultOpen}>
+    <Collapsible open={open} onOpenChange={onOpenChange}>
       <section className="border-b border-border bg-background" aria-label="Run log">
         <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
           <div className="flex items-center gap-2">
@@ -2429,8 +2462,18 @@ const RunLogSurface = ({
                 const events = parsed.attempts.flatMap((attempt) => attempt.events);
                 const entryTokens =
                   entry.usage === null ? null : entry.usage.inputTokens + entry.usage.outputTokens;
+                const focused =
+                  focusedAttempt?.nodeId === entry.nodeId &&
+                  focusedAttempt.blockRun === entry.blockRun;
                 return (
-                  <article className="px-5 py-4" key={entry.id}>
+                  <article
+                    className={cn(
+                      'scroll-m-24 px-5 py-4 transition-colors',
+                      focused && 'border-l-2 border-primary bg-primary/5 pl-[18px]',
+                    )}
+                    id={runLogEntryId(entry.nodeId, entry.blockRun)}
+                    key={entry.id}
+                  >
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <div className="flex items-center gap-2">
@@ -2461,36 +2504,47 @@ const RunLogSurface = ({
                         {events.map((event, index) => {
                           if (event.kind === 'command') {
                             return (
-                              <div
-                                className="py-3"
+                              <details
+                                className="group/command py-2"
                                 key={`${entry.id}:${event.id}:${String(index)}`}
+                                open={event.status === 'running'}
                               >
-                                <div className="flex items-start gap-2">
-                                  <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                                  <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs leading-5">
-                                    {event.command}
+                                <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+                                  <ChevronDown className="size-3.5 shrink-0 -rotate-90 text-muted-foreground transition-transform group-open/command:rotate-0" />
+                                  <Terminal className="size-3.5 shrink-0 text-muted-foreground" />
+                                  <code
+                                    className="min-w-0 flex-1 truncate text-xs"
+                                    title={event.command}
+                                  >
+                                    {compactCommand(event.command)}
                                   </code>
                                   <span className="shrink-0 text-[10px] text-muted-foreground">
                                     {event.status === 'running'
                                       ? 'running'
                                       : `exit ${String(event.exitCode ?? 0)}`}
                                   </span>
-                                </div>
-                                {event.output.length === 0 ? null : (
-                                  <details
-                                    className="ml-5 mt-2 text-xs"
-                                    open={event.status !== 'completed'}
-                                  >
-                                    <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
-                                      Command output · {event.output.length.toLocaleString()}{' '}
-                                      characters
-                                    </summary>
-                                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
-                                      {event.output}
+                                </summary>
+                                <div className="ml-9 mt-2 space-y-2 text-xs">
+                                  <div>
+                                    <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                      Full command
+                                    </div>
+                                    <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 font-mono text-[11px] leading-5">
+                                      {event.command}
                                     </pre>
-                                  </details>
-                                )}
-                              </div>
+                                  </div>
+                                  {event.output.length === 0 ? null : (
+                                    <div>
+                                      <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                        Output · {event.output.length.toLocaleString()} characters
+                                      </div>
+                                      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
+                                        {event.output}
+                                      </pre>
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
                             );
                           }
                           if (event.kind === 'message') {
@@ -2565,202 +2619,6 @@ const RunLogSurface = ({
         </CollapsibleContent>
       </section>
     </Collapsible>
-  );
-};
-
-const ExecutionAttemptSurface = ({
-  state,
-  onClose,
-}: {
-  readonly state: ExecutionAttemptLoadState;
-  readonly onClose: () => void;
-}) => {
-  if (state.status === 'missing') return null;
-  if (state.status === 'loading') {
-    return (
-      <section className="border-b border-border px-5 py-4" aria-label="Execution attempt log">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" />
-          Loading {state.nodeId} attempt {state.blockRun}…
-        </div>
-      </section>
-    );
-  }
-  if (state.status === 'failed') {
-    return (
-      <section className="border-b border-border" aria-label="Execution attempt log">
-        <div className="flex items-center justify-between px-5 py-3">
-          <InlineError>{state.message}</InlineError>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={onClose}>
-            <X />
-          </Button>
-        </div>
-      </section>
-    );
-  }
-
-  const attempt = state.attempt;
-  const output = attempt.output;
-  const log = attempt.transcript === null ? null : planningAgentLogFrom(attempt.transcript);
-  const events = log?.attempts.flatMap((providerAttempt) => providerAttempt.events) ?? [];
-  return (
-    <section className="border-b border-border bg-muted/5" aria-label="Execution attempt log">
-      <div className="flex items-start justify-between gap-4 border-b border-border/70 px-5 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Terminal className="size-4 text-primary" />
-            <strong className="text-sm">Focused attempt</strong>
-            <StateBadge>{output?.status ?? 'running'}</StateBadge>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {attempt.nodeId} · attempt {attempt.blockRun}
-            {output?.usage === null || output?.usage === undefined
-              ? ''
-              : ` · ${(output.usage.inputTokens + output.usage.outputTokens).toLocaleString()} tok · ${(output.usage.durationMs / 1_000).toFixed(1)}s`}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Close run log"
-          onClick={onClose}
-        >
-          <X />
-        </Button>
-      </div>
-      <ScrollArea className="max-h-[min(58vh,42rem)]">
-        <div className="divide-y divide-border/60 px-5">
-          {events.map((event, index) => {
-            if (event.kind === 'command') {
-              return (
-                <div className="py-3" key={`${event.id}:${String(index)}`}>
-                  <div className="flex items-start gap-2">
-                    <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                    <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs leading-5">
-                      {event.command}
-                    </code>
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                      {event.status === 'running'
-                        ? 'running'
-                        : `exit ${String(event.exitCode ?? 0)}`}
-                    </span>
-                  </div>
-                  {event.output.length === 0 ? null : (
-                    <details className="ml-5 mt-2 text-xs">
-                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                        Command output
-                      </summary>
-                      <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
-                        {event.output}
-                      </pre>
-                    </details>
-                  )}
-                </div>
-              );
-            }
-            if (event.kind === 'message') {
-              return (
-                <div className="flex gap-2 py-3 text-xs" key={`message:${String(index)}`}>
-                  <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                  <div>
-                    <strong className="font-medium">{event.title}</strong>
-                    {event.detail === null ? null : (
-                      <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
-                        {event.detail}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div
-                className={cn(
-                  'flex gap-2 py-3 text-xs',
-                  event.kind === 'error'
-                    ? 'text-destructive'
-                    : 'text-amber-700 dark:text-amber-300',
-                )}
-                key={`${event.kind}:${String(index)}`}
-              >
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                <span className="whitespace-pre-wrap break-words">{event.message}</span>
-              </div>
-            );
-          })}
-          {output === null ? null : (
-            <div className="py-3 text-xs">
-              <div className="grid gap-1 text-muted-foreground sm:grid-cols-2">
-                <span>Runner: {output.runner}</span>
-                <span>Exit: {output.exitCode === null ? 'n/a' : output.exitCode}</span>
-                <span className="sm:col-span-2 break-all">cwd: {output.cwd}</span>
-              </div>
-              {output.result?.summary === undefined ? null : (
-                <p className="mt-2 text-foreground">{output.result.summary}</p>
-              )}
-              {output.stdout.length === 0 && output.stderr.length === 0 ? null : (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                    Full persisted stdout/stderr
-                  </summary>
-                  <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-3 font-mono text-[11px] leading-5">
-                    {[output.stdout, output.stderr].filter((value) => value.length > 0).join('\n')}
-                  </pre>
-                </details>
-              )}
-            </div>
-          )}
-          {attempt.workspaceChanges === null ? null : (
-            <div className="py-3">
-              <div className="flex items-center justify-between gap-3">
-                <strong className="text-xs font-medium">
-                  Files changed · {attempt.workspaceChanges.paths.length}
-                </strong>
-                {attempt.workspaceChanges.truncated ? (
-                  <span className="text-[10px] text-amber-700 dark:text-amber-300">truncated</span>
-                ) : null}
-              </div>
-              {attempt.workspaceChanges.paths.length === 0 ? (
-                <p className="mt-2 text-xs text-muted-foreground">No product file changes</p>
-              ) : (
-                <ul className="mt-2 space-y-1 font-mono text-xs">
-                  {attempt.workspaceChanges.paths.map((file) => (
-                    <li
-                      className="flex min-w-0 items-center gap-2"
-                      key={`${file.status}:${file.path}`}
-                    >
-                      <span className="w-6 shrink-0 text-muted-foreground">{file.status}</span>
-                      <span className="min-w-0 break-all">{file.path}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {attempt.workspaceChanges.trackedDiffSha256 === null ? null : (
-                <p className="mt-2 break-all text-[10px] text-muted-foreground">
-                  diff {attempt.workspaceChanges.trackedDiffSha256}
-                </p>
-              )}
-            </div>
-          )}
-          {attempt.evidence.length === 0 ? null : (
-            <div className="py-3">
-              <strong className="text-xs font-medium">Evidence · {attempt.evidence.length}</strong>
-              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                {attempt.evidence.map((artifact) => (
-                  <li className="flex items-center justify-between gap-3" key={artifact.artifactId}>
-                    <span className="min-w-0 truncate">{artifact.relativePath}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {artifact.mimeType} · {artifact.byteLength.toLocaleString()} B
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </ScrollArea>
-    </section>
   );
 };
 
@@ -3043,9 +2901,11 @@ export const App = () => {
   const [operatorProjectionState, setOperatorProjectionState] =
     useState<OperatorProjectionLoadState>({ status: 'loading' });
   const [runLogState, setRunLogState] = useState<RunLogLoadState>({ status: 'missing' });
-  const [executionAttemptState, setExecutionAttemptState] = useState<ExecutionAttemptLoadState>({
-    status: 'missing',
-  });
+  const [runLogOpen, setRunLogOpen] = useState(true);
+  const [focusedRunLogAttempt, setFocusedRunLogAttempt] = useState<{
+    readonly nodeId: string;
+    readonly blockRun: number;
+  } | null>(null);
   const [implementationPlanState, setImplementationPlanState] =
     useState<ImplementationPlanLoadState>({ status: 'missing' });
   const [planningTranscriptState, setPlanningTranscriptState] =
@@ -3552,27 +3412,16 @@ export const App = () => {
 
   const handleSelectTask = (taskId: string): void => {
     setRestartConfirmationTaskId(null);
-    setExecutionAttemptState({ status: 'missing' });
+    setFocusedRunLogAttempt(null);
+    setRunLogOpen(true);
     setSelectedId(taskId);
     void refreshSelection(taskId);
   };
 
   const handleSelectExecutionAttempt = (step: OperatorWorkflowStep, blockRun: number): void => {
-    const taskReference = selectedIdRef.current;
-    if (taskReference.length === 0 || step.kind === 'wait') return;
-    setExecutionAttemptState({ status: 'loading', nodeId: step.id, blockRun });
-    void loadOperatorExecutionAttempt(taskReference, step.id, blockRun)
-      .then((attempt) => {
-        if (selectedIdRef.current !== taskReference) return;
-        setExecutionAttemptState({ status: 'ready', attempt });
-      })
-      .catch((error: unknown) => {
-        if (selectedIdRef.current !== taskReference) return;
-        setExecutionAttemptState({
-          status: 'failed',
-          message: error instanceof Error ? error.message : 'Execution attempt is unavailable',
-        });
-      });
+    if (selectedIdRef.current.length === 0 || step.kind === 'wait') return;
+    setRunLogOpen(true);
+    setFocusedRunLogAttempt({ nodeId: step.id, blockRun });
   };
 
   const handleJiraSync = (issueKeyInput: string, repository?: string): void => {
@@ -4142,25 +3991,10 @@ export const App = () => {
                 {view === null ? null : <ValidationSurface view={view} />}
                 <JiraPlanningSurface task={selectedTask} />
                 <RunLogSurface
-                  key={
-                    selectedIntervention !== null ||
-                    selectedWorkflowContinuation?.status === 'awaiting_review' ||
-                    selectedTask.status === 'code_review'
-                      ? 'run-log-attention'
-                      : 'run-log-active'
-                  }
                   state={runLogState}
-                  defaultOpen={
-                    selectedIntervention === null &&
-                    selectedWorkflowContinuation?.status !== 'awaiting_review' &&
-                    selectedTask.status !== 'code_review'
-                  }
-                />
-                <ExecutionAttemptSurface
-                  state={executionAttemptState}
-                  onClose={() => {
-                    setExecutionAttemptState({ status: 'missing' });
-                  }}
+                  open={runLogOpen}
+                  focusedAttempt={focusedRunLogAttempt}
+                  onOpenChange={setRunLogOpen}
                 />
                 <div>
                   {selectedTask.status === 'plan_review' ? (

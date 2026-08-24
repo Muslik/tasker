@@ -5,6 +5,8 @@ import { pullRequestOutputSchema } from '../../../src/harness/step-contracts.js'
 import {
   ExternalEffectStore,
   JiraReviewReadyAdapter,
+  type JiraAttachmentObservation,
+  type JiraAttachmentPort,
   type JiraCommentObservation,
   type JiraFieldValueObservation,
   type JiraLifecycleIssue,
@@ -14,7 +16,10 @@ import {
   type JiraLifecycleTransitionField,
   type JiraTransitionObservation,
 } from '../../../src/integrations/index.js';
-import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
+import type {
+  IntegrationEvidenceReader,
+  IntegrationStepExecutionRequest,
+} from '../../../src/integrations/execution.js';
 import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
@@ -110,7 +115,7 @@ const executeReviewReady = (
   return adapter.executeForPullRequest(request, parsed);
 };
 
-class StatefulJiraReviewPort implements JiraLifecyclePort {
+class StatefulJiraReviewPort implements JiraLifecyclePort, JiraAttachmentPort {
   public issue: JiraLifecycleIssue = {
     issueKey: 'AVIA-12536',
     issueType: 'Task',
@@ -122,6 +127,12 @@ class StatefulJiraReviewPort implements JiraLifecyclePort {
     },
   };
   public comments: { readonly id: string; readonly body: string }[] = [];
+  public attachments: {
+    readonly id: string;
+    readonly filename: string;
+    readonly mimeType: string;
+    readonly size: number;
+  }[] = [];
   public fieldValues: Record<string, null | number | string> = {};
   public transitionFields: readonly JiraLifecycleTransitionField[] = [];
   public readonly transitionCalls: string[] = [];
@@ -164,6 +175,27 @@ class StatefulJiraReviewPort implements JiraLifecyclePort {
 
   public listComments(): Promise<JiraCommentObservation> {
     return Promise.resolve({ status: 'observed', comments: this.comments });
+  }
+
+  public listAttachments(): Promise<JiraAttachmentObservation> {
+    return Promise.resolve({ status: 'observed', attachments: this.attachments });
+  }
+
+  public uploadAttachment(
+    _issueKey: string,
+    attachment: {
+      readonly filename: string;
+      readonly mimeType: string;
+      readonly content: Uint8Array;
+    },
+  ): Promise<JiraLifecycleMutation> {
+    this.attachments.push({
+      id: String(this.attachments.length + 1),
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      size: attachment.content.byteLength,
+    });
+    return Promise.resolve({ status: 'accepted' });
   }
 
   public assign(): Promise<JiraLifecycleMutation> {
@@ -246,12 +278,129 @@ afterEach(() => {
   ledger = undefined;
 });
 
-const adapterFor = (jira: JiraLifecyclePort): JiraReviewReadyAdapter => {
+const adapterFor = (
+  jira: JiraLifecyclePort & JiraAttachmentPort,
+  evidence: IntegrationEvidenceReader | null = null,
+): JiraReviewReadyAdapter => {
   ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
-  return new JiraReviewReadyAdapter(jira, new ExternalEffectStore(ledger.repository, systemClock));
+  return new JiraReviewReadyAdapter(
+    jira,
+    new ExternalEffectStore(ledger.repository, systemClock),
+    evidence,
+  );
 };
 
 describe('Jira review-ready effect adapter', () => {
+  it('publishes one current bug after-video and references it from the managed fix comment', async () => {
+    const jira = new StatefulJiraReviewPort();
+    jira.issue = { ...jira.issue, issueKey: 'AVIA-12045', issueType: 'Bug' };
+    const bugTask = {
+      ...makePlanningTaskSnapshot('avia-13236-short-bug', {
+        origin: 'jira',
+        reference: 'jira:AVIA-12045',
+      }),
+      taskId: 'AVIA-12045',
+    } as const;
+    const baseRequest = requestFor('workflow:jira-bug-review:attempt-1');
+    const request: IntegrationStepExecutionRequest = {
+      ...baseRequest,
+      taskReference: bugTask.reference,
+      task: bugTask,
+      stepInput: {
+        objective: bugTask.title,
+        repository: bugTask.repository,
+        taskId: bugTask.taskId,
+      },
+      evidence: {
+        ...baseRequest.evidence,
+        completedSteps: [
+          ...baseRequest.evidence.completedSteps,
+          {
+            operationId: 'workflow:verify:attempt-1',
+            nodeId: 'verify-change',
+            stepReference: 'verify.acceptance@1',
+            status: 'completed',
+            summary: 'Bug verified',
+            artifactIds: ['evidence:after-video'],
+            details: { output: { decision: 'accepted' } },
+            recordedAt: '2026-08-04T00:00:30.000Z',
+          },
+        ],
+      },
+    };
+    const content = new TextEncoder().encode('video');
+    const evidence: IntegrationEvidenceReader = {
+      read: (artifactId) =>
+        Promise.resolve(
+          artifactId === 'evidence:after-video'
+            ? {
+                status: 'found' as const,
+                artifact: {
+                  artifactId,
+                  relativePath: 'AVIA-12045-fixed.mp4',
+                  mimeType: 'video/mp4',
+                  contentSha256: 'a'.repeat(64),
+                  content,
+                },
+              }
+            : { status: 'not_evidence' as const },
+        ),
+    };
+    const adapter = adapterFor(jira, evidence);
+
+    const first = await executeReviewReady(adapter, request);
+    const redelivered = await executeReviewReady(adapter, request);
+
+    expect(first).toMatchObject({ status: 'completed' });
+    expect(redelivered).toMatchObject({ status: 'completed' });
+    expect(jira.attachments).toEqual([
+      {
+        id: '1',
+        filename: 'AVIA-12045-fixed.mp4',
+        mimeType: 'video/mp4',
+        size: content.byteLength,
+      },
+    ]);
+    expect(jira.commentCalls).toEqual([
+      `Исправлено — видео: [^AVIA-12045-fixed.mp4]\n\nPR: [73|${pullRequestUrl}]`,
+    ]);
+  });
+
+  it('blocks bug delivery before Jira mutation when Verify produced no publishable after evidence', async () => {
+    const jira = new StatefulJiraReviewPort();
+    jira.issue = { ...jira.issue, issueKey: 'AVIA-12045', issueType: 'Bug' };
+    const bugTask = {
+      ...makePlanningTaskSnapshot('avia-13236-short-bug', {
+        origin: 'jira',
+        reference: 'jira:AVIA-12045',
+      }),
+      taskId: 'AVIA-12045',
+    } as const;
+    const baseRequest = requestFor('workflow:jira-bug-review:missing-evidence');
+    const request: IntegrationStepExecutionRequest = {
+      ...baseRequest,
+      taskReference: bugTask.reference,
+      task: bugTask,
+      stepInput: {
+        objective: bugTask.title,
+        repository: bugTask.repository,
+        taskId: bugTask.taskId,
+      },
+    };
+    const evidence: IntegrationEvidenceReader = {
+      read: () => Promise.resolve({ status: 'not_evidence' }),
+    };
+
+    const result = await executeReviewReady(adapterFor(jira, evidence), request);
+
+    expect(result).toMatchObject({ status: 'blocked', kind: 'verification' });
+    if (result.status !== 'blocked') throw new Error('Expected missing evidence to block');
+    expect(result.summary).toContain('requires exactly one current');
+    expect(jira.transitionCalls).toEqual([]);
+    expect(jira.commentCalls).toEqual([]);
+    expect(jira.attachments).toEqual([]);
+  });
+
   it('updates the single managed review comment left by a previous run', async () => {
     const jira = new StatefulJiraReviewPort();
     jira.issue = { ...jira.issue, status: 'Code Review' };

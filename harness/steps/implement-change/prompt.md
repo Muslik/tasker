@@ -8,5 +8,12 @@ it. Do not repeat broad validation owned by the Verify block. Keep temporary scr
 `$TASKER_SCRATCH_ROOT` and durable evidence in `$TASKER_ARTIFACTS_ROOT`; only product changes belong
 in the worktree.
 
+Before completing, maintain `.tasker/pull-request/draft.json` for the current worktree. It is an
+internal delivery draft with `title`, `description`, `commit`, and `branchArtifacts`. Follow the
+repository history and every applicable AGENTS/CLAUDE rule and selected skill when composing it.
+List any required tracked support artifacts in `branchArtifacts`; never list `.tasker` paths. On a
+later Development iteration update the same draft for the actual current change rather than
+creating another delivery description.
+
 If the task needs another repository, external process, or materially different scope, return a
 typed workflow-change request instead of silently expanding the change.

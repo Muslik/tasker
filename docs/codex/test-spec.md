@@ -1,6 +1,6 @@
 # Tasker Temporal test specification
 
-Status: canonical semantic-workflow cutover acceptance specification, 2026-08-22
+Status: canonical semantic-workflow cutover acceptance specification, 2026-08-24
 
 Production isolation invariant: test builders stay under `test/support`. The server,
 workflow subject source, harness loader, and operator API expose no fixture task source,
@@ -284,7 +284,7 @@ For a representative run, inspect Event History and Search Attributes:
 - dirty/conflicting state opens typed attention instead of destructive reset;
 - deleting/recreating API process does not lose worktree locator.
 - read-only investigation receives a read-only `/workspace` mount;
-- temporary reproduction code is created only in `/tasker/scratch` and cannot enter Jest,
+- temporary reproduction code is created only in `<worktree>/.tasker/scratch/<operation>` and cannot enter Jest,
   Playwright, or repository discovery unless invoked explicitly;
 - `/tasker/artifacts` evidence is imported by logical ID and remains readable after
   scratch cleanup;

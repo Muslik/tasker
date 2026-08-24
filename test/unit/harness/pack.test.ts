@@ -132,7 +132,7 @@ describe('file-backed harness pack', () => {
 
     expect(stepDefinition).toMatchObject({
       block: {
-        executor: { kind: 'agent', profile: 'verification', skills: ['test-ops-planning'] },
+        executor: { kind: 'agent', profile: 'verification', skills: [] },
       },
       prompt: { relativePath: 'steps/fill-test-ops-plan/prompt.md' },
     });
@@ -213,12 +213,6 @@ describe('file-backed harness pack', () => {
     expect(pack.policies).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'ai-assistance',
-          version: '1',
-          obligations: [],
-          agentSkills: [expect.objectContaining({ skill: 'ai-assistance' })],
-        }),
-        expect.objectContaining({
           id: 'quality-boundaries',
           version: '1',
         }),
@@ -248,7 +242,18 @@ describe('file-backed harness pack', () => {
     expect(pack.company.workspaceRuntime.cacheVolumes).toContainEqual({
       id: 'home',
       mountPath: '/tasker/home',
+      serviceIds: [],
     });
+    expect(pack.company.workspaceRuntime.environment).toMatchObject({
+      DOCKER_HOST: 'tcp://tasker-docker:2375',
+    });
+    expect(pack.company.workspaceRuntime.services).toContainEqual(
+      expect.objectContaining({
+        id: 'tasker-docker',
+        image: { kind: 'prebuilt', reference: 'docker:29-dind' },
+        privileged: true,
+      }),
+    );
   });
 
   it('exposes only the reviewed validation surface for the six frontend repositories', () => {
@@ -322,43 +327,21 @@ describe('file-backed harness pack', () => {
     });
   });
 
-  it('binds company AI guidance to semantic implementation without adding workflow blocks', () => {
+  it('keeps company AI assistance out of workflow and kernel policies', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const implementation = pack.steps.find(({ reference }) => reference === 'implement.change@1');
     const aiPolicy = pack.policies.find(({ id }) => id === 'ai-assistance');
 
     expect(implementation?.block.executor.kind).toBe('agent');
-    expect(aiPolicy?.agentSkills).toContainEqual({
-      skill: 'ai-assistance',
-      steps: ['implement.change@1', 'component.consume_published@1'],
-    });
+    expect(aiPolicy).toBeUndefined();
     expect(pack.steps.map(({ reference }) => reference)).not.toEqual(
-      expect.arrayContaining(['pr.describe@1', 'pr.prepare@1']),
+      expect.arrayContaining([
+        'ai.assistance.initialize@1',
+        'ai.assistance.finalize@1',
+        'pr.describe@1',
+        'pr.prepare@1',
+      ]),
     );
-  });
-
-  it('removes policy-owned blocks from future packs when the policy is disabled', async () => {
-    const root = await createTemporaryPack();
-    const policyPath = join(root, 'policies/ai-assistance.json');
-    const policy = JSON.parse(await readFile(policyPath, 'utf8')) as { enabled: boolean };
-    policy.enabled = false;
-    await writeFile(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
-
-    const pack = loadHarnessPack(root);
-    const references = pack.steps.map(({ reference }) => reference);
-
-    expect(pack.policies.map(({ id }) => id)).toEqual([
-      'jira-lifecycle',
-      'quality-boundaries',
-      'review-feedback',
-    ]);
-    expect(references).not.toContain('ai.assistance.initialize@1');
-    expect(references).not.toContain('ai.assistance.validate@1');
-    const implementation = pack.steps.find(({ reference }) => reference === 'implement.change@1');
-    expect(implementation?.block.executor.kind).toBe('agent');
-    if (implementation?.block.executor.kind !== 'agent') throw new Error('Expected agent block');
-    expect(implementation.block.executor.skills).not.toContain('ai-assistance');
-    expect(references).toContain('deliver.pull-request@1');
   });
 
   it('removes the Bitbucket acknowledgement block when review feedback policy is disabled', async () => {

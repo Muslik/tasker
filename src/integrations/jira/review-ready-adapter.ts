@@ -1,3 +1,5 @@
+import { basename } from 'node:path';
+
 import type { z } from 'zod';
 
 import type { pullRequestOutputSchema } from '../../harness/step-contracts.js';
@@ -5,6 +7,8 @@ import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import type {
   IntegrationStepExecutionRequest,
   IntegrationStepExecutionResult,
+  IntegrationEvidenceArtifact,
+  IntegrationEvidenceReader,
 } from '../execution.js';
 import type { ExternalEffectStore, ExternalEffectStoreError } from '../effects.js';
 import { JiraIssueKeySchema, type JiraIssueKey } from './contracts.js';
@@ -12,6 +16,7 @@ import {
   jiraLifecyclePolicyConfiguration,
   preflightJiraTransition,
   sameJiraValue,
+  type JiraAttachmentPort,
   type JiraLifecycleIssue,
   type JiraLifecyclePort,
   type JiraLifecycleProblem,
@@ -75,12 +80,24 @@ const commentReceipt = (
   pullRequestUrl: string,
 ): JsonValue => ({ issueKey, commentId, pullRequestUrl });
 
+const attachmentReceipt = (
+  issueKey: JiraIssueKey,
+  attachmentId: string,
+  artifact: IntegrationEvidenceArtifact,
+): JsonValue => ({
+  issueKey,
+  attachmentId,
+  filename: basename(artifact.relativePath),
+  contentSha256: artifact.contentSha256,
+});
+
 export class JiraReviewReadyAdapter {
   public readonly id = 'jira.review-ready@1';
 
   public constructor(
-    private readonly jira: JiraLifecyclePort,
+    private readonly jira: JiraLifecyclePort & JiraAttachmentPort,
     private readonly effects: ExternalEffectStore,
+    private readonly evidence: IntegrationEvidenceReader | null = null,
   ) {}
 
   public async executeForPullRequest(
@@ -111,6 +128,20 @@ export class JiraReviewReadyAdapter {
     }
 
     const artifactIds: string[] = [];
+    const fixEvidence =
+      request.task.kind === 'bug'
+        ? await this.findFixEvidence(request, artifactIds)
+        : { status: 'not_required' as const };
+    if (fixEvidence.status === 'blocked') return fixEvidence.result;
+    if (fixEvidence.status === 'found') {
+      const attached = await this.ensureFixEvidenceAttachment(
+        request,
+        issueKey.data,
+        fixEvidence.artifact,
+        artifactIds,
+      );
+      if (attached.status === 'blocked') return attached;
+    }
     const observation = await this.jira.observeIssue(issueKey.data);
     if (observation.status === 'failed') return problemResult(observation.problem, artifactIds);
     const transitioned = await this.ensureTargetStatus(
@@ -121,12 +152,17 @@ export class JiraReviewReadyAdapter {
     );
     if (transitioned.status === 'blocked') return transitioned;
 
-    const commentBody = `${configured.data.reviewReady.commentPrefix}: [${pullRequest.externalId}|${pullRequest.url}]`;
+    const commentPrefix =
+      fixEvidence.status === 'found' ? 'Исправлено —' : configured.data.reviewReady.commentPrefix;
+    const commentBody =
+      fixEvidence.status === 'found'
+        ? `Исправлено — ${fixEvidence.artifact.mimeType.startsWith('video/') ? 'видео' : 'скриншот'}: [^${basename(fixEvidence.artifact.relativePath)}]\n\nPR: [${pullRequest.externalId}|${pullRequest.url}]`
+        : `${commentPrefix}: [${pullRequest.externalId}|${pullRequest.url}]`;
     const commented = await this.ensurePullRequestComment(
       request,
       issueKey.data,
       pullRequest.url,
-      configured.data.reviewReady.commentPrefix,
+      commentPrefix,
       commentBody,
       artifactIds,
     );
@@ -138,6 +174,168 @@ export class JiraReviewReadyAdapter {
       output: { externalId: issueKey.data, status: transitioned.issue.status },
       artifactIds,
     };
+  }
+
+  private async findFixEvidence(
+    request: IntegrationStepExecutionRequest,
+    artifactIds: readonly string[],
+  ): Promise<
+    | { readonly status: 'found'; readonly artifact: IntegrationEvidenceArtifact }
+    | { readonly status: 'blocked'; readonly result: BlockedIntegrationResult }
+  > {
+    if (this.evidence === null) {
+      return {
+        status: 'blocked',
+        result: blocked(
+          'configuration',
+          'Bug delivery requires a configured after-evidence reader',
+          { taskId: request.task.taskId },
+          artifactIds,
+        ),
+      };
+    }
+    const verificationArtifacts = request.evidence.completedSteps
+      .filter(
+        ({ status, stepReference }) =>
+          status === 'completed' && stepReference === 'verify.acceptance@1',
+      )
+      .flatMap(({ artifactIds: ids }) => ids);
+    const candidates: IntegrationEvidenceArtifact[] = [];
+    for (const artifactId of verificationArtifacts) {
+      const read = await this.evidence.read(artifactId);
+      if (read.status === 'failed') {
+        return {
+          status: 'blocked',
+          result: blocked(
+            'infrastructure',
+            'Bug after evidence cannot be read',
+            { taskId: request.task.taskId, artifactId, message: read.message },
+            artifactIds,
+          ),
+        };
+      }
+      if (read.status !== 'found') continue;
+      const filename = basename(read.artifact.relativePath);
+      if (
+        (read.artifact.mimeType.startsWith('image/') ||
+          read.artifact.mimeType.startsWith('video/')) &&
+        filename.startsWith(`${request.task.taskId}-`) &&
+        filename.includes('-fixed.')
+      ) {
+        candidates.push(read.artifact);
+      }
+    }
+    if (candidates.length !== 1 || candidates[0] === undefined) {
+      return {
+        status: 'blocked',
+        result: blocked(
+          'verification',
+          `Bug delivery requires exactly one current ${request.task.taskId}-*-fixed image or video from Verify`,
+          {
+            taskId: request.task.taskId,
+            candidates: candidates.map(({ artifactId, relativePath, mimeType }) => ({
+              artifactId,
+              relativePath,
+              mimeType,
+            })),
+          },
+          artifactIds,
+        ),
+      };
+    }
+    return { status: 'found', artifact: candidates[0] };
+  }
+
+  private async ensureFixEvidenceAttachment(
+    request: IntegrationStepExecutionRequest,
+    issueKey: JiraIssueKey,
+    artifact: IntegrationEvidenceArtifact,
+    artifactIds: string[],
+  ): Promise<{ readonly status: 'attached' } | BlockedIntegrationResult> {
+    const effectId = 'publish-fix-evidence';
+    const filename = basename(artifact.relativePath);
+    const prepared = this.effects.prepare({
+      operationId: request.operationId,
+      effectId,
+      effectKind: 'jira.issue.attachment',
+      identity: { issueKey, filename, contentSha256: artifact.contentSha256 },
+    });
+    if (!prepared.ok) return journalFailure(prepared.error, artifactIds);
+    artifactIds.push(this.effects.intentArtifactId(request.operationId, effectId));
+    const receipt = this.effects.readReceipt(request.operationId, effectId);
+    if (!receipt.ok) return journalFailure(receipt.error, artifactIds);
+    const before = await this.jira.listAttachments(issueKey);
+    if (before.status === 'failed') {
+      return problemResult(before.problem, artifactIds, receipt.value !== null);
+    }
+    const matches = before.attachments.filter(
+      (attachment) =>
+        attachment.filename === filename &&
+        attachment.mimeType === artifact.mimeType &&
+        attachment.size === artifact.content.byteLength,
+    );
+    if (matches.length > 1) {
+      return blocked(
+        'remote_conflict',
+        'Jira contains multiple matching fix-evidence attachments',
+        { issueKey, filename, attachmentIds: matches.map(({ id }) => id) },
+        artifactIds,
+      );
+    }
+    let confirmed = matches[0];
+    if (receipt.value !== null) {
+      if (confirmed === undefined) {
+        return blocked(
+          'remote_conflict',
+          'The Jira fix-evidence attachment no longer matches its recorded receipt',
+          { issueKey, filename },
+          artifactIds,
+        );
+      }
+      artifactIds.push(this.effects.receiptArtifactId(request.operationId, effectId));
+      return { status: 'attached' };
+    }
+    if (confirmed === undefined) {
+      const mutation = await this.jira.uploadAttachment(issueKey, {
+        filename,
+        mimeType: artifact.mimeType,
+        content: artifact.content,
+      });
+      if (
+        mutation.status === 'failed' &&
+        mutation.problem.kind !== 'unavailable' &&
+        mutation.problem.kind !== 'invalid_response'
+      ) {
+        return problemResult(mutation.problem, artifactIds);
+      }
+      const after = await this.jira.listAttachments(issueKey);
+      if (after.status === 'failed') return problemResult(after.problem, artifactIds, true);
+      confirmed = after.attachments.find(
+        (attachment) =>
+          attachment.filename === filename &&
+          attachment.mimeType === artifact.mimeType &&
+          attachment.size === artifact.content.byteLength,
+      );
+      if (confirmed === undefined) {
+        return mutation.status === 'failed'
+          ? problemResult(mutation.problem, artifactIds, true)
+          : blocked(
+              'unknown_outcome',
+              'Jira accepted the fix evidence but it could not be confirmed',
+              { issueKey, filename },
+              artifactIds,
+            );
+      }
+    }
+    const applied = this.effects.recordApplied({
+      operationId: request.operationId,
+      effectId,
+      effectKind: 'jira.issue.attachment',
+      result: attachmentReceipt(issueKey, confirmed.id, artifact),
+    });
+    if (!applied.ok) return journalFailure(applied.error, artifactIds);
+    artifactIds.push(this.effects.receiptArtifactId(request.operationId, effectId));
+    return { status: 'attached' };
   }
 
   private async ensureTargetStatus(
@@ -343,7 +541,7 @@ export class JiraReviewReadyAdapter {
     if (before.status === 'failed') {
       return problemResult(before.problem, artifactIds, receipt.value !== null);
     }
-    const managedPrefix = `${commentPrefix}:`;
+    const managedPrefix = commentPrefix;
     const managedComments = before.comments.filter((comment) =>
       comment.body.trimStart().startsWith(managedPrefix),
     );

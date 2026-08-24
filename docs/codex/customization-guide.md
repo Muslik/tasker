@@ -1,6 +1,6 @@
 # Customizing Tasker
 
-Status: canonical semantic-workflow cutover guide, 2026-08-22
+Status: canonical semantic-workflow cutover guide, 2026-08-24
 
 Tasker has no reusable task-family workflow templates. Every initial semantic workflow
 is assembled from an empty source for one task. Reuse exists below that source:
@@ -284,21 +284,21 @@ the selected provider view, so a skill must never depend on a hard-coded `.codex
 `.claude` path. A missing package, duplicate logical name, invalid dependency scope, or
 unknown project binding fails closed before provider invocation.
 
-Repository-specific operational skills are connected through
-`profiles[].stepBindings`. `front-avia` adds localization, state/data, tracking, and
-UI-kit knowledge only to implementation, repair, and review steps. A review, publish,
-or tracker package remains invisible until a compatible registered block selects it.
+Repository-specific operational skills may be `project_ambient` like the interactive harness or
+connected through `profiles[].stepBindings`. `front-avia` currently installs its reviewed project
+skills as ambient repository guidance. Integration packages remain invisible until a compatible
+registered block selects them.
 
-Reusable personal skills may be sourced from the interactive harness without making a
-run depend on a live symlink. `pnpm harness:setup` creates the ignored local source
-`harness/workspace/imports/global-skills`; the manifest allowlists the imported names.
-Bootstrap copies their content into the immutable run snapshot. A live edit therefore
-changes a later run, not the active run being resumed.
+Reusable personal sources come from the interactive harness without making a run depend on a live
+symlink. `pnpm harness:setup` links global skills/rules, selected shared skills/rules, and project
+skills/overrides under `harness/workspace/imports`; the manifest allowlists the imported names.
+Bootstrap copies their content into the immutable run snapshot. A live edit therefore changes a
+later run, not the active run being resumed.
 
 A package that invokes another package declares logical names in `dependencies.json`.
 The provider adapter resolves that transitive set before either CLI starts. Dependencies
-do not grant graph effects: selecting a legacy macro such as `pr-finalize` is still
-invalid as a replacement for typed PR/Jira integration blocks.
+do not grant graph effects. End-to-end macros such as `fix-bug` and `pr-finalize` are not in the
+Tasker catalog; only their stable requirements are carried into relevant prompts and adapters.
 
 Keep these boundaries distinct:
 
@@ -310,9 +310,9 @@ Keep these boundaries distinct:
 - **integration effects** are performed only by typed internal Delivery operations (Git
   push, PR, Jira mutation, publication), never by a catch-all skill.
 
-The old `pr-finalize` skill is therefore migration input, not the Tasker execution model:
-it combines several remote effects and approval points which Temporal must persist and
-reconcile separately. Conversely, `playwright-demo` is a valid reusable skill but does
+`pr-finalize` is therefore design input, not a Tasker skill: it combines several remote effects
+which Temporal must persist and reconcile separately. Conversely, `playwright-demo` is a valid
+reusable skill but does
 not itself make visual verification part of every graph.
 
 Use prompts for judgment and implementation guidance. Use generic compiler obligations
@@ -378,20 +378,17 @@ prefix intentionally starts a new identity; migrate existing Jira comments first
 Tasker will not claim them. Multiple comments with the active prefix fail closed and
 must be resolved explicitly.
 
-For example, the company-wide `ai-assistance` requirement is the file-backed
-`harness/policies/ai-assistance.json` pack, not kernel behavior. Its `agentSkills`
-bindings add the logical `ai-assistance` skill to write-capable implementation,
-repair/revision, and PR-description agents. Initial artifact materialization,
-plan/result/verification maintenance, and the PR section happen inside those existing
-agent invocations; they are not standalone workflow bookkeeping blocks.
+For example, `ai-assistance` is deliberately not a Tasker policy or kernel feature. The selected
+shared rule is composed into both `AGENTS.md` and `CLAUDE.md`, while the corresponding shared skill
+is ambient in the provider view. The implementation agent follows those ordinary instructions and
+creates the company artifacts and PR section itself. Removing the imported rule/skill changes the
+next harness snapshot without changing Temporal, compiler, or adapter logic.
 
-When the policy is enabled, its bindings are included in future immutable harness
-snapshots. Disabling it and restarting Tasker removes the skill from future runs;
-snapshotted running work remains unchanged. A policy may still declare path obligations
-or policy-owned blocks when it represents an independently recoverable external effect
-or human wait. Do not use either merely to display an internal checklist item. The
-generic Delivery protocol remains unaware of AI policy. No Temporal Workflow,
-API route, or Bitbucket adapter changes when this policy is removed.
+The implementation agent also maintains the generic internal
+`.tasker/pull-request/draft.json`. Delivery validates and consumes that draft; it does not rebuild
+company prose from the plan. For a bug, Verify creates exactly one current `*-fixed` image or video
+and Jira Delivery uploads it idempotently before updating the single managed fix comment. Private
+investigation media is never selected for publication.
 
 The current file-backed manifest vocabulary deliberately reuses named runtime schemas
 (`task_input`, `pull_request_input`, `agent_output`, and so on). Add a schema name in
@@ -404,29 +401,34 @@ Tasker must not call the personal `/Users/dzhabrail/Projects/harness/work/bootst
 create nested `work` overlays. That command discovers and mutates every worktree under
 `~/Projects/work`; Tasker owns a different managed clone.
 
-The built-in pack lives in `harness/workspace`. It contains portable integration/shared
-skills and repository profiles imported from the personal harness, but excludes its
-symlink machinery and secrets. `manifest.json` maps repository aliases to profiles, so
-adding another repository does not require an application-code branch.
+The built-in pack lives in `harness/workspace`. `pnpm harness:setup` creates ignored authoring
+symlinks to global skills/rules, selected `work/shared` skills/rules, and project skills/overrides
+under `/Users/dzhabrail/Projects/harness`. `manifest.json` allowlists the exact logical packages;
+`fix-bug` and `pr-finalize` are not imported as end-to-end macros. Their stable ideas live in the
+relevant Tasker prompts and Delivery behavior. Every run copies ordinary bytes into a
+content-addressed snapshot, so live symlinks never participate in resume.
 
 Repository rules and Tasker rules have different owners:
 
-- tracked repository `.ai/**` remains unchanged and is read from the managed clone;
+- a declared project override replaces the corresponding repository `AGENTS.md`, `CLAUDE.md`, or
+  `.ai/*.md` content for that worktree;
+- without a declared override, tracked repository guidance remains the base;
+- global/shared/project Markdown rules are rebuilt between harness rule markers in both root
+  guidance files;
 - Tasker may add only Markdown under `.ai/`, `AGENTS.md`, or `CLAUDE.md`; another
   destination makes the workspace pack invalid;
 - `.ai/tasker.md` contains the managed-run boundary and is an ignored worktree file;
-- when the repository already tracks `AGENTS.md` or `CLAUDE.md`, Tasker reads that file
-  from the run's pinned base commit and appends the profile delta between explicit
-  `tasker managed guidance` markers;
+- Tasker appends only its execution overlay between explicit `tasker managed guidance` markers;
+  that final overlay wins over interactive worktree/finalization mechanics because Tasker already
+  prepared and owns those boundaries;
 - when a root guidance file does not exist, the profile file becomes its complete
   ignored content;
 - composed tracked guidance is marked `skip-worktree`, so it guides the agent but cannot
   enter the product diff.
 
-This is composition, not replacement. A Tasker profile must not copy the repository's
-architecture documents: otherwise a later repository update would silently leave the
-managed agent on a stale fork of its own rules. Only Tasker-specific operational delta
-belongs in `workspace/profiles/<id>/guidance`.
+This is explicit composition with optional replacement. Project overrides remain owned by the
+interactive harness; Tasker-specific operational delta alone belongs in
+`workspace/profiles/<id>/guidance`. The frozen content hash makes the exact result reviewable.
 
 The repository preparation Activity:
 
@@ -445,12 +447,13 @@ separate run/step-scoped surfaces:
 
 ```text
 /workspace         product worktree
-/tasker/scratch    disposable temporary files
+<worktree>/.tasker/scratch/<operation>  disposable project-local temporary files
 /tasker/artifacts  durable evidence pending import
 /tasker/cache      project/provider caches
 ```
 
-A block without `workspace.write` receives `/workspace` read-only. Scratch is the only
+A block without `workspace.write` receives the worktree read-only, with a nested writable scratch
+mount. Scratch is the only
 place for temporary reproduction specs; durable evidence is registered from the artifact
 root. Neither location relies on `.gitignore` or filename conventions for isolation.
 

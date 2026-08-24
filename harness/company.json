@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "3",
+  "version": "4",
   "availableCapabilities": [
     "ci.read",
     "command.run",
@@ -31,17 +31,35 @@
       "MISE_CACHE_DIR": "/tasker/cache/mise/cache",
       "MISE_CONFIG_DIR": "/tasker/home/.config/mise",
       "PNPM_HOME": "/tasker/home/.local/share/pnpm",
+      "DOCKER_HOST": "tcp://tasker-docker:2375",
       "PATH": "/tasker/home/.local/share/pnpm:/tasker/home/.local/share/pnpm/bin:/tasker/cache/mise/data/shims:/usr/local/bin:/usr/bin:/bin",
-      "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"
+      "PLAYWRIGHT_BROWSERS_PATH": "/tasker/cache/playwright"
     },
     "bootstrap": [],
     "cacheVolumes": [
       { "id": "home", "mountPath": "/tasker/home" },
       { "id": "node-modules", "mountPath": "/workspace/node_modules" },
       { "id": "pnpm-store", "mountPath": "/tasker/cache/pnpm-store" },
-      { "id": "mise-cache", "mountPath": "/tasker/cache/mise" }
+      { "id": "mise-cache", "mountPath": "/tasker/cache/mise" },
+      { "id": "playwright-browsers", "mountPath": "/tasker/cache/playwright" },
+      {
+        "id": "nested-docker-data",
+        "mountPath": "/var/lib/docker",
+        "serviceIds": ["tasker-docker"]
+      }
     ],
-    "services": []
+    "services": [
+      {
+        "id": "tasker-docker",
+        "image": { "kind": "prebuilt", "reference": "docker:29-dind" },
+        "command": "dockerd-entrypoint.sh --host=tcp://0.0.0.0:2375 --tls=false",
+        "shell": "sh",
+        "privileged": true,
+        "aliases": ["tasker-docker"],
+        "readyCheck": "docker info --format '{{.ServerVersion}}' >/dev/null",
+        "environment": { "DOCKER_TLS_CERTDIR": "" }
+      }
+    ]
   },
   "systemPrompts": {
     "implementationPlanner": "prompts/implementation-planner.md",
@@ -185,6 +203,22 @@
       "timeoutMs": 1200000,
       "serviceTier": "fast"
     },
+    "review-simple": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "timeoutMs": 600000,
+      "serviceTier": "fast"
+    },
+    "review-standard": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "timeoutMs": 900000,
+      "serviceTier": "fast"
+    },
     "claude-ralplan": {
       "provider": "claude",
       "command": "claude",
@@ -204,13 +238,13 @@
         "context": "context-simple",
         "implementation": "implementation-simple",
         "verification": "verification",
-        "review": "review"
+        "review": "review-simple"
       },
       "standard": {
         "context": "workflow-analysis",
         "implementation": "implementation-standard",
         "verification": "verification",
-        "review": "review"
+        "review": "review-standard"
       },
       "complex": {
         "context": "investigation",
