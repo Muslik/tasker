@@ -60,6 +60,7 @@ import {
   UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
+import { RetrospectiveStore } from '../retrospective/index.js';
 import {
   loadWorkspaceConfiguration,
   loadWorkspaceBootstrapConfiguration,
@@ -99,6 +100,7 @@ import { createWorkflowFreezeActivity } from './activities/workflow-freeze-activ
 import { createTaskAdmissionActivity } from './activities/task-admission-activity.js';
 import { WorkspaceMutationRecoveryStore } from './activities/workspace-mutation-recovery.js';
 import { createExecutionContinuationActivity } from './activities/execution-continuation-activity.js';
+import { createExecutionRetrospectiveActivity } from './activities/execution-retrospective-activity.js';
 import { connectTaskerTemporalWorker } from './worker.js';
 import { DEFAULT_TEMPORAL_CLIENT_CONFIGURATION } from './client.js';
 
@@ -265,6 +267,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   );
   const workspaceStore = new WorkspaceStore(ledger.repository, systemClock);
   const blockReceipts = new BlockReceiptStore(ledger.repository, systemClock);
+  const retrospectives = new RetrospectiveStore(ledger.repository, systemClock);
   const workspaces = new ManagedWorkspaceManager(
     loadWorkspaceConfiguration(),
     workspaceStore,
@@ -357,6 +360,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         continuationAnalyzer,
         contextDiscovery,
       ),
+      ...createExecutionRetrospectiveActivity(retrospectives),
       ...executionActivities,
     });
     try {

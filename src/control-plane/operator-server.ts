@@ -29,6 +29,7 @@ import {
   UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
+import { RetrospectiveStore } from '../retrospective/index.js';
 import {
   connectTemporalTaskRunService,
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
@@ -66,6 +67,7 @@ export const startOperatorServer = async (): Promise<void> => {
 
   const ledger = openSqliteLedger({ filename: databasePath, clock: systemClock });
   const service = createOperatorWorkflowService(ledger.repository, systemClock);
+  const retrospectives = new RetrospectiveStore(ledger.repository, systemClock);
   const temporalConfiguration: TemporalClientConfiguration = {
     ...DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
     address: process.env.TASKER_TEMPORAL_ADDRESS ?? DEFAULT_TEMPORAL_CLIENT_CONFIGURATION.address,
@@ -136,6 +138,7 @@ export const startOperatorServer = async (): Promise<void> => {
     temporalRunService: temporalRuntime.service,
     blockReceipts: new BlockReceiptStore(ledger.repository, systemClock),
     planReviews: new PlanReviewStore(ledger.repository, systemClock),
+    retrospectives,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

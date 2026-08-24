@@ -559,6 +559,11 @@ publishes evidence/comment and reaches that status once. A later operator `Mark 
 the local Execution workflow; it does not invoke Jira again or move the issue into testing, release,
 or done states.
 
+After the completed state is visible, a non-blocking retrospective Activity summarizes immutable
+attempt, recovery, usage, duration, and cost evidence. Its findings and proposed harness or
+infrastructure improvements are stored for review. Retrospective failure never reopens the task, and
+proposals are never applied automatically.
+
 The operator projection classifies each wait before Cockpit renders it:
 
 - `typed_resolution` uses a dedicated question, plan-review, continuation, or code-review control;

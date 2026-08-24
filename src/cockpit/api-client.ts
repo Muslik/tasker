@@ -52,6 +52,7 @@ import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
 } from '../repositories/contracts.js';
+import { RetrospectiveResponseSchema, type RetrospectiveResponse } from '../retrospective/index.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }
@@ -197,6 +198,17 @@ export const loadOperatorRunLog = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = OperatorRunLogResponseSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Operator run log does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const loadRetrospective = async (taskReference: string): Promise<RetrospectiveResponse> => {
+  const result = await fetchJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/retrospective`,
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = RetrospectiveResponseSchema.safeParse(result.body);
+  if (!parsed.success)
+    throw new Error('Retrospective response does not match the cockpit contract');
   return parsed.data;
 };
 

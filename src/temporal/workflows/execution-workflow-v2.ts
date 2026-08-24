@@ -441,6 +441,14 @@ export async function executionWorkflowV2(
     wait: null,
     outcome: traversal.outcome,
   };
+  await recoverableDeliveryActivities
+    .runExecutionRetrospective({
+      taskReference: input.taskReference,
+      workflowId: execution.workflowId,
+      workflowRunId: execution.runId,
+      outcome: traversal.outcome,
+    })
+    .catch(() => undefined);
   return {
     taskReference: input.taskReference,
     workflowHash: input.workflowHash,

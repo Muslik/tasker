@@ -43,6 +43,7 @@ import {
   type PlanReviewStore,
 } from './plan-review.js';
 import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
+import { RetrospectiveResponseSchema, type RetrospectiveStore } from '../retrospective/index.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import { projectOperatorActivity } from './operator-activity-projection.js';
@@ -86,6 +87,7 @@ export interface BuildOperatorApiOptions {
   readonly temporalRunService: TaskRunService;
   readonly blockReceipts: Pick<BlockReceiptStore, 'read'>;
   readonly planReviews?: PlanReviewStore | undefined;
+  readonly retrospectives?: Pick<RetrospectiveStore, 'read' | 'generate'> | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -318,6 +320,70 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       tasks: [...hydratedJiraTasks, ...(await Promise.all(result.value.tasks.map(withRunState)))],
       streamCursor: result.value.streamCursor,
     });
+  });
+
+  api.get('/api/operator/tasks/:taskReference/retrospective', async (request, reply) => {
+    if (options.retrospectives === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('retrospective_unavailable', 'Retrospective storage is unavailable'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
+    if (lifecycle?.execution === null || lifecycle?.execution === undefined) {
+      return reply.send(RetrospectiveResponseSchema.parse({ status: 'pending' }));
+    }
+    const report = options.retrospectives.read(
+      lifecycle.execution.workflowId,
+      lifecycle.execution.runId,
+    );
+    if (!report.ok) {
+      return reply
+        .code(500)
+        .send(apiError('retrospective_corrupt', 'Retrospective report is unavailable'));
+    }
+    return reply.send(
+      RetrospectiveResponseSchema.parse(
+        report.value === null ? { status: 'pending' } : { status: 'ready', report: report.value },
+      ),
+    );
+  });
+
+  api.post('/api/operator/tasks/:taskReference/retrospective/reconcile', async (request, reply) => {
+    if (options.retrospectives === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('retrospective_unavailable', 'Retrospective storage is unavailable'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
+    if (lifecycle?.execution?.status !== 'completed') {
+      return reply
+        .code(409)
+        .send(apiError('task_not_done', 'Retrospective starts only after task completion'));
+    }
+    const generated = options.retrospectives.generate({
+      taskReference: params.data.taskReference,
+      workflowId: lifecycle.execution.workflowId,
+      workflowRunId: lifecycle.execution.runId,
+      outcome: lifecycle.execution.outcome,
+    });
+    if (!generated.ok) {
+      return reply
+        .code(500)
+        .send(apiError('retrospective_failed', 'Retrospective could not be generated'));
+    }
+    return reply.send(
+      RetrospectiveResponseSchema.parse({ status: 'ready', report: generated.value }),
+    );
   });
 
   api.get('/api/operator/tasks/:taskReference/activity', async (request, reply) => {

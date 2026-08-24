@@ -531,6 +531,9 @@ Review-ready Jira effects run only before the first `code_review@1` wait. Resolv
 approved or changes-requested is local workflow input and must not replay Jira transitions,
 comments, or attachments. In particular, `Mark done` never advances Jira beyond `Code Review`.
 
+The post-run retrospective is evidence-only. It may propose edits to harness prompts, project
+runtime policy, or infrastructure, but applying any proposal remains a separate reviewed change.
+
 An Allure `flaky` label is evidence, not the final CI decision. A terminal visual diff is
 repair evidence even when the test carries that label: the observer persists its expected,
 actual, and diff images and returns a task-repair outcome. Only failures whose available

@@ -48,6 +48,7 @@ import {
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
+import type { RetrospectiveResponse } from '../retrospective/index.js';
 import {
   answerPlanningClarification,
   completeCodeReview,
@@ -63,6 +64,7 @@ import {
   loadJiraIssue,
   loadOperatorActivity,
   loadOperatorRunLog,
+  loadRetrospective,
   loadOperatorWorkflowProjection,
   loadWorkflow,
   reviewPlan,
@@ -145,6 +147,12 @@ type JiraIssueLoadState =
 type JiraSyncState =
   | { readonly status: 'idle' }
   | { readonly status: 'syncing'; readonly issueKey: string }
+  | { readonly status: 'failed'; readonly message: string };
+
+type RetrospectiveLoadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'pending' }
+  | { readonly status: 'ready'; readonly response: RetrospectiveResponse & { status: 'ready' } }
   | { readonly status: 'failed'; readonly message: string };
 
 type ConsoleStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'offline';
@@ -2006,6 +2014,71 @@ const TaskDetails = ({
   );
 };
 
+const RetrospectiveSurface = ({
+  retrospective,
+}: {
+  readonly retrospective: RetrospectiveLoadState;
+}) => {
+  if (retrospective.status === 'loading' || retrospective.status === 'pending') {
+    return (
+      <section className="border-y border-border bg-muted/5 px-5 py-3 text-sm text-muted-foreground">
+        Retrospective is running…
+      </section>
+    );
+  }
+  if (retrospective.status === 'failed') return <InlineError>{retrospective.message}</InlineError>;
+  const report = retrospective.response.report;
+  return (
+    <Collapsible defaultOpen>
+      <section className="border-y border-border bg-muted/5">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between bg-muted/10 px-5 py-3 text-left hover:bg-muted/30">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Retrospective</span>
+            <StateBadge>{`${String(report.proposals.length)} proposals`}</StateBadge>
+          </div>
+          <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="space-y-4 border-t border-border/60 px-5 py-4 text-sm">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>{report.metrics.attempts} attempts</span>
+              <span>{report.metrics.blockedAttempts} recoveries</span>
+              <span>{report.metrics.inputTokens.toLocaleString()} measured input tokens</span>
+              <span>~${report.metrics.estimatedCostUsd.toFixed(2)} API</span>
+            </div>
+            {report.findings.map((finding) => (
+              <div key={`${finding.kind}:${finding.title}`}>
+                <strong className="text-sm">{finding.title}</strong>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{finding.detail}</p>
+              </div>
+            ))}
+            {report.proposals.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No harness changes proposed.</p>
+            ) : (
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Proposed improvements · review required
+                </p>
+                <ul className="space-y-2">
+                  {report.proposals.map((proposal) => (
+                    <li key={proposal.id} className="border-l-2 border-primary/40 pl-3">
+                      <strong className="text-sm">{proposal.title}</strong>
+                      <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                        {proposal.rationale}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+};
+
 const ActivityTimeline = ({
   activity,
   streamStatus,
@@ -2936,6 +3009,9 @@ export const App = () => {
     status: 'not_applicable',
   });
   const [jiraSyncState, setJiraSyncState] = useState<JiraSyncState>({ status: 'idle' });
+  const [retrospectiveState, setRetrospectiveState] = useState<RetrospectiveLoadState>({
+    status: 'pending',
+  });
   const [codeReviewNotices, setCodeReviewNotices] = useState<ReadonlyMap<string, string>>(
     new Map(),
   );
@@ -2988,6 +3064,32 @@ export const App = () => {
           ({ status }) => status === 'awaiting_review',
         ) ?? null)
       : null;
+
+  useEffect(() => {
+    if (selectedTask?.status !== 'done') {
+      setRetrospectiveState({ status: 'pending' });
+      return;
+    }
+    let active = true;
+    setRetrospectiveState({ status: 'loading' });
+    void loadRetrospective(selectedTask.id)
+      .then((response) => {
+        if (!active) return;
+        setRetrospectiveState(
+          response.status === 'ready' ? { status: 'ready', response } : { status: 'pending' },
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setRetrospectiveState({
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Retrospective is unavailable',
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedTask?.id, selectedTask?.status]);
 
   const selectedIdRef = useRef(selectedId);
   useEffect(() => {
@@ -4105,6 +4207,9 @@ export const App = () => {
                     onRetry={handleJiraSync}
                     syncing={jiraSyncState.status === 'syncing'}
                   />
+                  {selectedTask.status === 'done' ? (
+                    <RetrospectiveSurface retrospective={retrospectiveState} />
+                  ) : null}
                   {view === null ? null : (
                     <>
                       <WhyThisWorkflow view={view} />

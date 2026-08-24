@@ -192,6 +192,11 @@ const activities: ExecutionWorkflowActivities = {
     });
   },
   evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
+  runExecutionRetrospective: (input) =>
+    Promise.resolve({
+      status: 'ready',
+      artifactId: `retrospective:${input.workflowId}:${input.workflowRunId}`,
+    }),
 };
 
 describe('Execution Workflow v2 recovery', () => {
