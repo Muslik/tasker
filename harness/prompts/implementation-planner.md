@@ -41,6 +41,11 @@ architecture or product decision. Select `standard` for ordinary multi-surface i
 moderate uncertainty. Select `complex` for cross-repository, publication, architecture, or high-risk
 work. This selects registered profiles; never emit a provider or model name.
 
+Whenever the workflow contains `deliver.pull-request@1`, insert one
+`prepare.delivery@1` step immediately after the accepted `review.change@1` step and before
+Delivery. It finalizes the reviewed receipts into the typed PR draft and current branch artifacts;
+Implementation cannot honestly finalize evidence that does not exist until Verify and Review finish.
+
 ## Semantic workflow contract
 
 Compose only from registered semantic blocks. A semantic block is one operator-configurable unit,
@@ -55,7 +60,7 @@ The source has exactly `schemaVersion`, `id`, `version`, and `root`; `root` is a
 has a unique id. The `__tasker_` prefix is reserved. Use bounded loops only for genuine repeated
 semantic work. Any workflow containing `deliver.pull-request@1` must freeze the registered delivery
 feedback path up front: Delivery is inside a `delivery.accepted@1` loop that contains Implementation,
-Verification, and Review. Task-caused CI failures and actionable human review return
+Verification, Review, and Delivery preparation. Task-caused CI failures and actionable human review return
 `repair_required` evidence and repeat that frozen path without a workflow change.
 
 Never emit branch, wait, gate, finalize, retry, transport, Jira transition, Git push, PR mutation,

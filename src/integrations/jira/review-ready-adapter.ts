@@ -194,12 +194,18 @@ export class JiraReviewReadyAdapter {
         ),
       };
     }
-    const verificationArtifacts = request.evidence.completedSteps
+    const latestVerification = request.evidence.completedSteps
       .filter(
         ({ status, stepReference }) =>
           status === 'completed' && stepReference === 'verify.acceptance@1',
       )
-      .flatMap(({ artifactIds: ids }) => ids);
+      .toSorted((left, right) =>
+        `${left.recordedAt}:${left.operationId}`.localeCompare(
+          `${right.recordedAt}:${right.operationId}`,
+        ),
+      )
+      .at(-1);
+    const verificationArtifacts = latestVerification?.artifactIds ?? [];
     const candidates: IntegrationEvidenceArtifact[] = [];
     for (const artifactId of verificationArtifacts) {
       const read = await this.evidence.read(artifactId);

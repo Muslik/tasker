@@ -316,6 +316,16 @@ describe('Jira review-ready effect adapter', () => {
         completedSteps: [
           ...baseRequest.evidence.completedSteps,
           {
+            operationId: 'workflow:verify:old-attempt',
+            nodeId: 'verify-change',
+            stepReference: 'verify.acceptance@1',
+            status: 'completed',
+            summary: 'Superseded bug verification',
+            artifactIds: ['evidence:old-after-image'],
+            details: { output: { decision: 'accepted' } },
+            recordedAt: '2026-08-04T00:00:20.000Z',
+          },
+          {
             operationId: 'workflow:verify:attempt-1',
             nodeId: 'verify-change',
             stepReference: 'verify.acceptance@1',
@@ -332,18 +342,29 @@ describe('Jira review-ready effect adapter', () => {
     const evidence: IntegrationEvidenceReader = {
       read: (artifactId) =>
         Promise.resolve(
-          artifactId === 'evidence:after-video'
+          artifactId === 'evidence:old-after-image'
             ? {
                 status: 'found' as const,
                 artifact: {
                   artifactId,
-                  relativePath: 'AVIA-12045-fixed.mp4',
-                  mimeType: 'video/mp4',
-                  contentSha256: 'a'.repeat(64),
-                  content,
+                  relativePath: 'AVIA-12045-fixed.png',
+                  mimeType: 'image/png',
+                  contentSha256: 'b'.repeat(64),
+                  content: new TextEncoder().encode('old-image'),
                 },
               }
-            : { status: 'not_evidence' as const },
+            : artifactId === 'evidence:after-video'
+              ? {
+                  status: 'found' as const,
+                  artifact: {
+                    artifactId,
+                    relativePath: 'AVIA-12045-fixed.mp4',
+                    mimeType: 'video/mp4',
+                    contentSha256: 'a'.repeat(64),
+                    content,
+                  },
+                }
+              : { status: 'not_evidence' as const },
         ),
     };
     const adapter = adapterFor(jira, evidence);

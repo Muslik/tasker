@@ -24,7 +24,7 @@
     "profile": "verification",
     "strategyRole": "verification",
     "prompt": "prompt.md",
-    "skills": ["playwright-demo", "test-design"]
+    "skills": ["jira", "playwright-demo", "test-design"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": {

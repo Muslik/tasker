@@ -32,7 +32,7 @@
   "idempotency": "probe",
   "waitKinds": ["ci_retry@1", "ci_infrastructure@1", "ci_unknown@1", "code_review@1"],
   "artifactContracts": ["pull-request", "ci-verdict"],
-  "requiredArtifactContracts": ["acceptance-verification"],
+  "requiredArtifactContracts": ["acceptance-verification", "delivery-draft"],
   "workflowChanges": [],
   "reconciliation": { "strategy": "probe" }
 }

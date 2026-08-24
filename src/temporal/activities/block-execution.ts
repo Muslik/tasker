@@ -89,6 +89,15 @@ import type { TaskStepFilesystemStore } from './task-step-filesystem.js';
 import type { TaskStepEvidenceStore } from './task-step-evidence.js';
 import { normalizeTaskStepEvidencePaths } from './task-step-evidence.js';
 
+const removeWorkspaceScratchMountPoint = async (path: string): Promise<void> => {
+  try {
+    await rm(path, { recursive: true, force: true });
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EACCES') return;
+    throw error;
+  }
+};
+
 const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
   z
     .object({
@@ -515,7 +524,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
       });
     } finally {
       await this.filesystems.cleanupScratch(stepFilesystem);
-      await rm(workspaceScratchPath, { recursive: true, force: true });
+      await removeWorkspaceScratchMountPoint(workspaceScratchPath);
       await rm(directory, { recursive: true, force: true });
     }
   }

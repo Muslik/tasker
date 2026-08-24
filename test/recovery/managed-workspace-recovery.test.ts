@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -125,6 +125,27 @@ describe('managed workspace recovery', () => {
         message: `Remote branch ${branch} already exists outside this run`,
       },
     });
+  });
+
+  it('removes a stale remote-tracking ref after the remote confirms the task branch is absent', async () => {
+    const { clock, ledger, configuration, request, repositoryPath } = setup();
+    const manager = new ManagedWorkspaceManager(
+      configuration,
+      new WorkspaceStore(ledger.repository, clock),
+      nodeCommandRunner,
+    );
+    const branch = manager.identity(request).branch;
+    const staleReference = `refs/remotes/origin/${branch}`;
+    git(repositoryPath, ['update-ref', staleReference, 'HEAD']);
+
+    const result = await manager.prepare(request);
+
+    expect(result.ok).toBe(true);
+    expect(
+      spawnSync('git', ['show-ref', '--verify', '--quiet', staleReference], {
+        cwd: repositoryPath,
+      }).status,
+    ).toBe(1);
   });
 
   it('reuses the durable worktree after ledger and manager restart without losing changes', async () => {

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "reference": "prepare.delivery@1",
+  "description": "Finalize the reviewed change into current branch artifacts and a typed pull-request draft.",
+  "stage": { "id": "delivery", "label": "Delivery" },
+  "availableDuring": ["execution"],
+  "inputContract": "task_input",
+  "outputContract": "agent_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "documentation",
+    "strategyRole": null,
+    "prompt": "prompt.md",
+    "skills": []
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": { "kind": "workspace_mutation" },
+  "activityDelivery": "workspace_reconciled",
+  "allowedEffects": ["workspace.write"],
+  "requiredCapabilities": ["repository.read", "workspace.write"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["delivery-draft"],
+  "requiredArtifactContracts": ["source-diff", "acceptance-verification", "agent-review"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "receipt" }
+}

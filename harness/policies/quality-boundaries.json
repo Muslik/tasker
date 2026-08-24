@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "quality-boundaries",
-  "version": "1",
+  "version": "2",
   "enabled": true,
   "description": "Require product mutation to pass semantic verification and independent review before delivery.",
   "configuration": {},
@@ -10,10 +10,11 @@
       "id": "local-ready-before-delivery",
       "kind": "path_sequence",
       "direction": "after",
-      "trigger": { "kind": "effect", "reference": "workspace.write" },
+      "trigger": { "kind": "step", "reference": "implement.change@1" },
       "ordered": [
         { "kind": "step", "reference": "verify.acceptance@1" },
         { "kind": "step", "reference": "review.change@1" },
+        { "kind": "step", "reference": "prepare.delivery@1" },
         { "kind": "step", "reference": "deliver.pull-request@1" }
       ],
       "reason": "A changed worktree must have accepted task evidence and independent review before remote delivery."
@@ -29,6 +30,7 @@
             "implement.change@1",
             "verify.acceptance@1",
             "review.change@1",
+            "prepare.delivery@1",
             "deliver.pull-request@1"
           ]
         },

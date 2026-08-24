@@ -259,6 +259,12 @@ export class ManagedWorkspaceManager {
         message: `Remote branch ${identity.branch} already exists outside this run`,
       });
     }
+    const prunedTaskReference = await this.git(
+      request.repositoryPath,
+      'remove stale remote task branch reference',
+      ['update-ref', '-d', `refs/remotes/origin/${identity.branch}`],
+    );
+    if (!prunedTaskReference.ok) return prunedTaskReference;
     const added = await this.git(request.repositoryPath, 'create managed worktree', [
       'worktree',
       'add',

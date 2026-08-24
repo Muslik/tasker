@@ -214,7 +214,7 @@ describe('file-backed harness pack', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'quality-boundaries',
-          version: '1',
+          version: '2',
         }),
         expect.objectContaining({
           id: 'review-feedback',
@@ -397,7 +397,7 @@ describe('file-backed harness pack', () => {
     ).toBe(false);
     expect(verify.block.executor).toMatchObject({
       kind: 'agent',
-      skills: ['playwright-demo', 'test-design'],
+      skills: ['jira', 'playwright-demo', 'test-design'],
     });
     expect(verify.block.completion).toMatchObject({
       kind: 'structured_evidence',
@@ -417,6 +417,7 @@ describe('file-backed harness pack', () => {
         'implement.change@1',
         'verify.acceptance@1',
         'review.change@1',
+        'prepare.delivery@1',
         'deliver.pull-request@1',
       ]),
     );

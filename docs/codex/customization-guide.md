@@ -380,15 +380,18 @@ must be resolved explicitly.
 
 For example, `ai-assistance` is deliberately not a Tasker policy or kernel feature. The selected
 shared rule is composed into both `AGENTS.md` and `CLAUDE.md`, while the corresponding shared skill
-is ambient in the provider view. The implementation agent follows those ordinary instructions and
-creates the company artifacts and PR section itself. Removing the imported rule/skill changes the
-next harness snapshot without changing Temporal, compiler, or adapter logic.
+is ambient in the provider view. Implementation creates only start-of-task identity/plan artifacts
+required by those ordinary instructions. After accepted Verify and Review receipts exist, the
+generic `prepare.delivery@1` agent transcribes the actual result, verification, and PR section.
+Removing the imported rule/skill changes the next harness snapshot without changing Temporal,
+compiler, or adapter logic.
 
-The implementation agent also maintains the generic internal
-`.tasker/pull-request/draft.json`. Delivery validates and consumes that draft; it does not rebuild
-company prose from the plan. For a bug, Verify creates exactly one current `*-fixed` image or video
-and Jira Delivery uploads it idempotently before updating the single managed fix comment. Private
-investigation media is never selected for publication.
+Delivery preparation maintains the generic internal `.tasker/pull-request/draft.json` with a
+mandatory typed commit description and tracked `branchArtifacts`. Deterministic Delivery validates
+and consumes that draft; it does not rebuild company prose from the plan. For a bug, the latest
+accepted Verify attempt creates exactly one current `*-fixed` image or video and Jira Delivery
+uploads it idempotently before updating the single managed fix comment. Private investigation and
+source-comparison media are never selected for publication.
 
 The current file-backed manifest vocabulary deliberately reuses named runtime schemas
 (`task_input`, `pull_request_input`, `agent_output`, and so on). Add a schema name in
@@ -550,6 +553,13 @@ a required value such as Development estimate is absent, the run names the exact
 field and waits. Fill it in Jira and press Resume; Tasker re-runs only that operation and
 preserves the already completed workflow prefix. It does not guess or write business
 estimates on the operator's behalf.
+
+Local development reads optional non-secret write authorization from `.tasker/local.env` before
+starting the worker. A pilot run should enable `TASKER_ENABLE_JIRA_EFFECTS` and
+`TASKER_ENABLE_BITBUCKET_PR_EFFECTS`, set Git author identity, and allowlist the exact
+`jira:<KEY>` through `TASKER_EXTERNAL_EFFECT_TASKS`. The file is ignored with the rest of
+`.tasker`; credentials continue to come from the external interactive-harness `.env`. Shell
+environment values remain available for CI/VPS configuration.
 
 ## 9. Configure provider and model selection
 

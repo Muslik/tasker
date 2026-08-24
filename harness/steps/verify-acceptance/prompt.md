@@ -15,6 +15,18 @@ for a static visible result and a video for interaction or state transitions. Us
 when recording. Inspect the final image or representative video frames before accepting. Other
 diagnostic logs/JSON may also be registered, but they must not use the `-fixed` publication name.
 Temporary runners belong only below `$TASKER_SCRATCH_ROOT`.
+Every one-shot Playwright runner must close its browser in `finally`; a failed scenario must
+terminate promptly instead of leaving Chromium handles alive across agent commands.
+
+When the frozen Jira task snapshot contains source screenshots or video, use the `jira` skill to
+download the relevant attachment by its exact issue key and attachment ID into
+`$TASKER_ARTIFACTS_ROOT` with a private `-before` name. Inspect it before choosing a repository
+fixture. The after scenario must preserve the visible route/state, card kind, viewport, and
+cardinality/labels of the condition that caused the defect (for example two named technical stops),
+unless the accepted plan explicitly justifies an equivalent substitute. Merely injecting a generic
+non-empty field such as `stps` into a convenient mock is not source-faithful evidence. If the source
+attachment cannot be read or no matching fixture/state can be reached, block instead of accepting a
+different screenshot. Never name private source evidence `-fixed` or upload it back to Jira.
 
 Return `accepted` only when all required commands and runtime evidence support acceptance. Return
 `changes_requested` with concrete files and findings when another Development-loop attempt is

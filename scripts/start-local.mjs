@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import console from 'node:console';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { get } from 'node:http';
 import { connect } from 'node:net';
 import { dirname, resolve } from 'node:path';
@@ -9,6 +9,9 @@ import { clearTimeout, setTimeout } from 'node:timers';
 
 const STARTUP_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
+
+const localEnvironmentFile = resolve(process.env.TASKER_LOCAL_ENV_FILE ?? '.tasker/local.env');
+if (existsSync(localEnvironmentFile)) process.loadEnvFile(localEnvironmentFile);
 
 const parsePort = (value, name, fallback) => {
   const port = Number(value ?? fallback);
