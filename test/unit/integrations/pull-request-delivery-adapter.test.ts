@@ -127,7 +127,10 @@ const request = (
   },
 });
 
-const adapter = (ciStatus: 'passed' | 'likely_caused_by_change' = 'passed') => {
+const adapter = (
+  ciStatus: 'passed' | 'likely_caused_by_change' = 'passed',
+  jira: ConstructorParameters<typeof PullRequestDeliveryAdapter>[2] = null,
+) => {
   type ExecuteDraft = (
     request: IntegrationStepExecutionRequest,
     draft: PullRequestDraft,
@@ -150,7 +153,7 @@ const adapter = (ciStatus: 'passed' | 'likely_caused_by_change' = 'passed') => {
   );
   return {
     executeDraft,
-    delivery: new PullRequestDeliveryAdapter({ executeDraft }, { execute: observeCi }, null),
+    delivery: new PullRequestDeliveryAdapter({ executeDraft }, { execute: observeCi }, jira),
   };
 };
 
@@ -177,16 +180,62 @@ describe('pull-request semantic delivery', () => {
   });
 
   it('completes the same semantic block from a typed approval resolution', async () => {
-    const fixture = adapter();
-
-    const result = await fixture.delivery.execute(
-      request({ decision: 'approved', reviewId: 'operator:review-1' }),
+    const executeForPullRequest = vi.fn(() =>
+      Promise.resolve({
+        status: 'completed' as const,
+        summary: 'Jira review-ready state published',
+        output: pullRequestOutput,
+        artifactIds: ['jira-review-ready'],
+      }),
     );
+    const fixture = adapter('passed', { executeForPullRequest });
+    const approved = request({ decision: 'approved', reviewId: 'operator:review-1' });
+
+    const result = await fixture.delivery.execute({
+      ...approved,
+      task: { ...approved.task, origin: 'jira' },
+    });
 
     expect(result).toMatchObject({
       status: 'completed',
       output: pullRequestOutput,
     });
+    expect(executeForPullRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat Jira review-ready effects after the code-review wait was published', async () => {
+    const executeForPullRequest = vi.fn(() =>
+      Promise.resolve({
+        status: 'completed' as const,
+        summary: 'Jira review-ready state published',
+        output: pullRequestOutput,
+        artifactIds: ['jira-review-ready'],
+      }),
+    );
+    const fixture = adapter('passed', { executeForPullRequest });
+    const initial = request();
+    const result = await fixture.delivery.execute({
+      ...initial,
+      task: { ...initial.task, origin: 'jira' },
+      evidence: {
+        ...initial.evidence,
+        completedSteps: [
+          {
+            operationId: 'delivery:previous',
+            nodeId: 'deliver-change',
+            stepReference: 'deliver.pull-request@1',
+            status: 'blocked',
+            summary: 'Waiting for human review',
+            artifactIds: ['jira-review-ready'],
+            details: { phase: 'human_review', output: pullRequestOutput },
+            recordedAt: '2026-08-24T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({ status: 'waiting', waitKind: 'code_review@1' });
+    expect(executeForPullRequest).not.toHaveBeenCalled();
   });
 
   it('returns task-caused CI as a frozen-loop repair outcome', async () => {

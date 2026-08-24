@@ -94,6 +94,16 @@ const waitingDetails = (
   extra: Readonly<Record<string, JsonValue>> = {},
 ): JsonValue => JsonValueSchema.parse({ phase, output: pullRequest, ...extra });
 
+const reviewReadyWasPublished = (request: IntegrationStepExecutionRequest): boolean =>
+  request.evidence.completedSteps.some(
+    ({ stepReference, details }) =>
+      stepReference === 'deliver.pull-request@1' &&
+      typeof details === 'object' &&
+      details !== null &&
+      !Array.isArray(details) &&
+      details.phase === 'human_review',
+  );
+
 const deliveryOutput = (
   pullRequest: PullRequestOutput,
   ci: CiObservationOutput,
@@ -169,21 +179,6 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
     const ciWait = this.ciWait(ci, pullRequest, artifactIds);
     if (ciWait !== null) return ciWait;
 
-    if (request.task.origin === 'jira') {
-      if (this.jira === null) {
-        return {
-          status: 'blocked',
-          kind: 'configuration',
-          summary: 'Jira review-ready operation is not configured',
-          details: waitingDetails('jira_review_ready', pullRequest),
-          artifactIds,
-        };
-      }
-      const reviewReady = await this.jira.executeForPullRequest(request, pullRequest);
-      if (reviewReady.status !== 'completed') return relay(reviewReady, artifactIds);
-      artifactIds = [...combineArtifacts(artifactIds, reviewReady.artifactIds)];
-    }
-
     const resolution = ReviewResolutionSchema.safeParse(request.waitResolution);
     const review = latestReview(request.evidence.reviewInputs);
     const decision = resolution.success ? resolution.data.decision : review?.snapshot.decision;
@@ -206,6 +201,21 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
         }),
         artifactIds,
       };
+    }
+
+    if (request.task.origin === 'jira' && !reviewReadyWasPublished(request)) {
+      if (this.jira === null) {
+        return {
+          status: 'blocked',
+          kind: 'configuration',
+          summary: 'Jira review-ready operation is not configured',
+          details: waitingDetails('jira_review_ready', pullRequest),
+          artifactIds,
+        };
+      }
+      const reviewReady = await this.jira.executeForPullRequest(request, pullRequest);
+      if (reviewReady.status !== 'completed') return relay(reviewReady, artifactIds);
+      artifactIds = [...combineArtifacts(artifactIds, reviewReady.artifactIds)];
     }
     return {
       status: 'waiting',

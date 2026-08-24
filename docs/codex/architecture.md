@@ -554,6 +554,11 @@ threads, starts a revision Activity, and posts acknowledgements only through the
 integration adapter after CI, then returns to code review. Provider-specific resolution
 may be added behind the same boundary when its API and policy are verified.
 
+`Code Review` is Tasker's final externally managed Jira status. The initial review-ready Delivery
+publishes evidence/comment and reaches that status once. A later operator `Mark done` completes only
+the local Execution workflow; it does not invoke Jira again or move the issue into testing, release,
+or done states.
+
 The operator projection classifies each wait before Cockpit renders it:
 
 - `typed_resolution` uses a dedicated question, plan-review, continuation, or code-review control;

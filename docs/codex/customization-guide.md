@@ -527,6 +527,10 @@ delivery outside a bounded `delivery.accepted@1` loop containing Implement, Veri
 Review feedback. A provider-specific retry mutation needs its own reconciled internal
 operation; it must not be hidden inside the read observer.
 
+Review-ready Jira effects run only before the first `code_review@1` wait. Resolving that wait as
+approved or changes-requested is local workflow input and must not replay Jira transitions,
+comments, or attachments. In particular, `Mark done` never advances Jira beyond `Code Review`.
+
 An Allure `flaky` label is evidence, not the final CI decision. A terminal visual diff is
 repair evidence even when the test carries that label: the observer persists its expected,
 actual, and diff images and returns a task-repair outcome. Only failures whose available
