@@ -129,12 +129,14 @@ also declares `pnpm start`, network aliases, and the HTTPS readiness probe. Ther
 Playwright and reproduction run against the service from the same managed worktree,
 not an unrelated server that happened to be listening on the host.
 
-The writable Playwright cache is task-scoped. Agent-generated browser scripts are mounted at
+The writable Playwright cache is task-scoped. Every configured frontend project installs the
+Chromium revision pinned by its own Playwright package during workspace bootstrap, once per task
+cache. Agent-generated browser scripts are mounted at
 `<worktree>/.tasker/scratch/<operation>` so Node module resolution starts inside the project.
 Repository tests and snapshot updates use existing package scripts/configs directly; Tasker does
-not generate replacements. `playwright-demo` may install the Chromium revision matching the
-current project package into that cache. Runtime preparation itself remains kernel infrastructure
-and is not emitted as fake workflow steps.
+not generate replacements. `playwright-demo` reuses the prepared project revision instead of
+discovering browser infrastructure during an agent attempt. Runtime preparation itself remains
+kernel infrastructure and is not emitted as fake workflow steps.
 
 ## Mount and security rules
 

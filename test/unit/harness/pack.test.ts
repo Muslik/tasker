@@ -268,6 +268,10 @@ describe('file-backed harness pack', () => {
       'onetwotrip/front-railways',
     ]);
     for (const project of pack.projects) {
+      expect(project.workspaceRuntime).toBeDefined();
+      expect(project.workspaceRuntime?.bootstrap).toContain(
+        'pnpm exec playwright install chromium',
+      );
       expect(project.processCommands['validation.visual@1']).toBeUndefined();
       expect(
         Object.values(project.processCommands).flatMap(({ commands }) =>

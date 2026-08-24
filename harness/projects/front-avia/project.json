@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "4",
+  "version": "5",
   "repository": "onetwotrip/front-avia",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -11,7 +11,11 @@
     "commit": { "kind": "task_key_subject" }
   },
   "workspaceRuntime": {
-    "bootstrap": ["pnpm install --frozen-lockfile", "pnpm run dicts"],
+    "bootstrap": [
+      "pnpm install --frozen-lockfile",
+      "pnpm exec playwright install chromium",
+      "pnpm run dicts"
+    ],
     "services": [
       {
         "id": "front-avia-app",

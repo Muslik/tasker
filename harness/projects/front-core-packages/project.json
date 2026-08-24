@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "3",
+  "version": "4",
   "repository": "onetwotrip/front-core-packages",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -17,6 +17,7 @@
   "workspaceRuntime": {
     "bootstrap": [
       "pnpm install --frozen-lockfile",
+      "pnpm exec playwright install chromium",
       "mise use --global rust@1.97.1",
       "rustup target add wasm32-wasip1"
     ],

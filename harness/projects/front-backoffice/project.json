@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "3",
+  "version": "4",
   "repository": "onetwotrip/front-backoffice",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -11,7 +11,7 @@
     "commit": { "kind": "task_key_subject" }
   },
   "workspaceRuntime": {
-    "bootstrap": ["pnpm install --frozen-lockfile"],
+    "bootstrap": ["pnpm install --frozen-lockfile", "pnpm exec playwright install chromium"],
     "services": []
   },
   "processCommands": {
