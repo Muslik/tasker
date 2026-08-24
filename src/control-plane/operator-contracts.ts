@@ -208,6 +208,7 @@ export const OperatorWorkflowContinuationSchema = z.union([
 export const OperatorInterventionActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('operator_guidance') }).strict(),
   z.object({ kind: z.literal('external_prerequisite') }).strict(),
+  z.object({ kind: z.literal('retry_step') }).strict(),
   z.object({ kind: z.literal('typed_resolution') }).strict(),
 ]);
 

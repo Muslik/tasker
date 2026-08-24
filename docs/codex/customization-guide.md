@@ -624,9 +624,10 @@ run so completed work is retained.
 
 Wait UI is driven by the operator projection's typed intervention action. Agent retries use
 `operator_guidance`; deterministic integration, process, workspace, and external handoff waits use
-`external_prerequisite`; plan/questions/review use `typed_resolution`. Do not add a Cockpit regex
-over wait text. An external prerequisite never receives free-form guidance: repair the source
-system and resume the same block.
+`external_prerequisite`; exhausted provider-contract retries use `retry_step`; plan/questions/review
+use `typed_resolution`. Do not add a Cockpit regex over wait text. An external prerequisite never
+receives free-form guidance: repair the source system and resume the same block. A retry-step action
+also has no guidance editor because malformed provider output is not a task decision.
 
 Codex and Claude are current first-class subscription-CLI adapters for analysis,
 planning, and agent steps. Adding another provider means implementing this same adapter

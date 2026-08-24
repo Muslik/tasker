@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { Context } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 import { z } from 'zod';
 
 import {
@@ -157,7 +157,7 @@ const decodeAgentStepOutcome = (
       try {
         details = JSON.parse(outputJson) as unknown;
       } catch {
-        return err({ kind: 'invalid_agent_outcome', issues: ['outputJson is not valid JSON'] });
+        details = null;
       }
     }
     const outcome = AgentStepOutcomeSchema.safeParse({
@@ -1547,18 +1547,10 @@ export const executeRegisteredTaskStep = async (
     const decodedDecision = decodeAgentStepOutcome(provider.value.finalMessage);
     if (!decodedDecision.ok) {
       const issues = decodedDecision.error.issues.join('; ').replace(/\s+/gu, ' ').slice(0, 1_000);
-      return persistAgentBlockedResult(
-        dependencies.traces,
-        input,
-        recovery,
-        `Agent execution for ${input.uses} returned an invalid outcome: ${issues}`,
-        decodedDecision.error,
-        provider.value.stdout,
-        provider.value.stderr,
-        executionProfile.provider,
-        provider.value.usage,
-        provider.value.artifactIds,
-      );
+      throw ApplicationFailure.create({
+        message: `Agent execution for ${input.uses} returned an invalid outcome: ${issues}`,
+        type: 'agent_contract.invalid_outcome',
+      });
     }
     const decision = decodedDecision.value;
     if (decision.status === 'blocked') {

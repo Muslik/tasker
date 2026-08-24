@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { OperatorIntervention } from '../../../src/cockpit/App.js';
 
-const renderIntervention = (kind: 'external_prerequisite' | 'operator_guidance') =>
+const renderIntervention = (kind: 'external_prerequisite' | 'operator_guidance' | 'retry_step') =>
   renderToStaticMarkup(
     createElement(OperatorIntervention, {
       action: { kind },
@@ -34,5 +34,13 @@ describe('operator intervention', () => {
 
     expect(html).toContain('Guidance required');
     expect(html).toContain('<textarea');
+  });
+
+  it('shows a technical retry without asking the operator for prose', () => {
+    const html = renderIntervention('retry_step');
+
+    expect(html).toContain('Retry required');
+    expect(html).toContain('Retry the same step without additional guidance');
+    expect(html).not.toContain('<textarea');
   });
 });

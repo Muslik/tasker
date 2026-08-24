@@ -845,18 +845,25 @@ export const OperatorIntervention = ({
   readonly onRestartConfirm: () => void;
 }) => {
   const acceptsGuidance = action.kind === 'operator_guidance';
+  const retriesStep = action.kind === 'retry_step';
   return (
     <section className="border-b border-amber-500/20 bg-amber-500/4 px-5 py-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <strong className="text-sm">
-            {acceptsGuidance ? 'Guidance required' : 'Prerequisite required'}
+            {acceptsGuidance
+              ? 'Guidance required'
+              : retriesStep
+                ? 'Retry required'
+                : 'Prerequisite required'}
           </strong>
           <p className="mt-1 max-w-4xl text-sm leading-5 text-foreground/90">{stage}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {acceptsGuidance
               ? 'Tell the agent what changed or how to approach the same step. Completed work will not repeat.'
-              : 'Fix the prerequisite, then click Resume. Completed work will not repeat.'}
+              : retriesStep
+                ? 'Automatic retries were exhausted. Retry the same step without additional guidance.'
+                : 'Fix the prerequisite, then click Resume. Completed work will not repeat.'}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -872,7 +879,7 @@ export const OperatorIntervention = ({
           </Button>
           <Button size="sm" type="button" disabled={pending} onClick={onResume}>
             {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-            {pending ? 'Working…' : 'Resume'}
+            {pending ? 'Working…' : retriesStep ? 'Retry step' : 'Resume'}
           </Button>
         </div>
       </div>

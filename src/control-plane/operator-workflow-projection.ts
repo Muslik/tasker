@@ -366,6 +366,7 @@ const interventionFor = (
 ): OperatorInterventionAction => {
   if (TYPED_RESOLUTION_WAITS.has(waitKind)) return { kind: 'typed_resolution' };
   if (waitKind === 'operator_guidance@1') return { kind: 'operator_guidance' };
+  if (waitKind.endsWith('.activity-failed@1')) return { kind: 'retry_step' };
   if (runtime === 'bootstrap') {
     return nodeId === 'investigation' || nodeId === 'planning'
       ? { kind: 'operator_guidance' }

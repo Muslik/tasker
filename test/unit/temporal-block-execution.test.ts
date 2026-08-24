@@ -223,6 +223,59 @@ const makeSnapshot = (
   });
 };
 
+const executeVerifyOutcome = (ledger: SqliteLedger, finalMessage: unknown) =>
+  executeRegisteredTaskStep(
+    {
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'validate-bug-fix',
+      stepAttempt: 1,
+      uses: 'verify.acceptance@1',
+      activityDelivery: { kind: 'read_only' },
+      workspace: stubWorkspace,
+      planningSnapshot: {
+        artifactId: 'planning-snapshot:test',
+        checksum: 'd'.repeat(64),
+      },
+      operatorGuidance: null,
+      waitResolution: null,
+      input: {
+        objective: 'Repeat the investigated scenario and prove the fix',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    },
+    {
+      snapshots: {
+        readRunSnapshot: () => ok(makeSnapshot('verify.acceptance@1')),
+      },
+      currentSteps: createCurrentStepRegistry(pack),
+      traces: new TemporalTaskStepTraceStore(ledger.repository, systemClock),
+      mutationRecovery,
+      agentRunner: {
+        run: () =>
+          Promise.resolve(
+            ok({
+              artifactIds: [],
+              stdout: '',
+              stderr: '',
+              usage: TEST_AGENT_USAGE,
+              finalMessage,
+            }),
+          ),
+      },
+      commands: workspaceCommands(),
+      workspaces: stubWorkspaceStore,
+    },
+    {
+      attempt: 1,
+      cancellationSignal: new AbortController().signal,
+      heartbeat: () => {},
+    },
+  );
+
 describe('temporal block execution activity', () => {
   let ledger: SqliteLedger;
 
@@ -538,6 +591,37 @@ describe('temporal block execution activity', () => {
       summary: `Agent execution for verify.acceptance@1 is blocked: ${reason}`,
       waitKind: 'verify.acceptance.1.blocked@1',
     });
+  });
+
+  it('keeps a valid blocking reason when optional diagnostic JSON is malformed', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const result = await executeVerifyOutcome(ledger, {
+      status: 'blocked',
+      outputJson: '{',
+      requestJson: null,
+      blockingReason: 'The exact source fixture is unavailable',
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      summary:
+        'Agent execution for verify.acceptance@1 is blocked: The exact source fixture is unavailable',
+    });
+  });
+
+  it('raises a retryable activity failure for malformed completion output', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+
+    await expect(
+      executeVerifyOutcome(ledger, {
+        status: 'completed',
+        outputJson: '{',
+        requestJson: null,
+        blockingReason: null,
+      }),
+    ).rejects.toThrow(
+      'Agent execution for verify.acceptance@1 returned an invalid outcome: outputJson is not valid JSON',
+    );
   });
 
   it('does not repeat a controlled blocked provider result after response loss', async () => {

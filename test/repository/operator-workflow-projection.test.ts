@@ -18,8 +18,8 @@ const draftProvenance = {
 } as const;
 
 const waitingLifecycleFor = (
-  reference: 'deliver.pull-request@1' | 'implement.change@1',
-  activityDelivery: 'workspace_reconciled' | 'remote_reconciled',
+  reference: 'deliver.pull-request@1' | 'implement.change@1' | 'verify.acceptance@1',
+  activityDelivery: 'read_only' | 'workspace_reconciled' | 'remote_reconciled',
   waitKind: string,
 ) => {
   const graph = CompiledWorkflowSchema.parse({
@@ -179,6 +179,23 @@ describe('operator workflow projection', () => {
     expect(projection.current).toMatchObject({
       status: 'waiting',
       intervention: { kind: 'operator_guidance' },
+    });
+  });
+
+  it('classifies an exhausted agent contract retry without requesting guidance', () => {
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      waitingLifecycleFor(
+        'verify.acceptance@1',
+        'read_only',
+        'verify.acceptance@1.activity-failed@1',
+      ),
+      { read: () => ok(null) },
+    );
+
+    expect(projection.current).toMatchObject({
+      status: 'waiting',
+      intervention: { kind: 'retry_step' },
     });
   });
 

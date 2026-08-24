@@ -558,11 +558,13 @@ The operator projection classifies each wait before Cockpit renders it:
 
 - `typed_resolution` uses a dedicated question, plan-review, continuation, or code-review control;
 - `operator_guidance` exposes free-form text to the next agent attempt;
+- `retry_step` repeats an Activity after automatic provider-contract retries are exhausted and
+  never asks the operator to explain a schema or transport failure;
 - `external_prerequisite` instructs the operator to repair the owning system and does not expose or
   submit guidance that a deterministic integration/process step cannot consume.
 
-Resume preserves the completed prefix, worktree, artifacts, and conversation provenance in all
-three cases. Classification belongs to the control-plane projection, not a Cockpit string filter.
+Resume preserves the completed prefix, worktree, artifacts, and conversation provenance in every
+case. Classification belongs to the control-plane projection, not a Cockpit string filter.
 
 When a bootstrap Activity exhausts its automatic delivery retries, the wait reason
 contains the bounded root cause returned by the Activity, not a generic stage label.
