@@ -532,6 +532,10 @@ repair evidence even when the test carries that label: the observer persists its
 actual, and diff images and returns a task-repair outcome. Only failures whose available
 evidence is exclusively flaky remain on the `ci_retry@1` boundary.
 
+Jenkins merge builds may report both the target-branch revision and the task revision. Exact-commit
+observation accepts the build when any declared revision equals the prepared task commit; it never
+assumes the first `lastBuiltRevision` action is the branch under test.
+
 Moving to GitLab Issues and GitLab CI should require:
 
 1. a tracker adapter that produces the normalized task snapshot;

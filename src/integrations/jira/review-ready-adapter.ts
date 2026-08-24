@@ -194,62 +194,74 @@ export class JiraReviewReadyAdapter {
         ),
       };
     }
-    const latestVerification = request.evidence.completedSteps
+    const verifications = request.evidence.completedSteps
       .filter(
         ({ status, stepReference }) =>
           status === 'completed' && stepReference === 'verify.acceptance@1',
       )
       .toSorted((left, right) =>
-        `${left.recordedAt}:${left.operationId}`.localeCompare(
-          `${right.recordedAt}:${right.operationId}`,
+        `${right.recordedAt}:${right.operationId}`.localeCompare(
+          `${left.recordedAt}:${left.operationId}`,
         ),
-      )
-      .at(-1);
-    const verificationArtifacts = latestVerification?.artifactIds ?? [];
-    const candidates: IntegrationEvidenceArtifact[] = [];
-    for (const artifactId of verificationArtifacts) {
-      const read = await this.evidence.read(artifactId);
-      if (read.status === 'failed') {
+      );
+    for (const verification of verifications) {
+      const candidates: IntegrationEvidenceArtifact[] = [];
+      for (const artifactId of verification.artifactIds) {
+        const read = await this.evidence.read(artifactId);
+        if (read.status === 'failed') {
+          return {
+            status: 'blocked',
+            result: blocked(
+              'infrastructure',
+              'Bug after evidence cannot be read',
+              { taskId: request.task.taskId, artifactId, message: read.message },
+              artifactIds,
+            ),
+          };
+        }
+        if (read.status !== 'found') continue;
+        const filename = basename(read.artifact.relativePath);
+        if (
+          (read.artifact.mimeType.startsWith('image/') ||
+            read.artifact.mimeType.startsWith('video/')) &&
+          filename.startsWith(`${request.task.taskId}-`) &&
+          filename.includes('-fixed.')
+        ) {
+          candidates.push(read.artifact);
+        }
+      }
+      if (candidates.length === 1 && candidates[0] !== undefined) {
+        return { status: 'found', artifact: candidates[0] };
+      }
+      if (candidates.length > 1) {
         return {
           status: 'blocked',
           result: blocked(
-            'infrastructure',
-            'Bug after evidence cannot be read',
-            { taskId: request.task.taskId, artifactId, message: read.message },
+            'verification',
+            `Bug delivery requires exactly one current ${request.task.taskId}-*-fixed image or video from Verify`,
+            {
+              taskId: request.task.taskId,
+              verificationOperationId: verification.operationId,
+              candidates: candidates.map(({ artifactId, relativePath, mimeType }) => ({
+                artifactId,
+                relativePath,
+                mimeType,
+              })),
+            },
             artifactIds,
           ),
         };
       }
-      if (read.status !== 'found') continue;
-      const filename = basename(read.artifact.relativePath);
-      if (
-        (read.artifact.mimeType.startsWith('image/') ||
-          read.artifact.mimeType.startsWith('video/')) &&
-        filename.startsWith(`${request.task.taskId}-`) &&
-        filename.includes('-fixed.')
-      ) {
-        candidates.push(read.artifact);
-      }
     }
-    if (candidates.length !== 1 || candidates[0] === undefined) {
-      return {
-        status: 'blocked',
-        result: blocked(
-          'verification',
-          `Bug delivery requires exactly one current ${request.task.taskId}-*-fixed image or video from Verify`,
-          {
-            taskId: request.task.taskId,
-            candidates: candidates.map(({ artifactId, relativePath, mimeType }) => ({
-              artifactId,
-              relativePath,
-              mimeType,
-            })),
-          },
-          artifactIds,
-        ),
-      };
-    }
-    return { status: 'found', artifact: candidates[0] };
+    return {
+      status: 'blocked',
+      result: blocked(
+        'verification',
+        `Bug delivery requires exactly one current ${request.task.taskId}-*-fixed image or video from Verify`,
+        { taskId: request.task.taskId, candidates: [] },
+        artifactIds,
+      ),
+    };
   }
 
   private async ensureFixEvidenceAttachment(

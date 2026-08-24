@@ -316,14 +316,14 @@ export class JenkinsBuildClient implements JenkinsBuildPort {
     const parsedBuild = RawBuildSchema.safeParse(buildResponse.body);
     if (!parsedBuild.success) return this.invalidResponse('build');
     if (!this.sameOrigin(parsedBuild.data.url)) return this.invalidResponse('build');
-    const revision = parsedBuild.data.actions.find(
-      ({ lastBuiltRevision }) => lastBuiltRevision !== undefined,
-    )?.lastBuiltRevision?.SHA1;
-    if (revision === undefined && (parsedBuild.data.building || parsedBuild.data.result === null)) {
+    const revisions = parsedBuild.data.actions.flatMap(({ lastBuiltRevision }) =>
+      lastBuiltRevision === undefined ? [] : [lastBuiltRevision.SHA1],
+    );
+    if (revisions.length === 0 && (parsedBuild.data.building || parsedBuild.data.result === null)) {
       return { status: 'pending', reason: 'building', buildUrl: parsedBuild.data.url };
     }
-    if (revision === undefined) return this.invalidResponse('build revision');
-    if (revision !== input.expectedRevision) {
+    if (revisions.length === 0) return this.invalidResponse('build revision');
+    if (!revisions.includes(input.expectedRevision)) {
       return { status: 'pending', reason: 'stale_revision', buildUrl: parsedBuild.data.url };
     }
     if (parsedBuild.data.building || parsedBuild.data.result === null) {
@@ -339,7 +339,7 @@ export class JenkinsBuildClient implements JenkinsBuildPort {
       build: {
         number: parsedBuild.data.number,
         url: parsedBuild.data.url,
-        revision,
+        revision: input.expectedRevision,
         result: parsedBuild.data.result,
         durationMs: parsedBuild.data.duration,
         stages: stages.value,

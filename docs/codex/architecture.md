@@ -561,7 +561,12 @@ The operator projection classifies each wait before Cockpit renders it:
 - `retry_step` repeats an Activity after automatic provider-contract retries are exhausted and
   never asks the operator to explain a schema or transport failure;
 - `external_prerequisite` instructs the operator to repair the owning system and does not expose or
-  submit guidance that a deterministic integration/process step cannot consume.
+submit guidance that a deterministic integration/process step cannot consume.
+
+For bug delivery, the newest Verify attempt containing exactly one publishable `*-fixed` artifact
+owns Jira attachment publication. A later accepted delta-only Verify may reuse that immutable
+artifact without copying its bytes; an attempt that produces a new artifact supersedes the older
+one.
 
 Resume preserves the completed prefix, worktree, artifacts, and conversation provenance in every
 case. Classification belongs to the control-plane projection, not a Cockpit string filter.

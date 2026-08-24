@@ -335,6 +335,16 @@ describe('Jira review-ready effect adapter', () => {
             details: { output: { decision: 'accepted' } },
             recordedAt: '2026-08-04T00:00:30.000Z',
           },
+          {
+            operationId: 'workflow:verify:delta-attempt',
+            nodeId: 'verify-change',
+            stepReference: 'verify.acceptance@1',
+            status: 'completed',
+            summary: 'Accepted repair delta reusing runtime evidence',
+            artifactIds: [],
+            details: { output: { decision: 'accepted' } },
+            recordedAt: '2026-08-04T00:00:40.000Z',
+          },
         ],
       },
     };

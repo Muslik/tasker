@@ -487,7 +487,10 @@ describe('Jenkins build observation', () => {
                 building: false,
                 result: 'SUCCESS',
                 duration: 12_000,
-                actions: [{ lastBuiltRevision: { SHA1: revision } }],
+                actions: [
+                  { lastBuiltRevision: { SHA1: 'b'.repeat(40) } },
+                  { lastBuiltRevision: { SHA1: revision } },
+                ],
               }
             : url.endsWith('/wfapi/describe')
               ? {
