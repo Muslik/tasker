@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { LedgerExecutionActivityReader } from '../../src/control-plane/execution-activity.js';
@@ -6,6 +10,7 @@ import { BlockReceiptSchema, blockReceiptId } from '../../src/blocks/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { systemClock } from '../../src/shared/clock.js';
 import { TemporalTaskStepTraceStore } from '../../src/temporal/activities/block-execution.js';
+import { TaskStepEvidenceStore } from '../../src/temporal/activities/task-step-evidence.js';
 import { JsonValueSchema } from '../../src/workflow/schema.js';
 import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
 
@@ -15,6 +20,28 @@ describe('execution activity', () => {
   afterEach(() => {
     ledger?.close();
     ledger = null;
+  });
+
+  it('reads verified evidence bytes for the operator surface', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const artifacts = mkdtempSync(join(tmpdir(), 'tasker-operator-evidence-'));
+    writeFileSync(join(artifacts, 'AVIA-12045-fixed.png'), 'fixed-image', 'utf8');
+    const store = new TaskStepEvidenceStore(ledger.repository, systemClock);
+    const registered = await store.register('verify:attempt-1', artifacts);
+    expect(registered.ok).toBe(true);
+    if (!registered.ok || registered.value[0] === undefined) return;
+
+    const read = await new LedgerExecutionActivityReader(ledger.repository).readEvidence(
+      registered.value[0],
+    );
+
+    expect(read).toMatchObject({
+      status: 'found',
+      artifact: { relativePath: 'AVIA-12045-fixed.png', mimeType: 'image/png' },
+    });
+    if (read.status === 'found') {
+      expect(Buffer.from(read.artifact.content).toString('utf8')).toBe('fixed-image');
+    }
   });
 
   it('surfaces one useful linked entry for a terminal Jenkins observation', () => {

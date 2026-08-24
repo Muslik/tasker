@@ -2601,10 +2601,20 @@ const RunLogSurface = ({
                       </ul>
                     )}
                     {entry.evidence.length === 0 ? null : (
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        Evidence:{' '}
-                        {entry.evidence.map(({ relativePath }) => relativePath).join(', ')}
-                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                        <span>Evidence:</span>
+                        {entry.evidence.map(({ artifactId, relativePath }) => (
+                          <a
+                            className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+                            href={`/api/operator/tasks/${encodeURIComponent(state.response.taskReference)}/evidence/${encodeURIComponent(artifactId)}`}
+                            key={artifactId}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {relativePath}
+                          </a>
+                        ))}
+                      </div>
                     )}
                     {entry.truncated ? (
                       <p className="mt-2 text-xs text-destructive">

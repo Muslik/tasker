@@ -8,6 +8,7 @@ import {
   executionOperationIdFor,
   TemporalTaskStepTraceStore,
 } from '../temporal/activities/block-execution.js';
+import { TaskStepEvidenceStore } from '../temporal/activities/task-step-evidence.js';
 import { TaskStepEvidenceArtifactSchema } from '../temporal/task-step-evidence-contracts.js';
 import { systemClock } from '../shared/clock.js';
 import { PlanningTranscriptStore, type PlanningTranscriptView } from './planning-transcript.js';
@@ -67,6 +68,7 @@ export interface ExecutionActivityReader {
     blockRun: number,
   ): OperatorExecutionAttempt | null;
   readRunLog(lifecycle: TaskRunLifecycle): OperatorRunLogResponse;
+  readEvidence(artifactId: string): ReturnType<TaskStepEvidenceStore['read']>;
 }
 
 export class LedgerExecutionActivityReader implements ExecutionActivityReader {
@@ -86,6 +88,10 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
     );
     const transcript = new TemporalTaskStepTraceStore(this.ledger, systemClock).read(operationId);
     return transcript.ok ? transcript.value : null;
+  }
+
+  public readEvidence(artifactId: string): ReturnType<TaskStepEvidenceStore['read']> {
+    return new TaskStepEvidenceStore(this.ledger, systemClock).read(artifactId);
   }
 
   public readAttempt(

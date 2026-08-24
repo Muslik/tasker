@@ -370,6 +370,7 @@ Playwright acceptance scenarios:
     request is rejected.
 15. a completed step can be opened and shows agent messages, full commands, referenced
     stdout/stderr, Jira/CI operations, changesets, commits, artifacts, verdict and usage;
+    every evidence file opens through a task/run-scoped content-addressed endpoint;
 16. one Development loop renders once with current/max attempt and causal failure;
 17. failed Verify is not green merely because its Activity completed;
 18. future CI/review recovery is absent until a real outcome materializes it;

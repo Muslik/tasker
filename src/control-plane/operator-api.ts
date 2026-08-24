@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { extname, join, relative, resolve } from 'node:path';
+import { basename, extname, join, relative, resolve } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -61,6 +61,9 @@ const ExecutionAttemptParamsSchema = z
     nodeId: z.string().min(1),
     blockRun: z.coerce.number().int().positive(),
   })
+  .strict();
+const TaskEvidenceParamsSchema = z
+  .object({ taskReference: z.string().min(1), artifactId: z.string().min(1) })
   .strict();
 const JiraIssueParamsSchema = z.object({ issueKey: z.string().min(1) }).strict();
 const JiraSyncBodySchema = z.object({ repository: RepositoryReferenceSchema.optional() }).strict();
@@ -435,6 +438,45 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     return reply.send(
       OperatorRunLogResponseSchema.parse(options.executionActivity.readRunLog(lifecycle.value)),
     );
+  });
+
+  api.get('/api/operator/tasks/:taskReference/evidence/:artifactId', async (request, reply) => {
+    if (options.executionActivity === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('execution_activity_unavailable', 'Run evidence is unavailable'));
+    }
+    const params = TaskEvidenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply
+        .code(400)
+        .send(apiError('invalid_request', 'Valid evidence identity is required'));
+    }
+    const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
+    if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
+    if (lifecycle.value === null) {
+      return reply.code(404).send(apiError('run_not_found', 'This workflow has not started'));
+    }
+    const runLog = options.executionActivity.readRunLog(lifecycle.value);
+    const belongsToRun = runLog.entries.some((entry) =>
+      entry.evidence.some(({ artifactId }) => artifactId === params.data.artifactId),
+    );
+    if (!belongsToRun) {
+      return reply.code(404).send(apiError('evidence_not_found', 'Run evidence does not exist'));
+    }
+    const evidence = await options.executionActivity.readEvidence(params.data.artifactId);
+    if (evidence.status === 'failed') {
+      return reply.code(409).send(apiError('evidence_unavailable', evidence.message));
+    }
+    if (evidence.status !== 'found') {
+      return reply.code(404).send(apiError('evidence_not_found', 'Run evidence does not exist'));
+    }
+    const filename = basename(evidence.artifact.relativePath);
+    return reply
+      .type(evidence.artifact.mimeType)
+      .header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`)
+      .header('Cache-Control', 'private, max-age=31536000, immutable')
+      .send(Buffer.from(evidence.artifact.content));
   });
 
   api.get(

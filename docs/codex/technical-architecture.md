@@ -279,6 +279,11 @@ the same rule: the immutable subject is captured by `taskReference + runId`, nev
 Jira key alone. There is no “latest artifact by Jira key” fallback. A missing current
 artifact fails closed instead of leaking state from an old run.
 
+Run-log evidence downloads use the same boundary. The artifact must be referenced by an
+attempt in the selected run, and its content hash is revalidated before the API serves it
+inline. A valid artifact ID from another task or retired run is therefore not a cross-run
+download capability.
+
 Detailed provider and runtime receipts remain owned by Activities and product stores.
 Temporal history carries a neutral workspace handle plus artifact IDs, hashes, bounded
 status, and decisions; it does not duplicate Docker receipts, provider payloads, or
