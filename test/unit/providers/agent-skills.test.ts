@@ -8,6 +8,9 @@ import { prepareAgentSkills, workspaceHarnessEnvironment } from '../../../src/pr
 
 const createWorkspaceSkillCatalog = (profile = 'front-bus'): string => {
   const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-agent-skills-workspace-'));
+  const supportDirectory = join(repositoryPath, '.tasker', 'harness', 'lib');
+  mkdirSync(supportDirectory, { recursive: true });
+  writeFileSync(join(supportDirectory, 'harness_env.py'), 'def load_env(): pass\n', 'utf8');
   for (const skill of [
     'ai-assistance',
     'feature-review',
@@ -137,6 +140,9 @@ describe('provider-neutral agent skills', () => {
     );
     expect(readFileSync(join(result.value.skillsRoot, 'test-design/SKILL.md'), 'utf8')).toContain(
       'test-design test skill',
+    );
+    expect(readFileSync(join(configurationRoot, 'lib/harness_env.py'), 'utf8')).toContain(
+      'def load_env()',
     );
     expect(existsSync(join(result.value.skillsRoot, 'pr-finalize/SKILL.md'))).toBe(false);
     expect(result.value.cliArguments.slice(0, 1)).toEqual(fixture.expectedArguments);

@@ -176,7 +176,9 @@ into an isolated provider view:
 
 Both views originate from the same `SKILL.md` package and supporting files. Scripts use
 `TASKER_SKILLS_ROOT`, which points at the selected provider view instead of a hard-coded
-`.codex` or `.claude` path. A missing logical package blocks before the subscription CLI starts.
+`.codex` or `.claude` path. The manifest's `supportFiles` directory is copied beside that provider
+view once, so shared script imports such as `harness_env` resolve identically for Codex and Claude.
+A missing logical package or support directory blocks before the subscription CLI starts.
 
 The four scopes have distinct selection rules:
 

@@ -8,6 +8,7 @@ import {
   WORKSPACE_HARNESS_MANIFEST_PATH,
   workspaceHarnessBinPath,
   workspaceHarnessSkillsPath,
+  workspaceHarnessSupportPath,
 } from '../harness/runtime-layout.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
@@ -197,6 +198,7 @@ export const prepareAgentSkills = async (
   if (!selected.ok) return selected;
   const layout = preparedLayout(request.provider, request.configurationRoot);
   const sourceRoot = workspaceHarnessSkillsPath(request.repositoryPath);
+  const sourceSupportRoot = workspaceHarnessSupportPath(request.repositoryPath);
   const visited = new Set<string>();
   const skills: string[] = [];
 
@@ -233,6 +235,11 @@ export const prepareAgentSkills = async (
   }
 
   try {
+    await cp(sourceSupportRoot, join(request.configurationRoot, 'lib'), {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
     await mkdir(layout.skillsRoot, { recursive: true });
     for (const skill of skills) {
       const override = request.skillOverrides?.[skill];

@@ -21,6 +21,12 @@ const fixture = () => makePlanningTaskSnapshot('avia-13236-short-bug');
 const validAnalyzerOutput = () => makeAnalyzerOutput(makeTaskFixture());
 const analyzerRepositoryPath = mkdtempSync(join(tmpdir(), 'tasker-analyzer-workspace-'));
 mkdirSync(join(analyzerRepositoryPath, '.tasker', 'harness'), { recursive: true });
+mkdirSync(join(analyzerRepositoryPath, '.tasker', 'harness', 'lib'), { recursive: true });
+writeFileSync(
+  join(analyzerRepositoryPath, '.tasker', 'harness', 'lib', 'harness_env.py'),
+  'def load_env(): pass\n',
+  'utf8',
+);
 writeFileSync(
   join(analyzerRepositoryPath, '.tasker', 'harness', 'manifest.json'),
   `${JSON.stringify({

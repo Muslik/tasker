@@ -23,6 +23,12 @@ const plannerRepositoryPath = mkdtempSync(join(tmpdir(), 'tasker-planner-workspa
 
 const writeSkillCatalog = (repositoryPath: string): void => {
   mkdirSync(join(repositoryPath, '.tasker', 'harness'), { recursive: true });
+  mkdirSync(join(repositoryPath, '.tasker', 'harness', 'lib'), { recursive: true });
+  writeFileSync(
+    join(repositoryPath, '.tasker', 'harness', 'lib', 'harness_env.py'),
+    'def load_env(): pass\n',
+    'utf8',
+  );
   writeFileSync(
     join(repositoryPath, '.tasker', 'harness', 'manifest.json'),
     `${JSON.stringify({

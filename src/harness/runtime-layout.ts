@@ -9,5 +9,8 @@ export const WORKSPACE_HARNESS_MANIFEST_PATH = `${WORKSPACE_HARNESS_DIRECTORY}/m
 export const workspaceHarnessSkillsPath = (repositoryPath: string): string =>
   join(repositoryPath, WORKSPACE_HARNESS_SKILLS_DIRECTORY);
 
+export const workspaceHarnessSupportPath = (repositoryPath: string): string =>
+  join(repositoryPath, WORKSPACE_HARNESS_SUPPORT_DIRECTORY);
+
 export const workspaceHarnessBinPath = (repositoryPath: string): string =>
   join(repositoryPath, WORKSPACE_HARNESS_BIN_DIRECTORY);
