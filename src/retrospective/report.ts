@@ -81,6 +81,13 @@ const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const reportId = (workflowId: string, workflowRunId: string): string =>
   `retrospective:${workflowId}:${workflowRunId}`;
 
+const RetrospectiveGeneratedPayloadSchema = z
+  .object({
+    artifactId: z.string().min(1),
+    taskReference: z.string().min(1),
+  })
+  .strict();
+
 const outputArtifacts = (ledger: LedgerRepository, workflowId: string, workflowRunId: string) => {
   const prefix = `task-step-output:${workflowId}:${workflowRunId}:`;
   return ledger
@@ -117,6 +124,32 @@ export class RetrospectiveStore {
       : err({
           kind: 'report_corrupt',
           issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  public readLatest(
+    taskReference: string,
+  ): Outcome<RetrospectiveReport | null, RetrospectiveStoreError> {
+    const event = this.ledger
+      .listEvents()
+      .toReversed()
+      .find((candidate) => {
+        if (candidate.eventType !== 'RetrospectiveGenerated') return false;
+        const payload = RetrospectiveGeneratedPayloadSchema.safeParse(candidate.payload);
+        return payload.success && payload.data.taskReference === taskReference;
+      });
+    if (event === undefined) return ok(null);
+    const payload = RetrospectiveGeneratedPayloadSchema.parse(event.payload);
+    const artifact = this.ledger.readArtifact(payload.artifactId);
+    if (artifact === null) return err({ kind: 'report_corrupt', issues: ['artifact: missing'] });
+    const report = RetrospectiveReportSchema.safeParse(artifact.payload);
+    return report.success
+      ? ok(report.data)
+      : err({
+          kind: 'report_corrupt',
+          issues: report.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });

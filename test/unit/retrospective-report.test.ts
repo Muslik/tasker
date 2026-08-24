@@ -15,6 +15,7 @@ describe('execution retrospective', () => {
   it('summarizes repeated costly attempts and persists one idempotent report', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const taskReference = 'jira:AVIA-1';
     const workflowId = 'tasker:execution:v2:jira:AVIA-1:bootstrap-run';
     const workflowRunId = 'execution-run';
     const record = (attempt: number, status: 'blocked' | 'completed', inputTokens: number) =>
@@ -69,13 +70,13 @@ describe('execution retrospective', () => {
     const retrospectives = new RetrospectiveStore(ledger.repository, systemClock);
 
     const first = retrospectives.generate({
-      taskReference: 'jira:AVIA-1',
+      taskReference,
       workflowId,
       workflowRunId,
       outcome: 'accepted',
     });
     const repeated = retrospectives.generate({
-      taskReference: 'jira:AVIA-1',
+      taskReference,
       workflowId,
       workflowRunId,
       outcome: 'accepted',
@@ -96,5 +97,6 @@ describe('execution retrospective', () => {
       },
     });
     expect(repeated).toEqual(first);
+    expect(retrospectives.readLatest(taskReference)).toEqual(first);
   });
 });
