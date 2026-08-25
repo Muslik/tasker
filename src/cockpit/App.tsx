@@ -2810,6 +2810,23 @@ const WorkflowSidebar = ({
   }
 
   if (workflow.status === 'missing' && projection.projection.stages.length === 0) {
+    if (task?.status === 'done') {
+      return (
+        <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
+          <div className="border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold">Workflow</h2>
+              <StateBadge className="bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
+                complete
+              </StateBadge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Tasker work is complete. The durable retrospective remains available in the task.
+            </p>
+          </div>
+        </aside>
+      );
+    }
     if (task?.origin.kind === 'jira') {
       const binding = task.origin.repositoryBinding;
       const repositoryResolved = binding.status === 'resolved';
