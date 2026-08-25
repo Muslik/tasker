@@ -7,7 +7,10 @@ import {
   resolveImplementationPlannerProfile,
   type ProcessExecutionPlan,
 } from '../../src/harness/index.js';
-import { IntegrationStepAdapterRegistry } from '../../src/integrations/index.js';
+import {
+  IntegrationStepAdapterRegistry,
+  type TaskRunEvidence,
+} from '../../src/integrations/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
 import type { CommandRunner, WorkspaceCommandRunner } from '../../src/providers/command-runner.js';
@@ -17,6 +20,7 @@ import {
   createCurrentStepRegistry,
   createTaskExecutionActivity,
   executeRegisteredTaskStep,
+  selectAgentRunEvidence,
   TemporalTaskStepTraceStore,
   type TaskStepAgentRunner,
 } from '../../src/temporal/activities/block-execution.js';
@@ -281,6 +285,39 @@ describe('temporal block execution activity', () => {
 
   afterEach(() => {
     ledger.close();
+  });
+
+  it('keeps the latest, accepted, and interrupted frontier for every semantic node', () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const step = (
+      operationId: string,
+      nodeId: string,
+      status: TaskRunEvidence['completedSteps'][number]['status'],
+    ): TaskRunEvidence['completedSteps'][number] => ({
+      operationId,
+      nodeId,
+      stepReference: `${nodeId}@1`,
+      status,
+      summary: operationId,
+      artifactIds: [],
+      details: { operationId },
+      recordedAt: `2026-08-25T00:00:0${operationId.at(-1) ?? '0'}.000Z`,
+    });
+    const evidence: TaskRunEvidence = {
+      acceptedPlan: { title: 'Accepted plan' },
+      completedSteps: [
+        step('verify-1', 'verify', 'blocked'),
+        step('verify-2', 'verify', 'completed'),
+        step('verify-3', 'verify', 'blocked'),
+        step('verify-4', 'verify', 'completed'),
+        step('implement-1', 'implement', 'completed'),
+      ],
+      reviewInputs: [],
+    };
+
+    expect(
+      selectAgentRunEvidence(evidence).completedSteps.map(({ operationId }) => operationId),
+    ).toEqual(['verify-3', 'verify-4', 'implement-1']);
   });
 
   it('uses the snapshotted prompt and base step binding for an agent attempt', async () => {

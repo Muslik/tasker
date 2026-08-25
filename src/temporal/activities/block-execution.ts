@@ -26,6 +26,7 @@ import {
   type IntegrationStepAdapterRegistry,
   type PullRequestReviewEvidence,
   type TaskRunEvidence,
+  type TaskRunStepEvidence,
 } from '../../integrations/index.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
 import {
@@ -991,6 +992,40 @@ const withRecoveryArtifact = (
 const registryFrom = (pack: LoadedHarnessPack): ReadonlyMap<string, LoadedHarnessStep> =>
   new Map(pack.steps.map((step) => [step.reference, step] as const));
 
+const runHistoryIndex = (steps: readonly TaskRunStepEvidence[]) =>
+  steps.map(({ operationId, nodeId, stepReference, status, summary, artifactIds, recordedAt }) => ({
+    operationId,
+    nodeId,
+    stepReference,
+    status,
+    summary,
+    artifactIds,
+    recordedAt,
+  }));
+
+export const selectAgentRunEvidence = (evidence: TaskRunEvidence): TaskRunEvidence => {
+  const selected = new Set<string>();
+  const byNode = new Map<string, TaskRunStepEvidence[]>();
+  for (const step of evidence.completedSteps) {
+    const steps = byNode.get(step.nodeId) ?? [];
+    steps.push(step);
+    byNode.set(step.nodeId, steps);
+  }
+  for (const steps of byNode.values()) {
+    const latest = steps.at(-1);
+    const completed = steps.findLast(({ status }) => status === 'completed');
+    const interrupted = steps.findLast(({ status }) => status !== 'completed');
+    if (latest !== undefined) selected.add(latest.operationId);
+    if (completed !== undefined) selected.add(completed.operationId);
+    if (interrupted !== undefined) selected.add(interrupted.operationId);
+  }
+  return {
+    acceptedPlan: evidence.acceptedPlan,
+    completedSteps: evidence.completedSteps.filter(({ operationId }) => selected.has(operationId)),
+    reviewInputs: evidence.reviewInputs,
+  };
+};
+
 const promptForAgentStep = (input: {
   readonly snapshottedPrompt: string;
   readonly taskReference: string;
@@ -1009,6 +1044,7 @@ const promptForAgentStep = (input: {
   readonly recovery: TaskStepRecoveryContext;
   readonly operatorGuidance: string | null;
   readonly evidence: TaskRunEvidence;
+  readonly historyIndex: ReturnType<typeof runHistoryIndex>;
 }): string =>
   [
     input.snapshottedPrompt.trim(),
@@ -1032,6 +1068,7 @@ const promptForAgentStep = (input: {
         activityRecovery: input.recovery,
         operatorGuidance: input.operatorGuidance,
         runEvidence: input.evidence,
+        runHistoryIndex: input.historyIndex,
       },
       null,
       2,
@@ -1042,6 +1079,7 @@ const promptForAgentStep = (input: {
     'For a workflow change, set status="workflow_change_required", set outputJson=null, put the serialized typed workflow-change request JSON in requestJson, and set blockingReason=null.',
     'For a recoverable infrastructure, access, or ambiguity failure that does not change task scope, set status="blocked", requestJson=null, blockingReason to the actionable reason, and outputJson to serialized evidence details or null.',
     'Do not encode infrastructure failures as workflow changes.',
+    'runEvidence contains the bounded causal frontier. runHistoryIndex lists every prior attempt; full immutable receipt files are mounted for on-demand inspection.',
   ].join('\n');
 
 const snapshottedStepFrom = (
@@ -1491,6 +1529,7 @@ export const executeRegisteredTaskStep = async (
       }
       recovery = prepared.value;
     }
+    const agentEvidence = selectAgentRunEvidence(evidence);
     const prompt = promptForAgentStep({
       snapshottedPrompt: snapshottedStep.block.executor.prompt,
       taskReference: input.taskReference,
@@ -1508,12 +1547,16 @@ export const executeRegisteredTaskStep = async (
       skills: snapshottedStep.block.executor.skills,
       recovery,
       operatorGuidance: input.operatorGuidance,
-      evidence,
+      evidence: agentEvidence,
+      historyIndex: runHistoryIndex(evidence.completedSteps),
     });
     const provider = await dependencies.agentRunner.run({
-      inputArtifactIds: evidence.completedSteps
-        .filter(({ status }) => status === 'completed')
-        .flatMap(({ artifactIds }) => artifactIds),
+      inputArtifactIds: [
+        ...agentEvidence.completedSteps.flatMap(({ artifactIds }) => artifactIds),
+        ...evidence.completedSteps.map(({ operationId }) =>
+          dependencies.traces.outputArtifactIdFor(operationId),
+        ),
+      ],
       operationId: executionOperationId(input),
       stepReference: input.uses,
       profile: executionProfile,

@@ -539,6 +539,11 @@ Archiving disposable Temporal history does not remove the completed workflow or 
 operator console: those views are reconstructed from immutable ledger artifacts. Do not add a
 provider- or company-specific completion cache to preserve them.
 
+Do not solve repeated-step token growth by deleting old receipts or weakening verification. Tasker
+keeps the complete run index and mounted receipt files, but only places the causal frontier inline in
+the next agent prompt. Step prompts may tell the agent when prior evidence is stale; they must not
+re-expand the entire history by default.
+
 An Allure `flaky` label is evidence, not the final CI decision. A terminal visual diff is
 repair evidence even when the test carries that label: the observer persists its expected,
 actual, and diff images and returns a task-repair outcome. Only failures whose available

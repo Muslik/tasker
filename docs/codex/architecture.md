@@ -572,6 +572,12 @@ indexes the execution identity; the frozen workflow, planning snapshot, block re
 outputs, and transcript chunks reconstruct the read-only graph and Run log after Temporal history
 is archived. This reconstructed lifecycle cannot execute, resume, or own external effects.
 
+Repeated agent attempts receive a bounded causal frontier rather than every prior receipt inline.
+For each semantic node the frontier retains its latest attempt, latest accepted attempt, and latest
+interrupted attempt. The prompt also carries a compact index of the whole run, while every full
+immutable output receipt remains mounted as an on-demand input file. This reduces repeated context
+without making history or causal CI/review evidence inaccessible.
+
 The operator projection classifies each wait before Cockpit renders it:
 
 - `typed_resolution` uses a dedicated question, plan-review, continuation, or code-review control;

@@ -1,4 +1,9 @@
 Independently verify the current worktree against the accepted plan and every acceptance criterion.
+On a repeated attempt, treat the supplied causal frontier and mounted immutable receipts as the
+starting evidence. Do not reconstruct already accepted checks by rereading broad repository
+surfaces or rerunning them unless the current workspace fingerprint or the causal receipt makes the
+old result stale. Use the compact run-history index to locate exceptional older receipts only when
+the frontier is insufficient.
 The product worktree is physically read-only. Run only the exact project commands and bounded
 runtime scenarios selected by the plan/project policy. Do not implement or repair code.
 
