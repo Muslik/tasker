@@ -1916,7 +1916,7 @@ const TaskDetails = ({
                 ) : null}
               </div>
             )}
-            <div className="max-h-[430px] overflow-y-auto pr-2">
+            <div className="pr-2">
               {issue === null ? (
                 <p className="text-sm text-muted-foreground">
                   No Jira snapshot is available yet. The persisted intake will remain here while
@@ -4197,6 +4197,9 @@ export const App = () => {
                       onSubmitAnswers={handlePlanningClarification}
                     />
                   ) : null}
+                  {selectedTask.status === 'done' ? (
+                    <RetrospectiveSurface retrospective={retrospectiveState} />
+                  ) : null}
                   <ActivityTimeline activity={activityState} streamStatus={streamStatus} />
                   {runLogState.status === 'missing' ? (
                     <PlanningTranscriptSurface
@@ -4224,9 +4227,6 @@ export const App = () => {
                     onRetry={handleJiraSync}
                     syncing={jiraSyncState.status === 'syncing'}
                   />
-                  {selectedTask.status === 'done' ? (
-                    <RetrospectiveSurface retrospective={retrospectiveState} />
-                  ) : null}
                   {view === null ? null : (
                     <>
                       <WhyThisWorkflow view={view} />
