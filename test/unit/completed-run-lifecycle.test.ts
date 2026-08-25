@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CompletedRunLifecycleReader } from '../../src/control-plane/completed-run-lifecycle.js';
+import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
 import { RetrospectiveReportSchema } from '../../src/retrospective/index.js';
 import { ok } from '../../src/shared/outcome.js';
 import { WorkflowFreezeReceiptSchema } from '../../src/temporal/index.js';
@@ -79,7 +80,11 @@ describe('completed run lifecycle', () => {
       { readLatest: () => ok(freeze) },
       {
         readRunSnapshot: () =>
-          ok({ kind: 'execution', workflow: { graph } } as unknown as RunPlanningSnapshot),
+          ok({
+            kind: 'execution',
+            workflow: { graph },
+            harness: { company: { retrospective: { enabled: true } } },
+          } as unknown as RunPlanningSnapshot),
       },
     );
 
@@ -96,6 +101,14 @@ describe('completed run lifecycle', () => {
           nodeStates: { 'implement-change': 'succeeded', finished: 'succeeded' },
         },
       },
+    });
+    if (!lifecycle.ok || lifecycle.value === null) throw new Error('Expected completed lifecycle');
+    const projection = createOperatorWorkflowProjection('jira:TEST-1', lifecycle.value, {
+      read: () => ok(null),
+    });
+    expect(projection.stages.at(-1)).toMatchObject({
+      id: 'retrospective',
+      status: 'succeeded',
     });
   });
 });

@@ -1289,6 +1289,7 @@ export class ImplementationPlanningCoordinator {
       readonly semanticHash: string;
       readonly compilerVersion: string;
       readonly harnessSnapshotHash: string;
+      readonly retrospectiveEnabled: boolean;
       readonly graph: z.infer<typeof CompiledWorkflowSchema>;
       readonly planningSnapshot: PlanningSnapshotReference;
       readonly evidenceBundle: EvidenceBundleReference;
@@ -1319,6 +1320,7 @@ export class ImplementationPlanningCoordinator {
       semanticHash: snapshot.value.semanticHash,
       compilerVersion: snapshot.value.compilerVersion,
       harnessSnapshotHash: snapshot.value.harnessHash,
+      retrospectiveEnabled: snapshot.value.harness.company.retrospective.enabled,
       graph: graph.data,
       planningSnapshot: record.executionSnapshot,
       evidenceBundle: record.evidenceBundle,

@@ -531,8 +531,10 @@ Review-ready Jira effects run only before the first `code_review@1` wait. Resolv
 approved or changes-requested is local workflow input and must not replay Jira transitions,
 comments, or attachments. In particular, `Mark done` never advances Jira beyond `Code Review`.
 
-The post-run retrospective is evidence-only. It may propose edits to harness prompts, project
-runtime policy, or infrastructure, but applying any proposal remains a separate reviewed change.
+The terminal retrospective system stage is evidence-only. It may propose edits to harness prompts,
+project runtime policy, or infrastructure, but applying any proposal remains a separate reviewed
+change. It is enabled for every new run with `company.retrospective.enabled`; changing the value to
+`false` omits it from future frozen workflows without changing the semantic step catalog.
 Archiving disposable Temporal history does not remove the completed workflow or Agent log from the
 operator console: those views are reconstructed from immutable ledger artifacts. Do not add a
 provider- or company-specific completion cache to preserve them.

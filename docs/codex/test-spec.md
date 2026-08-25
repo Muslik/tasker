@@ -442,6 +442,8 @@ Playwright acceptance scenarios:
 - every recovery resumes from the correct boundary;
 - operator interventions, time, and cost are measurable;
 - retrospective changes are proposed and manually approved, never self-applied.
+- an enabled retrospective is visible as the terminal system stage after task completion;
+- a run frozen with `company.retrospective.enabled = false` omits the Activity and stage.
 
 Before the next real Jira pilot, a synthetic simple-bug journey additionally proves:
 

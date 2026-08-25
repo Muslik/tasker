@@ -348,6 +348,29 @@ const createExecutionStages = (
   });
 };
 
+const createRetrospectiveStage = (
+  execution: ExecutionWorkflowPublicState | null,
+): readonly OperatorWorkflowStage[] => {
+  if (execution === null || execution.retrospective === 'disabled') return [];
+  const status: WorkflowNodeStatus =
+    execution.retrospective === 'pending'
+      ? 'planned'
+      : execution.retrospective === 'running'
+        ? 'running'
+        : execution.retrospective === 'succeeded'
+          ? 'succeeded'
+          : 'failed';
+  return [
+    OperatorWorkflowStageSchema.parse({
+      key: 'system:retrospective',
+      id: 'retrospective',
+      label: 'Retrospective',
+      status,
+      steps: [],
+    }),
+  ];
+};
+
 const findNode = (node: CompiledWorkflowNode, nodeId: string): CompiledWorkflowNode | null => {
   if (node.id === nodeId) return node;
   for (const child of childrenFor(node)) {
@@ -492,6 +515,7 @@ export const createOperatorWorkflowProjection = (
           key: `continuation:${continuation.continuationId}:${stage.key}`,
         })),
       ),
+      ...createRetrospectiveStage(execution),
     ],
     continuations:
       execution?.continuations.map((continuation) =>

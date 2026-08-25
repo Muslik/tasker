@@ -15,6 +15,7 @@ const draftProvenance = {
   semanticHash: 'd'.repeat(64),
   compilerVersion: 'semantic-workflow-v1',
   harnessSnapshotHash: 'e'.repeat(64),
+  retrospectiveEnabled: true,
 } as const;
 
 const waitingLifecycleFor = (
@@ -84,6 +85,7 @@ const waitingLifecycleFor = (
       blockRuns: { 'active-step': 1 },
       loopIterations: {},
       continuations: [],
+      retrospective: 'disabled',
       status: 'waiting',
       currentNodeId: 'active-step',
       wait: { nodeId: 'active-step', waitKind, reason: 'Action is required' },
@@ -376,6 +378,7 @@ describe('operator workflow projection', () => {
         blockRuns: { 'implement-change': 1 },
         loopIterations: {},
         continuations: [],
+        retrospective: 'disabled',
         status: 'running',
         currentNodeId: graph.root.id,
         wait: null,
@@ -532,6 +535,7 @@ describe('operator workflow projection', () => {
         blockRuns: { 'implement-fix': 1 },
         loopIterations: {},
         continuations: [],
+        retrospective: 'disabled',
         status: 'running',
         currentNodeId: 'implement-fix',
         wait: null,
@@ -686,6 +690,7 @@ describe('operator workflow projection', () => {
         blockRuns: {},
         loopIterations: { 'repair-validation': 1 },
         continuations: [],
+        retrospective: 'disabled',
         status: 'running',
         currentNodeId: 'repair-code',
         wait: null,

@@ -538,6 +538,7 @@ export async function bootstrapWorkflowV3(
         taskReference: input.taskReference,
         workflowHash: acceptedDraft.workflowHash,
         graph: acceptedDraft.graph,
+        retrospectiveEnabled: acceptedDraft.retrospectiveEnabled,
         contextReferences: [
           {
             kind: 'workspace',

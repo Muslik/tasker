@@ -20,6 +20,7 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   schemaVersion: 2,
   taskReference,
   workflowHash: 'a'.repeat(64),
+  retrospectiveEnabled: true,
   contextReferences: [
     { kind: 'workspace', reference: `workspace:${taskReference}`, hash: 'c'.repeat(64) },
     { kind: 'planning_snapshot', reference: `planning:${taskReference}`, hash: 'd'.repeat(64) },
@@ -383,6 +384,27 @@ describe('Execution Workflow v2 recovery', () => {
       environment.client.workflow.getHandle(firstWorkflowId).cancel(),
       environment.client.workflow.getHandle(secondWorkflowId).cancel(),
     ]);
+  });
+
+  it('omits the terminal retrospective when the frozen run policy disables it', async () => {
+    const taskReference = 'fixture:retrospective-disabled';
+    const workflowId = workflowIdFor(taskReference);
+    const input = {
+      ...workflowInput(taskReference),
+      retrospectiveEnabled: false,
+      graph: {
+        ...workflowInput(taskReference).graph,
+        root: { kind: 'finalize' as const, id: 'accepted', outcome: 'accepted' },
+      },
+    };
+
+    expect(await runs.start(workflowId, input)).toMatchObject({ ok: true });
+    await environment.client.workflow.getHandle(workflowId).result();
+
+    expect(await runs.read(workflowId)).toMatchObject({
+      ok: true,
+      value: { status: 'completed', retrospective: 'disabled' },
+    });
   });
 
   it('turns an exhausted Activity failure into a resumable operator wait', async () => {

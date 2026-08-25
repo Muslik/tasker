@@ -103,6 +103,7 @@ export async function executionWorkflowV2(
     blockRuns,
     loopIterations,
     continuations,
+    retrospective: input.retrospectiveEnabled ? 'pending' : 'disabled',
     status: 'running',
     currentNodeId: input.graph.root.id,
     wait: null,
@@ -441,14 +442,20 @@ export async function executionWorkflowV2(
     wait: null,
     outcome: traversal.outcome,
   };
-  await recoverableDeliveryActivities
-    .runExecutionRetrospective({
-      taskReference: input.taskReference,
-      workflowId: execution.workflowId,
-      workflowRunId: execution.runId,
-      outcome: traversal.outcome,
-    })
-    .catch(() => undefined);
+  if (input.retrospectiveEnabled) {
+    state = { ...state, retrospective: 'running' };
+    try {
+      await recoverableDeliveryActivities.runExecutionRetrospective({
+        taskReference: input.taskReference,
+        workflowId: execution.workflowId,
+        workflowRunId: execution.runId,
+        outcome: traversal.outcome,
+      });
+      state = { ...state, retrospective: 'succeeded' };
+    } catch {
+      state = { ...state, retrospective: 'failed' };
+    }
+  }
   return {
     taskReference: input.taskReference,
     workflowHash: input.workflowHash,

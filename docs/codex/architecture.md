@@ -559,10 +559,13 @@ publishes evidence/comment and reaches that status once. A later operator `Mark 
 the local Execution workflow; it does not invoke Jira again or move the issue into testing, release,
 or done states.
 
-After the completed state is visible, a non-blocking retrospective Activity summarizes immutable
-attempt, recovery, usage, duration, and cost evidence. Its findings and proposed harness or
-infrastructure improvements are stored for review. Retrospective failure never reopens the task, and
-proposals are never applied automatically.
+Every frozen run captures `company.retrospective.enabled`. When enabled, `Retrospective` is the
+terminal system stage shown after the task's dynamic graph. `Mark done` still makes the task complete
+for the operator before its non-blocking Activity summarizes immutable attempt, recovery, usage,
+duration, and cost evidence. Its findings and proposed harness or infrastructure improvements are
+stored for review. Failure is visible on that terminal stage but never reopens the task, and
+proposals are never applied automatically. Disabling the company policy omits both the stage and
+Activity for subsequent runs.
 
 Completed-run observability is a ledger read model, not a live Temporal query. The retrospective
 indexes the execution identity; the frozen workflow, planning snapshot, block receipts, step

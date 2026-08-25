@@ -99,6 +99,7 @@ export const BootstrapDraftStateSchema = z
     semanticHash: z.string().regex(/^[a-f0-9]{64}$/u),
     compilerVersion: z.string().min(1),
     harnessSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    retrospectiveEnabled: z.boolean(),
     graph: CompiledWorkflowSchema,
     planningSnapshot: PlanningSnapshotReferenceSchema,
     evidenceBundle: EvidenceBundleReferenceSchema,

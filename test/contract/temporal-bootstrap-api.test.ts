@@ -242,6 +242,7 @@ describe('Temporal bootstrap HTTP contract', () => {
             status: 'awaiting_review',
           },
         ],
+        retrospective: 'disabled',
         status: 'waiting',
         currentNodeId: 'deliver',
         wait: {

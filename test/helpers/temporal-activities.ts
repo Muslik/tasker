@@ -53,6 +53,7 @@ export const testTemporalActivities = {
         semanticHash: 'b'.repeat(64),
         compilerVersion: 'semantic-workflow-v1',
         harnessSnapshotHash: 'c'.repeat(64),
+        retrospectiveEnabled: true,
         graph: {
           metadata: {
             compilerVersion: 4 as const,

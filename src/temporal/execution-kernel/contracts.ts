@@ -26,6 +26,7 @@ export const ExecutionWorkflowInputSchema = z
     taskReference: z.string().min(1),
     workflowHash: z.string().regex(/^[a-f0-9]{64}$/u),
     graph: CompiledWorkflowSchema,
+    retrospectiveEnabled: z.boolean(),
     contextReferences: z.array(ExecutionContextReferenceSchema),
   })
   .strict()
@@ -107,6 +108,7 @@ const ExecutionWorkflowStateBaseSchema = z
     blockRuns: z.record(z.string(), z.number().int().nonnegative()),
     loopIterations: z.record(z.string(), z.number().int().nonnegative()),
     continuations: z.array(ExecutionContinuationStateSchema),
+    retrospective: z.enum(['disabled', 'pending', 'running', 'succeeded', 'failed']),
   })
   .strict();
 

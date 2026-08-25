@@ -386,6 +386,7 @@ export const HarnessCompanyManifestSchema = z
         workflowAnalyzer: RelativePathSchema,
       })
       .strict(),
+    retrospective: z.object({ enabled: z.boolean() }).strict().default({ enabled: true }),
     globalPackageRules: z.array(GlobalPackageRuleManifestSchema),
     apiPricing: ApiPricingTableSchema,
     executionProfiles: z

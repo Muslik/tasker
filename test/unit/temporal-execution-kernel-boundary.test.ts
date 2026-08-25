@@ -23,6 +23,7 @@ describe('Execution Workflow v2 boundary', () => {
       taskReference: 'fixture:boundary',
       workflowHash: 'a'.repeat(64),
       graph,
+      retrospectiveEnabled: true,
       contextReferences: [{ kind: 'workspace', reference: 'workspace:fixture' }],
       workspace: { path: '/tmp/worktree' },
     });

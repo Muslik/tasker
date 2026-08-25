@@ -66,6 +66,7 @@
     "implementationPlannerSkills": ["jira", "confluence", "loop"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
   },
+  "retrospective": { "enabled": true },
   "apiPricing": {
     "version": "openai-2026-08-22",
     "sourceUrls": [
