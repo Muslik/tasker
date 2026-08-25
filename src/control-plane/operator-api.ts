@@ -46,6 +46,7 @@ import type { OperatorServiceError, OperatorWorkflowService } from './operator-s
 import { RetrospectiveResponseSchema, type RetrospectiveStore } from '../retrospective/index.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
+import type { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
 import { projectOperatorActivity } from './operator-activity-projection.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import {
@@ -88,6 +89,7 @@ export interface BuildOperatorApiOptions {
   readonly blockReceipts: Pick<BlockReceiptStore, 'read'>;
   readonly planReviews?: PlanReviewStore | undefined;
   readonly retrospectives?: Pick<RetrospectiveStore, 'readLatest'> | undefined;
+  readonly completedRuns?: Pick<CompletedRunLifecycleReader, 'read'> | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -254,6 +256,14 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
   const temporalRunService = options.temporalRunService;
 
   const readCurrentLifecycle = async (taskReference: string, reply: FastifyReply) => {
+    const completed = options.completedRuns?.read(taskReference);
+    if (completed?.ok === false) {
+      reply
+        .code(500)
+        .send(apiError('completed_run_corrupt', `Completed run history is unavailable`));
+      return null;
+    }
+    if (completed?.value !== null && completed?.value !== undefined) return completed.value;
     const lifecycle = await temporalRunService.readLifecycle(taskReference);
     if (!lifecycle.ok) {
       sendTemporalRunError(reply, lifecycle.error);
@@ -429,13 +439,13 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
 
-    const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
-    if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
     return reply.send(
       OperatorWorkflowProjectionSchema.parse(
         createOperatorWorkflowProjection(
           params.data.taskReference,
-          lifecycle.value,
+          lifecycle,
           options.blockReceipts,
           (run) => {
             const reference = run.bootstrap.draft?.planningSnapshot;
@@ -464,13 +474,13 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
-    if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
-    if (lifecycle.value === null) {
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
+    if (lifecycle === null) {
       return reply.code(404).send(apiError('run_not_found', 'This workflow has not started'));
     }
     return reply.send(
-      OperatorRunLogResponseSchema.parse(options.executionActivity.readRunLog(lifecycle.value)),
+      OperatorRunLogResponseSchema.parse(options.executionActivity.readRunLog(lifecycle)),
     );
   });
 
@@ -486,12 +496,12 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         .code(400)
         .send(apiError('invalid_request', 'Valid evidence identity is required'));
     }
-    const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
-    if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
-    if (lifecycle.value === null) {
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
+    if (lifecycle === null) {
       return reply.code(404).send(apiError('run_not_found', 'This workflow has not started'));
     }
-    const runLog = options.executionActivity.readRunLog(lifecycle.value);
+    const runLog = options.executionActivity.readRunLog(lifecycle);
     const belongsToRun = runLog.entries.some((entry) =>
       entry.evidence.some(({ artifactId }) => artifactId === params.data.artifactId),
     );
@@ -527,13 +537,13 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
           .code(400)
           .send(apiError('invalid_request', 'Valid attempt identity is required'));
       }
-      const lifecycle = await temporalRunService.readLifecycle(params.data.taskReference);
-      if (!lifecycle.ok) return sendTemporalRunError(reply, lifecycle.error);
-      if (lifecycle.value?.execution === null || lifecycle.value?.execution === undefined) {
+      const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+      if (reply.sent) return reply;
+      if (lifecycle?.execution === null || lifecycle?.execution === undefined) {
         return reply.code(404).send(apiError('attempt_not_found', 'Execution has not started'));
       }
       const attempt = options.executionActivity.readAttempt(
-        lifecycle.value.execution,
+        lifecycle.execution,
         params.data.nodeId,
         params.data.blockRun,
       );
@@ -673,11 +683,12 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     if (!params.success) {
       return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
     }
-    const result = await temporalRunService.read(params.data.taskReference);
-    if (!result.ok) return sendTemporalRunError(reply, result.error);
-    return result.value === null
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
+    const current = lifecycle?.execution ?? lifecycle?.bootstrap ?? null;
+    return current === null
       ? reply.code(404).send(apiError('run_not_found', 'This workflow has not started'))
-      : reply.send(ExecutionRunViewSchema.parse(result.value));
+      : reply.send(ExecutionRunViewSchema.parse(current));
   });
 
   api.get('/api/workflows/:taskReference/implementation-plan', async (request, reply) => {

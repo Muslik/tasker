@@ -30,6 +30,7 @@ import {
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
 import { RetrospectiveStore } from '../retrospective/index.js';
+import { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
 import {
   connectTemporalTaskRunService,
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
@@ -41,6 +42,7 @@ import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { PlanReviewStore } from './plan-review.js';
+import { WorkflowFreezeStore } from './workflow-freeze.js';
 import { createOperatorWorkflowService } from './operator-service.js';
 import {
   PersistedGenerationSubjectResolver,
@@ -118,6 +120,12 @@ export const startOperatorServer = async (): Promise<void> => {
     planner: new SubscriptionCliImplementationPlanner(dockerCommands),
     harnessPack,
   });
+  const workflowFreezes = new WorkflowFreezeStore(ledger.repository, systemClock);
+  const completedRuns = new CompletedRunLifecycleReader(
+    retrospectives,
+    workflowFreezes,
+    implementationPlanning,
+  );
   const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
   const bitbucketReview =
     bitbucketConfiguration === null
@@ -139,6 +147,7 @@ export const startOperatorServer = async (): Promise<void> => {
     blockReceipts: new BlockReceiptStore(ledger.repository, systemClock),
     planReviews: new PlanReviewStore(ledger.repository, systemClock),
     retrospectives,
+    completedRuns,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

@@ -73,6 +73,11 @@ export type RetrospectiveResponse = z.infer<typeof RetrospectiveResponseSchema>;
 
 export type RetrospectiveReport = z.infer<typeof RetrospectiveReportSchema>;
 
+export interface RetrospectiveRunIndex {
+  readonly report: RetrospectiveReport;
+  readonly blockRuns: Readonly<Record<string, number>>;
+}
+
 export type RetrospectiveStoreError =
   | { readonly kind: 'ledger_conflict' }
   | { readonly kind: 'report_corrupt'; readonly issues: readonly string[] };
@@ -153,6 +158,23 @@ export class RetrospectiveStore {
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
+  }
+
+  public readLatestRun(
+    taskReference: string,
+  ): Outcome<RetrospectiveRunIndex | null, RetrospectiveStoreError> {
+    const latest = this.readLatest(taskReference);
+    if (!latest.ok) return latest;
+    if (latest.value === null) return ok(null);
+    const blockRuns: Record<string, number> = {};
+    for (const { output } of outputArtifacts(
+      this.ledger,
+      latest.value.workflowId,
+      latest.value.workflowRunId,
+    )) {
+      blockRuns[output.nodeId] = Math.max(blockRuns[output.nodeId] ?? 0, output.stepAttempt);
+    }
+    return ok({ report: latest.value, blockRuns });
   }
 
   public generate(input: {

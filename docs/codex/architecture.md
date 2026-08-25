@@ -564,6 +564,11 @@ attempt, recovery, usage, duration, and cost evidence. Its findings and proposed
 infrastructure improvements are stored for review. Retrospective failure never reopens the task, and
 proposals are never applied automatically.
 
+Completed-run observability is a ledger read model, not a live Temporal query. The retrospective
+indexes the execution identity; the frozen workflow, planning snapshot, block receipts, step
+outputs, and transcript chunks reconstruct the read-only graph and Run log after Temporal history
+is archived. This reconstructed lifecycle cannot execute, resume, or own external effects.
+
 The operator projection classifies each wait before Cockpit renders it:
 
 - `typed_resolution` uses a dedicated question, plan-review, continuation, or code-review control;

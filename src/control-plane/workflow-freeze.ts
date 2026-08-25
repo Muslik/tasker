@@ -73,6 +73,20 @@ export class WorkflowFreezeStore {
     return artifact === null ? ok(null) : parseReceipt(receiptId, artifact.payload);
   }
 
+  public readLatest(
+    taskReference: string,
+  ): Outcome<WorkflowFreezeReceipt | null, WorkflowFreezeStoreError> {
+    for (const event of this.ledger.listEvents().toReversed()) {
+      if (event.eventType !== 'TaskWorkflowFrozen') continue;
+      const artifact = this.ledger.readArtifact(event.aggregateId);
+      if (artifact === null) continue;
+      const receipt = parseReceipt(event.aggregateId, artifact.payload);
+      if (!receipt.ok) return receipt;
+      if (receipt.value.taskReference === taskReference) return receipt;
+    }
+    return ok(null);
+  }
+
   public record(
     inputValue: FreezeTaskWorkflowInput,
   ): Outcome<WorkflowFreezeReceipt, WorkflowFreezeStoreError> {

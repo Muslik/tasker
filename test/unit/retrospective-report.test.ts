@@ -98,5 +98,9 @@ describe('execution retrospective', () => {
     });
     expect(repeated).toEqual(first);
     expect(retrospectives.readLatest(taskReference)).toEqual(first);
+    expect(retrospectives.readLatestRun(taskReference)).toMatchObject({
+      ok: true,
+      value: { blockRuns: { verify: 2 } },
+    });
   });
 });

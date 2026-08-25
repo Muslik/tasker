@@ -533,6 +533,9 @@ comments, or attachments. In particular, `Mark done` never advances Jira beyond 
 
 The post-run retrospective is evidence-only. It may propose edits to harness prompts, project
 runtime policy, or infrastructure, but applying any proposal remains a separate reviewed change.
+Archiving disposable Temporal history does not remove the completed workflow or Agent log from the
+operator console: those views are reconstructed from immutable ledger artifacts. Do not add a
+provider- or company-specific completion cache to preserve them.
 
 An Allure `flaky` label is evidence, not the final CI decision. A terminal visual diff is
 repair evidence even when the test carries that label: the observer persists its expected,
