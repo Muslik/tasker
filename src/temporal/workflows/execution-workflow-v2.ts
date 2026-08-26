@@ -62,6 +62,9 @@ const guidanceFrom = (resolution: JsonValue): string | null =>
     ? resolution.guidance.trim()
     : null;
 
+const dismissesWorkflowChange = (resolution: JsonValue): boolean =>
+  isRecord(resolution) && resolution.decision === 'dismiss_workflow_change';
+
 const continuationReviewFrom = (
   resolution: JsonValue,
   continuationId: string,
@@ -314,6 +317,20 @@ export async function executionWorkflowV2(
                 };
                 state = { ...state, continuations: [...continuations] };
                 const resolution = await openWait(node.id, candidate.waitKind, candidate.summary);
+                if (dismissesWorkflowChange(resolution)) {
+                  continuations[continuations.length - 1] = {
+                    continuationId,
+                    attempt: continuationAttempt,
+                    parentNodeId: node.id,
+                    requestReference: result.requestReference,
+                    reason: guidanceFrom(resolution) ?? candidate.summary,
+                    transcriptOperationId: `${continuationId}:planner`,
+                    status: 'dismissed',
+                  };
+                  state = { ...state, continuations: [...continuations] };
+                  nodeStates[node.id] = 'succeeded';
+                  return { kind: 'continue' };
+                }
                 continuationGuidance = guidanceFrom(resolution);
                 continuationAttempt += 1;
                 markRunning(node.id);

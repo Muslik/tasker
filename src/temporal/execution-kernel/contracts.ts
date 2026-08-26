@@ -86,7 +86,7 @@ const ExecutionContinuationPlanningStateSchema = z
     requestReference: z.string().min(1),
     reason: z.string().min(1),
     transcriptOperationId: z.string().min(1),
-    status: z.enum(['planning', 'needs_input']),
+    status: z.enum(['planning', 'needs_input', 'dismissed']),
   })
   .strict()
   .readonly();

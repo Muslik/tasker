@@ -106,7 +106,7 @@ const activities: ExecutionWorkflowActivities = {
       return Promise.reject(new Error('receipt persistence failed'));
     }
     if (
-      input.taskReference === 'fixture:continuation' &&
+      input.taskReference.startsWith('fixture:continuation') &&
       input.nodeId === 'inspect' &&
       input.blockRun === 1
     ) {
@@ -131,6 +131,13 @@ const activities: ExecutionWorkflowActivities = {
     });
   },
   planExecutionContinuation: (input) => {
+    if (input.taskReference === 'fixture:continuation-dismissed') {
+      return Promise.resolve({
+        status: 'needs_input',
+        summary: 'The discovered failure is unrelated to the task scope',
+        waitKind: 'workflow_change.candidate-invalid@1',
+      });
+    }
     const prefix = `continuation-${String(input.attempt)}--`;
     return Promise.resolve({
       status: 'ready',
@@ -505,5 +512,35 @@ describe('Execution Workflow v2 recovery', () => {
       ],
     });
     await environment.client.workflow.getHandle(workflowId).cancel();
+  }, 30_000);
+
+  it('dismisses an unrelated workflow change without replaying or mutating the parent step', async () => {
+    const taskReference = 'fixture:continuation-dismissed';
+    const workflowId = workflowIdFor(taskReference);
+    expect(await runs.start(workflowId, workflowInput(taskReference))).toMatchObject({ ok: true });
+
+    const waiting = await waitFor(taskReference, 'workflow_change.candidate-invalid@1');
+    expect(
+      await runs.resolveWait(workflowId, {
+        runId: waiting.runId,
+        nodeId: 'inspect',
+        waitKind: 'workflow_change.candidate-invalid@1',
+        resolution: {
+          decision: 'dismiss_workflow_change',
+          guidance: 'The observed CI failure is unrelated to the accepted task change.',
+        },
+      }),
+    ).toMatchObject({ ok: true });
+
+    await environment.client.workflow.getHandle(workflowId).result();
+    expect(await runs.read(workflowId)).toMatchObject({
+      ok: true,
+      value: {
+        status: 'completed',
+        outcome: 'rejected',
+        blockRuns: { inspect: 1 },
+        continuations: [{ attempt: 1, status: 'dismissed' }],
+      },
+    });
   }, 30_000);
 });

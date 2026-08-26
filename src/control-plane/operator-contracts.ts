@@ -481,8 +481,18 @@ export const ResumeRunCommandSchema = z
   .object({
     expectedRunId: z.string().min(1),
     guidance: z.string().trim().min(1).max(10_000).optional(),
+    dismissWorkflowChange: z.literal(true).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.dismissWorkflowChange === true && value.guidance === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['guidance'],
+        message: 'Dismissing a workflow change requires a reason',
+      });
+    }
+  });
 
 export const ConfigureTaskDependencyCommandSchema = z
   .object({

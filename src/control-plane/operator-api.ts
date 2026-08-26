@@ -1339,7 +1339,8 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
       resolution: {
-        decision: 'resume',
+        decision:
+          command.data.dismissWorkflowChange === true ? 'dismiss_workflow_change' : 'resume',
         ...(command.data.guidance === undefined ? {} : { guidance: command.data.guidance }),
       },
     });
