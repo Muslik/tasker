@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -258,6 +258,24 @@ describe('Bitbucket pull request effect adapter', () => {
     expect(git(workspace.workspace, ['show', '-s', '--format=%s', 'HEAD'])).toBe(
       `${task.taskId}: ${task.title}`,
     );
+  });
+
+  it('uses Tasker validation instead of repository hooks during reconciled delivery', async () => {
+    const workspace = createGitWorkspace();
+    const hook = join(workspace.workspace, '.git/hooks/commit-msg');
+    const marker = join(workspace.workspace, 'hook-ran');
+    writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`, 'utf8');
+    chmodSync(hook, 0o755);
+    const pullRequests = new StatefulPullRequestPort();
+    const adapter = adapterFor(workspaceCommandRunner, pullRequests);
+
+    const result = await adapter.executeDraft(
+      requestFor(workspace, 'workflow:prepare-pr:attempt-1'),
+      pullRequestDraft,
+    );
+
+    expect(result).toMatchObject({ status: 'completed' });
+    expect(existsSync(marker)).toBe(false);
   });
 
   it('refuses remote publication when a declared branch artifact is not committed', async () => {

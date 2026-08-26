@@ -398,6 +398,8 @@ export class BitbucketPullRequestAdapter {
         `user.name=${this.commitIdentity.name}`,
         '-c',
         `user.email=${this.commitIdentity.email}`,
+        '-c',
+        'core.hooksPath=/dev/null',
         'commit',
         '-m',
         commitMessage.message,
