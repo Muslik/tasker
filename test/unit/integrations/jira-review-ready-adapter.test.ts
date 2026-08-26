@@ -297,7 +297,7 @@ const adapterFor = (
 };
 
 describe('Jira review-ready effect adapter', () => {
-  it('publishes bug evidence and its managed comment when status updates are disabled', async () => {
+  it('publishes bug evidence reused by a later accepted Verify attempt', async () => {
     const jira = new StatefulJiraReviewPort();
     jira.issue = { ...jira.issue, issueKey: 'AVIA-12045', issueType: 'Bug' };
     const bugTask = {
@@ -336,8 +336,8 @@ describe('Jira review-ready effect adapter', () => {
             operationId: 'workflow:verify:attempt-1',
             nodeId: 'verify-change',
             stepReference: 'verify.acceptance@1',
-            status: 'completed',
-            summary: 'Bug verified',
+            status: 'blocked',
+            summary: 'Runtime evidence passed before another verification prerequisite blocked',
             artifactIds: ['evidence:after-video'],
             details: { output: { decision: 'accepted' } },
             recordedAt: '2026-08-04T00:00:30.000Z',

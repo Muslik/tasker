@@ -229,16 +229,18 @@ export class JiraReviewReadyAdapter {
         ),
       };
     }
-    const verifications = request.evidence.completedSteps
-      .filter(
-        ({ status, stepReference }) =>
-          status === 'completed' && stepReference === 'verify.acceptance@1',
-      )
+    const verificationAttempts = request.evidence.completedSteps
+      .filter(({ stepReference }) => stepReference === 'verify.acceptance@1')
       .toSorted((left, right) =>
         `${right.recordedAt}:${right.operationId}`.localeCompare(
           `${left.recordedAt}:${left.operationId}`,
         ),
       );
+    const latestCompletedIndex = verificationAttempts.findIndex(
+      ({ status }) => status === 'completed',
+    );
+    const verifications =
+      latestCompletedIndex === -1 ? [] : verificationAttempts.slice(latestCompletedIndex);
     for (const verification of verifications) {
       const candidates: IntegrationEvidenceArtifact[] = [];
       for (const artifactId of verification.artifactIds) {
