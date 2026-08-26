@@ -68,14 +68,31 @@ CI classification, CI repair, validation-command, or review-reply nodes. In part
 `code.implement`, `code.repair`, `ci.repair`, duplicated validation suffixes, or technical retry
 nodes. Registered semantic blocks own those internal operations. Expected Delivery outcomes are
 represented by the frozen feedback loop, not linked continuations. A linked workflow continuation is
-reserved for genuinely new work shape discovered at runtime, such as another repository, external
-publication, translation, or a new human dependency.
+reserved for genuinely new work shape discovered at runtime, such as another repository, an
+external dependency, translation, or a new human dependency.
 
 Select only blocks supplied in plannerContext and available for the current lifecycle. Do not infer
-a hidden base template. Include translation, component publication, cross-repository work, visual
+a hidden base template. Include translation, external dependency work, visual
 verification, TestOps, or delivery only when task evidence and policy require the corresponding
 registered semantic block. If a necessary semantic block is absent, ask for clarification or return
 investigation instead of rebuilding it from technical fragments.
+
+## External package dependencies
+
+`taskSnapshot.dependencyDeclarations`, when present, is the frozen typed source for external package
+requirements. Never infer package names, versions, or a producer repository from prose when the
+declaration is absent. Tasker does not publish packages and one run never edits the producer
+repository.
+
+For each declared dependency, use the registered dependency blocks with the exact declaration id,
+revision, channel, and package names. `dependency.await_packages@1` must precede
+`dependency.consume_exact@1`; the consumer then runs normal Verify before Review or Delivery. A
+`final_only` declaration includes only the final wait/consume path. A `validate_dev_then_final`
+declaration may include a bounded dev wait/consume/Verify loop with at most three attempts, followed
+by a separate final wait/consume/Verify path. A dev verification never satisfies final Delivery.
+
+If required dependency blocks are absent from plannerContext, return `needs_clarification`; do not
+replace them with local links, `node_modules` patches, guessed versions, or a publish command.
 
 ## Acceptance and verification
 

@@ -6,6 +6,9 @@ import {
   createImplementationPlanningCoordinator,
   ImplementationPlanningStore,
 } from '../control-plane/implementation-planning.js';
+import { DependencyDeclarationStore } from '../control-plane/dependency-declaration.js';
+import { DependencyDeclarationGenerationSubjectResolver } from '../control-plane/dependency-declaration-generation-subject.js';
+import { VerifiedPackagePublicationStore } from '../control-plane/verified-package-publication.js';
 import { BlockReceiptStore } from '../blocks/index.js';
 import { ContextDiscoveryService, EvidenceBundleStore } from '../control-plane/evidence-bundle.js';
 import { PlanningTranscriptStore } from '../control-plane/planning-transcript.js';
@@ -22,6 +25,7 @@ import {
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
   ConfluencePlanningEvidenceReader,
+  DependencyAwaitPackagesAdapter,
   PullRequestReviewEvidenceStore,
   PullRequestDeliveryAdapter,
   createJiraIssueService,
@@ -141,6 +145,11 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     taskStepFilesystem,
     taskStepEvidence,
   );
+  const dependencyDeclarations = new DependencyDeclarationStore(ledger.repository, systemClock);
+  const verifiedPackagePublications = new VerifiedPackagePublicationStore(
+    ledger.repository,
+    systemClock,
+  );
   const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
   const gitCommitIdentity = loadGitCommitIdentity();
   const bitbucketPullRequestEffectsEnabled =
@@ -191,6 +200,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       ? null
       : new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
+    new DependencyAwaitPackagesAdapter(dependencyDeclarations, verifiedPackagePublications),
     ...(bitbucketPullRequests === null || jenkinsBuildObserver === null
       ? []
       : [
@@ -217,7 +227,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const subjects = new WorkflowGenerationSubjectSource(
     [
       new PersistedGenerationSubjectResolver(workflowService),
-      new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+      new DependencyDeclarationGenerationSubjectResolver(
+        new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+        dependencyDeclarations,
+      ),
     ],
     new PersistedGenerationSubjectRunStore(workflowService),
   );
@@ -359,6 +372,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         planningStore,
         continuationAnalyzer,
         contextDiscovery,
+        dependencyDeclarations,
       ),
       ...createExecutionRetrospectiveActivity(retrospectives),
       ...executionActivities,

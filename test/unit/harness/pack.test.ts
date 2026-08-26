@@ -290,7 +290,7 @@ describe('file-backed harness pack', () => {
     );
   });
 
-  it('exposes only the reviewed validation surface for the six frontend repositories', () => {
+  it('exposes only the reviewed validation surface for the seven frontend repositories', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
 
     expect(pack.projects.map(({ repository }) => repository).sort()).toEqual([
@@ -299,6 +299,7 @@ describe('file-backed harness pack', () => {
       'onetwotrip/front-bus',
       'onetwotrip/front-components',
       'onetwotrip/front-core-packages',
+      'onetwotrip/front-index',
       'onetwotrip/front-railways',
     ]);
     for (const project of pack.projects) {
@@ -317,9 +318,30 @@ describe('file-backed harness pack', () => {
       ({ repository }) => repository === 'onetwotrip/front-backoffice',
     );
     const avia = pack.projects.find(({ repository }) => repository === 'onetwotrip/front-avia');
+    const frontIndex = pack.projects.find(
+      ({ repository }) => repository === 'onetwotrip/front-index',
+    );
     expect(avia?.workspaceRuntime?.commandNetworkService).toBe('front-avia-app');
     expect(backoffice?.processCommands['validation.targeted@1']).toBeUndefined();
     expect(backoffice?.processCommands['validation.build@1']).toBeDefined();
+    expect(frontIndex?.workspaceRuntime?.commandNetworkService).toBeNull();
+    expect(frontIndex?.workspaceRuntime?.services).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'front-index-app',
+          command: 'pnpm start',
+          aliases: ['local.onetwotrip.com'],
+          readyCheck: 'curl -k -I --fail --max-time 5 https://local.onetwotrip.com:3000 >/dev/null',
+        }),
+      ]),
+    );
+    expect(frontIndex?.processCommands).toMatchObject({
+      'validation.build@1': {
+        commands: [{ command: 'pnpm', args: ['run', 'build:all'] }],
+      },
+    });
+    expect(frontIndex?.processCommands['validation.targeted@1']).toBeUndefined();
+    expect(frontIndex?.processCommands['validation.full@1']).toBeUndefined();
   });
 
   it('admits the company Jira issue types used for frontend work', () => {
@@ -365,6 +387,27 @@ describe('file-backed harness pack', () => {
         repair_required: { 'delivery.accepted@1': false },
       },
     });
+  });
+
+  it('requires verified dependency evidence before consuming exact package versions', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const awaitPackages = pack.steps.find(
+      ({ reference }) => reference === 'dependency.await_packages@1',
+    );
+    const consumeExact = pack.steps.find(
+      ({ reference }) => reference === 'dependency.consume_exact@1',
+    );
+
+    expect(awaitPackages?.contract).toMatchObject({
+      waitKinds: ['dependency.available@1'],
+      artifactContracts: ['dependency-publication'],
+      requiredArtifactContracts: [],
+    });
+    expect(consumeExact?.contract).toMatchObject({
+      artifactContracts: ['dependency-version-diff', 'source-diff'],
+      requiredArtifactContracts: ['dependency-publication'],
+    });
+    expect(pack.company.availableCapabilities).not.toContain('package.publish');
   });
 
   it('keeps company AI assistance out of workflow and kernel policies', () => {

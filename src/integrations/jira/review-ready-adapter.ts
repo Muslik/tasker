@@ -142,16 +142,6 @@ export class JiraReviewReadyAdapter {
       );
       if (attached.status === 'blocked') return attached;
     }
-    const observation = await this.jira.observeIssue(issueKey.data);
-    if (observation.status === 'failed') return problemResult(observation.problem, artifactIds);
-    const transitioned = await this.ensureTargetStatus(
-      request,
-      observation.issue,
-      configured.data.reviewReady.statusPath,
-      artifactIds,
-    );
-    if (transitioned.status === 'blocked') return transitioned;
-
     const commentPrefix =
       fixEvidence.status === 'found' ? 'Исправлено —' : configured.data.reviewReady.commentPrefix;
     const commentBody =
@@ -167,6 +157,51 @@ export class JiraReviewReadyAdapter {
       artifactIds,
     );
     if (commented.status === 'blocked') return commented;
+
+    if (request.trackerStatusUpdates === 'disabled') {
+      return {
+        status: 'completed',
+        summary: `Jira ${issueKey.data} evidence and review comment published without changing status`,
+        output: {
+          externalId: issueKey.data,
+          status: 'unchanged',
+          statusUpdate: { outcome: 'disabled' },
+        },
+        artifactIds,
+      };
+    }
+
+    const observation = await this.jira.observeIssue(issueKey.data);
+    if (observation.status === 'failed') {
+      return {
+        status: 'completed',
+        summary: `Jira ${issueKey.data} evidence and review comment published; status update was not applied: ${observation.problem.message}`,
+        output: {
+          externalId: issueKey.data,
+          status: 'unknown',
+          statusUpdate: { outcome: 'not_applied', reason: observation.problem.message },
+        },
+        artifactIds,
+      };
+    }
+    const transitioned = await this.ensureTargetStatus(
+      request,
+      observation.issue,
+      configured.data.reviewReady.statusPath,
+      artifactIds,
+    );
+    if (transitioned.status === 'blocked') {
+      return {
+        status: 'completed',
+        summary: `Jira ${issueKey.data} evidence and review comment published; status remains ${observation.issue.status}: ${transitioned.summary}`,
+        output: {
+          externalId: issueKey.data,
+          status: observation.issue.status,
+          statusUpdate: { outcome: 'not_applied', reason: transitioned.summary },
+        },
+        artifactIds: transitioned.artifactIds,
+      };
+    }
 
     return {
       status: 'completed',

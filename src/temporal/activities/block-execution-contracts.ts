@@ -4,6 +4,7 @@ import { PlanningSnapshotReferenceSchema } from '../../planning/run-planning-sna
 import { WorkspaceLocatorSchema } from '../../workspaces/contracts.js';
 import { JsonValueSchema, StepActivityDeliverySchema } from '../../workflow/schema.js';
 import { WorkflowChangeRequestSchema } from '../../workflow/execution-result.js';
+import { TrackerStatusUpdatesSchema } from '../../shared/task-run-settings.js';
 
 export const ExecuteTaskStepInputSchema = z
   .object({
@@ -17,6 +18,7 @@ export const ExecuteTaskStepInputSchema = z
     activityDelivery: StepActivityDeliverySchema,
     workspace: WorkspaceLocatorSchema,
     planningSnapshot: PlanningSnapshotReferenceSchema,
+    trackerStatusUpdates: TrackerStatusUpdatesSchema.default('enabled'),
     operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
     waitResolution: JsonValueSchema.nullable(),
     input: JsonValueSchema,
@@ -50,5 +52,5 @@ export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
     .readonly(),
 ]);
 
-export type ExecuteTaskStepInput = z.infer<typeof ExecuteTaskStepInputSchema>;
+export type ExecuteTaskStepInput = z.input<typeof ExecuteTaskStepInputSchema>;
 export type ExecuteTaskStepResult = z.infer<typeof ExecuteTaskStepResultSchema>;

@@ -25,7 +25,10 @@ const task = makePlanningTaskSnapshot('avia-12536-feature-review', {
 const jiraPolicy = loadHarnessPack().policies.find(({ id }) => id === 'jira-lifecycle');
 if (jiraPolicy === undefined) throw new Error('Missing Jira lifecycle policy');
 
-const requestFor = (operationId: string): IntegrationStepExecutionRequest => ({
+const requestFor = (
+  operationId: string,
+  trackerStatusUpdates: IntegrationStepExecutionRequest['trackerStatusUpdates'] = 'enabled',
+): IntegrationStepExecutionRequest => ({
   operationId,
   nodeId: 'admission',
   stepReference: 'jira.start-work@1',
@@ -58,6 +61,7 @@ const requestFor = (operationId: string): IntegrationStepExecutionRequest => ({
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [jiraPolicy],
   project: null,
+  trackerStatusUpdates,
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,
@@ -187,7 +191,7 @@ const adapterFor = (jira: JiraLifecyclePort): JiraStartWorkAdapter => {
 };
 
 describe('Jira start-work effect adapter', () => {
-  it('pauses on missing transition prerequisites and continues without repeating prior work', async () => {
+  it('admits work when a status transition requires missing fields', async () => {
     const jira = new StatefulJiraLifecyclePort();
     jira.startWorkTransitionFields = [
       {
@@ -200,30 +204,34 @@ describe('Jira start-work effect adapter', () => {
     ];
     const adapter = adapterFor(jira);
 
-    const blocked = await adapter.execute(requestFor('workflow:jira:attempt-1'));
+    const result = await adapter.execute(requestFor('workflow:jira:attempt-1'));
 
-    expect(blocked).toMatchObject({
-      status: 'blocked',
-      kind: 'invalid_request',
-      summary: 'Jira requires fields before Start work can run: Development estimate',
-      details: {
-        issueKey: 'AVIA-12536',
-        transitionId: '11',
-        transitionName: 'Start work',
-        toStatus: 'In Progress',
-        missingFields: [{ id: 'customfield_12345', name: 'Development estimate' }],
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: {
+        externalId: 'AVIA-12536',
+        status: 'Open',
+        statusUpdate: { outcome: 'not_applied' },
       },
     });
     expect(jira.issue.status).toBe('Open');
     expect(jira.assignmentCalls).toHaveLength(1);
     expect(jira.transitionCalls).toEqual(['511']);
+  });
 
-    jira.fieldValues.customfield_12345 = 2;
-    const resumed = await adapter.execute(requestFor('workflow:jira:attempt-2'));
+  it('admits work without requesting transitions when status updates are disabled', async () => {
+    const jira = new StatefulJiraLifecyclePort();
 
-    expect(resumed).toMatchObject({ status: 'completed' });
+    const result = await adapterFor(jira).execute(
+      requestFor('workflow:jira:attempt-1', 'disabled'),
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'Backlog', statusUpdate: { outcome: 'disabled' } },
+    });
     expect(jira.assignmentCalls).toHaveLength(1);
-    expect(jira.transitionCalls).toEqual(['511', '11']);
+    expect(jira.transitionCalls).toEqual([]);
   });
 
   it('assigns an eligible issue and follows the configured status path', async () => {
@@ -261,34 +269,33 @@ describe('Jira start-work effect adapter', () => {
     expect(jira.transitionCalls).toEqual(['11']);
   });
 
-  it('classifies Jira 400 as an admission error and preserves the completed first transition', async () => {
+  it('admits work when Jira rejects a status transition', async () => {
     const jira = new StatefulJiraLifecyclePort();
     jira.mode = 'invalid-at-open';
     const adapter = adapterFor(jira);
 
-    const blocked = await adapter.execute(requestFor('workflow:jira:attempt-1'));
-    jira.mode = 'normal';
-    const resumed = await adapter.execute(requestFor('workflow:jira:attempt-2'));
+    const result = await adapter.execute(requestFor('workflow:jira:attempt-1'));
 
-    expect(blocked).toMatchObject({ status: 'blocked', kind: 'invalid_request' });
-    expect(resumed).toMatchObject({ status: 'completed' });
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'Open', statusUpdate: { outcome: 'not_applied' } },
+    });
     expect(jira.assignmentCalls).toHaveLength(1);
-    expect(jira.transitionCalls).toEqual(['511', '11', '11']);
+    expect(jira.transitionCalls).toEqual(['511', '11']);
   });
 
-  it('pauses on Jira 403 and resumes without assigning the issue twice', async () => {
+  it('admits work when Jira status updates are unavailable', async () => {
     const jira = new StatefulJiraLifecyclePort();
     jira.mode = 'forbidden';
     const adapter = adapterFor(jira);
-    const request = requestFor('workflow:jira:attempt-1');
+    const result = await adapter.execute(requestFor('workflow:jira:attempt-1'));
 
-    const blocked = await adapter.execute(request);
-    jira.mode = 'normal';
-    const resumed = await adapter.execute(request);
-
-    expect(blocked).toMatchObject({ status: 'blocked', kind: 'infrastructure' });
-    expect(resumed).toMatchObject({ status: 'completed' });
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'Backlog', statusUpdate: { outcome: 'not_applied' } },
+    });
     expect(jira.assignmentCalls).toHaveLength(1);
+    expect(jira.transitionCalls).toEqual(['511']);
   });
 
   it('refuses a task assigned to another person before any Jira mutation', async () => {
@@ -305,13 +312,17 @@ describe('Jira start-work effect adapter', () => {
     expect(jira.transitionCalls).toEqual([]);
   });
 
-  it('refuses an ineligible Jira status before assigning an unowned issue', async () => {
+  it('admits an eligible task without changing a status outside the configured path', async () => {
     const jira = new StatefulJiraLifecyclePort();
     jira.issue = { ...jira.issue, status: 'In Release' };
 
     const result = await adapterFor(jira).execute(requestFor('workflow:jira:attempt-1'));
 
-    expect(result).toMatchObject({ status: 'blocked', kind: 'invalid_request' });
-    expect(jira.assignmentCalls).toEqual([]);
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'In Release', statusUpdate: { outcome: 'not_applied' } },
+    });
+    expect(jira.assignmentCalls).toHaveLength(1);
+    expect(jira.transitionCalls).toEqual([]);
   });
 });

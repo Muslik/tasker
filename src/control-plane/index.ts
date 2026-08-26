@@ -13,3 +13,8 @@ export * from './bootstrap-context-assembly.js';
 export * from './workflow-freeze.js';
 export * from './execution-activity.js';
 export * from './persisted-generation-subject.js';
+export * from './dependency-declaration.js';
+export * from './dependency-contracts.js';
+export * from './dependency-operator-service.js';
+export * from './dependency-declaration-generation-subject.js';
+export * from './verified-package-publication.js';

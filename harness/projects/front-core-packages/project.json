@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "4",
+  "version": "5",
   "repository": "onetwotrip/front-core-packages",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -10,7 +10,7 @@
     "branch": { "kind": "task_key_slug" },
     "commit": {
       "kind": "conventional_task_key",
-      "allowedTypes": ["fix", "feat", "refactor", "test", "chore"],
+      "allowedTypes": ["fix", "feat", "chore"],
       "requireScope": false
     }
   },

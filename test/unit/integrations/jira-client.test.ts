@@ -46,7 +46,24 @@ describe('Jira Server client', () => {
                 },
               ],
             },
-            issuelinks: [],
+            issuelinks: [
+              {
+                id: '118870',
+                type: {
+                  id: '10002',
+                  name: 'Deployment',
+                  inward: 'deploys',
+                  outward: 'is deployed by',
+                },
+                outwardIssue: {
+                  key: 'AVIA-13247',
+                  fields: {
+                    summary: 'FE Release 31.07.2026',
+                    status: { name: 'Testing' },
+                  },
+                },
+              },
+            ],
             customfield_14100: 'module:src/features/selectSeats',
           },
         }),
@@ -65,6 +82,16 @@ describe('Jira Server client', () => {
         repositoryHint: 'module:src/features/selectSeats',
         attachments: [{ filename: 'before.mp4' }],
         comments: [{ body: 'Fixed' }],
+        links: [
+          {
+            linkId: '118870',
+            linkTypeId: '10002',
+            linkTypeName: 'Deployment',
+            direction: 'outward',
+            issueKey: 'AVIA-13247',
+            relationship: 'is deployed by',
+          },
+        ],
       },
     });
     expect(request).toHaveBeenCalledOnce();

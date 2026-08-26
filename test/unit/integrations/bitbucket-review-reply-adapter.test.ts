@@ -107,6 +107,7 @@ const requestFor = (
   },
   policies: [],
   project: null,
+  trackerStatusUpdates: 'enabled',
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,

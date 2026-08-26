@@ -32,6 +32,10 @@ export const JiraCommentSchema = z
 
 export const JiraIssueLinkSchema = z
   .object({
+    linkId: z.string().min(1),
+    linkTypeId: z.string().min(1),
+    linkTypeName: z.string().min(1),
+    direction: z.enum(['inward', 'outward']),
     issueKey: JiraIssueKeySchema,
     summary: z.string().min(1),
     relationship: z.string().min(1),
@@ -41,7 +45,7 @@ export const JiraIssueLinkSchema = z
 
 export const JiraIssueSnapshotSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     issueKey: JiraIssueKeySchema,
     issueId: z.string().min(1),
     browseUrl: z.url(),
@@ -150,6 +154,7 @@ export const JiraIssueStateSchema = z.discriminatedUnion('status', [
 
 export type JiraIssueKey = z.infer<typeof JiraIssueKeySchema>;
 export type JiraAttachment = z.infer<typeof JiraAttachmentSchema>;
+export type JiraIssueLink = z.infer<typeof JiraIssueLinkSchema>;
 export type JiraIssueSnapshot = z.infer<typeof JiraIssueSnapshotSchema>;
 export type JiraSyncProblem = z.infer<typeof JiraSyncProblemSchema>;
 export type JiraIssueState = z.infer<typeof JiraIssueStateSchema>;

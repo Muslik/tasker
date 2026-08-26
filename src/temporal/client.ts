@@ -104,7 +104,8 @@ const sameImmutableInput = (
   input: BootstrapWorkflowInput,
 ): boolean =>
   state.settings.planReview === input.settings.planReview &&
-  state.settings.planningStrategy === input.settings.planningStrategy;
+  state.settings.planningStrategy === input.settings.planningStrategy &&
+  state.settings.trackerStatusUpdates === input.settings.trackerStatusUpdates;
 
 export class TemporalTaskRunService implements TaskRunService {
   public constructor(

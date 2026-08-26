@@ -22,9 +22,15 @@ semantic block and become visible as durable Run Log events. The compiler insert
 loop-exhaustion operator boundary.
 
 Build the smallest suffix caused by the new evidence. Examples: a task-caused CI verdict may select
-one Development loop; a newly discovered repository may select the registered cross-repository
-block; an external publication prerequisite may select a block that owns its durable wait. Do not
+one Development loop; a newly discovered repository may select the registered external-dependency
+block; a human-owned package prerequisite may select a block that owns its durable wait. Do not
 copy the initial workflow or predict unrelated recovery paths.
+
+When workflow-change evidence contains `cross_repository_dependency`, use only an accepted typed
+dependency declaration supplied in taskSnapshot. The suffix remains in the current consumer
+repository: await verified exact packages, consume them, and Verify the consumer. Never add producer
+implementation, package publication, another repository, a local link, or a child workspace. If the
+declaration or registered dependency blocks are missing, return `needs_input` instead of guessing.
 
 Every assembly decision cites exact evidence. Every verification check belongs to an actual
 semantic Verify step in this suffix. If the required semantic capability is absent, do not rebuild

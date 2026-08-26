@@ -37,6 +37,7 @@ const pullRequestUrl =
 const requestFor = (
   operationId: string,
   url: string | null = pullRequestUrl,
+  trackerStatusUpdates: IntegrationStepExecutionRequest['trackerStatusUpdates'] = 'enabled',
 ): IntegrationStepExecutionRequest => ({
   operationId,
   nodeId: 'deliver-change',
@@ -92,6 +93,7 @@ const requestFor = (
   },
   policies: [jiraPolicy],
   project: null,
+  trackerStatusUpdates,
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,
@@ -139,6 +141,7 @@ class StatefulJiraReviewPort implements JiraLifecyclePort, JiraAttachmentPort {
   public readonly commentCalls: string[] = [];
   public readonly updateCommentCalls: { readonly id: string; readonly body: string }[] = [];
   public readonly fieldObservationCalls: string[][] = [];
+  public readonly effectCalls: string[] = [];
   public observeCalls = 0;
   public mode: 'normal' | 'forbidden-transition' | 'forbidden-comment' | 'lose-comment-response' =
     'normal';
@@ -189,6 +192,7 @@ class StatefulJiraReviewPort implements JiraLifecyclePort, JiraAttachmentPort {
       readonly content: Uint8Array;
     },
   ): Promise<JiraLifecycleMutation> {
+    this.effectCalls.push('attachment');
     this.attachments.push({
       id: String(this.attachments.length + 1),
       filename: attachment.filename,
@@ -203,6 +207,7 @@ class StatefulJiraReviewPort implements JiraLifecyclePort, JiraAttachmentPort {
   }
 
   public transition(_issueKey: string, transitionId: string): Promise<JiraLifecycleMutation> {
+    this.effectCalls.push('transition');
     this.transitionCalls.push(transitionId);
     if (this.mode === 'forbidden-transition') {
       return Promise.resolve({
@@ -220,6 +225,7 @@ class StatefulJiraReviewPort implements JiraLifecyclePort, JiraAttachmentPort {
   }
 
   public comment(_issueKey: string, body: string): Promise<JiraLifecycleMutation> {
+    this.effectCalls.push('comment');
     this.commentCalls.push(body);
     if (this.mode === 'forbidden-comment') {
       return Promise.resolve({
@@ -291,7 +297,7 @@ const adapterFor = (
 };
 
 describe('Jira review-ready effect adapter', () => {
-  it('publishes one current bug after-video and references it from the managed fix comment', async () => {
+  it('publishes bug evidence and its managed comment when status updates are disabled', async () => {
     const jira = new StatefulJiraReviewPort();
     jira.issue = { ...jira.issue, issueKey: 'AVIA-12045', issueType: 'Bug' };
     const bugTask = {
@@ -304,6 +310,7 @@ describe('Jira review-ready effect adapter', () => {
     const baseRequest = requestFor('workflow:jira-bug-review:attempt-1');
     const request: IntegrationStepExecutionRequest = {
       ...baseRequest,
+      trackerStatusUpdates: 'disabled',
       taskReference: bugTask.reference,
       task: bugTask,
       stepInput: {
@@ -395,6 +402,9 @@ describe('Jira review-ready effect adapter', () => {
     expect(jira.commentCalls).toEqual([
       `Исправлено — видео: [^AVIA-12045-fixed.mp4]\n\nPR: [73|${pullRequestUrl}]`,
     ]);
+    expect(jira.transitionCalls).toEqual([]);
+    expect(jira.observeCalls).toBe(0);
+    expect(jira.effectCalls).toEqual(['attachment', 'comment']);
   });
 
   it('blocks bug delivery before Jira mutation when Verify produced no publishable after evidence', async () => {
@@ -485,7 +495,7 @@ describe('Jira review-ready effect adapter', () => {
     expect(jira.updateCommentCalls).toEqual([]);
   });
 
-  it('surfaces missing required transition fields before mutating Jira and resumes in place', async () => {
+  it('publishes the review comment when a status transition requires missing fields', async () => {
     const jira = new StatefulJiraReviewPort();
     jira.transitionFields = [
       {
@@ -498,36 +508,17 @@ describe('Jira review-ready effect adapter', () => {
     ];
     const adapter = adapterFor(jira);
 
-    const blocked = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-1'));
+    const result = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-1'));
 
-    expect(blocked).toMatchObject({
-      status: 'blocked',
-      kind: 'invalid_request',
-      summary: 'Jira requires fields before Ready for review can run: Development estimate',
-      details: {
-        issueKey: 'AVIA-12536',
-        transitionId: '31',
-        transitionName: 'Ready for review',
-        toStatus: 'Code Review',
-        missingFields: [
-          {
-            id: 'customfield_12345',
-            name: 'Development estimate',
-            operations: ['set'],
-          },
-        ],
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: {
+        status: 'In Progress',
+        statusUpdate: { outcome: 'not_applied' },
       },
-      artifactIds: [],
     });
     expect(jira.transitionCalls).toEqual([]);
-    expect(jira.commentCalls).toEqual([]);
-
-    jira.fieldValues.customfield_12345 = 3;
-    const resumed = await executeReviewReady(adapter, requestFor('workflow:jira-review:attempt-2'));
-
-    expect(resumed).toMatchObject({ status: 'completed' });
-    expect(jira.fieldObservationCalls).toEqual([['customfield_12345'], ['customfield_12345']]);
-    expect(jira.transitionCalls).toEqual(['31']);
+    expect(jira.fieldObservationCalls).toEqual([['customfield_12345']]);
     expect(jira.commentCalls).toHaveLength(1);
   });
 
@@ -545,6 +536,25 @@ describe('Jira review-ready effect adapter', () => {
     });
     expect(jira.transitionCalls).toEqual(['31']);
     expect(jira.commentCalls).toEqual([`PR ready for review: [73|${pullRequestUrl}]`]);
+    expect(jira.effectCalls).toEqual(['comment', 'transition']);
+  });
+
+  it('keeps the review comment when Jira rejects the status transition', async () => {
+    const jira = new StatefulJiraReviewPort();
+    jira.mode = 'forbidden-transition';
+
+    const result = await executeReviewReady(
+      adapterFor(jira),
+      requestFor('workflow:jira-review:attempt-1'),
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { status: 'In Progress', statusUpdate: { outcome: 'not_applied' } },
+    });
+    expect(jira.commentCalls).toEqual([`PR ready for review: [73|${pullRequestUrl}]`]);
+    expect(jira.transitionCalls).toEqual(['31']);
+    expect(jira.effectCalls).toEqual(['comment', 'transition']);
   });
 
   it('reconciles a lost comment response and does not publish the link twice', async () => {
@@ -563,7 +573,7 @@ describe('Jira review-ready effect adapter', () => {
     expect(jira.comments).toHaveLength(1);
   });
 
-  it('resumes after a comment 403 without repeating the completed transition', async () => {
+  it('resumes comment publication before applying the status update', async () => {
     const jira = new StatefulJiraReviewPort();
     jira.mode = 'forbidden-comment';
     const adapter = adapterFor(jira);

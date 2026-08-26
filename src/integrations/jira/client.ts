@@ -4,6 +4,7 @@ import { loadHarnessEnvironmentDefaults } from '../../shared/env-file.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import {
   JiraIssueKeySchema,
+  type JiraIssueLink,
   JiraIssueSnapshotSchema,
   type JiraIssueKey,
   type JiraIssueSnapshot,
@@ -64,8 +65,11 @@ const RawLinkedIssueSchema = z
 
 const RawIssueLinkSchema = z
   .object({
+    id: z.string().min(1),
     type: z
       .object({
+        id: z.string().min(1),
+        name: z.string().min(1),
         inward: z.string().min(1),
         outward: z.string().min(1),
       })
@@ -174,10 +178,14 @@ const normalizeIssue = (
   syncedAt: string,
 ): JiraIssueSnapshot => {
   const fields = raw.fields;
-  const links = raw.fields.issuelinks.flatMap((link) => {
+  const links: JiraIssueLink[] = raw.fields.issuelinks.flatMap((link): JiraIssueLink[] => {
     if (link.inwardIssue !== undefined) {
       return [
         {
+          linkId: link.id,
+          linkTypeId: link.type.id,
+          linkTypeName: link.type.name,
+          direction: 'inward' as const,
           issueKey: link.inwardIssue.key,
           summary: link.inwardIssue.fields.summary,
           relationship: link.type.inward,
@@ -188,6 +196,10 @@ const normalizeIssue = (
     if (link.outwardIssue !== undefined) {
       return [
         {
+          linkId: link.id,
+          linkTypeId: link.type.id,
+          linkTypeName: link.type.name,
+          direction: 'outward' as const,
           issueKey: link.outwardIssue.key,
           summary: link.outwardIssue.fields.summary,
           relationship: link.type.outward,
@@ -199,7 +211,7 @@ const normalizeIssue = (
   });
 
   return JiraIssueSnapshotSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     issueKey: raw.key,
     issueId: raw.id,
     browseUrl: `${baseUrl}/browse/${raw.key}`,

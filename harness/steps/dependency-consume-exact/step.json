@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
-  "reference": "component.consume_published@1",
-  "description": "Consume an exact published component version in the target repository.",
+  "reference": "dependency.consume_exact@1",
+  "description": "Consume only the exact package versions proven by an accepted dependency publication receipt.",
   "stage": { "id": "implementation", "label": "Implement" },
   "availableDuring": ["execution"],
-  "inputContract": "task_input",
+  "inputContract": "dependency_consume_input",
   "outputContract": "agent_output",
   "executor": {
     "kind": "agent",
@@ -14,17 +14,15 @@
     "skills": []
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
-  "completion": {
-    "kind": "workspace_mutation"
-  },
+  "completion": { "kind": "workspace_mutation" },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["workspace.write"],
   "requiredCapabilities": ["repository.read", "workspace.write"],
   "resumeBoundary": "step",
   "idempotency": "key",
   "waitKinds": [],
-  "artifactContracts": ["consumer-version-diff"],
-  "requiredArtifactContracts": [],
-  "workflowChanges": ["cross_repository_dependency", "verification_scope_changed"],
+  "artifactContracts": ["dependency-version-diff", "source-diff"],
+  "requiredArtifactContracts": ["dependency-publication"],
+  "workflowChanges": ["verification_scope_changed"],
   "reconciliation": { "strategy": "receipt" }
 }

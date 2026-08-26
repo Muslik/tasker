@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import type { BlockReceiptStore } from '../blocks/index.js';
+import type { LedgerRepository } from '../ledger/repository.js';
 import { type ImplementationPlanningCoordinator } from './implementation-planning.js';
 import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
@@ -20,7 +21,10 @@ import {
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
+  ConfigureTaskDependencyCommandSchema,
   DEFAULT_RUN_START_COMMAND,
+  DependencyAvailableCommandSchema,
+  DependencyDiscoveryCommandSchema,
   ExecutionRunViewSchema,
   ExpectedRunCommandSchema,
   OperatorActivityResponseSchema,
@@ -37,6 +41,14 @@ import {
   type OperatorTaskSummary,
 } from './operator-contracts.js';
 import {
+  DependencyDeclarationSchema,
+  type DependencyDeclarationStore,
+} from './dependency-declaration.js';
+import {
+  type DependencyOperatorService,
+  type DependencyOperatorServiceError,
+} from './dependency-operator-service.js';
+import {
   PlanReviewCommandSchema,
   PlanReviewHistoryResponseSchema,
   planReviewResolution,
@@ -49,6 +61,7 @@ import type { ExecutionActivityReader } from './execution-activity.js';
 import type { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
 import { projectOperatorActivity } from './operator-activity-projection.js';
 import { providerFailureSummary } from './workflow-generator.js';
+import type { VerifiedPackagePublicationStore } from './verified-package-publication.js';
 import {
   type TaskRunError,
   type TaskRunLifecycle,
@@ -85,6 +98,13 @@ export interface BuildOperatorApiOptions {
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly executionActivity?: ExecutionActivityReader | undefined;
   readonly bitbucketReview?: Pick<BitbucketReviewCoordinator, 'sync'> | undefined;
+  readonly dependencyOperator?: DependencyOperatorService | undefined;
+  readonly dependencyDeclarations?: Pick<
+    DependencyDeclarationStore,
+    'listLatestByConsumerTask' | 'readLatest' | 'readRevision'
+  >;
+  readonly artifacts?: Pick<LedgerRepository, 'readArtifact'>;
+  readonly verifiedPackagePublications?: Pick<VerifiedPackagePublicationStore, 'read'>;
   readonly temporalRunService: TaskRunService;
   readonly blockReceipts: Pick<BlockReceiptStore, 'read'>;
   readonly planReviews?: PlanReviewStore | undefined;
@@ -182,6 +202,63 @@ const sendBitbucketReviewError = (
         .send(apiError(error.problem.kind, error.problem.message));
     case 'store_failed':
       return reply.code(500).send(apiError('review_store_failed', error.error.kind));
+  }
+};
+
+const sendDependencyOperatorError = (
+  reply: FastifyReply,
+  error: DependencyOperatorServiceError,
+): FastifyReply => {
+  switch (error.kind) {
+    case 'wait_input_unavailable':
+      return reply
+        .code(409)
+        .send(apiError(error.kind, `The active ${error.waitKind} wait cannot be resolved here`));
+    case 'wait_input_mismatch':
+    case 'dependency_declaration_mismatch':
+      return reply.code(409).send(apiError(error.kind, error.reason));
+    case 'dependency_declaration_not_found':
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            error.kind,
+            `Declaration ${error.declarationId} revision ${String(error.declarationRevision)} is unavailable`,
+          ),
+        );
+    case 'dependency_request_mismatch':
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            error.kind,
+            `Stored dependency declaration ${error.declarationId} conflicts with this request`,
+          ),
+        );
+    case 'dependency_declaration_store_failed':
+      return reply
+        .code(error.error.kind === 'ledger_conflict' ? 409 : 500)
+        .send(apiError(error.error.kind, 'Dependency declarations could not be persisted'));
+    case 'verified_package_publication_store_failed':
+      return reply
+        .code(
+          error.error.kind === 'ledger_conflict' || error.error.kind === 'publication_conflict'
+            ? 409
+            : 500,
+        )
+        .send(apiError(error.error.kind, 'Verified package publications could not be stored'));
+    case 'nexus_observation_failed':
+      return reply
+        .code(
+          error.problem.kind === 'invalid_input'
+            ? 400
+            : error.problem.kind === 'invalid_response'
+              ? 502
+              : error.problem.retryable
+                ? 503
+                : 422,
+        )
+        .send(apiError(error.problem.kind, error.problem.message));
   }
 };
 
@@ -459,9 +536,114 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
             const transcript = options.implementationPlanning?.readOperationTranscript(operationId);
             return transcript?.ok === true ? transcript.value : null;
           },
+          {
+            listDeclarations: (taskReference) => {
+              const declarations =
+                options.dependencyDeclarations?.listLatestByConsumerTask(taskReference);
+              return declarations?.ok === true
+                ? declarations.value.map((declaration) => ({
+                    declarationId: declaration.declarationId,
+                    revision: declaration.revision,
+                    producerTaskReference: declaration.producerTaskReference,
+                    producerRepository: declaration.producerRepository,
+                    packages: declaration.packages,
+                    mode: declaration.mode,
+                    source: declaration.source,
+                    createdAt: declaration.createdAt,
+                  }))
+                : [];
+            },
+            readDeclaration: (declarationId) => {
+              const declaration = options.dependencyDeclarations?.readLatest(declarationId);
+              return declaration?.ok === true ? declaration.value : null;
+            },
+            readPublication: (observationId) => {
+              const publication = options.verifiedPackagePublications?.read(observationId);
+              return publication?.ok === true ? publication.value : null;
+            },
+            readArtifact: (artifactId) => options.artifacts?.readArtifact(artifactId) ?? null,
+          },
         ),
       ),
     );
+  });
+
+  api.post('/api/operator/tasks/:taskReference/dependencies/configure', async (request, reply) => {
+    if (
+      options.dependencyOperator === undefined ||
+      options.dependencyDeclarations === undefined ||
+      options.verifiedPackagePublications === undefined ||
+      options.jiraIssueService === undefined
+    ) {
+      return reply
+        .code(503)
+        .send(apiError('dependency_operator_unavailable', 'Dependency configuration is disabled'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const command = ConfigureTaskDependencyCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(apiError('invalid_dependency_configuration', 'Dependency configuration is invalid'));
+    }
+    if (command.data.consumerTaskReference !== params.data.taskReference) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'dependency_consumer_mismatch',
+            'The configured consumer task does not match the selected task',
+          ),
+        );
+    }
+    const consumerIssueKey = params.data.taskReference.startsWith('jira:')
+      ? params.data.taskReference.slice('jira:'.length)
+      : null;
+    const producerIssueKey = command.data.producerTaskReference.startsWith('jira:')
+      ? command.data.producerTaskReference.slice('jira:'.length)
+      : null;
+    if (consumerIssueKey === null || producerIssueKey === null) {
+      return reply
+        .code(409)
+        .send(apiError('dependency_jira_link_required', 'Dependency tasks must be Jira tasks'));
+    }
+    const jiraState = options.jiraIssueService.read(consumerIssueKey);
+    if (!jiraState.ok) return sendJiraServiceError(reply, jiraState.error);
+    if (jiraState.value === null || jiraState.value.status === 'unavailable') {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'dependency_jira_snapshot_required',
+            'Sync the consumer Jira task before configuring its dependency',
+          ),
+        );
+    }
+    const matchingLink = jiraState.value.issue.links.find(
+      (link) =>
+        link.linkId === command.data.source.linkId &&
+        link.linkTypeId === command.data.source.linkTypeId &&
+        link.direction === command.data.source.direction &&
+        link.issueKey === producerIssueKey &&
+        link.linkTypeName.toLocaleLowerCase('en-US') === 'blocks',
+    );
+    if (matchingLink === undefined) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'dependency_jira_link_mismatch',
+            'The selected Jira Blocks link does not point at the declared producer task',
+          ),
+        );
+    }
+    const configured = options.dependencyOperator.configureTaskDependency(command.data);
+    return configured.ok
+      ? reply.send(DependencyDeclarationSchema.parse(configured.value))
+      : sendDependencyOperatorError(reply, configured.error);
   });
 
   api.get('/api/operator/tasks/:taskReference/run-log', async (request, reply) => {
@@ -859,6 +1041,136 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     );
   });
 
+  api.post('/api/workflows/:taskReference/dependency/available', async (request, reply) => {
+    if (options.dependencyOperator === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('dependency_operator_unavailable', 'Dependency verification is disabled'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const command = DependencyAvailableCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(
+          apiError('invalid_dependency_available_command', 'Published versions payload is invalid'),
+        );
+    }
+    const current = await temporalRunService.read(params.data.taskReference);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.runtime !== 'execution' ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'dependency.available@1'
+    ) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'run_not_at_dependency_available',
+            'The run is not waiting for published versions',
+          ),
+        );
+    }
+    if (
+      command.data.expectedRunId !== current.value.runId ||
+      command.data.nodeId !== current.value.wait.nodeId
+    ) {
+      return reply
+        .code(409)
+        .send(apiError('stale_run', 'Refresh before verifying published versions'));
+    }
+    const waitingRun = current.value;
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent || lifecycle === null || lifecycle.execution === null) return reply;
+    const prepared = await options.dependencyOperator.prepareAvailableResolution(
+      params.data.taskReference,
+      lifecycle,
+      waitingRun,
+      command.data,
+    );
+    if (!prepared.ok) return sendDependencyOperatorError(reply, prepared.error);
+    const resumed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
+      nodeId: waitingRun.wait.nodeId,
+      waitKind: waitingRun.wait.waitKind,
+      resolution: prepared.value.resolution,
+    });
+    return resumed.ok
+      ? sendTemporalState(reply, params.data.taskReference, resumed.value)
+      : sendTemporalRunError(reply, resumed.error);
+  });
+
+  api.post('/api/workflows/:taskReference/dependency/discovery', async (request, reply) => {
+    if (options.dependencyOperator === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('dependency_operator_unavailable', 'Dependency configuration is disabled'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const command = DependencyDiscoveryCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(
+          apiError(
+            'invalid_dependency_discovery_command',
+            'Dependency discovery payload is invalid',
+          ),
+        );
+    }
+    const current = await temporalRunService.read(params.data.taskReference);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.runtime !== 'execution' ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'dependency.discovery@1'
+    ) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'run_not_at_dependency_discovery',
+            'The run is not waiting for dependency configuration',
+          ),
+        );
+    }
+    if (
+      command.data.expectedRunId !== current.value.runId ||
+      command.data.nodeId !== current.value.wait.nodeId
+    ) {
+      return reply
+        .code(409)
+        .send(apiError('stale_run', 'Refresh before configuring the dependency wait'));
+    }
+    const waitingRun = current.value;
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent || lifecycle === null || lifecycle.execution === null) return reply;
+    const prepared = options.dependencyOperator.prepareDiscoveryResolution(
+      params.data.taskReference,
+      waitingRun,
+      command.data,
+    );
+    if (!prepared.ok) return sendDependencyOperatorError(reply, prepared.error);
+    const resumed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
+      nodeId: waitingRun.wait.nodeId,
+      waitKind: waitingRun.wait.waitKind,
+      resolution: prepared.value.resolution,
+    });
+    return resumed.ok
+      ? sendTemporalState(reply, params.data.taskReference, resumed.value)
+      : sendTemporalRunError(reply, resumed.error);
+  });
+
   api.post('/api/workflows/:taskReference/resume', async (request, reply) => {
     const params = TaskReferenceParamsSchema.safeParse(request.params);
     if (!params.success) {
@@ -885,6 +1197,8 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     }
     if (
       current.value.wait.waitKind === 'human_clarification' ||
+      current.value.wait.waitKind === 'dependency.available@1' ||
+      current.value.wait.waitKind === 'dependency.discovery@1' ||
       current.value.wait.waitKind === 'plan.approved@1' ||
       current.value.wait.waitKind === 'workflow_change.review@1' ||
       current.value.wait.waitKind === 'code_review@1'

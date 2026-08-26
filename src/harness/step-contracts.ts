@@ -30,6 +30,38 @@ export const processInputSchema = z
   })
   .strict();
 
+const DependencyChannelSchema = z.enum(['dev', 'final']);
+
+const DependencyPackageNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(/^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u);
+
+const uniquePackageNames = (packages: readonly string[], context: z.RefinementCtx): void => {
+  if (new Set(packages).size !== packages.length) {
+    context.addIssue({ code: 'custom', message: 'Dependency package names must be unique' });
+  }
+};
+
+export const dependencyWaitInputSchema = taskInputSchema
+  .extend({
+    declarationId: z.string().min(1),
+    declarationRevision: z.number().int().positive(),
+    channel: DependencyChannelSchema,
+    packages: z.array(DependencyPackageNameSchema).min(1),
+    afterObservationId: z.string().min(1).optional(),
+  })
+  .superRefine((value, context) => {
+    uniquePackageNames(value.packages, context);
+  });
+
+export const dependencyConsumeInputSchema = taskInputSchema.extend({
+  declarationId: z.string().min(1),
+  declarationRevision: z.number().int().positive(),
+  channel: DependencyChannelSchema,
+});
+
 export const WorkspaceRelativePathSchema = z
   .string()
   .min(1)
@@ -139,6 +171,35 @@ export const integrationOutputSchema = z
   })
   .strict();
 
+export const dependencyPublicationOutputSchema = z
+  .object({
+    outcome: z.literal('verified'),
+    observationId: z.string().min(1),
+    declarationId: z.string().min(1),
+    declarationRevision: z.number().int().positive(),
+    channel: DependencyChannelSchema,
+    packages: z
+      .array(
+        z
+          .object({
+            name: DependencyPackageNameSchema,
+            version: z.string().min(1),
+            registry: z.url(),
+            tarballUrl: z.url(),
+            integrity: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    uniquePackageNames(
+      value.packages.map(({ name }) => name),
+      context,
+    );
+  });
+
 export const pullRequestOutputSchema = z
   .object({
     externalId: z.string().min(1),
@@ -246,6 +307,9 @@ const contractSchemas = {
   agent_review_output: agentReviewOutputSchema,
   ci_observation_output: ciObservationOutputSchema,
   delivery_output: deliveryOutputSchema,
+  dependency_consume_input: dependencyConsumeInputSchema,
+  dependency_publication_output: dependencyPublicationOutputSchema,
+  dependency_wait_input: dependencyWaitInputSchema,
   integration_output: integrationOutputSchema,
   investigation_input: investigationInputSchema,
   investigation_output: investigationOutputSchema,

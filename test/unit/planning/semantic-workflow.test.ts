@@ -181,4 +181,140 @@ describe('semantic workflow harness', () => {
       ]),
     );
   });
+
+  it('compiles a bounded dev-to-final dependency verification workflow', () => {
+    const taskInput = {
+      objective: 'Verify the consumer against an exact shared package',
+      repository: 'onetwotrip/front-index',
+      taskId: 'FI-1309',
+    };
+    const dependency = {
+      declarationId: 'dependency-declaration:jira-link:1:jira:FI-1309',
+      declarationRevision: 1,
+      packages: ['@ott/interceptors'],
+    };
+    const dependencyConsumption = {
+      declarationId: dependency.declarationId,
+      declarationRevision: dependency.declarationRevision,
+    };
+    const result = compileSemanticWorkflow({
+      contracts: HARNESS_WORKFLOW_CONTRACTS,
+      loopExhaustedWait: 'operator_guidance@1',
+      source: {
+        schemaVersion: 1,
+        id: 'linked-package-verification',
+        version: 1,
+        root: {
+          kind: 'sequence',
+          id: 'dependency-work',
+          children: [
+            {
+              kind: 'bounded_loop',
+              id: 'dev-validation',
+              maxAttempts: 3,
+              until: 'verification.accepted@1',
+              body: {
+                kind: 'sequence',
+                id: 'dev-attempt',
+                children: [
+                  {
+                    kind: 'step',
+                    id: 'await-dev',
+                    uses: 'dependency.await_packages@1',
+                    with: { ...taskInput, ...dependency, channel: 'dev' },
+                  },
+                  {
+                    kind: 'step',
+                    id: 'consume-dev',
+                    uses: 'dependency.consume_exact@1',
+                    with: { ...taskInput, ...dependencyConsumption, channel: 'dev' },
+                  },
+                  {
+                    kind: 'step',
+                    id: 'verify-dev',
+                    uses: 'verify.acceptance@1',
+                    with: taskInput,
+                  },
+                ],
+              },
+            },
+            {
+              kind: 'step',
+              id: 'await-final',
+              uses: 'dependency.await_packages@1',
+              with: { ...taskInput, ...dependency, channel: 'final' },
+            },
+            {
+              kind: 'step',
+              id: 'consume-final',
+              uses: 'dependency.consume_exact@1',
+              with: { ...taskInput, ...dependencyConsumption, channel: 'final' },
+            },
+            {
+              kind: 'step',
+              id: 'verify-final',
+              uses: 'verify.acceptance@1',
+              with: taskInput,
+            },
+          ],
+        },
+      },
+    });
+
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    const report = validateWorkflowObligations(result.value.compiled.graph, { origin: 'jira' });
+    expect(report.issues).toEqual([]);
+    expect(result.value.compiled.graph.metadata.references).toMatchObject({
+      stepTypes: [
+        'dependency.await_packages@1',
+        'dependency.consume_exact@1',
+        'verify.acceptance@1',
+      ],
+      waits: ['operator_guidance@1'],
+    });
+  });
+
+  it('rejects exact dependency consumption without earlier verified publication evidence', () => {
+    const result = compileSemanticWorkflow({
+      contracts: HARNESS_WORKFLOW_CONTRACTS,
+      loopExhaustedWait: 'operator_guidance@1',
+      source: {
+        schemaVersion: 1,
+        id: 'unverified-dependency-consumption',
+        version: 1,
+        root: {
+          kind: 'sequence',
+          id: 'dependency-work',
+          children: [
+            {
+              kind: 'step',
+              id: 'consume-final',
+              uses: 'dependency.consume_exact@1',
+              with: {
+                objective: 'Consume an unverified package',
+                repository: 'onetwotrip/front-index',
+                taskId: 'FI-1309',
+                declarationId: 'dependency-declaration:jira-link:1:jira:FI-1309',
+                declarationRevision: 1,
+                channel: 'final',
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    const report = validateWorkflowObligations(result.value.compiled.graph, { origin: 'jira' });
+    const missingProducer = report.issues.find(
+      (issue) =>
+        issue.code === 'unsatisfied_workflow_obligation' &&
+        issue.details !== undefined &&
+        issue.details !== null &&
+        typeof issue.details === 'object' &&
+        !Array.isArray(issue.details) &&
+        issue.details.obligationId === 'artifact-producer-before-consumer',
+    );
+    expect(missingProducer?.message).toContain('dependency-publication');
+  });
 });

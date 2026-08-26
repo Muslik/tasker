@@ -22,6 +22,7 @@ import type {
   BootstrapWorkspaceContext,
   PlanningActivityCommand,
   ResolveBootstrapWaitCommand,
+  TaskRunSettings,
   WorkflowFreezeReceipt,
 } from '../bootstrap-kernel/contracts.js';
 import {
@@ -60,6 +61,9 @@ type AvailableBootstrapState = Extract<
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const trackerStatusUpdatesFrom = (settings: unknown): TaskRunSettings['trackerStatusUpdates'] =>
+  isRecord(settings) && settings.trackerStatusUpdates === 'disabled' ? 'disabled' : 'enabled';
 
 const retryGuidanceFrom = (resolution: JsonValue): string | null =>
   isRecord(resolution) &&
@@ -134,6 +138,11 @@ export async function bootstrapWorkflowV3(
   input: BootstrapWorkflowInput,
 ): Promise<BootstrapWorkflowResult> {
   const execution = workflowInfo();
+  const settings = {
+    planReview: input.settings.planReview,
+    planningStrategy: input.settings.planningStrategy,
+    trackerStatusUpdates: trackerStatusUpdatesFrom(input.settings),
+  } satisfies TaskRunSettings;
   let workspaceContext: BootstrapWorkspaceContext | null = null;
   let planningContext: BootstrapContextState | null = null;
   let draft: BootstrapDraftState | null = null;
@@ -157,7 +166,7 @@ export async function bootstrapWorkflowV3(
     workflowId: execution.workflowId,
     runId: execution.runId,
     workflowHash: null,
-    settings: input.settings,
+    settings,
     phase: 'workspace',
     workspaceContext: null,
     context: null,
@@ -303,7 +312,7 @@ export async function bootstrapWorkflowV3(
             planningSnapshot: activeContext.planningSnapshot,
             evidenceBundle: activeContext.evidenceBundle,
             commandId,
-            requestedStrategy: input.settings.planningStrategy,
+            requestedStrategy: settings.planningStrategy,
             command,
           });
           break;
@@ -426,7 +435,7 @@ export async function bootstrapWorkflowV3(
   await runPlanning({ kind: 'initial' });
 
   let approval: { readonly kind: 'automatic' | 'operator_approved' };
-  if (input.settings.planReview === 'automatic') {
+  if (settings.planReview === 'automatic') {
     nodeStates.plan_review = 'skipped';
     approval = { kind: 'automatic' };
   } else {
@@ -479,6 +488,7 @@ export async function bootstrapWorkflowV3(
         workflowRunId: execution.runId,
         planningSnapshot: acceptedDraft.planningSnapshot,
         workspace: acceptedWorkspaceContext.workspace,
+        trackerStatusUpdates: settings.trackerStatusUpdates,
         operatorGuidance: admissionGuidance,
         waitResolution: admissionResolution,
       });
@@ -549,6 +559,10 @@ export async function bootstrapWorkflowV3(
             kind: 'planning_snapshot',
             reference: acceptedDraft.planningSnapshot.artifactId,
             hash: acceptedDraft.planningSnapshot.checksum,
+          },
+          {
+            kind: 'tracker_status_updates',
+            reference: settings.trackerStatusUpdates,
           },
         ],
       },

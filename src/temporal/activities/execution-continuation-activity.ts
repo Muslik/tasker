@@ -3,6 +3,11 @@ import { Context } from '@temporalio/activity';
 import { z } from 'zod';
 
 import type { ContextDiscoveryService } from '../../control-plane/evidence-bundle.js';
+import {
+  dependencyDeclarationIdFor,
+  type DependencyDeclaration,
+  type DependencyDeclarationStore,
+} from '../../control-plane/dependency-declaration.js';
 import type { ImplementationPlanningStore } from '../../control-plane/implementation-planning.js';
 import type { WorkflowAnalyzer } from '../../control-plane/workflow-generator.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
@@ -32,6 +37,23 @@ import {
 const ContinuationRequestArtifactSchema = TaskStepOutputArtifactSchema.extend({
   details: z.object({ request: WorkflowChangeRequestSchema }).loose(),
 });
+
+type CrossRepositoryDependencyChange = Extract<
+  z.infer<typeof WorkflowChangeRequestSchema>['changes'][number],
+  { readonly kind: 'cross_repository_dependency' }
+>;
+
+type DependencyDiscoveryResolution =
+  | { readonly kind: 'not_applicable' }
+  | {
+      readonly kind: 'needs_input';
+      readonly result: z.infer<typeof PlanExecutionContinuationResultSchema>;
+    }
+  | {
+      readonly kind: 'ready';
+      readonly change: CrossRepositoryDependencyChange;
+      readonly declaration: DependencyDeclaration;
+    };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 
@@ -81,12 +103,160 @@ const continuationTask = (
 const unavailable = (waitKind: string, summary: string) =>
   PlanExecutionContinuationResultSchema.parse({ status: 'needs_input', waitKind, summary });
 
+const crossRepositoryDeclarationIdFor = (
+  consumerTaskReference: string,
+  workflowRunId: string,
+  requestArtifactId: string,
+): string =>
+  dependencyDeclarationIdFor(consumerTaskReference, {
+    kind: 'runtime_discovery',
+    workflowRunId,
+    requestArtifactId,
+  });
+
+const packageNameForComponentPath = (componentPath: string): string | null => {
+  const segments = componentPath.split('/').filter((segment) => segment.length > 0);
+  if (segments[0] !== 'packages') return null;
+  const packageRoot = segments[1];
+  if (packageRoot === undefined) return null;
+  if (packageRoot.startsWith('@')) {
+    const packageName = segments[2];
+    return packageName === undefined ? null : `${packageRoot}/${packageName}`;
+  }
+  return packageRoot;
+};
+
+const declarationMatchesRequestBoundary = (
+  declaration: DependencyDeclaration,
+  change: CrossRepositoryDependencyChange,
+): { readonly ok: true } | { readonly ok: false; readonly reason: string } => {
+  if (declaration.producerRepository !== change.repository) {
+    return {
+      ok: false,
+      reason: `requested repository ${change.repository} but declaration targets ${declaration.producerRepository}`,
+    };
+  }
+  if (change.componentPath === undefined) return { ok: true };
+
+  const expectedPackage = packageNameForComponentPath(change.componentPath);
+  if (expectedPackage === null) {
+    return {
+      ok: false,
+      reason: `component path ${change.componentPath} is not a package boundary Tasker can map to an exact dependency package`,
+    };
+  }
+  if (!declaration.packages.includes(expectedPackage)) {
+    return {
+      ok: false,
+      reason: `component path ${change.componentPath} maps to package ${expectedPackage}, but declaration packages are ${declaration.packages.join(', ')}`,
+    };
+  }
+  return { ok: true };
+};
+
+const dependencyDiscoverySummary = (input: {
+  readonly requestArtifactId: string;
+  readonly consumerTaskReference: string;
+  readonly requestedRepository: string;
+  readonly requestedOutcome: string;
+  readonly componentPath?: string;
+  readonly declarationId: string;
+  readonly declaration: DependencyDeclaration | null;
+  readonly mismatchReason?: string;
+}): string => {
+  const boundary = [
+    `request ${input.requestArtifactId}`,
+    `consumer ${input.consumerTaskReference}`,
+    `repository ${input.requestedRepository}`,
+    `outcome ${JSON.stringify(input.requestedOutcome)}`,
+    ...(input.componentPath === undefined ? [] : [`component ${input.componentPath}`]),
+  ].join('; ');
+  if (input.declaration === null) {
+    return `Dependency discovery is waiting for a declaration: ${boundary}; declarationId ${input.declarationId}`;
+  }
+  return [
+    `Dependency discovery requires a matching declaration: ${boundary}`,
+    `declarationId ${input.declaration.declarationId}`,
+    `revision ${String(input.declaration.revision)}`,
+    `hash ${input.declaration.hash}`,
+    `packages ${input.declaration.packages.join(', ')}`,
+    `mode ${input.declaration.mode}`,
+    input.mismatchReason === undefined ? null : `mismatch ${input.mismatchReason}`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('; ');
+};
+
+const resolveDependencyDiscovery = (
+  changeRequest: z.infer<typeof WorkflowChangeRequestSchema>,
+  consumerTaskReference: string,
+  workflowRunId: string,
+  requestArtifactId: string,
+  dependencyDeclarations: Pick<DependencyDeclarationStore, 'readLatest'>,
+): DependencyDiscoveryResolution => {
+  const crossRepositoryChange = changeRequest.changes.find(
+    (change): change is CrossRepositoryDependencyChange =>
+      change.kind === 'cross_repository_dependency',
+  );
+  if (crossRepositoryChange === undefined) {
+    return { kind: 'not_applicable' };
+  }
+
+  const declarationId = crossRepositoryDeclarationIdFor(
+    consumerTaskReference,
+    workflowRunId,
+    requestArtifactId,
+  );
+  const declaration = dependencyDeclarations.readLatest(declarationId);
+  if (!declaration.ok) {
+    return {
+      kind: 'needs_input',
+      result: unavailable(
+        'workflow_change.dependency-declaration-unavailable@1',
+        `Dependency declaration ${declarationId} could not be read: ${declaration.error.kind}`,
+      ),
+    };
+  }
+
+  const matches =
+    declaration.value === null
+      ? null
+      : declarationMatchesRequestBoundary(declaration.value, crossRepositoryChange);
+  if (declaration.value === null || (matches !== null && !matches.ok)) {
+    return {
+      kind: 'needs_input',
+      result: unavailable(
+        'dependency.discovery@1',
+        dependencyDiscoverySummary({
+          requestArtifactId,
+          consumerTaskReference,
+          requestedRepository: crossRepositoryChange.repository,
+          requestedOutcome: crossRepositoryChange.requestedOutcome,
+          ...(crossRepositoryChange.componentPath === undefined
+            ? {}
+            : { componentPath: crossRepositoryChange.componentPath }),
+          declarationId,
+          declaration: declaration.value,
+          ...(matches?.ok === false ? { mismatchReason: matches.reason } : {}),
+        }),
+      ),
+    };
+  }
+
+  return {
+    kind: 'ready',
+    change: crossRepositoryChange,
+    declaration: declaration.value,
+  };
+};
+
 export const createExecutionContinuationActivity = (
   ledger: LedgerRepository,
   clock: Clock,
   snapshots: Pick<ImplementationPlanningStore, 'readRunSnapshot'>,
   analyzer: WorkflowAnalyzer,
   contextDiscovery: ContextDiscoveryService,
+  dependencyDeclarations: Pick<DependencyDeclarationStore, 'readLatest'>,
 ): Pick<ExecutionWorkflowActivities, 'planExecutionContinuation'> => ({
   planExecutionContinuation: async (inputValue) => {
     const input = PlanExecutionContinuationInputSchema.parse(inputValue);
@@ -111,16 +281,6 @@ export const createExecutionContinuationActivity = (
         'The continuation request evidence is unavailable or corrupt',
       );
     }
-    if (
-      request.data.details.request.changes.some(
-        (change) => change.kind === 'cross_repository_dependency',
-      )
-    ) {
-      return unavailable(
-        'workflow_change.cross-repository@1',
-        'Cross-repository continuation requires a separately prepared child workspace',
-      );
-    }
 
     const snapshot = snapshots.readRunSnapshot(input.planningSnapshot);
     if (!snapshot.ok || snapshot.value.kind !== 'execution') {
@@ -128,6 +288,16 @@ export const createExecutionContinuationActivity = (
         'workflow_change.snapshot-required@1',
         'The parent execution snapshot is unavailable',
       );
+    }
+    const dependencyDiscovery = resolveDependencyDiscovery(
+      request.data.details.request,
+      snapshot.value.task.reference,
+      input.workflowRunId,
+      input.requestReference,
+      dependencyDeclarations,
+    );
+    if (dependencyDiscovery.kind === 'needs_input') {
+      return dependencyDiscovery.result;
     }
     const task = continuationTask(
       snapshot.value.task,
@@ -138,6 +308,24 @@ export const createExecutionContinuationActivity = (
       parentTaskSnapshot: snapshot.value.taskSnapshot,
       workflowChange: request.data.details.request,
       operatorGuidance: input.guidance,
+      ...(dependencyDiscovery.kind !== 'ready'
+        ? {}
+        : {
+            dependencyDiscovery: {
+              requestArtifactId: input.requestReference,
+              consumerTaskReference: snapshot.value.task.reference,
+              requestedRepository: dependencyDiscovery.change.repository,
+              requestedOutcome: dependencyDiscovery.change.requestedOutcome,
+              componentPath: dependencyDiscovery.change.componentPath ?? null,
+              declarationId: dependencyDiscovery.declaration.declarationId,
+              declarationRevision: dependencyDiscovery.declaration.revision,
+              declarationHash: dependencyDiscovery.declaration.hash,
+              producerTaskReference: dependencyDiscovery.declaration.producerTaskReference,
+              producerRepository: dependencyDiscovery.declaration.producerRepository,
+              packages: dependencyDiscovery.declaration.packages,
+              mode: dependencyDiscovery.declaration.mode,
+            },
+          }),
     });
     const analyzerContext = createWorkflowAnalyzerContext(task, taskSnapshot);
     const evidence = await contextDiscovery.discover({

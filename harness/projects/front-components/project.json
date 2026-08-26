@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "5",
+  "version": "7",
   "repository": "onetwotrip/front-components",
   "repositoryKind": "frontend",
   "translations": { "kind": "none" },
@@ -10,7 +10,7 @@
     "branch": { "kind": "task_key_slug" },
     "commit": {
       "kind": "conventional_task_key",
-      "allowedTypes": ["fix", "feat", "refactor", "test", "chore"],
+      "allowedTypes": ["fix", "feat", "chore"],
       "requireScope": false
     }
   },
@@ -19,14 +19,16 @@
     "services": []
   },
   "processCommands": {
-    "validation.targeted@1": {
-      "commands": [{ "command": "pnpm", "args": ["run", "lint-no-fix"] }]
-    },
     "validation.full@1": {
-      "commands": [{ "command": "pnpm", "args": ["run", "test:unit", "--runInBand"] }]
+      "commands": [{ "command": "pnpm", "args": ["run", "test:unit:ci"] }]
     },
     "validation.build@1": {
-      "commands": [{ "command": "pnpm", "args": ["run", "storybook:build"] }]
+      "commands": [
+        {
+          "command": "bash",
+          "args": ["-lc", "CI=true WORKSPACE=\"${PWD##*/}\" pnpm run storybook:build"]
+        }
+      ]
     }
   }
 }

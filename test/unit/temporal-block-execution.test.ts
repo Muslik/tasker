@@ -826,94 +826,6 @@ describe('temporal block execution activity', () => {
     );
   });
 
-  it('uses the snapshotted development publish command for shared component tasks', async () => {
-    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
-    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
-    const commands: CommandRunner['run'] = vi.fn(() =>
-      Promise.resolve({
-        status: 'exited' as const,
-        exitCode: 0,
-        stdout: 'publish ok\n',
-        stderr: '',
-        durationMs: 3,
-      }),
-    );
-
-    const componentTask = {
-      ...translationFixture,
-      repository: 'onetwotrip/front-components',
-    };
-    const componentWorkspace = {
-      ...stubWorkspace,
-      workspaceId: 'f'.repeat(24),
-      workflowId: 'tasker:component-task',
-      workflowRunId: 'run-3',
-      repository: {
-        ...stubWorkspace.repository,
-        reference: componentTask.repository,
-      },
-    };
-
-    const result = await executeRegisteredTaskStep(
-      {
-        taskReference: 'task-ref',
-        workflowId: componentWorkspace.workflowId,
-        workflowRunId: componentWorkspace.workflowRunId,
-        workflowHash: WORKFLOW_HASH,
-        nodeId: 'publish-development-package',
-        stepAttempt: 1,
-        uses: 'component.dev_publish@1',
-        activityDelivery: { kind: 'single_attempt' },
-        workspace: componentWorkspace,
-        planningSnapshot: {
-          artifactId: 'planning-snapshot:test',
-          checksum: 'd'.repeat(64),
-        },
-        operatorGuidance: null,
-        waitResolution: null,
-        input: {
-          repository: componentTask.repository,
-          taskId: translationFixture.taskId,
-        },
-      },
-      {
-        snapshots: {
-          readRunSnapshot: () =>
-            ok(
-              makeSnapshot('component.dev_publish@1', {
-                task: componentTask,
-                repositoryReference: componentTask.repository,
-                workspacePath: componentWorkspace.path,
-                workspaceId: componentWorkspace.workspaceId,
-              }),
-            ),
-        },
-        currentSteps: createCurrentStepRegistry(pack),
-        traces,
-        mutationRecovery,
-        agentRunner: {
-          run: vi.fn(),
-        },
-        commands: workspaceCommands(commands),
-        workspaces: stubWorkspaceStore,
-      },
-      {
-        attempt: 1,
-        cancellationSignal: new AbortController().signal,
-        heartbeat: () => {},
-      },
-    );
-
-    expect(result).toMatchObject({ status: 'completed' });
-    expect(commands).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: 'pnpm',
-        args: ['component:publish-dev'],
-        cwd: componentWorkspace.path,
-      }),
-    );
-  });
-
   it('persists a reconciled integration result before returning it to Temporal', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
@@ -1155,6 +1067,7 @@ describe('temporal block execution activity', () => {
           reference: 'planning-snapshot:test',
           hash: 'd'.repeat(64),
         },
+        { kind: 'tracker_status_updates' as const, reference: 'disabled' },
       ],
       operatorGuidance: null,
       waitResolution: null,
@@ -1171,6 +1084,9 @@ describe('temporal block execution activity', () => {
     expect(first).toMatchObject({ status: 'needs_input', waitKind: 'code_review@1' });
     expect(redelivered).toEqual(first);
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ trackerStatusUpdates: 'disabled' }),
+    );
   });
 
   it('advances the execution graph only after an accepted BlockReceipt', async () => {

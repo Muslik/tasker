@@ -90,7 +90,6 @@ describe('production architecture boundaries', () => {
       'deliver.pull-request@1',
       'code_review@1',
       'translation_complete@1',
-      'final_publish@1',
     ];
 
     expect(offenders('src/planning/{contracts,obligations}.ts', companyReferences)).toEqual([]);

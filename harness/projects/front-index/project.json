@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "version": "1",
+  "repository": "onetwotrip/front-index",
+  "repositoryKind": "frontend",
+  "translations": { "kind": "none" },
+  "ci": { "kind": "jenkins", "job": "front-index" },
+  "git": {
+    "baseBranch": "master",
+    "branch": { "kind": "task_key_slug" },
+    "commit": { "kind": "task_key_subject" }
+  },
+  "workspaceRuntime": {
+    "bootstrap": ["pnpm install --frozen-lockfile", "pnpm exec playwright install chromium"],
+    "services": [
+      {
+        "id": "front-index-app",
+        "command": "pnpm start",
+        "aliases": ["local.onetwotrip.com"],
+        "readyCheck": "curl -k -I --fail --max-time 5 https://local.onetwotrip.com:3000 >/dev/null"
+      }
+    ]
+  },
+  "processCommands": {
+    "validation.build@1": {
+      "commands": [{ "command": "pnpm", "args": ["run", "build:all"] }]
+    }
+  }
+}

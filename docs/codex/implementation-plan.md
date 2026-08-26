@@ -112,11 +112,10 @@ infrastructure, and unknown results remain states of the active Delivery block a
 re-observe on resume.
 Automatic Jenkins retrigger remains a later reconciled effect rather than a hidden read-side mutation.
 
-Jira lifecycle transitions now preflight provider-owned field requirements for both
-admission and review-ready paths. Missing values become an actionable durable wait
-before mutation; Resume re-observes Jira and continues the same block without replaying
-completed transitions or delivery work. Jira 400 field/validator reasons remain a
-fallback for server rules that transition metadata cannot describe.
+Jira lifecycle transitions preflight provider-owned field requirements for admission and
+review-ready paths only when the immutable run setting enables status updates. Missing values and
+Jira 400/403 field/validator responses become a non-blocking `not_applied` outcome. Evidence and the
+managed PR comment are independently reconciled before the optional review transition.
 Review-ready delivery reconciles one configured-prefix managed PR comment across task
 runs: it updates the old link, accepts an existing human comment with the exact current
 URL without rewriting it, and stops on multiple managed matches.

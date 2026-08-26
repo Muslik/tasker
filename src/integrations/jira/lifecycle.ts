@@ -786,6 +786,19 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       issue = assignment.issue;
     }
 
+    if (request.trackerStatusUpdates === 'disabled') {
+      return {
+        status: 'completed',
+        summary: `Jira ${issue.issueKey} admitted without changing status ${issue.status}`,
+        output: {
+          externalId: issue.issueKey,
+          status: issue.status,
+          statusUpdate: { outcome: 'disabled' },
+        },
+        artifactIds,
+      };
+    }
+
     const targetStatus = admission.statusPath.at(-1);
     if (targetStatus === undefined) {
       return blocked('configuration', 'Jira lifecycle status path is empty', {}, artifactIds);
@@ -794,12 +807,17 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       const fromIndex = statusIndex(admission.statusPath, issue.status);
       const toStatus = admission.statusPath[fromIndex + 1];
       if (fromIndex < 0 || toStatus === undefined) {
-        return blocked(
-          'invalid_request',
-          `Jira status ${issue.status} is not eligible for autonomous admission`,
-          { issueKey: issue.issueKey, status: issue.status, statusPath: admission.statusPath },
+        const reason = `Jira status ${issue.status} is outside the configured update path`;
+        return {
+          status: 'completed',
+          summary: `Jira ${issue.issueKey} admitted without changing status ${issue.status}: ${reason}`,
+          output: {
+            externalId: issue.issueKey,
+            status: issue.status,
+            statusUpdate: { outcome: 'not_applied', reason },
+          },
           artifactIds,
-        );
+        };
       }
       const transitioned = await this.ensureTransition(
         request,
@@ -809,7 +827,18 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
         admission.statusPath,
         artifactIds,
       );
-      if (transitioned.status === 'blocked') return transitioned;
+      if (transitioned.status === 'blocked') {
+        return {
+          status: 'completed',
+          summary: `Jira ${issue.issueKey} admitted without changing status ${issue.status}: ${transitioned.summary}`,
+          output: {
+            externalId: issue.issueKey,
+            status: issue.status,
+            statusUpdate: { outcome: 'not_applied', reason: transitioned.summary },
+          },
+          artifactIds: transitioned.artifactIds,
+        };
+      }
       issue = transitioned.issue;
     }
 
@@ -853,12 +882,6 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       return blocked('invalid_request', 'Jira issue is assigned to another person', {
         issueKey: issue.issueKey,
         assignee: issue.assignee.accountName,
-      });
-    }
-    if (statusIndex(admission.statusPath, issue.status) < 0) {
-      return blocked('invalid_request', `Jira status ${issue.status} is not agent-eligible`, {
-        issueKey: issue.issueKey,
-        status: issue.status,
       });
     }
     return null;

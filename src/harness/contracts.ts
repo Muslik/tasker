@@ -60,6 +60,9 @@ export const HarnessContractNameSchema = z.enum([
   'agent_review_output',
   'ci_observation_output',
   'delivery_output',
+  'dependency_consume_input',
+  'dependency_publication_output',
+  'dependency_wait_input',
   'integration_output',
   'investigation_input',
   'investigation_output',
@@ -357,20 +360,6 @@ export const HarnessProjectManifestSchema = z
   })
   .strict();
 
-export const GlobalPackageRuleManifestSchema = z
-  .object({
-    id: z.string().min(1),
-    repositoryKind: z.literal('frontend'),
-    pathPrefix: z.string().min(1),
-    publication: z
-      .object({
-        kind: z.literal('human_final'),
-        developmentPublishCommand: z.string().min(1),
-      })
-      .strict(),
-  })
-  .strict();
-
 export const HarnessCompanyManifestSchema = z
   .object({
     schemaVersion: z.literal(2),
@@ -387,7 +376,6 @@ export const HarnessCompanyManifestSchema = z
       })
       .strict(),
     retrospective: z.object({ enabled: z.boolean() }).strict().default({ enabled: true }),
-    globalPackageRules: z.array(GlobalPackageRuleManifestSchema),
     apiPricing: ApiPricingTableSchema,
     executionProfiles: z
       .record(ExecutionProfileNameSchema, ExecutionProfileSchema)

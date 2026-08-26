@@ -1,6 +1,9 @@
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
+  ConfigureTaskDependencyCommandSchema,
+  DependencyAvailableCommandSchema,
+  DependencyDiscoveryCommandSchema,
   ExpectedRunCommandSchema,
   PlanningClarificationSubmissionSchema,
   RestartRunCommandSchema,
@@ -20,6 +23,9 @@ import type {
   RunStartCommand,
   RestartRunCommand,
   ResumeRunCommand,
+  ConfigureTaskDependencyCommand,
+  DependencyAvailableCommand,
+  DependencyDiscoveryCommand,
   WorkflowChangeReviewCommand,
   OperatorActivityResponse,
   OperatorExecutionAttempt,
@@ -33,6 +39,10 @@ import type {
   ExpectedRunCommand,
   PlanningClarificationSubmission,
 } from '../control-plane/operator-contracts.js';
+import {
+  DependencyDeclarationSchema,
+  type DependencyDeclaration,
+} from '../control-plane/dependency-contracts.js';
 import {
   PlanReviewCommandSchema,
   PlanReviewHistoryResponseSchema,
@@ -301,6 +311,69 @@ export const resumeWorkflow = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Resume response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const configureTaskDependency = async (
+  taskReference: string,
+  commandInput: ConfigureTaskDependencyCommand,
+): Promise<DependencyDeclaration> => {
+  const command = ConfigureTaskDependencyCommandSchema.parse(commandInput);
+  const result = await fetchJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/dependencies/configure`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = DependencyDeclarationSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Dependency configuration response does not match the cockpit contract');
+  }
+  return parsed.data;
+};
+
+export const resolveDependencyAvailable = async (
+  taskReference: string,
+  commandInput: DependencyAvailableCommand,
+): Promise<ExecutionRunView> => {
+  const command = DependencyAvailableCommandSchema.parse(commandInput);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/dependency/available`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Dependency availability response does not match the cockpit contract');
+  }
+  return parsed.data;
+};
+
+export const resolveDependencyDiscovery = async (
+  taskReference: string,
+  commandInput: DependencyDiscoveryCommand,
+): Promise<ExecutionRunView> => {
+  const command = DependencyDiscoveryCommandSchema.parse(commandInput);
+  const result = await fetchJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/dependency/discovery`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(command),
+    },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = ExecutionRunViewSchema.safeParse(result.body);
+  if (!parsed.success) {
+    throw new Error('Dependency discovery response does not match the cockpit contract');
+  }
   return parsed.data;
 };
 

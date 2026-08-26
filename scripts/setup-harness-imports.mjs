@@ -14,6 +14,7 @@ const projectIds = [
   'front-bus',
   'front-components',
   'front-core-packages',
+  'front-index',
   'front-railways',
 ];
 
@@ -24,6 +25,7 @@ const requestedImports = [
   ['work-shared-rules', resolve(interactiveHarnessRoot, 'work', 'shared', 'rules')],
   ...projectIds.flatMap((projectId) => [
     [`project-skills/${projectId}`, resolve(interactiveHarnessRoot, 'work', projectId, 'skills')],
+    [`project-rules/${projectId}`, resolve(interactiveHarnessRoot, 'work', projectId, 'rules')],
     [
       `project-overrides/${projectId}`,
       resolve(interactiveHarnessRoot, 'work', projectId, 'overrides'),

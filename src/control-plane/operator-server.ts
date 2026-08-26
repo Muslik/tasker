@@ -31,6 +31,9 @@ import {
 import { systemClock } from '../shared/clock.js';
 import { RetrospectiveStore } from '../retrospective/index.js';
 import { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
+import { DependencyDeclarationStore } from './dependency-declaration.js';
+import { DependencyDeclarationGenerationSubjectResolver } from './dependency-declaration-generation-subject.js';
+import { DependencyOperatorService } from './dependency-operator-service.js';
 import {
   connectTemporalTaskRunService,
   DEFAULT_TEMPORAL_CLIENT_CONFIGURATION,
@@ -48,6 +51,8 @@ import {
   PersistedGenerationSubjectResolver,
   PersistedGenerationSubjectRunStore,
 } from './persisted-generation-subject.js';
+import { VerifiedPackagePublicationStore } from './verified-package-publication.js';
+import { NexusPackageObserver } from '../integrations/nexus/index.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
   DockerWorkspaceCommandRunner,
@@ -97,10 +102,14 @@ export const startOperatorServer = async (): Promise<void> => {
     nodeCommandRunner,
     new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
   );
+  const dependencyDeclarations = new DependencyDeclarationStore(ledger.repository, systemClock);
   const subjects = new WorkflowGenerationSubjectSource(
     [
       new PersistedGenerationSubjectResolver(service),
-      new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+      new DependencyDeclarationGenerationSubjectResolver(
+        new JiraWorkflowGenerationSubjectResolver(jiraIssueService),
+        dependencyDeclarations,
+      ),
     ],
     new PersistedGenerationSubjectRunStore(service),
   );
@@ -126,6 +135,16 @@ export const startOperatorServer = async (): Promise<void> => {
     workflowFreezes,
     implementationPlanning,
   );
+  const verifiedPackagePublications = new VerifiedPackagePublicationStore(
+    ledger.repository,
+    systemClock,
+  );
+  const dependencyOperator = new DependencyOperatorService(
+    dependencyDeclarations,
+    ledger.repository,
+    verifiedPackagePublications,
+    new NexusPackageObserver(),
+  );
   const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
   const bitbucketReview =
     bitbucketConfiguration === null
@@ -143,6 +162,10 @@ export const startOperatorServer = async (): Promise<void> => {
     implementationPlanning,
     executionActivity: new LedgerExecutionActivityReader(ledger.repository),
     ...(bitbucketReview === undefined ? {} : { bitbucketReview }),
+    dependencyOperator,
+    dependencyDeclarations,
+    artifacts: ledger.repository,
+    verifiedPackagePublications,
     temporalRunService: temporalRuntime.service,
     blockReceipts: new BlockReceiptStore(ledger.repository, systemClock),
     planReviews: new PlanReviewStore(ledger.repository, systemClock),

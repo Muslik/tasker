@@ -29,7 +29,7 @@ const inputFor = (
 ): BootstrapWorkflowInput => ({
   schemaVersion: 3,
   taskReference,
-  settings: { planReview, planningStrategy: 'fast' },
+  settings: { planReview, planningStrategy: 'fast', trackerStatusUpdates: 'enabled' },
 });
 
 describe('Bootstrap Workflow v3 recovery', () => {
@@ -100,6 +100,7 @@ describe('Bootstrap Workflow v3 recovery', () => {
         settings: {
           planReview: 'automatic',
           planningStrategy: 'fast',
+          trackerStatusUpdates: 'enabled',
         },
       }),
     ).toEqual({
@@ -319,6 +320,7 @@ describe('Bootstrap infrastructure failure visibility', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
+            trackerStatusUpdates: 'enabled',
           },
         }),
       ).toMatchObject({ ok: true });
@@ -419,6 +421,7 @@ describe('Bootstrap investigation recovery', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
+            trackerStatusUpdates: 'enabled',
           },
         }),
       ).toMatchObject({ ok: true });
@@ -557,6 +560,7 @@ describe('Bootstrap planning failure recovery', () => {
           settings: {
             planReview: 'automatic',
             planningStrategy: 'fast',
+            trackerStatusUpdates: 'enabled',
           },
         }),
       ).toMatchObject({ ok: true });

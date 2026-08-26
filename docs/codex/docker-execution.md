@@ -129,6 +129,13 @@ files such as `.nvmrc`, installs the declared toolchain into the task cache, and
 shims. A repository with no supported version file blocks during workspace preparation instead of
 falling back to the image's Node. Corepack then resolves pnpm from `packageManager`.
 
+External package dependency checks are control-plane reads, not workspace package publication.
+Configure them with `TASKER_NEXUS_REGISTRY_URL` and an explicit `TASKER_NEXUS_AUTH_KIND` of
+`anonymous`, `bearer`, or `basic`; bearer uses `TASKER_NEXUS_TOKEN`, while basic uses
+`TASKER_NEXUS_USERNAME` plus `TASKER_NEXUS_PASSWORD`. Tasker records an available dependency only
+after exact-version metadata contains a tarball URL and integrity or shasum. These credentials are
+never copied into the workspace harness snapshot.
+
 `mise` does not guess project bootstrap. The project policy explicitly declares steps
 such as `pnpm install --frozen-lockfile` and `pnpm run dicts`. The `front-avia` policy
 also declares `pnpm start`, network aliases, and the HTTPS readiness probe. Therefore

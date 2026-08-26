@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createOperatorWorkflowService,
+  DependencyDeclarationGenerationSubjectResolver,
+  DependencyDeclarationStore,
   OPERATOR_WORKFLOW_OPERATION_PROJECTION,
   PersistedGenerationSubjectResolver,
   PersistedGenerationSubjectRunStore,
@@ -257,6 +259,117 @@ describe('operation-scoped workflow persistence', () => {
     expect(restartedSource.resolve(taskReference, 'run-b')).toMatchObject({
       ok: true,
       value: { task: { description: 'second Jira revision' } },
+    });
+    restartedLedger.close();
+  });
+
+  it('keeps run-captured dependency declarations frozen while later runs see newer revisions', () => {
+    const filename = databasePath();
+    const clock = makeAdjustableClock('2026-08-25T12:00:00.000Z');
+    const taskReference = 'jira:AVIA-12045';
+    const remote = {
+      resolve: () => ({
+        ok: true as const,
+        value: {
+          schemaVersion: 1 as const,
+          repositoryPath: '/managed/front-avia',
+          task: makePlanningTaskSnapshot('avia-13236-short-bug', {
+            origin: 'jira',
+            reference: taskReference,
+          }),
+          taskSnapshot: { origin: 'jira', issue: { issueKey: 'AVIA-12045' } },
+        },
+      }),
+    };
+    const firstLedger = openSqliteLedger({ filename, clock });
+    const firstService = createOperatorWorkflowService(firstLedger.repository, clock);
+    const firstDeclarations = new DependencyDeclarationStore(firstLedger.repository, clock);
+    const firstSource = new WorkflowGenerationSubjectSource(
+      [new DependencyDeclarationGenerationSubjectResolver(remote, firstDeclarations)],
+      new PersistedGenerationSubjectRunStore(firstService),
+    );
+
+    const initialDeclaration = firstDeclarations.declare({
+      consumerTaskReference: taskReference,
+      producerTaskReference: 'jira:AVIA-400',
+      producerRepository: 'onetwotrip/front-core-packages',
+      packages: ['@ott/core-button'],
+      mode: 'final_only',
+      source: {
+        kind: 'runtime_discovery',
+        workflowRunId: 'run-a',
+        requestArtifactId: 'artifact:dependency-request:1',
+      },
+    });
+    if (!initialDeclaration.ok) throw new Error(JSON.stringify(initialDeclaration.error));
+
+    expect(firstSource.resolve(taskReference, 'run-a')).toMatchObject({
+      ok: true,
+      value: {
+        taskSnapshot: {
+          dependencyDeclarations: [{ revision: 1, packages: ['@ott/core-button'] }],
+        },
+      },
+    });
+
+    const revisedDeclaration = firstDeclarations.declare({
+      consumerTaskReference: taskReference,
+      producerTaskReference: 'jira:AVIA-400',
+      producerRepository: 'onetwotrip/front-core-packages',
+      packages: ['@ott/core-button', '@ott/core-theme'],
+      mode: 'final_only',
+      source: {
+        kind: 'runtime_discovery',
+        workflowRunId: 'run-a',
+        requestArtifactId: 'artifact:dependency-request:1',
+      },
+    });
+    if (!revisedDeclaration.ok) throw new Error(JSON.stringify(revisedDeclaration.error));
+
+    expect(firstSource.resolve(taskReference, 'run-a')).toMatchObject({
+      ok: true,
+      value: {
+        taskSnapshot: {
+          dependencyDeclarations: [{ revision: 1, packages: ['@ott/core-button'] }],
+        },
+      },
+    });
+    expect(firstSource.resolve(taskReference, 'run-b')).toMatchObject({
+      ok: true,
+      value: {
+        taskSnapshot: {
+          dependencyDeclarations: [
+            { revision: 2, packages: ['@ott/core-button', '@ott/core-theme'] },
+          ],
+        },
+      },
+    });
+    firstLedger.close();
+
+    const restartedLedger = openSqliteLedger({ filename, clock });
+    const restartedService = createOperatorWorkflowService(restartedLedger.repository, clock);
+    const restartedDeclarations = new DependencyDeclarationStore(restartedLedger.repository, clock);
+    const restartedSource = new WorkflowGenerationSubjectSource(
+      [new DependencyDeclarationGenerationSubjectResolver(remote, restartedDeclarations)],
+      new PersistedGenerationSubjectRunStore(restartedService),
+    );
+    expect(restartedSource.resolve(taskReference, 'run-a')).toMatchObject({
+      ok: true,
+      value: {
+        taskSnapshot: {
+          dependencyDeclarations: [{ revision: 1, packages: ['@ott/core-button'] }],
+        },
+      },
+    });
+    expect(restartedSource.resolve(taskReference, 'run-b')).toMatchObject({
+      ok: true,
+      value: {
+        taskSnapshot: {
+          dependencyDeclarations: [
+            { revision: 2, packages: ['@ott/core-button', '@ott/core-theme'] },
+          ],
+        },
+      },
     });
     restartedLedger.close();
   });

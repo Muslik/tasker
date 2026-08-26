@@ -7,17 +7,11 @@
     "command.run",
     "code-review.write",
     "git.write",
-    "package.publish",
     "repository.read",
     "tracker.write",
     "workspace.write"
   ],
-  "processCommands": {
-    "component.dev-publish@1": {
-      "commands": [{ "command": "pnpm", "args": ["component:publish-dev"] }],
-      "timeoutMs": 2100000
-    }
-  },
+  "processCommands": {},
   "workspaceRuntime": {
     "engine": "docker",
     "image": {
@@ -254,16 +248,5 @@
         "review": "review"
       }
     }
-  },
-  "globalPackageRules": [
-    {
-      "id": "frontend-ott-package",
-      "repositoryKind": "frontend",
-      "pathPrefix": "packages/@ott/",
-      "publication": {
-        "kind": "human_final",
-        "developmentPublishCommand": "pnpm component:publish-dev"
-      }
-    }
-  ]
+  }
 }

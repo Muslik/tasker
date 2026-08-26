@@ -13,12 +13,14 @@ bootstrap program.
 | `work/shared/*`              | `shared-skills/*`                | pinned hidden catalog; scope declared in `manifest.json` |
 | `work/<profile>/skills/*`    | `profiles/<profile>/skills/*`    | pinned hidden catalog; project step binding              |
 | profile operational skills   | `profiles/<profile>/step-skills` | pinned hidden catalog; project step binding              |
+| `work/<profile>/rules/*`     | `profiles[].ruleSources`         | pinned project-only `AGENTS.md` / `CLAUDE.md` rules      |
 | `work/<profile>/overrides/*` | `profiles/<profile>/guidance/*`  | pinned `.ai/**`, `AGENTS.md`, `CLAUDE.md` rules          |
 | `work/lib/*`                 | `lib/*`                          | `.tasker/harness/lib/*` for integration skill scripts    |
 | `work/bin/with-env`          | portable `bin/with-env`          | `.tasker/harness/bin/with-env`                           |
 
-The initial manifest declares six repositories: `front-avia`, `front-backoffice`,
-`front-bus`, `front-components`, `front-core-packages`, and `front-railways`.
+The initial manifest declares seven repositories: `front-avia`, `front-backoffice`,
+`front-bus`, `front-components`, `front-core-packages`, `front-index`, and
+`front-railways`.
 
 Project-owned `.ai` files arrive with the managed clone and remain the repository's
 source of truth. Tasker adds only `.ai/tasker.md`; it does not duplicate a repository's
@@ -30,8 +32,8 @@ When the repository already tracks one of those root files, bootstrap composes
 hashes the result, and marks it `skip-worktree`. When the file does not exist, the delta
 is materialized as the complete file. This keeps repository rules and Tasker rules
 simultaneously, without adding either to the task diff. `front-components` has no
-repository architecture guidance, so its profile states that fact instead of borrowing
-rules from another project.
+repository architecture guidance, so its imported project override supplies the minimal
+repository boundary instead of borrowing rules from another project.
 
 ## Initial project validation
 
@@ -45,26 +47,34 @@ stops at its first non-zero result.
 | `front-bus`           | unavailable                                                      | unavailable                      | `pnpm run build`           | unavailable |
 | `front-avia`          | `typecheck` → `lint:eslint` → `lint:stylelint` → `lint:circular` | targeted → `test:unit` → build   | `pnpm run build`           | unavailable |
 | `front-core-packages` | `node type-check.mjs` → `pnpm run linters`                       | `pnpm run test:unit --runInBand` | `pnpm run build-packages`  | unavailable |
-| `front-components`    | `pnpm run lint-no-fix`                                           | `pnpm run test:unit --runInBand` | `pnpm run storybook:build` | unavailable |
+| `front-index`         | unavailable                                                      | unavailable                      | `pnpm run build:all`       | unavailable |
+| `front-components`    | unavailable                                                      | `pnpm run test:unit:ci`          | `pnpm run storybook:build` | unavailable |
 | `front-backoffice`    | unavailable                                                      | unavailable                      | `pnpm run build`           | unavailable |
 
 `test:ui` is deliberately not registered for any project. Today the process ABI has no
 typed Playwright selector, so exposing it would let an ordinary validation node launch
 the complete visual suite. Likewise `front-backoffice`'s
 `agent:eslint-for-changed` is excluded because it runs `eslint --fix` and mutates the
-workspace. Missing categories stay unavailable to the planner instead of falling back
-to an expensive or mutating command.
+workspace. `front-index` targeted validation is unavailable because clean `master` reports
+existing TypeScript errors; full validation stays unavailable until a smoke-backed bounded selector
+proves a narrower visual/runtime path than the full matrix. Missing categories stay unavailable to
+the planner instead of falling back to an expensive or mutating command. `front-components`
+targeted validation is unavailable because its root `lint-no-fix` resolves an incompatible hoisted
+ESLint instead of the workspace-owned legacy configuration; its CI-faithful unit and Storybook
+commands remain registered.
 
-These declarations are executable policy. `pnpm harness:smoke` runs them in the same Docker
-runtime used by task Activities against disposable Tasker-owned worktrees. Five profiles currently
+These declarations are executable policy. `pnpm harness:smoke` first materializes the pinned
+workspace profile, then runs commands in the same Docker runtime used by task Activities against
+disposable Tasker-owned worktrees. Seven profiles currently
 pass every registered command on a clean base. `front-bus` full validation was removed because its
 test command finds no tests; `front-backoffice` targeted validation was removed because clean
-master currently reports TypeScript failures. `front-components` remains unverified while its
-Bitbucket lookup returns VPN/authorization `403`.
+master currently reports TypeScript failures. `front-index` likewise exposes only its smoke-proven
+build because clean `master` reports existing targeted TypeScript failures.
 
 ```sh
 pnpm harness:smoke
 TASKER_SMOKE_PROJECTS=front-components pnpm harness:smoke
+TASKER_SMOKE_PROJECTS=front-index pnpm harness:smoke
 ```
 
 Clones, worktrees, Docker runtimes, and JSON reports live under
@@ -94,7 +104,7 @@ run snapshot. A known model produces a `price_table` estimate with the exact tab
 provider-reported amount is retained when no row exists; otherwise the receipt is explicitly
 `unrated`. These are hypothetical API equivalents, never claims about subscription charges.
 
-All six profiles currently use `translations.kind = none`. This does not say that the
+All seven profiles currently use `translations.kind = none`. This does not say that the
 repository has no localized text; it says Tasker has no special human translation
 handoff for that project. Ordinary locale-file edits remain implementation work. A
 future proven extract → human wait → pull process uses `human_handoff` plus explicit
@@ -194,8 +204,8 @@ skills as project-ambient guidance, matching the interactive harness.
 ## Local imports from the interactive harness
 
 Run `pnpm harness:setup` once per machine. It creates ignored authoring symlinks for global
-skills/rules, selected `work/shared` skills/rules, and available project skills/overrides (override
-the source with `TASKER_INTERACTIVE_HARNESS_PATH`). The manifest allowlists all global skills,
+skills/rules, selected `work/shared` skills/rules, and available project skills/rules/overrides
+(override the source with `TASKER_INTERACTIVE_HARNESS_PATH`). The manifest allowlists all global skills,
 only `ai-assistance`, `playwright-demo`, `playwright`, and `review-process` from shared, and the
 declared project packages.
 
@@ -228,13 +238,16 @@ changes. Planning reads the same configured filesystem that later execution uses
   `manifest.json` for a semantic change. The content hash is computed automatically.
 - The change affects newly bootstrapped runs only. Existing worktrees keep their pinned
   snapshot until their run finishes.
-- Add a project by creating its guidance and optional skill packages, then declare
-  repository aliases, scoped `skillSources`, and `stepBindings` in `manifest.json`. No
+- Add a project by creating its guidance and optional skill/rule packages, then declare
+  repository aliases, scoped `skillSources`, `ruleSources`, and `stepBindings` in `manifest.json`. No
   orchestrator or Temporal code changes are required.
 - Put Tasker-only operational rules in `.ai/tasker.md`. Keep repository architecture in
   the repository's own `.ai`. Imported project overrides own the complete base content
   of `AGENTS.md`, `CLAUDE.md`, and matching `.ai/*.md`; profile guidance contains only
   the managed-run delta appended after that base.
+- Put reusable project-only Markdown under the interactive profile's `rules/` directory and
+  declare it through `profiles[].ruleSources`; Tasker snapshots it instead of following a live
+  symlink during execution.
 - Add a package under `shared-skills`, `integration-skills`, or a profile directory and
   explicitly list its logical name in one `skillSources` entry. Directory placement
   alone grants no visibility.

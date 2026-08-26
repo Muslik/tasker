@@ -42,6 +42,7 @@ const requestFor = (taskReference: string): IntegrationStepExecutionRequest => (
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: loadHarnessPack().policies,
   project: null,
+  trackerStatusUpdates: 'enabled',
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,

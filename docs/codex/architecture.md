@@ -21,7 +21,7 @@ The operator normally intervenes only to:
 2. approve or revise the implementation plan when plan review was requested;
 3. guide an agent that explicitly asks for help after bounded recovery;
 4. review the PR and send comments back for revision;
-5. complete a human-only gate such as translation or final package publication.
+5. complete a human-only gate such as translation.
 
 No task is silently discarded because a process, worker, laptop, VPN, provider, or
 remote API failed. Resumption continues from the failed boundary and keeps the
@@ -171,16 +171,14 @@ does not receive Tasker's private before-reproduction evidence automatically; fi
 demo evidence may be published during delivery when the task policy requests it.
 These obligations add no vendor branches to the compiler or Temporal Workflow.
 
-Jira remains the source of truth for transition prerequisites. Before either admission
-or review-ready mutation, its adapter reads `transitions.fields` and the current values
-of required fields without defaults. Missing fields open an actionable durable wait
-before a mutation intent is created. The operator fills the field (or performs an
-intentionally human-only transition) and resumes the same block; the completed graph
-prefix, worktree, PR, and CI evidence are preserved. Tasker never invents estimates or
-other business values. Jira validators may still reject a transition after preflight;
-structured 400 reasons remain visible in the same operator action.
+Jira remains the source of truth for transition prerequisites, but status movement is not an
+execution gate. Each immutable run chooses whether Tasker should attempt Jira status updates.
+When enabled, the adapter reads `transitions.fields` and current required values without defaults;
+missing fields, unavailable transitions, and Jira 400/403 responses are recorded as `not_applied`
+and execution continues. Tasker never invents or writes estimates and other business values.
 
-The review-ready adapter owns one Tasker-managed PR comment per Jira issue. Its
+The review-ready adapter publishes final evidence and owns one Tasker-managed PR comment per Jira
+issue before it attempts the optional status transition. Its
 configured prefix is the stable remote identity: a later run updates that comment with
 the current PR link instead of appending another one. An existing non-Tasker comment
 that already contains the exact PR URL is accepted without rewriting human text. More
@@ -296,7 +294,8 @@ ExecutionWorkflow(frozenExecutableIr, semanticWorkflowReference, runSettings, co
 The Bootstrap Workflow owns workspace/context preparation, investigation admission,
 mandatory planning, optional plan review, reconciled task-source admission, deterministic draft
 validation, and the immutable freeze receipt. Jira admission runs after plan acceptance and before
-freeze/Execution, so a 400/403 waits on the same run and worktree without becoming a semantic node.
+freeze/Execution, but a status-transition 400/403 is a non-blocking observation rather than a
+semantic node or durable wait.
 The Execution Workflow receives only the accepted frozen
 executable IR plus opaque semantic/artifact references. It never discovers planning
 nodes by name.
@@ -356,7 +355,7 @@ protocol:
 - `verification`: exact project process operations plus optional runtime/visual agent
   judgment;
 - `delivery`: typed Git/tracker/SCM/CI operations with prepare/execute/reconcile behavior;
-- task-specific external/human protocols such as translations or package publication.
+- task-specific external/human protocols such as translations.
 
 An internal operation remains typed and independently receipted. Grouping it under a
 semantic block does not turn several remote mutations into one unobservable or
@@ -457,7 +456,7 @@ materialization, transcript capture, normalized usage, timeout, cancellation, an
 receipt metadata. Adding another provider must add an adapter and registered profile;
 it must not add provider branches to the graph or interpreter.
 
-Temporal delivery does not make a Jira comment, git push, package publish, or PR update
+Temporal delivery does not make a Jira comment, git push, or PR update
 exactly once. External mutations use a Tasker idempotency key and this protocol:
 
 ```text
@@ -490,7 +489,7 @@ Plan size is selected by deterministic heuristics plus planner evidence:
 
 - small plan for bounded, local, low-risk changes;
 - normal plan for multi-surface or uncertain work;
-- consensus/`ralplan` only for high ambiguity, cross-repo/publication work, or explicit
+- consensus/`ralplan` only for high ambiguity, cross-repo work, or explicit
   operator choice.
 
 The operator may send plan feedback. That creates a new immutable planning Activity
@@ -501,7 +500,7 @@ only when explicitly selected and otherwise affect future runs.
 
 Initial assembly cannot know everything. Reproduction or implementation may discover
 a shared component in another repository, an external translation process, new visual
-verification, or a missing human publication gate.
+verification, or another missing human-owned prerequisite.
 
 Expected feedback is not graph evolution. Verification rejection, agent-review changes,
 task-caused CI failure, and actionable PR review are typed outcomes of bounded loops
@@ -519,9 +518,12 @@ does not mutate the accepted graph. The parent Workflow:
    same Execution Workflow and workspace, so the accepted parent graph never mutates;
 6. resumes the frozen parent traversal only after that suffix reaches its terminal.
 
-Cross-repository continuation is not silently forced through the parent workspace. It
-opens a typed prerequisite until Tasker has an explicit child-workspace lifecycle and
-operator projection for it.
+Cross-repository implementation is never forced through the parent workspace. A discovered
+dependency opens a typed operator boundary that records a producer task/repository and exact package
+requirements. Producer work remains an independent run. Once a human-owned package publication is
+observed in Nexus, the accepted continuation contains only consumer-repository blocks: await the
+verified artifact, consume its exact version, and re-verify the consumer. Arbitrary child workspaces
+remain unsupported.
 
 During stabilization, every graph revision is operator-reviewable. Once retrospective
 evidence shows a class is reliable, policy may auto-accept that class. The validator is
@@ -539,7 +541,8 @@ Waits are first-class domain states projected from Temporal history:
 - `plan_review`;
 - `agent_guidance_required` after bounded recovery;
 - `translation_pending`;
-- `dev_publish_pending` or `final_publish_pending`;
+- `dependency_discovery_pending`;
+- `dependency_available_pending`;
 - `ci_pending`;
 - `code_review_pending`;
 - `infrastructure_blocked`;
@@ -549,15 +552,20 @@ Every wait declares the expected message, optional timeout/escalation, and resum
 payload schema. The Workflow consumes a message once and records the decision in
 history. Duplicate webhook/poll results are deduplicated by stable external identity.
 
+Loop messages and operator input are dependency provenance, not publication proof. The dependency
+wait advances only after a read-only Nexus observation confirms every declared exact package
+version and persists immutable registry/tarball/integrity evidence. Development versions never
+satisfy a final dependency gate.
+
 PR conversation is the primary review channel: Tasker imports unresolved Bitbucket
 threads, starts a revision Activity, and posts acknowledgements only through the
 integration adapter after CI, then returns to code review. Provider-specific resolution
 may be added behind the same boundary when its API and policy are verified.
 
-`Code Review` is Tasker's final externally managed Jira status. The initial review-ready Delivery
-publishes evidence/comment and reaches that status once. A later operator `Mark done` completes only
-the local Execution workflow; it does not invoke Jira again or move the issue into testing, release,
-or done states.
+`Code Review` is the final Jira status Tasker may attempt. Review-ready Delivery always publishes
+evidence/comment first; a disabled or rejected transition leaves Jira unchanged and still enters the
+local `code_review@1` human wait. A later operator `Mark done` completes only the local Execution
+workflow and never moves Jira into testing, release, or done states.
 
 Every frozen run captures `company.retrospective.enabled`. When enabled, `Retrospective` is the
 terminal system stage shown after the task's dynamic graph. `Mark done` still makes the task complete
@@ -760,7 +768,7 @@ production histories durable.
 Secrets exist only in worker process configuration and Activity adapters. They are
 redacted before Tasker persistence and never passed in Workflow arguments, results,
 Search Attributes, logs, or artifact metadata. Integration capabilities are
-fail-closed; an analyzer cannot grant itself a Jira/Bitbucket/publish capability.
+fail-closed; an analyzer cannot grant itself a Jira/Bitbucket capability.
 
 ## 15. Architectural invariants
 

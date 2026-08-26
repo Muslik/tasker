@@ -35,6 +35,7 @@ import type {
   OperatorWorkflowContinuation,
   OperatorWorkflowProjection,
   OperatorWorkflowStep,
+  RunStartCommand,
   WorkflowResponse,
   WorkflowView,
 } from '../control-plane/operator-contracts.js';
@@ -50,6 +51,7 @@ import type { PlanningStrategyRequest } from '../planning/implementation-plan.js
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import type { RetrospectiveResponse } from '../retrospective/index.js';
 import {
+  configureTaskDependency,
   answerPlanningClarification,
   completeCodeReview,
   connectOperatorStream,
@@ -70,6 +72,8 @@ import {
   reviewPlan,
   reviewWorkflowChange,
   restartWorkflow,
+  resolveDependencyAvailable,
+  resolveDependencyDiscovery,
   resumeWorkflow,
   syncCodeReview,
   syncJiraIssue,
@@ -164,10 +168,40 @@ type TaskOperation =
   | 'syncing_review'
   | 'completing_review'
   | 'answering_questions'
+  | 'configuring_dependency'
+  | 'verifying_dependency'
+  | 'configuring_discovered_dependency'
   | 'resuming'
   | 'restarting'
   | 'accepting_continuation'
   | 'rejecting_continuation';
+
+type DependencySummary = OperatorWorkflowProjection['dependencies'][number];
+type TypedResolutionAction = Extract<
+  OperatorInterventionAction,
+  { readonly kind: 'typed_resolution' }
+>;
+type DependencyAvailableDetails = Extract<
+  NonNullable<TypedResolutionAction['details']>,
+  { readonly kind: 'dependency_available' }
+>;
+type DependencyDiscoveryDetails = Extract<
+  NonNullable<TypedResolutionAction['details']>,
+  { readonly kind: 'dependency_discovery' }
+>;
+type TaskDependencyDraft = {
+  readonly producerTaskReference: string;
+  readonly producerRepository: string;
+  readonly packages: string;
+  readonly mode: 'final_only' | 'validate_dev_then_final';
+  readonly linkId: string;
+  readonly linkTypeId: string;
+  readonly direction: 'inward' | 'outward';
+};
+type DependencyProvenanceDraft = {
+  readonly postId: string;
+  readonly url: string;
+};
 
 const STORAGE_KEY = 'tasker.operator.selectedTaskId';
 const TASK_RAIL_STORAGE_KEY = 'tasker.operator.tasksCollapsed';
@@ -183,6 +217,12 @@ const formatShortDateTime = (value: string): string =>
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value));
+
+const parsePackageLines = (value: string): string[] =>
+  value
+    .split(/[\n,]+/u)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 
 const formatProviderSession = (activity: ActivityLoadState): string => {
   if (activity.status === 'loading') return 'provider session loading';
@@ -351,12 +391,213 @@ const EmptyState = ({ children }: { readonly children: string }) => (
   </div>
 );
 
+type JiraTaskLaunchInput = {
+  readonly issueKey: string;
+  readonly repository: string;
+  readonly settings: RunStartCommand['settings'];
+};
+
+export const JiraTaskLaunchDialog = ({
+  open,
+  repositories,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  readonly open: boolean;
+  readonly repositories: readonly RepositoryCatalogEntry[];
+  readonly pending: boolean;
+  readonly error: string | null;
+  readonly onClose: () => void;
+  readonly onSubmit: (input: JiraTaskLaunchInput) => Promise<void>;
+}) => {
+  const [issueKey, setIssueKey] = useState('');
+  const [repository, setRepository] = useState('');
+  const [planningStrategy, setPlanningStrategy] = useState<PlanningStrategyRequest>('auto');
+  const [requirePlanReview, setRequirePlanReview] = useState(true);
+  const [updateJiraStatuses, setUpdateJiraStatuses] = useState(true);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !pending) onClose();
+      }}
+    >
+      <form
+        className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="jira-task-launch-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (issueKey.trim().length === 0 || repository.length === 0 || pending) return;
+          void onSubmit({
+            issueKey: issueKey.trim().toUpperCase(),
+            repository,
+            settings: {
+              planReview: requirePlanReview ? 'required' : 'automatic',
+              planningStrategy,
+              trackerStatusUpdates: updateJiraStatuses ? 'enabled' : 'disabled',
+            },
+          })
+            .then(() => {
+              setIssueKey('');
+              setRepository('');
+              setPlanningStrategy('auto');
+              setRequirePlanReview(true);
+              setUpdateJiraStatuses(true);
+              onClose();
+            })
+            .catch(() => undefined);
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="jira-task-launch-title" className="text-base font-semibold">
+              Start Jira task
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Import the issue, bind its repository, and start a recoverable workflow.
+            </p>
+          </div>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            type="button"
+            aria-label="Close task launch dialog"
+            disabled={pending}
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <label className="block space-y-1.5 text-xs font-medium">
+            Jira task
+            <input
+              autoFocus
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm uppercase outline-none placeholder:normal-case placeholder:text-muted-foreground focus:border-ring"
+              aria-label="Jira task"
+              placeholder="FC-2244"
+              value={issueKey}
+              disabled={pending}
+              onChange={(event) => {
+                setIssueKey(event.target.value);
+              }}
+            />
+          </label>
+
+          <label className="block space-y-1.5 text-xs font-medium">
+            Repository
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+              aria-label="Repository"
+              value={repository}
+              disabled={pending}
+              onChange={(event) => {
+                setRepository(event.target.value);
+              }}
+            >
+              <option value="">Select repository</option>
+              {repositories.map((entry) => (
+                <option
+                  key={`${entry.repositoryId}:${entry.remoteUrl ?? entry.checkout.path}`}
+                  value={entry.repositoryId}
+                >
+                  {entry.repositoryId}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block space-y-1.5 text-xs font-medium">
+            Planning strategy
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+              aria-label="Planning strategy"
+              value={planningStrategy}
+              disabled={pending}
+              onChange={(event) => {
+                setPlanningStrategy(event.target.value as PlanningStrategyRequest);
+              }}
+            >
+              <option value="auto">Auto</option>
+              <option value="fast">Fast</option>
+              <option value="ralplan">Ralplan</option>
+            </select>
+          </label>
+
+          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+              <input
+                className="mt-0.5 size-4 accent-primary"
+                type="checkbox"
+                checked={requirePlanReview}
+                disabled={pending}
+                onChange={(event) => {
+                  setRequirePlanReview(event.target.checked);
+                }}
+              />
+              <span>
+                <span className="block font-medium">Review plan before execution</span>
+                <span className="block text-xs text-muted-foreground">
+                  Pause after planning for explicit approval.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+              <input
+                className="mt-0.5 size-4 accent-primary"
+                type="checkbox"
+                aria-label="Update Jira statuses"
+                checked={updateJiraStatuses}
+                disabled={pending}
+                onChange={(event) => {
+                  setUpdateJiraStatuses(event.target.checked);
+                }}
+              />
+              <span>
+                <span className="block font-medium">Update Jira statuses</span>
+                <span className="block text-xs text-muted-foreground">
+                  Try In Progress and Code Review transitions. Failure never blocks implementation,
+                  evidence, or comments.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {error === null ? null : <p className="mt-3 text-xs text-destructive">{error}</p>}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" type="button" disabled={pending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={pending || issueKey.trim().length === 0 || repository.length === 0}
+          >
+            {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+            {pending ? 'Starting…' : 'Start task'}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
 const TaskQueue = ({
   tasks,
   repositories,
   selectedId,
   onSelect,
-  onImportJira,
+  onStartJira,
   jiraSync,
   liveStatus,
 }: {
@@ -364,13 +605,11 @@ const TaskQueue = ({
   readonly repositories: readonly RepositoryCatalogEntry[];
   readonly selectedId: string;
   readonly onSelect: (taskId: string) => void;
-  readonly onImportJira: (issueKey: string, repository?: string) => void;
+  readonly onStartJira: (input: JiraTaskLaunchInput) => Promise<void>;
   readonly jiraSync: JiraSyncState;
   readonly liveStatus: ConsoleStreamStatus;
 }) => {
   const [importOpen, setImportOpen] = useState(false);
-  const [issueKey, setIssueKey] = useState('');
-  const [repository, setRepository] = useState('');
   const counts = useMemo(() => {
     const result = new Map<OperatorTaskSummary['status'], number>();
     for (const task of tasks) {
@@ -417,63 +656,27 @@ const TaskQueue = ({
             <Tooltip>
               <TooltipTrigger
                 className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Import Jira issue"
+                aria-label="Start Jira task"
                 onClick={() => {
                   setImportOpen((open) => !open);
                 }}
               >
                 <Plus className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent>Import Jira issue</TooltipContent>
+              <TooltipContent>Start Jira task</TooltipContent>
             </Tooltip>
           </div>
         </div>
-        {importOpen ? (
-          <form
-            className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-1.5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (issueKey.trim().length === 0) return;
-              onImportJira(issueKey, repository.trim() || undefined);
-              setIssueKey('');
-              setRepository('');
-              setImportOpen(false);
-            }}
-          >
-            <input
-              className="h-7 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs uppercase outline-none placeholder:normal-case placeholder:text-muted-foreground focus:border-ring"
-              aria-label="Jira issue key"
-              placeholder="AVIA-13235"
-              value={issueKey}
-              onChange={(event) => {
-                setIssueKey(event.target.value);
-              }}
-            />
-            <Button size="sm" type="submit" disabled={jiraSync.status === 'syncing'}>
-              {jiraSync.status === 'syncing' ? <LoaderCircle className="animate-spin" /> : 'Open'}
-            </Button>
-            <input
-              className="col-span-2 h-7 min-w-0 rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
-              aria-label="Repository (optional)"
-              placeholder="Repository (optional)"
-              list="tasker-repositories"
-              value={repository}
-              onChange={(event) => {
-                setRepository(event.target.value);
-              }}
-            />
-            <datalist id="tasker-repositories">
-              {repositories.map((entry) => (
-                <option key={`${entry.repositoryId}:${entry.remoteUrl ?? entry.checkout.path}`}>
-                  {entry.repositoryId}
-                </option>
-              ))}
-            </datalist>
-          </form>
-        ) : null}
-        {jiraSync.status === 'failed' ? (
-          <p className="mt-1.5 text-[11px] text-destructive">{jiraSync.message}</p>
-        ) : null}
+        <JiraTaskLaunchDialog
+          open={importOpen}
+          repositories={repositories}
+          pending={jiraSync.status === 'syncing'}
+          error={jiraSync.status === 'failed' ? jiraSync.message : null}
+          onClose={() => {
+            setImportOpen(false);
+          }}
+          onSubmit={onStartJira}
+        />
         <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
           {visibleCounts.map((status) => (
             <span key={status}>
@@ -938,6 +1141,427 @@ export const OperatorIntervention = ({
     </section>
   );
 };
+
+export const DependencyWaitSurface = ({
+  details,
+  pending,
+  restartConfirming,
+  versions,
+  provenance,
+  discoveryDraft,
+  onVersionChange,
+  onProvenanceChange,
+  onDiscoveryDraftChange,
+  onSubmit,
+  onRestartRequest,
+  onRestartCancel,
+  onRestartConfirm,
+}: {
+  readonly details: DependencyAvailableDetails | DependencyDiscoveryDetails;
+  readonly pending: boolean;
+  readonly restartConfirming: boolean;
+  readonly versions: ReadonlyMap<string, string>;
+  readonly provenance: DependencyProvenanceDraft;
+  readonly discoveryDraft: TaskDependencyDraft;
+  readonly onVersionChange: (packageName: string, version: string) => void;
+  readonly onProvenanceChange: (draft: DependencyProvenanceDraft) => void;
+  readonly onDiscoveryDraftChange: (draft: TaskDependencyDraft) => void;
+  readonly onSubmit: () => void;
+  readonly onRestartRequest: () => void;
+  readonly onRestartCancel: () => void;
+  readonly onRestartConfirm: () => void;
+}) => {
+  const title =
+    details.kind === 'dependency_available' ? 'Published versions' : 'Configure dependency';
+  const actionLabel =
+    details.kind === 'dependency_available' ? 'Verify published versions' : 'Configure dependency';
+  return (
+    <section className="border-b border-cyan-500/20 bg-cyan-500/4 px-5 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <strong className="text-sm">{title}</strong>
+          <p className="mt-1 max-w-4xl text-sm leading-5 text-foreground/90">
+            {details.kind === 'dependency_available'
+              ? 'Verify the exact published versions in Nexus before Tasker rechecks the dependency.'
+              : 'Persist the discovered cross-repository dependency before Tasker continues.'}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            disabled={pending}
+            onClick={onRestartRequest}
+          >
+            <RotateCcw data-icon="inline-start" />
+            Restart from scratch
+          </Button>
+          <Button size="sm" type="button" disabled={pending} onClick={onSubmit}>
+            {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+            {pending ? 'Working…' : actionLabel}
+          </Button>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="rounded-md border border-border/70 bg-background/60 p-3 text-sm">
+          <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            Status
+          </div>
+          <dl className="mt-2 space-y-1">
+            {details.kind === 'dependency_available' ? (
+              <>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Declaration</dt>
+                  <dd>
+                    {details.declarationId} rev {String(details.declarationRevision)}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Channel</dt>
+                  <dd>{details.channel}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Result status</dt>
+                  <dd>
+                    {details.observation.status === 'recorded'
+                      ? 'Verified publication recorded'
+                      : 'Waiting for published versions'}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Provenance</dt>
+                  <dd>
+                    {details.observation.provenance === null
+                      ? 'None recorded'
+                      : `Loop ${details.observation.provenance.postId}`}
+                  </dd>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Requested repository</dt>
+                  <dd>{details.requestedRepository}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Requested outcome</dt>
+                  <dd>{details.requestedOutcome}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Component path</dt>
+                  <dd>{details.componentPath ?? 'Not specified'}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Declaration</dt>
+                  <dd>
+                    {details.declaration.status === 'recorded'
+                      ? `${details.declaration.declarationId} rev ${String(details.declaration.declarationRevision)}`
+                      : 'Not persisted yet'}
+                  </dd>
+                </div>
+              </>
+            )}
+          </dl>
+        </div>
+        <div className="rounded-md border border-border/70 bg-background/60 p-3 text-sm">
+          <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            Packages
+          </div>
+          {details.kind === 'dependency_available' ? (
+            <div className="mt-2 space-y-2">
+              {details.packages.map((packageName) => (
+                <label key={packageName} className="block">
+                  <span className="mb-1 block text-xs text-muted-foreground">{packageName}</span>
+                  <input
+                    className="w-full rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+                    aria-label={`${packageName} version`}
+                    placeholder="1.2.3 or 1.2.3-dev.4"
+                    value={versions.get(packageName) ?? ''}
+                    disabled={pending}
+                    onChange={(event) => {
+                      onVersionChange(packageName, event.target.value);
+                    }}
+                  />
+                </label>
+              ))}
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-muted-foreground">Loop post ID</span>
+                  <input
+                    className="w-full rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+                    aria-label="Loop post ID"
+                    placeholder="Optional"
+                    value={provenance.postId}
+                    disabled={pending}
+                    onChange={(event) => {
+                      onProvenanceChange({ ...provenance, postId: event.target.value });
+                    }}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-muted-foreground">Loop URL</span>
+                  <input
+                    className="w-full rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+                    aria-label="Loop URL"
+                    placeholder="https://…"
+                    value={provenance.url}
+                    disabled={pending}
+                    onChange={(event) => {
+                      onProvenanceChange({ ...provenance, url: event.target.value });
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2 grid gap-2">
+              <input
+                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+                aria-label="Discovered producer task reference"
+                placeholder={details.declaration.producerTaskReference ?? 'Producer task reference'}
+                value={discoveryDraft.producerTaskReference}
+                disabled={pending}
+                onChange={(event) => {
+                  onDiscoveryDraftChange({
+                    ...discoveryDraft,
+                    producerTaskReference: event.target.value,
+                  });
+                }}
+              />
+              <textarea
+                className="min-h-20 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+                aria-label="Discovered dependency packages"
+                placeholder={
+                  details.declaration.packages.length === 0
+                    ? (details.expectedPackage ?? 'One package per line')
+                    : details.declaration.packages.join('\n')
+                }
+                value={discoveryDraft.packages}
+                disabled={pending}
+                onChange={(event) => {
+                  onDiscoveryDraftChange({ ...discoveryDraft, packages: event.target.value });
+                }}
+              />
+              <select
+                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+                aria-label="Discovered dependency mode"
+                value={discoveryDraft.mode}
+                disabled={pending}
+                onChange={(event) => {
+                  onDiscoveryDraftChange({
+                    ...discoveryDraft,
+                    mode: event.target.value as TaskDependencyDraft['mode'],
+                  });
+                }}
+              >
+                <option value="validate_dev_then_final">Validate dev, then final</option>
+                <option value="final_only">Final only</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Expected package boundary:{' '}
+                {details.expectedPackage ?? 'Operator must supply the package list'}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+      {details.kind === 'dependency_available' && details.observation.status === 'recorded' ? (
+        <div className="mt-3 rounded-md border border-emerald-500/20 bg-emerald-500/6 p-3 text-sm">
+          <div className="flex justify-between gap-4">
+            <strong className="text-emerald-800 dark:text-emerald-200">Recorded observation</strong>
+            <span className="text-xs text-muted-foreground">
+              {formatShortDateTime(details.observation.observedAt)}
+            </span>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {details.observation.packages.map((entry) => (
+              <li key={`${entry.name}@${entry.version}`}>
+                {entry.name}@{entry.version}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {restartConfirming ? (
+        <div className="mt-3 flex items-center justify-between gap-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <div>
+            <strong className="text-sm text-destructive">Abandon this run?</strong>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Tasker will preserve its Temporal history, terminate unfinished work, and create a new
+              workspace from the current harness.
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              disabled={pending}
+              onClick={onRestartCancel}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              disabled={pending}
+              onClick={onRestartConfirm}
+            >
+              {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+              {pending ? 'Restarting…' : 'Confirm restart'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
+export const TaskDependencyPanel = ({
+  taskReference,
+  dependencies,
+  links,
+  draft,
+  pending,
+  onChange,
+  onSubmit,
+}: {
+  readonly taskReference: string;
+  readonly dependencies: readonly DependencySummary[];
+  readonly links: JiraIssueSnapshot['links'];
+  readonly draft: TaskDependencyDraft;
+  readonly pending: boolean;
+  readonly onChange: (draft: TaskDependencyDraft) => void;
+  readonly onSubmit: () => void;
+}) => (
+  <section className="border-b border-border px-5 py-4">
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <strong className="text-sm">Task dependencies</strong>
+        <p className="mt-1 text-sm text-foreground/90">
+          Persist known cross-repository dependencies for {taskReference} before the workflow
+          starts.
+        </p>
+      </div>
+      <Button size="sm" type="button" disabled={pending} onClick={onSubmit}>
+        {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+        {pending ? 'Saving…' : 'Configure dependency'}
+      </Button>
+    </div>
+    <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      <div className="rounded-md border border-border/70 bg-background/60 p-3">
+        <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          Saved declarations
+        </div>
+        {dependencies.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No dependency declarations are stored yet.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {dependencies.map((dependency) => (
+              <div
+                key={dependency.declarationId}
+                className="rounded-md border border-border/60 p-3 text-sm"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <strong>{dependency.producerTaskReference}</strong>
+                  <Badge variant="outline">{dependency.mode}</Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {dependency.producerRepository}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {dependency.declarationId} rev {String(dependency.revision)} ·{' '}
+                  {formatShortDateTime(dependency.createdAt)}
+                </p>
+                <p className="mt-2">{dependency.packages.join(', ')}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="rounded-md border border-border/70 bg-background/60 p-3">
+        <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          New declaration
+        </div>
+        <div className="mt-2 grid gap-2">
+          <select
+            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+            aria-label="Jira dependency link"
+            value={draft.linkId}
+            disabled={pending}
+            onChange={(event) => {
+              const link = links.find((candidate) => candidate.linkId === event.target.value);
+              if (link === undefined) return;
+              onChange({
+                ...draft,
+                producerTaskReference: `jira:${link.issueKey}`,
+                linkId: link.linkId,
+                linkTypeId: link.linkTypeId,
+                direction: link.direction,
+              });
+            }}
+          >
+            <option value="">Select Jira Blocks link</option>
+            {links
+              .filter(({ linkTypeName }) => linkTypeName.toLocaleLowerCase('en-US') === 'blocks')
+              .map((link) => (
+                <option key={link.linkId} value={link.linkId}>
+                  {link.relationship} {link.issueKey}: {link.summary}
+                </option>
+              ))}
+          </select>
+          <input
+            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+            aria-label="Producer task reference"
+            placeholder="Producer task reference"
+            value={draft.producerTaskReference}
+            disabled
+            readOnly
+          />
+          <input
+            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+            aria-label="Producer repository"
+            placeholder="Producer repository"
+            value={draft.producerRepository}
+            disabled={pending}
+            onChange={(event) => {
+              onChange({ ...draft, producerRepository: event.target.value });
+            }}
+          />
+          <textarea
+            className="min-h-20 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+            aria-label="Dependency packages"
+            placeholder="One package per line"
+            value={draft.packages}
+            disabled={pending}
+            onChange={(event) => {
+              onChange({ ...draft, packages: event.target.value });
+            }}
+          />
+          <select
+            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
+            aria-label="Dependency mode"
+            value={draft.mode}
+            disabled={pending}
+            onChange={(event) => {
+              onChange({
+                ...draft,
+                mode: event.target.value as TaskDependencyDraft['mode'],
+              });
+            }}
+          >
+            <option value="validate_dev_then_final">Validate dev, then final</option>
+            <option value="final_only">Final only</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+);
 
 const ValidationSurface = ({ view }: { readonly view: WorkflowView }) => {
   const issues = view.workflow.validatorReport.issues;
@@ -3044,6 +3668,15 @@ export const App = () => {
   const [continuationGuidanceDrafts, setContinuationGuidanceDrafts] = useState<
     ReadonlyMap<string, string>
   >(new Map());
+  const [taskDependencyDrafts, setTaskDependencyDrafts] = useState<
+    ReadonlyMap<string, TaskDependencyDraft>
+  >(new Map());
+  const [dependencyVersionDrafts, setDependencyVersionDrafts] = useState<
+    ReadonlyMap<string, ReadonlyMap<string, string>>
+  >(new Map());
+  const [dependencyProvenanceDrafts, setDependencyProvenanceDrafts] = useState<
+    ReadonlyMap<string, DependencyProvenanceDraft>
+  >(new Map());
   const [interventionGuidanceDrafts, setInterventionGuidanceDrafts] = useState<
     ReadonlyMap<string, string>
   >(new Map());
@@ -3069,18 +3702,53 @@ export const App = () => {
     operatorProjectionState.status === 'ready'
       ? operatorProjectionState.projection.activeRunId
       : null;
+  const selectedTypedResolution =
+    operatorProjectionState.status === 'ready' &&
+    operatorProjectionState.projection.current?.status === 'waiting' &&
+    operatorProjectionState.projection.current.intervention.kind === 'typed_resolution'
+      ? operatorProjectionState.projection.current.intervention
+      : null;
+  const selectedDependencyWait =
+    selectedTypedResolution?.details?.kind === 'dependency_available' ||
+    selectedTypedResolution?.details?.kind === 'dependency_discovery'
+      ? selectedTypedResolution.details
+      : null;
   const selectedIntervention =
     operatorProjectionState.status === 'ready' &&
     operatorProjectionState.projection.current?.status === 'waiting' &&
     operatorProjectionState.projection.current.intervention.kind !== 'typed_resolution'
       ? operatorProjectionState.projection.current.intervention
       : null;
+  const selectedDependencies =
+    operatorProjectionState.status === 'ready'
+      ? operatorProjectionState.projection.dependencies
+      : [];
   const selectedWorkflowContinuation =
     operatorProjectionState.status === 'ready'
       ? (operatorProjectionState.projection.continuations.findLast(
           ({ status }) => status === 'awaiting_review',
         ) ?? null)
       : null;
+  const selectedTaskDependencyDraft =
+    selectedTask === null
+      ? null
+      : (taskDependencyDrafts.get(selectedTask.id) ?? {
+          producerTaskReference: '',
+          producerRepository: '',
+          packages: '',
+          mode: 'validate_dev_then_final',
+          linkId: '',
+          linkTypeId: '',
+          direction: 'outward',
+        });
+  const selectedDependencyVersions =
+    selectedTask === null
+      ? new Map<string, string>()
+      : (dependencyVersionDrafts.get(selectedTask.id) ?? new Map<string, string>());
+  const selectedDependencyProvenance =
+    selectedTask === null
+      ? { postId: '', url: '' }
+      : (dependencyProvenanceDrafts.get(selectedTask.id) ?? { postId: '', url: '' });
 
   useEffect(() => {
     if (selectedTask?.status !== 'done') {
@@ -3583,6 +4251,38 @@ export const App = () => {
       });
   };
 
+  const handleJiraStart = async (input: JiraTaskLaunchInput): Promise<void> => {
+    const issueKey = input.issueKey.trim().toUpperCase();
+    if (issueKey.length === 0) return;
+    let taskReference = `jira:${issueKey}`;
+    setJiraSyncState({ status: 'syncing', issueKey });
+    try {
+      const state = await syncJiraIssue(issueKey, input.repository);
+      const normalizedKey = state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
+      taskReference = `jira:${normalizedKey}`;
+      setRuntimeWatchTaskId(taskReference);
+      setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
+      await generateWorkflow(taskReference, { settings: input.settings });
+      await refreshTasks();
+      setSelectedId(taskReference);
+      await refreshSelection(taskReference);
+      setJiraSyncState({ status: 'idle' });
+    } catch (error) {
+      setJiraSyncState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Unexpected Jira task start failure',
+      });
+      throw error;
+    } finally {
+      setPendingOperations((current) => {
+        if (current.get(taskReference) !== 'generating') return current;
+        const next = new Map(current);
+        next.delete(taskReference);
+        return next;
+      });
+    }
+  };
+
   const handleGenerate = (): void => {
     if (
       selectedTask === null ||
@@ -3601,6 +4301,7 @@ export const App = () => {
       settings: {
         planReview: requirePlanApproval ? 'required' : 'automatic',
         planningStrategy,
+        trackerStatusUpdates: 'enabled',
       },
     })
       .then(async () => {
@@ -3743,6 +4444,189 @@ export const App = () => {
       .finally(() => {
         setPendingOperations((current) => {
           if (current.get(taskReference) !== operation) return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
+  const handleConfigureTaskDependency = (): void => {
+    if (selectedTask === null || selectedTaskDependencyDraft === null) return;
+    const packages = parsePackageLines(selectedTaskDependencyDraft.packages);
+    if (
+      selectedTaskDependencyDraft.producerTaskReference.trim().length === 0 ||
+      selectedTaskDependencyDraft.producerRepository.trim().length === 0 ||
+      selectedTaskDependencyDraft.linkId.trim().length === 0 ||
+      selectedTaskDependencyDraft.linkTypeId.trim().length === 0 ||
+      packages.length === 0
+    ) {
+      return;
+    }
+    const taskReference = selectedTask.id;
+    setPendingOperations((current) =>
+      new Map(current).set(taskReference, 'configuring_dependency'),
+    );
+    void configureTaskDependency(taskReference, {
+      consumerTaskReference: taskReference,
+      producerTaskReference: selectedTaskDependencyDraft.producerTaskReference.trim(),
+      producerRepository: selectedTaskDependencyDraft.producerRepository.trim(),
+      packages,
+      mode: selectedTaskDependencyDraft.mode,
+      source: {
+        kind: 'jira_link',
+        linkId: selectedTaskDependencyDraft.linkId.trim(),
+        linkTypeId: selectedTaskDependencyDraft.linkTypeId.trim(),
+        direction: selectedTaskDependencyDraft.direction,
+      },
+    })
+      .then(async () => {
+        if (selectedIdRef.current === taskReference) {
+          await refreshSelection(taskReference);
+        }
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Unexpected dependency configuration failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'configuring_dependency') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
+  const handleResolveDependencyAvailable = (): void => {
+    if (
+      selectedTask === null ||
+      selectedRunId === null ||
+      selectedDependencyWait === null ||
+      selectedDependencyWait.kind !== 'dependency_available' ||
+      operatorProjectionState.status !== 'ready' ||
+      operatorProjectionState.projection.current?.status !== 'waiting'
+    ) {
+      return;
+    }
+    const packages = selectedDependencyWait.packages.map((packageName) => ({
+      name: packageName,
+      version: (selectedDependencyVersions.get(packageName) ?? '').trim(),
+    }));
+    if (packages.some((entry) => entry.version.length === 0)) return;
+    const taskReference = selectedTask.id;
+    const postId = selectedDependencyProvenance.postId.trim();
+    const url = selectedDependencyProvenance.url.trim();
+    setRuntimeWatchTaskId(taskReference);
+    setPendingOperations((current) => new Map(current).set(taskReference, 'verifying_dependency'));
+    void resolveDependencyAvailable(taskReference, {
+      expectedRunId: selectedRunId,
+      nodeId: operatorProjectionState.projection.current.nodeId,
+      waitKind: 'dependency.available@1',
+      declarationId: selectedDependencyWait.declarationId,
+      declarationRevision: selectedDependencyWait.declarationRevision,
+      channel: selectedDependencyWait.channel,
+      packages,
+      ...(postId.length === 0
+        ? {}
+        : {
+            provenance: {
+              kind: 'loop' as const,
+              postId,
+              ...(url.length === 0 ? {} : { url }),
+            },
+          }),
+    })
+      .then(async () => {
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) {
+          await refreshSelection(taskReference);
+        }
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message:
+              error instanceof Error ? error.message : 'Unexpected dependency verification failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'verifying_dependency') return current;
+          const next = new Map(current);
+          next.delete(taskReference);
+          return next;
+        });
+      });
+  };
+
+  const handleResolveDependencyDiscovery = (): void => {
+    if (
+      selectedTask === null ||
+      selectedRunId === null ||
+      selectedDependencyWait === null ||
+      selectedDependencyWait.kind !== 'dependency_discovery' ||
+      operatorProjectionState.status !== 'ready' ||
+      operatorProjectionState.projection.current?.status !== 'waiting'
+    ) {
+      return;
+    }
+    const producerTaskReference = selectedTaskDependencyDraft?.producerTaskReference.trim().length
+      ? selectedTaskDependencyDraft.producerTaskReference.trim()
+      : (selectedDependencyWait.declaration.producerTaskReference ?? '');
+    const packages = parsePackageLines(selectedTaskDependencyDraft?.packages ?? '');
+    const resolvedPackages =
+      packages.length > 0 ? packages : [...selectedDependencyWait.declaration.packages];
+    const mode =
+      selectedDependencyWait.declaration.mode ??
+      selectedTaskDependencyDraft?.mode ??
+      'validate_dev_then_final';
+    if (producerTaskReference.length === 0 || resolvedPackages.length === 0) {
+      return;
+    }
+    const taskReference = selectedTask.id;
+    setRuntimeWatchTaskId(taskReference);
+    setPendingOperations((current) =>
+      new Map(current).set(taskReference, 'configuring_discovered_dependency'),
+    );
+    void resolveDependencyDiscovery(taskReference, {
+      expectedRunId: selectedRunId,
+      nodeId: operatorProjectionState.projection.current.nodeId,
+      waitKind: 'dependency.discovery@1',
+      requestArtifactId: selectedDependencyWait.requestArtifactId,
+      producerTaskReference,
+      producerRepository: selectedDependencyWait.requestedRepository,
+      packages: resolvedPackages,
+      mode,
+    })
+      .then(async () => {
+        await refreshTasks();
+        if (selectedIdRef.current === taskReference) {
+          await refreshSelection(taskReference);
+        }
+      })
+      .catch((error: unknown) => {
+        if (selectedIdRef.current === taskReference) {
+          setActivityState({
+            status: 'failed',
+            message:
+              error instanceof Error ? error.message : 'Unexpected discovered dependency failure',
+          });
+        }
+      })
+      .finally(() => {
+        setPendingOperations((current) => {
+          if (current.get(taskReference) !== 'configuring_discovered_dependency') return current;
           const next = new Map(current);
           next.delete(taskReference);
           return next;
@@ -4035,7 +4919,7 @@ export const App = () => {
               repositories={repositories}
               selectedId={selectedId}
               onSelect={handleSelectTask}
-              onImportJira={handleJiraSync}
+              onStartJira={handleJiraStart}
               jiraSync={jiraSyncState}
               liveStatus={streamStatus}
             />
@@ -4067,6 +4951,26 @@ export const App = () => {
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
                 />
+                {selectedTaskDependencyDraft === null ? null : (
+                  <TaskDependencyPanel
+                    taskReference={selectedTask.id}
+                    dependencies={selectedDependencies}
+                    links={
+                      jiraIssueState.status === 'ready' &&
+                      jiraIssueState.state.status !== 'unavailable'
+                        ? jiraIssueState.state.issue.links
+                        : []
+                    }
+                    draft={selectedTaskDependencyDraft}
+                    pending={pendingOperations.get(selectedTask.id) === 'configuring_dependency'}
+                    onChange={(draft) => {
+                      setTaskDependencyDrafts((current) =>
+                        new Map(current).set(selectedTask.id, draft),
+                      );
+                    }}
+                    onSubmit={handleConfigureTaskDependency}
+                  />
+                )}
                 {selectedTask.status === 'code_review' ? (
                   <CodeReviewControls
                     pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
@@ -4104,6 +5008,65 @@ export const App = () => {
                     onRestartConfirm={handleRestart}
                   />
                 ) : null}
+                {selectedTask.status === 'waiting' && selectedDependencyWait !== null ? (
+                  <DependencyWaitSurface
+                    details={selectedDependencyWait}
+                    pending={
+                      pendingOperations.get(selectedTask.id) === 'verifying_dependency' ||
+                      pendingOperations.get(selectedTask.id) ===
+                        'configuring_discovered_dependency' ||
+                      pendingOperations.get(selectedTask.id) === 'restarting'
+                    }
+                    restartConfirming={restartConfirmationTaskId === selectedTask.id}
+                    versions={selectedDependencyVersions}
+                    provenance={selectedDependencyProvenance}
+                    discoveryDraft={
+                      selectedTaskDependencyDraft ?? {
+                        producerTaskReference: '',
+                        producerRepository: '',
+                        packages: '',
+                        mode: 'validate_dev_then_final',
+                        linkId: '',
+                        linkTypeId: '',
+                        direction: 'outward',
+                      }
+                    }
+                    onVersionChange={(packageName, version) => {
+                      setDependencyVersionDrafts((current) => {
+                        const next = new Map(current);
+                        next.set(
+                          selectedTask.id,
+                          new Map(selectedDependencyVersions).set(packageName, version),
+                        );
+                        return next;
+                      });
+                    }}
+                    onProvenanceChange={(draft) => {
+                      setDependencyProvenanceDrafts((current) =>
+                        new Map(current).set(selectedTask.id, draft),
+                      );
+                    }}
+                    onDiscoveryDraftChange={(draft) => {
+                      setTaskDependencyDrafts((current) =>
+                        new Map(current).set(selectedTask.id, draft),
+                      );
+                    }}
+                    onSubmit={() => {
+                      if (selectedDependencyWait.kind === 'dependency_available') {
+                        handleResolveDependencyAvailable();
+                      } else {
+                        handleResolveDependencyDiscovery();
+                      }
+                    }}
+                    onRestartRequest={() => {
+                      setRestartConfirmationTaskId(selectedTask.id);
+                    }}
+                    onRestartCancel={() => {
+                      setRestartConfirmationTaskId(null);
+                    }}
+                    onRestartConfirm={handleRestart}
+                  />
+                ) : null}
                 <WorkflowContinuationSurface
                   continuation={selectedWorkflowContinuation}
                   guidance={continuationGuidanceDrafts.get(selectedTask.id) ?? ''}
@@ -4121,6 +5084,7 @@ export const App = () => {
                   }}
                 />
                 {selectedIntervention !== null ||
+                selectedDependencyWait !== null ||
                 selectedWorkflowContinuation?.status === 'awaiting_review' ? null : (
                   <ExecutionProgressSurface projection={operatorProjectionState} />
                 )}

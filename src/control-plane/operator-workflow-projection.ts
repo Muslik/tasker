@@ -1,4 +1,5 @@
 import { blockReceiptId, type BlockReceipt, type BlockReceiptStore } from '../blocks/index.js';
+import type { DependencyDeclaration } from './dependency-declaration.js';
 import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from '../planning/index.js';
 import type { RunPlanningSnapshot } from '../planning/run-planning-snapshot.js';
 import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../temporal/index.js';
@@ -20,6 +21,11 @@ import {
   type OperatorWorkflowStep,
   type WorkflowNodeStatus,
 } from './operator-contracts.js';
+import {
+  describeDependencyAvailableWait,
+  describeDependencyDiscoveryWait,
+} from './dependency-operator-service.js';
+import type { VerifiedPackagePublication } from './verified-package-publication.js';
 
 type BlockReceiptReader = Pick<BlockReceiptStore, 'read'>;
 type ExecutionSnapshotReader = (lifecycle: TaskRunLifecycle) => RunPlanningSnapshot | null;
@@ -27,9 +33,28 @@ type ExecutionTranscriptReader = (
   execution: ExecutionWorkflowPublicState,
 ) => PlanningTranscriptView | null;
 type ContinuationTranscriptReader = (operationId: string) => PlanningTranscriptView | null;
+type ProjectionArtifactRecord = { readonly payload: unknown };
+type ProjectionDependencySummary = {
+  readonly declarationId: string;
+  readonly revision: number;
+  readonly producerTaskReference: string;
+  readonly producerRepository: string;
+  readonly packages: readonly string[];
+  readonly mode: 'final_only' | 'validate_dev_then_final';
+  readonly source: DependencyDeclaration['source'];
+  readonly createdAt: string;
+};
+interface DependencyProjectionReaders {
+  readonly listDeclarations: (taskReference: string) => readonly ProjectionDependencySummary[];
+  readonly readDeclaration: (declarationId: string) => DependencyDeclaration | null;
+  readonly readPublication: (observationId: string) => VerifiedPackagePublication | null;
+  readonly readArtifact: (artifactId: string) => ProjectionArtifactRecord | null;
+}
 
 const TYPED_RESOLUTION_WAITS = new Set([
   'code_review@1',
+  'dependency.available@1',
+  'dependency.discovery@1',
   'human_clarification',
   'plan.approved@1',
   'workflow_change.review@1',
@@ -381,13 +406,47 @@ const findNode = (node: CompiledWorkflowNode, nodeId: string): CompiledWorkflowN
 };
 
 const interventionFor = (
+  taskReference: string,
+  lifecycle: TaskRunLifecycle,
   runtime: 'bootstrap' | 'execution',
   nodeId: string,
   waitKind: string,
   executionNode: CompiledWorkflowNode | null,
   snapshot: RunPlanningSnapshot | null,
+  dependencyReaders: DependencyProjectionReaders,
 ): OperatorInterventionAction => {
-  if (TYPED_RESOLUTION_WAITS.has(waitKind)) return { kind: 'typed_resolution' };
+  if (waitKind === 'dependency.available@1') {
+    return {
+      kind: 'typed_resolution',
+      waitKind,
+      details:
+        runtime !== 'execution'
+          ? null
+          : describeDependencyAvailableWait(lifecycle, nodeId, dependencyReaders.readPublication),
+    };
+  }
+  if (waitKind === 'dependency.discovery@1') {
+    const executionRun =
+      runtime === 'execution' && lifecycle.execution?.status === 'waiting'
+        ? lifecycle.execution
+        : null;
+    return {
+      kind: 'typed_resolution',
+      waitKind,
+      details:
+        executionRun === null
+          ? null
+          : describeDependencyDiscoveryWait(
+              taskReference,
+              executionRun,
+              dependencyReaders.readDeclaration,
+              (artifactId) => dependencyReaders.readArtifact(artifactId),
+            ),
+    };
+  }
+  if (TYPED_RESOLUTION_WAITS.has(waitKind)) {
+    return { kind: 'typed_resolution', waitKind, details: null };
+  }
   if (waitKind === 'operator_guidance@1') return { kind: 'operator_guidance' };
   if (waitKind.endsWith('.activity-failed@1')) return { kind: 'retry_step' };
   if (runtime === 'bootstrap') {
@@ -412,16 +471,23 @@ export const createOperatorWorkflowProjection = (
   readSnapshot: ExecutionSnapshotReader = () => null,
   readExecutionTranscript: ExecutionTranscriptReader = () => null,
   readContinuationTranscript: ContinuationTranscriptReader = () => null,
+  dependencyReaders: DependencyProjectionReaders = {
+    listDeclarations: () => [],
+    readDeclaration: () => null,
+    readPublication: () => null,
+    readArtifact: () => null,
+  },
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 7,
+      schemaVersion: 8,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
       activeRunId: null,
       graphHash: null,
       current: null,
+      dependencies: dependencyReaders.listDeclarations(taskReference),
       stages: [],
       continuations: [],
     });
@@ -482,11 +548,14 @@ export const createOperatorWorkflowProjection = (
           intervention:
             active.status === 'waiting'
               ? interventionFor(
+                  taskReference,
+                  lifecycle,
                   currentRuntime,
                   activeNodeId,
                   active.wait.waitKind,
                   executionNode,
                   snapshot,
+                  dependencyReaders,
                 )
               : null,
           transcript:
@@ -499,13 +568,14 @@ export const createOperatorWorkflowProjection = (
               : readContinuationTranscript(activeContinuation.transcriptOperationId),
         };
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 7,
+    schemaVersion: 8,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',
     activeRunId: active.runId,
     graphHash: lifecycle.bootstrap.workflowHash,
     current,
+    dependencies: dependencyReaders.listDeclarations(taskReference),
     stages: [
       ...createBootstrapStages(lifecycle),
       ...(graph === null ? [] : createExecutionStages(graph, execution, receipts, snapshot)),

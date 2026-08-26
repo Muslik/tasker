@@ -5,7 +5,7 @@ import {
 
 export const makeJiraSnapshot = (overrides: Partial<JiraIssueSnapshot> = {}): JiraIssueSnapshot =>
   JiraIssueSnapshotSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     issueKey: 'AVIA-13235',
     issueId: '325225',
     browseUrl: 'https://jira.twiket.com/browse/AVIA-13235',
@@ -52,6 +52,10 @@ export const makeJiraSnapshot = (overrides: Partial<JiraIssueSnapshot> = {}): Ji
     ],
     links: [
       {
+        linkId: '118870',
+        linkTypeId: '10002',
+        linkTypeName: 'Deployment',
+        direction: 'outward',
         issueKey: 'AVIA-13247',
         summary: 'FE Release 31.07.2026',
         relationship: 'is deployed by',

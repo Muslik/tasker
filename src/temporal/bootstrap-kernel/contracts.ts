@@ -13,6 +13,7 @@ import {
 } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { ImplementationPlanningFailureSchema } from '../../planning/planning-failure.js';
+import { TrackerStatusUpdatesSchema } from '../../shared/task-run-settings.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/schema.js';
 import {
   WorkflowFreezeReceiptSchema,
@@ -26,6 +27,7 @@ export const TaskRunSettingsSchema = z
   .object({
     planReview: z.enum(['required', 'automatic']),
     planningStrategy: PlanningStrategyRequestSchema,
+    trackerStatusUpdates: TrackerStatusUpdatesSchema.default('enabled'),
   })
   .strict()
   .readonly();
@@ -318,6 +320,7 @@ export const AdmitTaskExecutionInputSchema = z
     workflowRunId: z.string().min(1),
     planningSnapshot: PlanningSnapshotReferenceSchema,
     workspace: BootstrapWorkspaceHandleSchema,
+    trackerStatusUpdates: TrackerStatusUpdatesSchema.default('enabled'),
     operatorGuidance: z.string().trim().min(1).max(10_000).nullable(),
     waitResolution: JsonValueSchema.nullable(),
   })

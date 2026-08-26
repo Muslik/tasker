@@ -148,17 +148,24 @@ describe('Temporal bootstrap HTTP contract', () => {
     const response = await api.inject({
       method: 'POST',
       url: '/api/workflows/jira:AVIA-12045/generate',
-      payload: { settings: { planReview: 'automatic', planningStrategy: 'fast' } },
+      payload: {
+        settings: {
+          planReview: 'automatic',
+          planningStrategy: 'fast',
+          trackerStatusUpdates: 'disabled',
+        },
+      },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ taskReference: 'jira:AVIA-12045', runId: 'run-1' });
     expect(runs.starts).toHaveLength(1);
+    expect(runs.starts[0]?.settings.trackerStatusUpdates).toBe('disabled');
     await api.close();
   });
 
   it('rejects restart commands for an obsolete run', async () => {
-    const { api } = setup();
+    const { api, runs } = setup();
     await api.inject({ method: 'POST', url: '/api/workflows/jira:AVIA-12045/generate' });
     const stale = await api.inject({
       method: 'POST',
@@ -175,6 +182,7 @@ describe('Temporal bootstrap HTTP contract', () => {
     expect(stale.json()).toMatchObject({ error: 'stale_run' });
     expect(current.statusCode).toBe(200);
     expect(current.json()).toMatchObject({ runId: 'run-2' });
+    expect(runs.starts[0]?.settings.trackerStatusUpdates).toBe('enabled');
     await api.close();
   });
 

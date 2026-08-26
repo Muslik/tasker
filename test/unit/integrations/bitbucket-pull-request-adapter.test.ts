@@ -170,6 +170,7 @@ const requestFor = (
   evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
   policies: [],
   project: testProject,
+  trackerStatusUpdates: 'enabled',
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,

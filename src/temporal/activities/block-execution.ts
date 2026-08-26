@@ -60,6 +60,7 @@ import type {
 import type { RunPlanningSnapshot } from '../../planning/run-planning-snapshot.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
+import { TrackerStatusUpdatesSchema } from '../../shared/task-run-settings.js';
 import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
 import {
   WorkflowChangeRequestSchema,
@@ -1360,6 +1361,7 @@ export const executeRegisteredTaskStep = async (
       evidence,
       policies: snapshot.harness.policies,
       project: snapshot.harness.project,
+      trackerStatusUpdates: input.trackerStatusUpdates,
       runtime,
     });
     if (execution.status === 'continuation_required') {
@@ -2033,10 +2035,21 @@ export const createTaskExecutionActivity = (
     const planningReference = input.contextReferences.find(
       ({ kind }) => kind === 'planning_snapshot',
     );
+    const trackerStatusUpdates = TrackerStatusUpdatesSchema.safeParse(
+      input.contextReferences.find(({ kind }) => kind === 'tracker_status_updates')?.reference ??
+        'enabled',
+    );
     if (workspaceReference === undefined || planningReference?.hash === undefined) {
       return {
         status: 'needs_input',
         summary: `Execution context for ${input.uses} is incomplete`,
+        waitKind: `${input.uses}.context-required@1`,
+      };
+    }
+    if (!trackerStatusUpdates.success) {
+      return {
+        status: 'needs_input',
+        summary: `Execution context for ${input.uses} has invalid Jira status settings`,
         waitKind: `${input.uses}.context-required@1`,
       };
     }
@@ -2132,6 +2145,7 @@ export const createTaskExecutionActivity = (
         activityDelivery: input.activityDelivery,
         workspace: preparedWorkspace,
         planningSnapshot: snapshotReference,
+        trackerStatusUpdates: trackerStatusUpdates.data,
         operatorGuidance: input.operatorGuidance,
         waitResolution: input.waitResolution,
         input: input.input,

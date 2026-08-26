@@ -120,6 +120,7 @@ const request = (
   },
   policies: [],
   project,
+  trackerStatusUpdates: 'enabled',
   runtime: {
     attempt: 1,
     cancellationSignal: new AbortController().signal,

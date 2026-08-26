@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "5",
+  "version": "7",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -109,12 +109,41 @@
         "id": "front-core-packages-overrides",
         "path": "sources/profiles/front-core-packages/overrides",
         "importPath": "imports/project-overrides/front-core-packages"
-      }
+      },
+      "ruleSources": [
+        {
+          "id": "front-core-packages-rules",
+          "path": "sources/profiles/front-core-packages/rules",
+          "importPath": "imports/project-rules/front-core-packages"
+        }
+      ]
     },
     {
       "id": "front-components",
       "repositoryAliases": ["front-components", "onetwotrip/front-components"],
-      "guidance": "profiles/front-components/guidance"
+      "guidance": "profiles/front-components/guidance",
+      "overrides": {
+        "id": "front-components-overrides",
+        "path": "sources/profiles/front-components/overrides",
+        "importPath": "imports/project-overrides/front-components"
+      },
+      "ruleSources": [
+        {
+          "id": "front-components-rules",
+          "path": "sources/profiles/front-components/rules",
+          "importPath": "imports/project-rules/front-components"
+        }
+      ]
+    },
+    {
+      "id": "front-index",
+      "repositoryAliases": ["front-index", "onetwotrip/front-index"],
+      "guidance": "profiles/front-index/guidance",
+      "overrides": {
+        "id": "front-index-overrides",
+        "path": "sources/profiles/front-index/overrides",
+        "importPath": "imports/project-overrides/front-index"
+      }
     },
     {
       "id": "front-railways",

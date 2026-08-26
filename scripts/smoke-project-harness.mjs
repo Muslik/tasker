@@ -15,7 +15,9 @@ import {
   DockerWorkspaceCommandRunner,
   DockerWorkspaceRuntimeManager,
   DockerWorkspaceRuntimeStore,
+  HarnessProfileWorkspaceBootstrapAdapter,
   loadDockerWorkspaceConfiguration,
+  loadWorkspaceHarnessPack,
   resolveWorkspaceRuntimePolicy,
 } from '../dist/workspaces/index.js';
 
@@ -24,6 +26,7 @@ const defaultProjectNames = [
   'front-bus',
   'front-avia',
   'front-core-packages',
+  'front-index',
   'front-components',
   'front-backoffice',
 ];
@@ -42,6 +45,7 @@ const smokeRoot = resolve(
 const repositoryRoot = resolve(smokeRoot, 'repositories');
 const workspaceRoot = resolve(smokeRoot, 'worktrees');
 const runtimeRoot = resolve(smokeRoot, 'docker-runtimes');
+const harnessSnapshotRoot = resolve(smokeRoot, 'harness-snapshots');
 const reportRoot = resolve(smokeRoot, 'reports');
 const dockerEnvironment = {
   ...process.env,
@@ -62,6 +66,15 @@ const runtimeManager = new DockerWorkspaceRuntimeManager(
   runtimeStore,
   systemClock,
 );
+const workspaceHarnessPack = loadWorkspaceHarnessPack(resolve('harness/workspace'));
+const workspaceBootstrap = new HarnessProfileWorkspaceBootstrapAdapter(
+  {
+    sourcePackPath: workspaceHarnessPack.rootPath,
+    snapshotStorePath: harnessSnapshotRoot,
+  },
+  nodeCommandRunner,
+  systemClock,
+);
 const harness = loadHarnessPack();
 const bitbucketConfiguration = loadBitbucketRepositoryConfiguration();
 if (bitbucketConfiguration === null) {
@@ -71,6 +84,7 @@ const repositorySource = new BitbucketRepositoryClient(bitbucketConfiguration);
 
 mkdirSync(repositoryRoot, { recursive: true });
 mkdirSync(workspaceRoot, { recursive: true });
+mkdirSync(harnessSnapshotRoot, { recursive: true });
 mkdirSync(reportRoot, { recursive: true });
 
 const output = (result) => {
@@ -79,6 +93,13 @@ const output = (result) => {
     .filter((value) => value.trim().length > 0)
     .join('\n')
     .trim();
+};
+
+const reportOutput = (result) => {
+  const value = output(result);
+  return value.length <= 8_000
+    ? value
+    : `${value.slice(0, 4_000)}\n... smoke output truncated ...\n${value.slice(-4_000)}`;
 };
 
 const runHost = async (cwd, args, timeoutMs = 10 * 60_000) => {
@@ -129,7 +150,9 @@ const ensureRepository = async (project) => {
 
 const ensureWorkspace = async (project, repository, policyHash) => {
   const workspaceId = createHash('sha256')
-    .update(`smoke:${project.repository}:${repository.baseCommit}:${policyHash}`)
+    .update(
+      `smoke:${project.repository}:${repository.baseCommit}:${policyHash}:${workspaceHarnessPack.contentSha256}`,
+    )
     .digest('hex')
     .slice(0, 24);
   const path = resolve(workspaceRoot, workspaceId);
@@ -158,6 +181,7 @@ const ensureWorkspace = async (project, repository, policyHash) => {
     repository: {
       reference: project.repository,
       sourcePath: repository.path,
+      baseBranch: project.git.baseBranch,
       baseCommit: repository.baseCommit,
     },
     runnerId: 'smoke',
@@ -180,7 +204,7 @@ const processResult = (reference, index, invocation, result, statusBefore, statu
   durationMs: result.durationMs,
   cleanBefore: statusBefore.length === 0,
   cleanAfter: statusAfter.length === 0,
-  output: output(result).slice(-8_000),
+  output: reportOutput(result),
 });
 
 const smokeProject = async (project) => {
@@ -189,6 +213,22 @@ const smokeProject = async (project) => {
     const repository = await ensureRepository(project);
     const policy = resolveWorkspaceRuntimePolicy(harness.company, project);
     const workspace = await ensureWorkspace(project, repository, policy.policyHash);
+    const bootstrapped = await workspaceBootstrap.apply(
+      workspace,
+      `workspace:${workspace.workspaceId}:bootstrap@1`,
+    );
+    if (!bootstrapped.ok) {
+      return {
+        repository: project.repository,
+        status: 'harness_failed',
+        startedAt,
+        completedAt: systemClock.now(),
+        baseCommit: repository.baseCommit,
+        workspaceId: workspace.workspaceId,
+        failure: bootstrapped.error,
+        processes: [],
+      };
+    }
     const prepared = await runtimeManager.prepare(workspace, policy, {
       onProgress: ({ phase, detail }) => {
         process.stdout.write(
@@ -244,6 +284,7 @@ const smokeProject = async (project) => {
       completedAt: systemClock.now(),
       baseCommit: repository.baseCommit,
       workspaceId: workspace.workspaceId,
+      harness: bootstrapped.value.receipt,
       runtime: {
         image: prepared.value.image,
         imageId: prepared.value.imageId,

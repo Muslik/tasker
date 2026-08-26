@@ -6,13 +6,15 @@ import { AgentInvocationUsageSchema } from '../observability/agent-usage.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
+import { TaskRunSettingsSchema } from '../temporal/bootstrap-kernel/contracts.js';
 import { TaskStepOutputArtifactSchema } from '../temporal/task-step-output.js';
 import { TaskStepEvidenceArtifactSchema } from '../temporal/task-step-evidence-contracts.js';
-import {
-  PlanningClarificationAnswerCommandSchema,
-  PlanningStrategyRequestSchema,
-} from '../planning/implementation-plan.js';
+import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
 import { JsonValueSchema } from '../workflow/schema.js';
+import {
+  DependencyDeclarationModeSchema,
+  DependencyPackageNameSchema,
+} from './dependency-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 
 export const OPERATOR_VIEW_SCHEMA_VERSION = 7;
@@ -209,7 +211,96 @@ export const OperatorInterventionActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('operator_guidance') }).strict(),
   z.object({ kind: z.literal('external_prerequisite') }).strict(),
   z.object({ kind: z.literal('retry_step') }).strict(),
-  z.object({ kind: z.literal('typed_resolution') }).strict(),
+  z
+    .object({
+      kind: z.literal('typed_resolution'),
+      waitKind: z.string().min(1),
+      details: z
+        .union([
+          z
+            .object({
+              kind: z.literal('dependency_available'),
+              declarationId: z.string().min(1),
+              declarationRevision: z.number().int().positive(),
+              channel: z.enum(['dev', 'final']),
+              packages: z.array(DependencyPackageNameSchema).min(1),
+              observation: z.discriminatedUnion('status', [
+                z
+                  .object({
+                    status: z.literal('missing'),
+                    observationId: z.null(),
+                    observedAt: z.null(),
+                    provenance: z.null(),
+                    packages: z.array(z.never()).length(0),
+                  })
+                  .strict(),
+                z
+                  .object({
+                    status: z.literal('recorded'),
+                    observationId: z.string().min(1),
+                    observedAt: z.iso.datetime(),
+                    provenance: z
+                      .object({
+                        kind: z.literal('loop'),
+                        postId: z.string().min(1),
+                        url: z.url().optional(),
+                      })
+                      .strict()
+                      .nullable(),
+                    packages: z.array(
+                      z
+                        .object({
+                          name: DependencyPackageNameSchema,
+                          version: z.string().min(1),
+                          registry: z.url(),
+                          tarballUrl: z.url(),
+                          integrity: z.string().min(1),
+                        })
+                        .strict(),
+                    ),
+                  })
+                  .strict(),
+              ]),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.literal('dependency_discovery'),
+              requestArtifactId: z.string().min(1),
+              requestedRepository: z.string().min(1),
+              requestedOutcome: z.string().min(1),
+              componentPath: z.string().min(1).nullable(),
+              expectedPackage: DependencyPackageNameSchema.nullable(),
+              declaration: z.discriminatedUnion('status', [
+                z
+                  .object({
+                    status: z.literal('missing'),
+                    declarationId: z.null(),
+                    declarationRevision: z.null(),
+                    producerTaskReference: z.null(),
+                    producerRepository: z.null(),
+                    packages: z.array(z.never()).length(0),
+                    mode: z.null(),
+                  })
+                  .strict(),
+                z
+                  .object({
+                    status: z.literal('recorded'),
+                    declarationId: z.string().min(1),
+                    declarationRevision: z.number().int().positive(),
+                    producerTaskReference: z.string().min(1),
+                    producerRepository: z.string().min(1),
+                    packages: z.array(DependencyPackageNameSchema).min(1),
+                    mode: DependencyDeclarationModeSchema,
+                  })
+                  .strict(),
+              ]),
+            })
+            .strict(),
+        ])
+        .nullable(),
+    })
+    .strict(),
 ]);
 
 const OperatorWorkflowCurrentBaseSchema = {
@@ -222,7 +313,7 @@ const OperatorWorkflowCurrentBaseSchema = {
 
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(7),
+    schemaVersion: z.literal(8),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
@@ -253,6 +344,36 @@ export const OperatorWorkflowProjectionSchema = z
           .strict(),
       ])
       .nullable(),
+    dependencies: z.array(
+      z
+        .object({
+          declarationId: z.string().min(1),
+          revision: z.number().int().positive(),
+          producerTaskReference: z.string().min(1),
+          producerRepository: z.string().min(1),
+          packages: z.array(DependencyPackageNameSchema).min(1),
+          mode: DependencyDeclarationModeSchema,
+          source: z.discriminatedUnion('kind', [
+            z
+              .object({
+                kind: z.literal('jira_link'),
+                linkId: z.string().min(1),
+                linkTypeId: z.string().min(1),
+                direction: z.enum(['inward', 'outward']),
+              })
+              .strict(),
+            z
+              .object({
+                kind: z.literal('runtime_discovery'),
+                workflowRunId: z.string().min(1),
+                requestArtifactId: z.string().min(1),
+              })
+              .strict(),
+          ]),
+          createdAt: z.iso.datetime(),
+        })
+        .strict(),
+    ),
     stages: z.array(OperatorWorkflowStageSchema),
     continuations: z.array(OperatorWorkflowContinuationSchema),
   })
@@ -344,12 +465,7 @@ export const ExecutionRunViewSchema = TaskRunPublicStateSchema;
 
 export const RunStartCommandSchema = z
   .object({
-    settings: z
-      .object({
-        planReview: z.enum(['required', 'automatic']),
-        planningStrategy: PlanningStrategyRequestSchema,
-      })
-      .strict(),
+    settings: TaskRunSettingsSchema,
   })
   .strict();
 
@@ -357,6 +473,7 @@ export const DEFAULT_RUN_START_COMMAND = {
   settings: {
     planReview: 'required',
     planningStrategy: 'auto',
+    trackerStatusUpdates: 'enabled',
   },
 } as const satisfies z.input<typeof RunStartCommandSchema>;
 
@@ -364,6 +481,109 @@ export const ResumeRunCommandSchema = z
   .object({
     expectedRunId: z.string().min(1),
     guidance: z.string().trim().min(1).max(10_000).optional(),
+  })
+  .strict();
+
+export const ConfigureTaskDependencyCommandSchema = z
+  .object({
+    consumerTaskReference: z.string().min(1),
+    producerTaskReference: z.string().min(1),
+    producerRepository: z.string().min(1),
+    packages: z
+      .array(DependencyPackageNameSchema)
+      .min(1)
+      .superRefine((packages, context) => {
+        const seen = new Set<string>();
+        for (const [index, packageName] of packages.entries()) {
+          if (seen.has(packageName)) {
+            context.addIssue({
+              code: 'custom',
+              message: `Duplicate package name "${packageName}"`,
+              path: [index],
+            });
+          }
+          seen.add(packageName);
+        }
+      }),
+    mode: DependencyDeclarationModeSchema,
+    source: z
+      .object({
+        kind: z.literal('jira_link'),
+        linkId: z.string().min(1),
+        linkTypeId: z.string().min(1),
+        direction: z.enum(['inward', 'outward']),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const DependencyAvailableCommandSchema = z
+  .object({
+    expectedRunId: z.string().min(1),
+    nodeId: z.string().min(1),
+    waitKind: z.literal('dependency.available@1'),
+    declarationId: z.string().min(1),
+    declarationRevision: z.number().int().positive(),
+    channel: z.enum(['dev', 'final']),
+    packages: z
+      .array(
+        z
+          .object({
+            name: DependencyPackageNameSchema,
+            version: z.string().trim().min(1),
+          })
+          .strict(),
+      )
+      .min(1)
+      .superRefine((packages, context) => {
+        const seen = new Set<string>();
+        for (const [index, item] of packages.entries()) {
+          if (seen.has(item.name)) {
+            context.addIssue({
+              code: 'custom',
+              message: `Duplicate package name "${item.name}"`,
+              path: [index, 'name'],
+            });
+          }
+          seen.add(item.name);
+        }
+      }),
+    provenance: z
+      .object({
+        kind: z.literal('loop'),
+        postId: z.string().min(1),
+        url: z.url().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const DependencyDiscoveryCommandSchema = z
+  .object({
+    expectedRunId: z.string().min(1),
+    nodeId: z.string().min(1),
+    waitKind: z.literal('dependency.discovery@1'),
+    requestArtifactId: z.string().min(1),
+    producerTaskReference: z.string().min(1),
+    producerRepository: z.string().min(1),
+    packages: z
+      .array(DependencyPackageNameSchema)
+      .min(1)
+      .superRefine((packages, context) => {
+        const seen = new Set<string>();
+        for (const [index, packageName] of packages.entries()) {
+          if (seen.has(packageName)) {
+            context.addIssue({
+              code: 'custom',
+              message: `Duplicate package name "${packageName}"`,
+              path: [index],
+            });
+          }
+          seen.add(packageName);
+        }
+      }),
+    mode: DependencyDeclarationModeSchema,
   })
   .strict();
 
@@ -522,6 +742,9 @@ export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
 export type RunStartCommand = z.infer<typeof RunStartCommandSchema>;
 export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
+export type ConfigureTaskDependencyCommand = z.infer<typeof ConfigureTaskDependencyCommandSchema>;
+export type DependencyAvailableCommand = z.infer<typeof DependencyAvailableCommandSchema>;
+export type DependencyDiscoveryCommand = z.infer<typeof DependencyDiscoveryCommandSchema>;
 export type WorkflowChangeReviewCommand = z.infer<typeof WorkflowChangeReviewCommandSchema>;
 export type RestartRunCommand = z.infer<typeof RestartRunCommandSchema>;
 export type ExpectedRunCommand = z.infer<typeof ExpectedRunCommandSchema>;

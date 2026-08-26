@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "reference": "dependency.await_packages@1",
+  "description": "Wait for every exact package version in a declared external dependency to be verified in Nexus.",
+  "stage": { "id": "implementation", "label": "Implement" },
+  "availableDuring": ["execution"],
+  "inputContract": "dependency_wait_input",
+  "outputContract": "dependency_publication_output",
+  "executor": {
+    "kind": "integration",
+    "adapter": "dependency.await_packages@1"
+  },
+  "outcomes": ["completed", "needs_input", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["dependency-publication"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": [],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": ["dependency.available@1"],
+  "artifactContracts": ["dependency-publication"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

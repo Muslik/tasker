@@ -4,6 +4,7 @@ import type { JsonValue } from '../workflow/schema.js';
 import type { WorkspaceLocator } from '../workspaces/contracts.js';
 import type { PullRequestReviewEvidence } from './bitbucket/review.js';
 import type { WorkflowChangeRequest } from '../workflow/execution-result.js';
+import type { TrackerStatusUpdates } from '../shared/task-run-settings.js';
 
 export interface TaskRunStepEvidence {
   readonly operationId: string;
@@ -75,6 +76,7 @@ export interface IntegrationStepExecutionRequest {
   readonly evidence: TaskRunEvidence;
   readonly policies: readonly HarnessPolicyManifest[];
   readonly project: HarnessProjectManifest | null;
+  readonly trackerStatusUpdates: TrackerStatusUpdates;
   readonly runtime: IntegrationStepRuntime;
 }
 

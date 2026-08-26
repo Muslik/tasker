@@ -150,7 +150,7 @@ execution protocol:
   judgment;
 - `delivery`: invokes typed Git/tracker/SCM/CI operations with external-effect
   reconciliation;
-- a task-specific human/external protocol such as translation or package publication.
+- a task-specific human/external protocol such as translation.
 
 Waits are typed states owned by the active semantic block or a real task-specific human
 boundary. Potential recovery waits are not predeclared sibling nodes.
@@ -308,7 +308,7 @@ Keep these boundaries distinct:
 - **step skills** are selected by one immutable agent-step binding (`playwright-demo` for
   reproduction/visual verification, CI readers for CI analysis);
 - **integration effects** are performed only by typed internal Delivery operations (Git
-  push, PR, Jira mutation, publication), never by a catch-all skill.
+  push, PR, Jira mutation), never by a catch-all skill.
 
 `pr-finalize` is therefore design input, not a Tasker skill: it combines several remote effects
 which Temporal must persist and reconcile separately. Conversely, `playwright-demo` is a valid
@@ -348,23 +348,21 @@ Project policy describes workflow peculiarities, not source architecture. Good f
   process and explicitly binds the corresponding semantic protocol operations;
 - changed CSS/visual surfaces require screenshot verification;
 - changes in a specific package require build A and tests B/C;
-- final publication is human-owned;
 - a repository consumes packages from another repository;
-- permitted dev-publish and remote-effect capabilities.
+- permitted remote-effect capabilities.
 
 FSD, reducer patterns, React conventions, and implementation style belong in repository
 instructions or skills. They guide an agent Activity but do not create graph nodes or
 grant permissions.
 
 Unknown projects receive conservative defaults. Tasker never guesses an external
-translation/publish process from a repository name alone.
+translation process from a repository name alone.
 
 ## 6. Company-global policy
 
 Use global policy for reusable workflow knowledge, for example:
 
 - frontend `@ott` packages live in a known repository family;
-- dev publish may be automatic while final publish is human-only;
 - every PR observes Jenkins and human Bitbucket review;
 - provider/concurrency quotas;
 - default effect restrictions and retrospective thresholds.
@@ -405,7 +403,7 @@ create nested `work` overlays. That command discovers and mutates every worktree
 `~/Projects/work`; Tasker owns a different managed clone.
 
 The built-in pack lives in `harness/workspace`. `pnpm harness:setup` creates ignored authoring
-symlinks to global skills/rules, selected `work/shared` skills/rules, and project skills/overrides
+symlinks to global skills/rules, selected `work/shared` skills/rules, and project skills/rules/overrides
 under `/Users/dzhabrail/Projects/harness`. `manifest.json` allowlists the exact logical packages;
 `fix-bug` and `pr-finalize` are not imported as end-to-end macros. Their stable ideas live in the
 relevant Tasker prompts and Delivery behavior. Every run copies ordinary bytes into a
@@ -429,8 +427,8 @@ Repository rules and Tasker rules have different owners:
 - composed tracked guidance is marked `skip-worktree`, so it guides the agent but cannot
   enter the product diff.
 
-This is explicit composition with optional replacement. Project overrides remain owned by the
-interactive harness; Tasker-specific operational delta alone belongs in
+This is explicit composition with optional replacement. Project rules and overrides remain owned
+by the interactive harness; Tasker-specific operational delta alone belongs in
 `workspace/profiles/<id>/guidance`. The frozen content hash makes the exact result reviewable.
 
 The repository preparation Activity:
@@ -527,9 +525,11 @@ delivery outside a bounded `delivery.accepted@1` loop containing Implement, Veri
 Review feedback. A provider-specific retry mutation needs its own reconciled internal
 operation; it must not be hidden inside the read observer.
 
-Review-ready Jira effects run only before the first `code_review@1` wait. Resolving that wait as
-approved or changes-requested is local workflow input and must not replay Jira transitions,
-comments, or attachments. In particular, `Mark done` never advances Jira beyond `Code Review`.
+Review-ready Jira effects run only before the first `code_review@1` wait. Evidence attachment and
+the managed PR comment precede the optional status transition; disabling status updates or failing a
+transition never suppresses those publications. Resolving the wait as approved or changes-requested
+is local workflow input and must not replay Jira transitions, comments, or attachments. In
+particular, `Mark done` never advances Jira beyond `Code Review`.
 
 The terminal retrospective system stage is evidence-only. It may propose edits to harness prompts,
 project runtime policy, or infrastructure, but applying any proposal remains a separate reviewed
@@ -566,7 +566,9 @@ It should not require changing the Temporal interpreter, Workflow messaging mode
 generic IR, plan/question semantics, or retrospective model. If `JiraIssue` or a
 Bitbucket response shape appears in Workflow input, the boundary is broken.
 
-The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. Its
+The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. The task-launch
+dialog pins `trackerStatusUpdates` for the run; the default is enabled, and disabling it suppresses only
+`In Progress` / `Code Review` transition attempts. Its
 account, eligible issue types, excluded labels, admission/review status paths, and
 compact review comment prefix live in
 `harness/policies/jira-lifecycle.json`; changing those rules does not change adapter or
@@ -575,12 +577,10 @@ admission and not a required reproduction block. Tasker's private before evidenc
 remains in its artifact store. Keep any remote-media policy off until a selected pilot
 task and its transition requirements have been inspected.
 
-Required transition fields are not duplicated in Tasker configuration. Jira remains
-their source of truth: before an Implement-admission or Delivery-review-ready operation mutates an
-issue, the adapter reads the selected transition metadata and current issue values. If
-a required value such as Development estimate is absent, the run names the exact Jira
-field and waits. Fill it in Jira and press Resume; Tasker re-runs only that operation and
-preserves the already completed workflow prefix. It does not guess or write business
+Required transition fields are not duplicated in Tasker configuration. Jira remains their source of
+truth: before an enabled status update, the adapter reads transition metadata and current issue
+values. If a required value such as Development estimate is absent, the transition is recorded as
+not applied while implementation or delivery continues. Tasker does not guess or write business
 estimates on the operator's behalf.
 
 Local development reads optional non-secret write authorization from `.tasker/local.env` before
@@ -667,8 +667,10 @@ Tasker asks the analyzer for a validated semantic continuation, compiles it, and
 the review decision against the current Execution `runId`. An accepted same-repository
 suffix runs through namespaced nodes in the same Temporal Workflow and workspace. The
 parent graph and completed prefix remain immutable. A different repository requires a
-separately prepared child workspace and remains a typed prerequisite until that
-lifecycle is implemented.
+typed external dependency declaration. Its producer remains an independent task/run; after
+human-owned publication, a read-only Nexus adapter verifies exact package artifacts and a
+same-repository continuation updates and verifies the consumer. Tasker never mounts or executes the
+producer repository in the consumer run.
 
 During the pilot every revision is reviewable. Later known low-risk classes may be
 auto-accepted by policy, but deterministic validation never becomes optional.

@@ -230,6 +230,11 @@ describe('workspace harness bootstrap', () => {
       reference: 'onetwotrip/front-components',
       files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
     },
+    {
+      profile: 'front-index',
+      reference: 'onetwotrip/front-index',
+      files: ['.ai/tasker.md', 'AGENTS.md', 'CLAUDE.md'],
+    },
   ])(
     'materializes every project guidance file for $profile',
     async ({ profile, reference, files }) => {
@@ -253,7 +258,15 @@ describe('workspace harness bootstrap', () => {
           'utf8',
         );
         if (file === 'AGENTS.md' || file === 'CLAUDE.md') {
-          if (['front-avia', 'front-bus', 'front-railways'].includes(profile)) {
+          if (
+            [
+              'front-avia',
+              'front-bus',
+              'front-components',
+              'front-core-packages',
+              'front-railways',
+            ].includes(profile)
+          ) {
             expect(actual).not.toContain(
               file === 'AGENTS.md' ? '# Repository agents' : '# Repository Claude',
             );
@@ -265,39 +278,64 @@ describe('workspace harness bootstrap', () => {
           expect(actual).toContain(managed.trim());
           expect(actual).toContain('Задачи, которые заканчиваются пул-реквестом');
           expect(actual).toContain('tasker managed guidance');
+          if (['front-components', 'front-core-packages'].includes(profile)) {
+            expect(actual).toContain('## Коммиты и changelog');
+          } else {
+            expect(actual).not.toContain('## Коммиты и changelog');
+          }
         } else {
           expect(actual).toBe(managed);
         }
+      }
+      if (profile === 'front-core-packages') {
+        expect(readFileSync(join(repository.path, '.ai/commit.md'), 'utf8')).toContain(
+          'одну осмысленную запись в changelog',
+        );
       }
       expect(git(repository.path, 'status', '--porcelain')).toBe('');
     },
   );
 
-  it('keeps repository .ai guidance while applying the managed-run root rules', async () => {
-    const repository = createRepository();
-    const workspace = locatorFor(repository, 'onetwotrip/front-backoffice');
-    const adapter = createAdapter(
-      resolve('harness/workspace'),
-      mkdtempSync(join(tmpdir(), 'tasker-harness-snapshots-')),
-    );
+  it.each([
+    {
+      profile: 'front-backoffice',
+      reference: 'onetwotrip/front-backoffice',
+      snippets: ['pnpm run agent:typecheck', 'agent:eslint-for-changed'],
+    },
+    {
+      profile: 'front-index',
+      reference: 'onetwotrip/front-index',
+      snippets: ['pnpm run agent:check', 'https://local.onetwotrip.com:3000', 'pnpm run build:all'],
+    },
+  ])(
+    'keeps repository .ai guidance while applying the managed-run root rules for $profile',
+    async ({ profile, reference, snippets }) => {
+      const repository = createRepository();
+      const workspace = locatorFor(repository, reference);
+      const adapter = createAdapter(
+        resolve('harness/workspace'),
+        mkdtempSync(join(tmpdir(), 'tasker-harness-snapshots-')),
+      );
 
-    const result = await adapter.apply(workspace, operationId(workspace));
+      const result = await adapter.apply(workspace, operationId(workspace));
 
-    expect(result).toMatchObject({
-      ok: true,
-      value: { status: 'ready', receipt: { profile: 'front-backoffice' } },
-    });
-    expect(readFileSync(join(repository.path, '.ai/index.md'), 'utf8')).toBe(
-      '# Repository AI index\n',
-    );
-    expect(readFileSync(join(repository.path, '.ai/tasker.md'), 'utf8')).toContain(
-      'pnpm run agent:typecheck',
-    );
-    expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
-      'Tasker уже подготовил workflow',
-    );
-    expect(git(repository.path, 'status', '--porcelain')).toBe('');
-  });
+      expect(result).toMatchObject({
+        ok: true,
+        value: { status: 'ready', receipt: { profile } },
+      });
+      expect(readFileSync(join(repository.path, '.ai/index.md'), 'utf8')).toBe(
+        '# Repository AI index\n',
+      );
+      const taskerGuidance = readFileSync(join(repository.path, '.ai/tasker.md'), 'utf8');
+      for (const snippet of snippets) {
+        expect(taskerGuidance).toContain(snippet);
+      }
+      expect(readFileSync(join(repository.path, 'AGENTS.md'), 'utf8')).toContain(
+        'Tasker уже подготовил workflow',
+      );
+      expect(git(repository.path, 'status', '--porcelain')).toBe('');
+    },
+  );
 
   it('repairs a partial workspace from its pinned pack after the source changes', async () => {
     const repository = createRepository();

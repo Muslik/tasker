@@ -296,10 +296,10 @@ For a representative run, inspect Event History and Search Attributes:
 
 - sync success only updates snapshot and `syncedAt`, not activity history;
 - VPN/403 sync failure updates health without erasing cached task;
-- Jira 400 on take-into-work is classified and does not start code Activity;
+- Jira 400/403 or missing fields on a status transition are classified but do not block code;
 - non-agent task policy prevents assignment/status mutation;
-- code-review transition/comment requires durable PR evidence and follows CI;
-- Jira review-ready 403 resumes only that node without repeating code or PR preparation;
+- review-ready evidence/comment requires durable PR evidence and follows CI;
+- disabled or rejected review-ready transitions preserve evidence/comment and enter human review;
 - repeated comment/attachment Activity reconciles existing remote result;
 - private before-reproduction evidence is not automatically attached to Jira;
 - final demo evidence attaches only when explicit delivery policy permits it;

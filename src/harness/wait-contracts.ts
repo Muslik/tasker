@@ -85,10 +85,30 @@ export const harnessWaitContracts = [
     description: 'Wait for the translator to finish external work.',
   },
   {
-    id: 'final_publish',
+    id: 'dependency_available',
     version: '1',
-    stage: { id: 'delivery', label: 'Deliver' },
-    resolutionSchema: z.object({ version: z.string().min(1) }).strict(),
-    description: 'Wait for a human-owned final package publication.',
+    stage: { id: 'implementation', label: 'Implement' },
+    resolutionSchema: z
+      .object({
+        decision: z.literal('recheck'),
+        declarationId: z.string().min(1),
+        declarationRevision: z.number().int().positive(),
+        observationId: z.string().min(1),
+      })
+      .strict(),
+    description: 'Wait until every exact package version in a dependency is verified in Nexus.',
+  },
+  {
+    id: 'dependency_discovery',
+    version: '1',
+    stage: { id: 'implementation', label: 'Implement' },
+    resolutionSchema: z
+      .object({
+        decision: z.literal('configured'),
+        requestArtifactId: z.string().min(1),
+        declarationId: z.string().min(1),
+      })
+      .strict(),
+    description: 'Wait for an operator to configure a newly discovered external dependency.',
   },
 ] satisfies readonly WaitContract[];

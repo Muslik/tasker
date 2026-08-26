@@ -70,6 +70,7 @@ export const createTaskAdmissionActivity = (
       },
       policies: snapshot.value.harness.policies,
       project: snapshot.value.harness.project,
+      trackerStatusUpdates: input.trackerStatusUpdates,
       runtime: {
         attempt: context.info.attempt,
         cancellationSignal: context.cancellationSignal,
