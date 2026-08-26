@@ -63,6 +63,11 @@ targeted validation is unavailable because its root `lint-no-fix` resolves an in
 ESLint instead of the workspace-owned legacy configuration; its CI-faithful unit and Storybook
 commands remain registered.
 
+`front-core-packages` runtime observation is intentionally not a project validation process or a
+workspace-wide service. Investigation and Verify read the imported `.ai/app-runbook.md`, start
+Storybook inside their provider attempt, run one bounded repository selector, and let the provider
+container own cleanup. Planning and workspace setup therefore start no FCP product server.
+
 These declarations are executable policy. `pnpm harness:smoke` first materializes the pinned
 workspace profile, then runs commands in the same Docker runtime used by task Activities against
 disposable Tasker-owned worktrees. Seven profiles currently

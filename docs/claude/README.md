@@ -38,6 +38,6 @@
 Перечислены в конце [spec.md](spec.md). Два блокирующих:
 
 - MCP-доступ к проекту AVIA закрыт — нужен другой токен или REST-путь через скилл `jira`.
-- `app-runbook.md` есть только во `front-avia`; для остальных шести репозиториев предусловие для `reproduce` не выполнено.
+- `app-runbook.md` есть во `front-avia` и `front-core-packages`; остальные пять репозиториев ещё не имеют проверенного runtime-рецепта.
 
 Плюс шесть практических проверок, которые research закрыть не может, — в конце [research-landscape.md](research-landscape.md).

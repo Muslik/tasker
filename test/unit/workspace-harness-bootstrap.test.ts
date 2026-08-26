@@ -291,6 +291,9 @@ describe('workspace harness bootstrap', () => {
         expect(readFileSync(join(repository.path, '.ai/commit.md'), 'utf8')).toContain(
           'одну осмысленную запись в changelog',
         );
+        expect(readFileSync(join(repository.path, '.ai/app-runbook.md'), 'utf8')).toContain(
+          'pnpm exec storybook dev',
+        );
       }
       expect(git(repository.path, 'status', '--porcelain')).toBe('');
     },

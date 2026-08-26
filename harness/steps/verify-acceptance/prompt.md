@@ -24,9 +24,12 @@ criterion.
 
 When a repository Playwright command runs in this read-only step, keep its normal config and selector
 but select a non-writing reporter and direct its output directory below `$TASKER_SCRATCH_ROOT`.
-Tasker shares the configured app service network namespace with command containers, so
-`reuseExistingServer` can observe the task-scoped server on localhost; do not start or reconfigure a
-second application service.
+Read `.ai/app-runbook.md` before runtime verification. If it identifies an existing Tasker-managed
+service, reuse that service and do not start a competitor. Otherwise start the documented server
+inside this provider attempt, wait for its readiness signal, run the exact test and evidence scenario,
+and stop it with `trap` or `finally`. Never daemonize it outside the attempt, publish a host port, or
+assume it survives a retry. Server caches and outputs must use the writable paths documented by the
+runbook; block if the server requires writes to the read-only product worktree.
 
 For a bug, repeat the investigated scenario and create exactly one primary publishable after
 artifact below `$TASKER_ARTIFACTS_ROOT`: either `<TASK-ID>-fixed.png` or

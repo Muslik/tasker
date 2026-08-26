@@ -14,7 +14,19 @@ export const reproductionInputSchema = taskInputSchema.extend({
   phase: z.literal('after'),
 });
 
-export const investigationInputSchema = taskInputSchema;
+const RuntimeObservationEvidenceKindSchema = z.enum(['image', 'video', 'log', 'structured_output']);
+
+export const runtimeObservationInputSchema = taskInputSchema
+  .extend({
+    claim: z.string().min(1),
+    scenario: z.string().min(1),
+    requestedEvidence: z.array(RuntimeObservationEvidenceKindSchema).min(1).max(4),
+  })
+  .superRefine((value, context) => {
+    if (new Set(value.requestedEvidence).size !== value.requestedEvidence.length) {
+      context.addIssue({ code: 'custom', message: 'Requested evidence kinds must be unique' });
+    }
+  });
 
 export const verificationInputSchema = z
   .object({
@@ -139,6 +151,17 @@ const ReproductionEvidenceSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+const RuntimeObservationEvidenceSchema = z.discriminatedUnion('kind', [
+  ...ReproductionEvidenceSchema.options,
+  z
+    .object({
+      kind: z.literal('structured_output'),
+      path: ArtifactRelativePathSchema,
+      mimeType: z.literal('application/json'),
+    })
+    .strict(),
+]);
+
 export const reproductionOutputSchema = z
   .object({
     summary: z.string().min(1),
@@ -148,14 +171,29 @@ export const reproductionOutputSchema = z
   })
   .strict();
 
-export const investigationOutputSchema = z
+const RuntimeObservationOutputBaseSchema = z
   .object({
     summary: z.string().min(1),
-    outcome: z.enum(['reproduced', 'not_reproduced', 'inconclusive']),
+    claim: z.string().min(1),
+    scenario: z.string().min(1),
     observations: z.array(z.string().min(1)).min(1).max(50),
-    evidence: z.array(ReproductionEvidenceSchema).max(30),
+    evidence: z.array(RuntimeObservationEvidenceSchema).max(30),
   })
   .strict();
+
+export const runtimeObservationOutputSchema = z.discriminatedUnion('outcome', [
+  RuntimeObservationOutputBaseSchema.extend({
+    outcome: z.literal('observed'),
+    evidence: z.array(RuntimeObservationEvidenceSchema).min(1).max(30),
+  }).strict(),
+  RuntimeObservationOutputBaseSchema.extend({
+    outcome: z.literal('not_observed'),
+    evidence: z.array(RuntimeObservationEvidenceSchema).min(1).max(30),
+  }).strict(),
+  RuntimeObservationOutputBaseSchema.extend({
+    outcome: z.literal('inconclusive'),
+  }).strict(),
+]);
 
 export const processOutputSchema = z
   .object({
@@ -311,8 +349,8 @@ const contractSchemas = {
   dependency_publication_output: dependencyPublicationOutputSchema,
   dependency_wait_input: dependencyWaitInputSchema,
   integration_output: integrationOutputSchema,
-  investigation_input: investigationInputSchema,
-  investigation_output: investigationOutputSchema,
+  runtime_observation_input: runtimeObservationInputSchema,
+  runtime_observation_output: runtimeObservationOutputSchema,
   process_input: processInputSchema,
   process_output: processOutputSchema,
   pull_request_input: pullRequestInputSchema,

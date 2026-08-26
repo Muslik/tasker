@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "7",
+  "version": "8",
   "engines": ["codex", "claude"],
   "skillSources": [
     {

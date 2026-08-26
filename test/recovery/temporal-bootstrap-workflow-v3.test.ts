@@ -379,8 +379,13 @@ describe('Bootstrap investigation recovery', () => {
             steps: [
               {
                 id: 'reproduce-payment-spacing',
-                uses: 'bug.investigate@1',
-                with: { objective: 'Reproduce the payment spacing defect.' },
+                uses: 'runtime.observe@1',
+                with: {
+                  objective: 'Reproduce the payment spacing defect.',
+                  claim: 'The payment spacing defect is visible in the reported state.',
+                  scenario: 'Open the reported payment state and inspect the affected spacing.',
+                  requestedEvidence: ['image'],
+                },
               },
             ],
           },

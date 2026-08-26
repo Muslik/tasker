@@ -105,7 +105,7 @@ describe('Jira bootstrap context assembly', () => {
     });
     expect('workflow' in snapshot.value).toBe(false);
     expect(
-      snapshot.value.harness.steps.find(({ reference }) => reference === 'bug.investigate@1')?.block
+      snapshot.value.harness.steps.find(({ reference }) => reference === 'runtime.observe@1')?.block
         .availableDuring,
     ).toEqual(['bootstrap_investigation']);
 

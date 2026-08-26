@@ -33,7 +33,7 @@ describe('bootstrap investigation activity', () => {
         {
           status: 'continuation_required',
           summary: 'The defect belongs to a shared component repository',
-          waitKind: 'bug.investigate@1.continuation-required@1',
+          waitKind: 'runtime.observe@1.continuation-required@1',
           requestReference: 'task-step-output:investigation:artifact',
           receiptReference: 'block-receipt:investigation:run-1',
         },
@@ -42,7 +42,7 @@ describe('bootstrap investigation activity', () => {
     ).toEqual({
       status: 'continuation_required',
       summary: 'The defect belongs to a shared component repository',
-      waitKind: 'bug.investigate@1.continuation-required@1',
+      waitKind: 'runtime.observe@1.continuation-required@1',
       requestReference: 'task-step-output:investigation:artifact',
       evidenceBundle,
     });

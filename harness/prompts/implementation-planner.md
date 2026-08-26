@@ -31,6 +31,12 @@ plan and workflow can be produced. Select only registered blocks whose `availabl
 
 {"status":"investigation_required","request":{"reason":"...","steps":[{"id":"kebab-case","uses":"registered.block@1","with":{}}]}}
 
+For a material runtime fact, use the registered `runtime.observe@1` block with one explicit claim,
+one bounded scenario, and the evidence kinds needed to resolve the planning uncertainty. Do not
+request runtime observation merely to illustrate a plan or repeat evidence already in the bundle:
+
+{"id":"observe-current-state","uses":"runtime.observe@1","with":{"objective":"...","repository":"...","taskId":"...","claim":"observable statement to test","scenario":"bounded route/story/interaction","requestedEvidence":["image"]}}
+
 Use `needs_clarification` whenever a missing human decision materially changes behavior, scope, or
 acceptance. Never guess merely because plan review is automatic:
 
@@ -111,7 +117,7 @@ Use only these verification shapes:
 
 Every `workflowStepIds` entry names an actual semantic step node that performs or owns the proof.
 Select `source: new` only when a stable automated regression test is appropriate; creating it remains
-Implement work. Do not claim a bug is reproduced unless investigation evidence says so. Private
+Implement work. Do not claim a bug is reproduced unless runtime observation evidence says so. Private
 before-evidence remains Tasker evidence; publish only the final demo when policy requests it.
 
 Each plan step needs observable verification. Use exact paths only when evidence supports them;

@@ -484,6 +484,59 @@ describe('file-backed harness pack', () => {
     });
   });
 
+  it('models reusable runtime observations with an explicit claim and evidence request', () => {
+    const observe = getHarnessStepDefinition('runtime.observe@1');
+    if (observe === undefined) throw new Error('Expected semantic runtime observation block');
+
+    expect(
+      observe.contract.inputSchema.safeParse({
+        objective: 'Inspect the current component state',
+        repository: 'onetwotrip/front-core-packages',
+        taskId: 'FC-2244',
+        claim: 'Captcha is visible after the limiter returns ATTEMPTS_EXCEEDED with HTTP 200.',
+        scenario: 'Open the Captcha story and trigger the HTTP 200 limiter response.',
+        requestedEvidence: ['image', 'structured_output'],
+      }).success,
+    ).toBe(true);
+    expect(
+      observe.contract.inputSchema.safeParse({
+        objective: 'Inspect the current component state',
+        repository: 'onetwotrip/front-core-packages',
+        taskId: 'FC-2244',
+        claim: 'Captcha is visible.',
+        scenario: 'Open the Captcha story.',
+        requestedEvidence: ['image', 'image'],
+      }).success,
+    ).toBe(false);
+    expect(
+      observe.contract.outputSchema.safeParse({
+        summary: 'The requested runtime claim was observed.',
+        claim: 'Captcha is visible after the limiter returns ATTEMPTS_EXCEEDED with HTTP 200.',
+        scenario: 'Open the Captcha story and trigger the HTTP 200 limiter response.',
+        outcome: 'observed',
+        observations: ['The Captcha dialog became visible while all requests remained pending.'],
+        evidence: [
+          { kind: 'image', path: 'captcha-current.png', mimeType: 'image/png' },
+          {
+            kind: 'structured_output',
+            path: 'request-statuses.json',
+            mimeType: 'application/json',
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      observe.contract.outputSchema.safeParse({
+        summary: 'The agent claimed an observation without durable evidence.',
+        claim: 'Captcha is visible.',
+        scenario: 'Open the Captcha story.',
+        outcome: 'observed',
+        observations: ['The agent reported a dialog.'],
+        evidence: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it('registers the compact semantic catalog and project-owned verification commands', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const references = pack.steps.map(({ reference }) => reference);
@@ -492,7 +545,7 @@ describe('file-backed harness pack', () => {
 
     expect(references).toEqual(
       expect.arrayContaining([
-        'bug.investigate@1',
+        'runtime.observe@1',
         'implement.change@1',
         'verify.acceptance@1',
         'review.change@1',

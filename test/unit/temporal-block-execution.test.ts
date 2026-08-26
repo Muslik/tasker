@@ -492,9 +492,9 @@ describe('temporal block execution activity', () => {
         workflowId: stubWorkspace.workflowId,
         workflowRunId: stubWorkspace.workflowRunId,
         workflowHash: WORKFLOW_HASH,
-        nodeId: 'investigate-bug',
+        nodeId: 'observe-runtime',
         stepAttempt: 1,
-        uses: 'bug.investigate@1',
+        uses: 'runtime.observe@1',
         activityDelivery: { kind: 'workspace_reconciled' },
         workspace: stubWorkspace,
         planningSnapshot: {
@@ -507,11 +507,14 @@ describe('temporal block execution activity', () => {
           objective: 'Reproduce the reported bug',
           repository: fixture.repository,
           taskId: fixture.taskId,
+          claim: 'The reported layout failure is observable in the prepared scenario.',
+          scenario: 'Open the reported state and inspect the affected layout.',
+          requestedEvidence: ['image'],
         },
       },
       {
         snapshots: {
-          readRunSnapshot: () => ok(makeSnapshot('bug.investigate@1')),
+          readRunSnapshot: () => ok(makeSnapshot('runtime.observe@1')),
         },
         currentSteps: createCurrentStepRegistry(pack),
         traces,
@@ -527,8 +530,10 @@ describe('temporal block execution activity', () => {
                 finalMessage: {
                   status: 'completed',
                   outputJson: JSON.stringify({
-                    summary: 'Bug reproduced',
-                    outcome: 'reproduced',
+                    summary: 'Runtime claim observed',
+                    claim: 'The reported layout failure is observable in the prepared scenario.',
+                    scenario: 'Open the reported state and inspect the affected layout.',
+                    outcome: 'observed',
                     observations: ['The reported layout failed in the prepared scenario.'],
                     evidence: [
                       {
@@ -557,7 +562,7 @@ describe('temporal block execution activity', () => {
     expect(result).toMatchObject({
       status: 'blocked',
       summary:
-        'Agent execution for bug.investigate@1 returned invalid output: evidence.0.path: Expected a path relative to the Tasker artifact root',
+        'Agent execution for runtime.observe@1 returned invalid output: evidence.0.path: Expected a path relative to the Tasker artifact root',
     });
     expect(result.artifactIds).toContain(`task-step-evidence:${'a'.repeat(64)}`);
   });

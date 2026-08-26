@@ -488,11 +488,14 @@ describe('implementation planning recovery', () => {
                   steps: [
                     {
                       id: 'investigate-reported-bug',
-                      uses: 'bug.investigate@1',
+                      uses: 'runtime.observe@1',
                       with: {
                         objective: 'Reproduce the reported behavior.',
                         repository: REPOSITORY,
                         taskId: 'AVIA-13236',
+                        claim: 'The reported behavior is observable in the prepared application.',
+                        scenario: 'Repeat the bounded reproduction steps from the task.',
+                        requestedEvidence: ['video'],
                       },
                     },
                   ],
@@ -514,7 +517,7 @@ describe('implementation planning recovery', () => {
           ok: true,
           value: {
             status: 'investigation_required',
-            decision: { request: { steps: [{ uses: 'bug.investigate@1' }] } },
+            decision: { request: { steps: [{ uses: 'runtime.observe@1' }] } },
           },
         });
       },

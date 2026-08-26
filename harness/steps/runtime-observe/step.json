@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
-  "reference": "bug.investigate@1",
-  "description": "Ground the reported bug before planning and preserve observed behavior as planning evidence.",
+  "reference": "runtime.observe@1",
+  "description": "Observe a material runtime claim before planning and preserve the result as reusable evidence.",
   "stage": { "id": "investigation", "label": "Investigate" },
   "availableDuring": ["bootstrap_investigation"],
-  "inputContract": "investigation_input",
-  "outputContract": "investigation_output",
+  "inputContract": "runtime_observation_input",
+  "outputContract": "runtime_observation_output",
   "executor": {
     "kind": "agent",
     "profile": "investigation",
@@ -17,7 +17,7 @@
   "completion": {
     "kind": "structured_evidence",
     "source": "task_output",
-    "requiredArtifactKinds": ["investigation-result"]
+    "requiredArtifactKinds": ["runtime-observation"]
   },
   "activityDelivery": "workspace_reconciled",
   "allowedEffects": ["command.run"],
@@ -25,7 +25,7 @@
   "resumeBoundary": "step",
   "idempotency": "key",
   "waitKinds": [],
-  "artifactContracts": ["investigation-result"],
+  "artifactContracts": ["runtime-observation"],
   "requiredArtifactContracts": [],
   "workflowChanges": [
     "cross_repository_dependency",
