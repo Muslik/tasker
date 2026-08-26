@@ -1875,7 +1875,7 @@ const NativePlanReview = ({
         className={cn(
           'grid min-h-0 overflow-hidden',
           fullscreen && 'flex-1',
-          fullscreen || annotations.length > 0 || selection !== null
+          fullscreen || annotations.length > 0 || history.length > 0 || selection !== null
             ? 'grid-cols-[minmax(0,1fr)_320px]'
             : 'grid-cols-1',
         )}
@@ -1903,13 +1903,13 @@ const NativePlanReview = ({
           </div>
           {decisionActions}
         </div>
-        {fullscreen || annotations.length > 0 || selection !== null ? (
+        {fullscreen || annotations.length > 0 || history.length > 0 || selection !== null ? (
           <aside
             className="min-h-0 overflow-y-auto border-l border-border bg-muted/15 p-4"
             aria-label="Plan annotations"
           >
             <div className="flex items-center justify-between gap-2">
-              <strong className="text-sm">Annotations</strong>
+              <strong className="text-sm">Plan feedback</strong>
               <StateBadge>{String(annotations.length)}</StateBadge>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -2212,7 +2212,39 @@ const ImplementationPlanSurface = ({
           </div>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
         </CollapsibleTrigger>
-        <CollapsibleContent className="border-t border-border/60">{document}</CollapsibleContent>
+        <CollapsibleContent className="border-t border-border/60">
+          {document}
+          {history.length === 0 ? null : (
+            <section className="border-t border-border px-5 py-4" aria-label="Plan review history">
+              <strong className="text-sm">Review history</strong>
+              <ol className="mt-3 space-y-2 text-xs">
+                {history.map((round) => (
+                  <li className="rounded-md bg-muted/40 p-3" key={round.reviewId}>
+                    <div className="flex justify-between gap-2">
+                      <span>Attempt {round.planAttempt}</span>
+                      <StateBadge>{round.decision.replace('_', ' ')}</StateBadge>
+                    </div>
+                    {round.guidance === null ? null : (
+                      <p className="mt-2 leading-5">{round.guidance}</p>
+                    )}
+                    {round.annotations.length === 0 ? null : (
+                      <ol className="mt-2 space-y-2">
+                        {round.annotations.map((annotation, index) => (
+                          <li className="border-l-2 border-border pl-2" key={annotation.id}>
+                            <p className="text-muted-foreground">{annotation.quote}</p>
+                            <p className="mt-1 leading-5">
+                              {String(index + 1)}. {annotation.comment}
+                            </p>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+        </CollapsibleContent>
       </section>
     </Collapsible>
   );
@@ -3301,7 +3333,18 @@ const RunLogSurface = ({
 
                     {entry.runtime === 'bootstrap' && entry.runner === 'planner' ? (
                       <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
-                        <strong className="font-medium">Planner input</strong>
+                        <div className="flex items-center justify-between gap-3">
+                          <strong className="font-medium">Planner input</strong>
+                          <a
+                            className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                            href={`/api/workflows/${encodeURIComponent(state.response.taskReference)}/planner-input`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            View input JSON
+                            <ExternalLink className="size-3" />
+                          </a>
+                        </div>
                         <p className="mt-1 leading-5 text-muted-foreground">
                           Tasker sent the Jira task, repository evidence, project rules, available
                           workflow steps, and the required result format. The planner had read-only
@@ -5260,6 +5303,11 @@ export const App = () => {
                       planning={implementationPlanState}
                       answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
                       pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
+                      history={
+                        planReviewHistoryState.status === 'ready'
+                          ? planReviewHistoryState.rounds
+                          : []
+                      }
                       onAnswerChange={(questionId, answer) => {
                         setPlanningAnswerDrafts((current) => {
                           const taskAnswers = new Map(current.get(selectedTask.id) ?? []);

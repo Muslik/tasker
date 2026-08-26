@@ -60,6 +60,7 @@ import { RetrospectiveResponseSchema, type RetrospectiveStore } from '../retrosp
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import type { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
+import { JsonValueSchema } from '../workflow/schema.js';
 import { orderOperatorTasks } from './operator-task-order.js';
 import type { TaskPresenceStore } from './task-presence.js';
 import type { TaskRemovalError, TaskRemovalService } from './task-removal.js';
@@ -976,6 +977,53 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
           .code(404)
           .send(apiError('implementation_plan_not_found', 'No implementation plan exists'))
       : reply.send(ImplementationPlanningRecordSchema.parse(result.value));
+  });
+
+  api.get('/api/workflows/:taskReference/planner-input', async (request, reply) => {
+    if (options.implementationPlanning === undefined || options.artifacts === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('planner_input_unavailable', 'Planner input storage is unavailable'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
+    if (reply.sent) return reply;
+    const planningEpisodeId = currentPlanningEpisodeId(lifecycle);
+    if (planningEpisodeId === null) {
+      return reply.code(404).send(apiError('planner_input_not_found', 'No planning input exists'));
+    }
+    const planning = options.implementationPlanning.read(planningEpisodeId);
+    if (!planning.ok || planning.value === null || planning.value.planningSnapshot === null) {
+      return reply.code(404).send(apiError('planner_input_not_found', 'No planning input exists'));
+    }
+    const snapshot = options.implementationPlanning.readRunSnapshot(
+      planning.value.planningSnapshot,
+    );
+    if (!snapshot.ok) {
+      return reply
+        .code(409)
+        .send(apiError('planner_input_corrupt', 'Planning context snapshot is unavailable'));
+    }
+    const evidence = options.artifacts.readArtifact(planning.value.evidenceBundle.artifactId);
+    return reply.send(
+      JsonValueSchema.parse({
+        taskReference: params.data.taskReference,
+        planningEpisodeId,
+        planningAttempt: planning.value.attempt,
+        promptHash:
+          planning.value.status === 'planning' || planning.value.receipt === null
+            ? null
+            : planning.value.receipt.promptHash,
+        operatorGuidance: planning.value.operatorGuidance,
+        validationFeedback: planning.value.validationFeedback,
+        previousDecision: planning.value.previousDecision,
+        planningContext: snapshot.value,
+        evidenceBundle: evidence?.payload ?? null,
+      }),
+    );
   });
 
   api.get('/api/workflows/:taskReference/planning-transcript', async (request, reply) => {
