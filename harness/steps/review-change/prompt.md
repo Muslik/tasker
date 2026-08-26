@@ -8,3 +8,10 @@ needed. Invalid, contradictory, or failed Verify evidence created by the current
 an actionable `changes_requested` finding, not an operator block: identify the scenario-owning file
 and require fresh successful evidence. Block only when evidence is absent for an external reason the
 development loop cannot repair or when a safe decision genuinely needs the operator.
+
+Review product changes and accepted evidence, not Delivery's unfinished bookkeeping.
+`prepare.delivery@1` runs only after this review is accepted and owns finalizing
+`.ai/workspace/<TASK-ID>/result.md`, `verification.md`, and `.tasker/pull-request/draft.json`. Do not
+request changes solely because those files are missing, provisional, or stale before Delivery
+preparation. A tracked support artifact is a review finding only when its current content itself
+misrepresents the product change or exposes unsafe data independently of later finalization.
