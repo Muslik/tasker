@@ -53,7 +53,6 @@ describe('dependency cockpit surfaces', () => {
   it('renders the task dependency panel with saved declarations', () => {
     const html = renderToStaticMarkup(
       createElement(TaskDependencyPanel, {
-        taskReference: 'jira:AVIA-12045',
         dependencies: [
           {
             declarationId: 'dependency-declaration:jira-link:118870:jira:AVIA-12045',
@@ -92,15 +91,53 @@ describe('dependency cockpit surfaces', () => {
           linkTypeId: '',
           direction: 'outward',
         },
+        canConfigure: false,
         pending: false,
         onChange: vi.fn(),
         onSubmit: vi.fn(),
       }),
     );
 
-    expect(html).toContain('Task dependencies');
-    expect(html).toContain('Saved declarations');
+    expect(html).toContain('Package dependencies');
+    expect(html).toContain('@ott/fare-card from AVIA-11999');
     expect(html).toContain('front-core-packages');
-    expect(html).toContain('Configure dependency');
+    expect(html).toContain('Test dev, then final');
+    expect(html).not.toContain('dependency-declaration:');
+    expect(html).not.toContain('Producer task reference');
+  });
+
+  it('hides dependency configuration on a producer task', () => {
+    const html = renderToStaticMarkup(
+      createElement(TaskDependencyPanel, {
+        dependencies: [],
+        links: [
+          {
+            linkId: '118870',
+            linkTypeId: '10016',
+            linkTypeName: 'Blocks',
+            direction: 'outward',
+            issueKey: 'AVIA-12045',
+            summary: 'Consume the shared fare card package',
+            relationship: 'blocks',
+            status: 'Open',
+          },
+        ],
+        draft: {
+          producerTaskReference: '',
+          producerRepository: '',
+          packages: '',
+          mode: 'validate_dev_then_final',
+          linkId: '',
+          linkTypeId: '',
+          direction: 'outward',
+        },
+        canConfigure: true,
+        pending: false,
+        onChange: vi.fn(),
+        onSubmit: vi.fn(),
+      }),
+    );
+
+    expect(html).toBe('');
   });
 });

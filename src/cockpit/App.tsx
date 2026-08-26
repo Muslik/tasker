@@ -1420,148 +1420,190 @@ export const DependencyWaitSurface = ({
 };
 
 export const TaskDependencyPanel = ({
-  taskReference,
   dependencies,
   links,
   draft,
+  canConfigure,
   pending,
   onChange,
   onSubmit,
 }: {
-  readonly taskReference: string;
   readonly dependencies: readonly DependencySummary[];
   readonly links: JiraIssueSnapshot['links'];
   readonly draft: TaskDependencyDraft;
+  readonly canConfigure: boolean;
   readonly pending: boolean;
   readonly onChange: (draft: TaskDependencyDraft) => void;
   readonly onSubmit: () => void;
-}) => (
-  <section className="border-b border-border px-5 py-4">
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <strong className="text-sm">Task dependencies</strong>
-        <p className="mt-1 text-sm text-foreground/90">
-          Persist known cross-repository dependencies for {taskReference} before the workflow
-          starts.
-        </p>
-      </div>
-      <Button size="sm" type="button" disabled={pending} onClick={onSubmit}>
-        {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-        {pending ? 'Saving…' : 'Configure dependency'}
-      </Button>
-    </div>
-    <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-      <div className="rounded-md border border-border/70 bg-background/60 p-3">
-        <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          Saved declarations
-        </div>
-        {dependencies.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            No dependency declarations are stored yet.
+}) => {
+  const [editing, setEditing] = useState(false);
+  const availableLinks = links.filter(
+    (link) =>
+      link.linkTypeName.toLocaleLowerCase('en-US') === 'blocks' &&
+      link.direction === 'inward' &&
+      dependencies.every(
+        (dependency) =>
+          dependency.source.kind !== 'jira_link' || dependency.source.linkId !== link.linkId,
+      ),
+  );
+
+  useEffect(() => {
+    if (dependencies.length > 0) setEditing(false);
+  }, [dependencies.length]);
+
+  if (dependencies.length === 0 && (!canConfigure || availableLinks.length === 0)) return null;
+
+  const canSubmit =
+    draft.linkId.length > 0 &&
+    draft.producerRepository.trim().length > 0 &&
+    parsePackageLines(draft.packages).length > 0;
+
+  return (
+    <section className="border-b border-border px-5 py-4" aria-label="Task dependencies">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <strong className="text-sm">Package dependencies</strong>
+          <p className="mt-1 text-sm text-foreground/90">
+            Packages this task must receive from another Jira task before it can finish.
           </p>
-        ) : (
-          <div className="mt-2 space-y-2">
-            {dependencies.map((dependency) => (
-              <div
-                key={dependency.declarationId}
-                className="rounded-md border border-border/60 p-3 text-sm"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <strong>{dependency.producerTaskReference}</strong>
-                  <Badge variant="outline">{dependency.mode}</Badge>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {dependency.producerRepository}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {dependency.declarationId} rev {String(dependency.revision)} ·{' '}
-                  {formatShortDateTime(dependency.createdAt)}
-                </p>
-                <p className="mt-2">{dependency.packages.join(', ')}</p>
+        </div>
+        {canConfigure && availableLinks.length > 0 && !editing ? (
+          <Button
+            size="sm"
+            type="button"
+            onClick={() => {
+              setEditing(true);
+            }}
+          >
+            Add dependency
+          </Button>
+        ) : null}
+      </div>
+
+      {dependencies.length > 0 ? (
+        <div className="mt-3 space-y-2">
+          {dependencies.map((dependency) => (
+            <div
+              key={dependency.declarationId}
+              className="rounded-md border border-border/70 bg-background/60 p-3 text-sm"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <strong>
+                  {dependency.packages.join(', ')} from{' '}
+                  {dependency.producerTaskReference.replace(/^jira:/u, '')}
+                </strong>
+                <Badge variant="outline">
+                  {dependency.mode === 'validate_dev_then_final'
+                    ? 'Test dev, then final'
+                    : 'Final release only'}
+                </Badge>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="rounded-md border border-border/70 bg-background/60 p-3">
-        <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          New declaration
+              <p className="mt-1 text-xs text-muted-foreground">
+                Repository {dependency.producerRepository} · recorded{' '}
+                {formatShortDateTime(dependency.createdAt)}
+              </p>
+            </div>
+          ))}
         </div>
-        <div className="mt-2 grid gap-2">
-          <select
-            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
-            aria-label="Jira dependency link"
-            value={draft.linkId}
-            disabled={pending}
-            onChange={(event) => {
-              const link = links.find((candidate) => candidate.linkId === event.target.value);
-              if (link === undefined) return;
-              onChange({
-                ...draft,
-                producerTaskReference: `jira:${link.issueKey}`,
-                linkId: link.linkId,
-                linkTypeId: link.linkTypeId,
-                direction: link.direction,
-              });
-            }}
-          >
-            <option value="">Select Jira Blocks link</option>
-            {links
-              .filter(({ linkTypeName }) => linkTypeName.toLocaleLowerCase('en-US') === 'blocks')
-              .map((link) => (
-                <option key={link.linkId} value={link.linkId}>
-                  {link.relationship} {link.issueKey}: {link.summary}
+      ) : null}
+
+      {editing ? (
+        <div className="mt-3 rounded-md border border-border/70 bg-background/60 p-3">
+          <div className="grid gap-3">
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Blocking Jira task
+              <select
+                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
+                value={draft.linkId}
+                disabled={pending}
+                onChange={(event) => {
+                  const link = availableLinks.find(
+                    (candidate) => candidate.linkId === event.target.value,
+                  );
+                  if (link === undefined) return;
+                  onChange({
+                    ...draft,
+                    producerTaskReference: `jira:${link.issueKey}`,
+                    linkId: link.linkId,
+                    linkTypeId: link.linkTypeId,
+                    direction: link.direction,
+                  });
+                }}
+              >
+                <option value="">Select the task that publishes the package</option>
+                {availableLinks.map((link) => (
+                  <option key={link.linkId} value={link.linkId}>
+                    {link.issueKey}: {link.summary}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Package repository
+              <input
+                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
+                placeholder="front-core-packages"
+                value={draft.producerRepository}
+                disabled={pending}
+                onChange={(event) => {
+                  onChange({ ...draft, producerRepository: event.target.value });
+                }}
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Packages to wait for
+              <textarea
+                className="min-h-20 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
+                placeholder="@ott/interceptors"
+                value={draft.packages}
+                disabled={pending}
+                onChange={(event) => {
+                  onChange({ ...draft, packages: event.target.value });
+                }}
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Release validation
+              <select
+                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
+                value={draft.mode}
+                disabled={pending}
+                onChange={(event) => {
+                  onChange({
+                    ...draft,
+                    mode: event.target.value as TaskDependencyDraft['mode'],
+                  });
+                }}
+              >
+                <option value="validate_dev_then_final">
+                  Test a dev release, then wait for final
                 </option>
-              ))}
-          </select>
-          <input
-            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
-            aria-label="Producer task reference"
-            placeholder="Producer task reference"
-            value={draft.producerTaskReference}
-            disabled
-            readOnly
-          />
-          <input
-            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
-            aria-label="Producer repository"
-            placeholder="Producer repository"
-            value={draft.producerRepository}
-            disabled={pending}
-            onChange={(event) => {
-              onChange({ ...draft, producerRepository: event.target.value });
-            }}
-          />
-          <textarea
-            className="min-h-20 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
-            aria-label="Dependency packages"
-            placeholder="One package per line"
-            value={draft.packages}
-            disabled={pending}
-            onChange={(event) => {
-              onChange({ ...draft, packages: event.target.value });
-            }}
-          />
-          <select
-            className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
-            aria-label="Dependency mode"
-            value={draft.mode}
-            disabled={pending}
-            onChange={(event) => {
-              onChange({
-                ...draft,
-                mode: event.target.value as TaskDependencyDraft['mode'],
-              });
-            }}
-          >
-            <option value="validate_dev_then_final">Validate dev, then final</option>
-            <option value="final_only">Final only</option>
-          </select>
+                <option value="final_only">Wait for the final release only</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" type="button" disabled={pending || !canSubmit} onClick={onSubmit}>
+              {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+              {pending ? 'Saving…' : 'Save dependency'}
+            </Button>
+          </div>
         </div>
-      </div>
-    </div>
-  </section>
-);
+      ) : null}
+    </section>
+  );
+};
 
 const ValidationSurface = ({ view }: { readonly view: WorkflowView }) => {
   const issues = view.workflow.validatorReport.issues;
@@ -4953,7 +4995,7 @@ export const App = () => {
                 />
                 {selectedTaskDependencyDraft === null ? null : (
                   <TaskDependencyPanel
-                    taskReference={selectedTask.id}
+                    key={selectedTask.id}
                     dependencies={selectedDependencies}
                     links={
                       jiraIssueState.status === 'ready' &&
@@ -4962,6 +5004,7 @@ export const App = () => {
                         : []
                     }
                     draft={selectedTaskDependencyDraft}
+                    canConfigure={['backlog', 'planned', 'queued'].includes(selectedTask.status)}
                     pending={pendingOperations.get(selectedTask.id) === 'configuring_dependency'}
                     onChange={(draft) => {
                       setTaskDependencyDrafts((current) =>

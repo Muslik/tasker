@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 import type { ImplementationPlanningCoordinator } from './implementation-planning.js';
 import type { WorkflowFreezeStore } from './workflow-freeze.js';
 import type { RetrospectiveRunIndex, RetrospectiveStore } from '../retrospective/index.js';
@@ -10,9 +8,7 @@ import {
   TaskRunLifecycleSchema,
   type TaskRunLifecycle,
 } from '../temporal/index.js';
-import { CompiledWorkflowSchema, type CompiledWorkflowNode } from '../workflow/index.js';
-
-const ArchivedWorkflowSnapshotSchema = z.object({ graph: CompiledWorkflowSchema }).loose();
+import type { CompiledWorkflowNode } from '../workflow/index.js';
 
 export type CompletedRunLifecycleError =
   | { readonly kind: 'retrospective_corrupt' }
@@ -63,7 +59,10 @@ export class CompletedRunLifecycleReader {
   public constructor(
     private readonly retrospectives: Pick<RetrospectiveStore, 'readLatestRun'>,
     private readonly freezes: Pick<WorkflowFreezeStore, 'readLatest'>,
-    private readonly planning: Pick<ImplementationPlanningCoordinator, 'readRunSnapshot'>,
+    private readonly planning: Pick<
+      ImplementationPlanningCoordinator,
+      'readArchivedExecutionGraph'
+    >,
   ) {}
 
   public read(taskReference: string): Outcome<TaskRunLifecycle | null, CompletedRunLifecycleError> {
@@ -73,11 +72,11 @@ export class CompletedRunLifecycleReader {
     const frozen = this.freezes.readLatest(taskReference);
     if (!frozen.ok) return err({ kind: 'freeze_receipt_corrupt' });
     if (frozen.value === null) return err({ kind: 'freeze_receipt_corrupt' });
-    const snapshot = this.planning.readRunSnapshot(frozen.value.planningSnapshot);
-    if (!snapshot.ok || snapshot.value.kind !== 'execution') {
+    const graph = this.planning.readArchivedExecutionGraph(frozen.value.planningSnapshot);
+    if (!graph.ok) {
       return err({ kind: 'planning_snapshot_unavailable' });
     }
-    const graph = ArchivedWorkflowSnapshotSchema.parse(snapshot.value.workflow).graph;
+    const archivedGraph = graph.value;
     const execution = ExecutionWorkflowPublicStateSchema.parse({
       runtime: 'execution',
       schemaVersion: 2,
@@ -85,7 +84,7 @@ export class CompletedRunLifecycleReader {
       workflowId: indexed.value.report.workflowId,
       runId: indexed.value.report.workflowRunId,
       workflowHash: frozen.value.workflowHash,
-      nodeStates: completedNodeStates(graph.root, indexed.value.blockRuns),
+      nodeStates: completedNodeStates(archivedGraph.root, indexed.value.blockRuns),
       blockRuns: indexed.value.blockRuns,
       loopIterations: {},
       continuations: [],
@@ -114,8 +113,8 @@ export class CompletedRunLifecycleReader {
         semanticHash: frozen.value.semanticHash,
         compilerVersion: frozen.value.compilerVersion,
         harnessSnapshotHash: frozen.value.harnessSnapshotHash,
-        retrospectiveEnabled: snapshot.value.harness.company.retrospective.enabled,
-        graph,
+        retrospectiveEnabled: true,
+        graph: archivedGraph,
         planningSnapshot: frozen.value.planningSnapshot,
         evidenceBundle: frozen.value.evidenceBundle,
       },

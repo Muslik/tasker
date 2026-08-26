@@ -59,6 +59,7 @@ import { RetrospectiveResponseSchema, type RetrospectiveStore } from '../retrosp
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import type { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
+import { orderOperatorTasks } from './operator-task-order.js';
 import { projectOperatorActivity } from './operator-activity-projection.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import type { VerifiedPackagePublicationStore } from './verified-package-publication.js';
@@ -403,7 +404,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     if (options.jiraIssueService === undefined) {
       return reply.send({
         ...result.value,
-        tasks: await Promise.all(result.value.tasks.map(withRunState)),
+        tasks: orderOperatorTasks(await Promise.all(result.value.tasks.map(withRunState))),
       });
     }
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
@@ -413,7 +414,10 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       hydratedJiraTasks.push(await withRunState(task));
     }
     return reply.send({
-      tasks: [...hydratedJiraTasks, ...(await Promise.all(result.value.tasks.map(withRunState)))],
+      tasks: orderOperatorTasks([
+        ...hydratedJiraTasks,
+        ...(await Promise.all(result.value.tasks.map(withRunState))),
+      ]),
       streamCursor: result.value.streamCursor,
     });
   });

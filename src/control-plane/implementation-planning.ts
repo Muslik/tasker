@@ -124,6 +124,11 @@ const PlanningActivityEventPayloadSchema = z.looseObject({
   selectedStrategy: PlanningStrategySchema,
 });
 
+const ArchivedExecutionSnapshotSchema = z.looseObject({
+  kind: z.literal('execution'),
+  workflow: z.looseObject({ graph: CompiledWorkflowSchema }),
+});
+
 type PlanningActivityStatus =
   'running' | 'ready' | 'needs_clarification' | 'investigation_required' | 'paused';
 
@@ -278,6 +283,34 @@ export class ImplementationPlanningStore {
     const parsed = RunPlanningSnapshotSchema.safeParse(artifact.payload);
     return parsed.success
       ? ok(parsed.data)
+      : err({
+          kind: 'planning_snapshot_corrupt',
+          artifactId: reference.artifactId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+  }
+
+  public readArchivedExecutionGraph(
+    referenceInput: PlanningSnapshotReference,
+  ): Outcome<z.infer<typeof CompiledWorkflowSchema>, ImplementationPlanningStoreError> {
+    const reference = PlanningSnapshotReferenceSchema.parse(referenceInput);
+    const artifact = this.ledger.readArtifact(reference.artifactId);
+    if (artifact === null) {
+      return err({ kind: 'planning_snapshot_not_found', artifactId: reference.artifactId });
+    }
+    if (artifact.checksum !== reference.checksum) {
+      return err({
+        kind: 'planning_snapshot_checksum_mismatch',
+        artifactId: reference.artifactId,
+        expectedChecksum: reference.checksum,
+        actualChecksum: artifact.checksum,
+      });
+    }
+    const parsed = ArchivedExecutionSnapshotSchema.safeParse(artifact.payload);
+    return parsed.success
+      ? ok(parsed.data.workflow.graph)
       : err({
           kind: 'planning_snapshot_corrupt',
           artifactId: reference.artifactId,
@@ -970,6 +1003,13 @@ export class ImplementationPlanningCoordinator {
   ): Outcome<RunPlanningSnapshot, ImplementationPlanningError> {
     const snapshot = this.store.readRunSnapshot(reference);
     return snapshot.ok ? snapshot : err({ kind: 'store', error: snapshot.error });
+  }
+
+  public readArchivedExecutionGraph(
+    reference: PlanningSnapshotReference,
+  ): Outcome<z.infer<typeof CompiledWorkflowSchema>, ImplementationPlanningError> {
+    const graph = this.store.readArchivedExecutionGraph(reference);
+    return graph.ok ? graph : err({ kind: 'store', error: graph.error });
   }
 
   public createPlanningContextSnapshot(

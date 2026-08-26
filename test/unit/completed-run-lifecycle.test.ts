@@ -1,43 +1,46 @@
 import { describe, expect, it } from 'vitest';
 
 import { CompletedRunLifecycleReader } from '../../src/control-plane/completed-run-lifecycle.js';
+import { ImplementationPlanningStore } from '../../src/control-plane/implementation-planning.js';
 import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
+import { openSqliteLedger } from '../../src/ledger/index.js';
 import { RetrospectiveReportSchema } from '../../src/retrospective/index.js';
+import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
 import { WorkflowFreezeReceiptSchema } from '../../src/temporal/index.js';
-import { CompiledWorkflowSchema } from '../../src/workflow/index.js';
-import type { RunPlanningSnapshot } from '../../src/planning/index.js';
+import { CompiledWorkflowSchema, JsonValueSchema } from '../../src/workflow/index.js';
+
+const graph = CompiledWorkflowSchema.parse({
+  metadata: {
+    compilerVersion: 4,
+    irVersion: 'workflow-ir-v1',
+    workflowId: 'delivery',
+    workflowVersion: 1,
+    references: {
+      predicates: [],
+      stepTypes: ['implement.change@1'],
+      waits: [],
+    },
+  },
+  root: {
+    kind: 'sequence',
+    id: 'root',
+    children: [
+      {
+        kind: 'step',
+        id: 'implement-change',
+        uses: 'implement.change@1',
+        activityDelivery: { kind: 'workspace_reconciled' },
+        with: {},
+      },
+      { kind: 'finalize', id: 'finished', outcome: 'accepted' },
+    ],
+  },
+});
 
 describe('completed run lifecycle', () => {
   it('reconstructs a read-only completed projection from durable ledger indexes', () => {
     const hash = 'a'.repeat(64);
-    const graph = CompiledWorkflowSchema.parse({
-      metadata: {
-        compilerVersion: 4,
-        irVersion: 'workflow-ir-v1',
-        workflowId: 'delivery',
-        workflowVersion: 1,
-        references: {
-          predicates: [],
-          stepTypes: ['implement.change@1'],
-          waits: [],
-        },
-      },
-      root: {
-        kind: 'sequence',
-        id: 'root',
-        children: [
-          {
-            kind: 'step',
-            id: 'implement-change',
-            uses: 'implement.change@1',
-            activityDelivery: { kind: 'workspace_reconciled' },
-            with: {},
-          },
-          { kind: 'finalize', id: 'finished', outcome: 'accepted' },
-        ],
-      },
-    });
     const report = RetrospectiveReportSchema.parse({
       schemaVersion: 1,
       taskReference: 'jira:TEST-1',
@@ -79,12 +82,7 @@ describe('completed run lifecycle', () => {
       { readLatestRun: () => ok({ report, blockRuns: { 'implement-change': 2 } }) },
       { readLatest: () => ok(freeze) },
       {
-        readRunSnapshot: () =>
-          ok({
-            kind: 'execution',
-            workflow: { graph },
-            harness: { company: { retrospective: { enabled: true } } },
-          } as unknown as RunPlanningSnapshot),
+        readArchivedExecutionGraph: () => ok(graph),
       },
     );
 
@@ -110,5 +108,41 @@ describe('completed run lifecycle', () => {
       id: 'retrospective',
       status: 'succeeded',
     });
+  });
+
+  it('reads an archived graph without validating removed harness fields', () => {
+    const clock = makeAdjustableClock('2026-08-25T00:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: ':memory:', clock });
+    const artifactId = 'planning-snapshot:jira:TEST-1:archive';
+    const persisted = ledger.repository.transact({
+      artifacts: [
+        {
+          artifactId,
+          artifactKind: 'planning_run_snapshot',
+          storageUri: `ledger://artifacts/${artifactId}`,
+          payload: JsonValueSchema.parse({
+            schemaVersion: 9,
+            kind: 'execution',
+            workflow: { graph },
+            harness: { company: { globalPackageRules: [] } },
+          }),
+          metadata: {},
+          createdAt: clock.now(),
+        },
+      ],
+      timestamp: clock.now(),
+    });
+    expect(persisted.ok).toBe(true);
+    const artifact = ledger.repository.readArtifact(artifactId);
+    if (artifact === null) throw new Error('Expected archived planning snapshot');
+    const planning = new ImplementationPlanningStore(ledger.repository, clock);
+
+    const result = planning.readArchivedExecutionGraph({
+      artifactId,
+      checksum: artifact.checksum,
+    });
+
+    expect(result).toEqual({ ok: true, value: graph });
+    ledger.close();
   });
 });
