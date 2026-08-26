@@ -129,11 +129,18 @@ const compiledLoops = (
 
 const loopSatisfies = (
   loop: Extract<CompiledWorkflowNode, { readonly kind: 'bounded_loop' }>,
-  requirement: { readonly until: string; readonly requiredSteps: readonly string[] },
+  requirement: {
+    readonly until: string;
+    readonly requiredSteps: readonly string[];
+    readonly forbiddenSteps: readonly string[];
+  },
 ): boolean => {
   if (loop.until !== requirement.until) return false;
   const references = compiledStepReferences(loop.body);
-  return requirement.requiredSteps.every((reference) => references.has(reference));
+  return (
+    requirement.requiredSteps.every((reference) => references.has(reference)) &&
+    requirement.forbiddenSteps.every((reference) => !references.has(reference))
+  );
 };
 
 const validateFeedbackLoops = (

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "quality-boundaries",
-  "version": "2",
+  "version": "3",
   "enabled": true,
   "description": "Require product mutation to pass semantic verification and independent review before delivery.",
   "configuration": {},
@@ -36,11 +36,13 @@
         },
         {
           "until": "agent_review.accepted@1",
-          "requiredSteps": ["implement.change@1", "verify.acceptance@1", "review.change@1"]
+          "requiredSteps": ["implement.change@1", "verify.acceptance@1", "review.change@1"],
+          "forbiddenSteps": ["prepare.delivery@1", "deliver.pull-request@1"]
         },
         {
           "until": "verification.accepted@1",
-          "requiredSteps": ["implement.change@1", "verify.acceptance@1"]
+          "requiredSteps": ["implement.change@1", "verify.acceptance@1"],
+          "forbiddenSteps": ["review.change@1", "prepare.delivery@1", "deliver.pull-request@1"]
         }
       ],
       "reason": "Expected verification, review, and CI feedback must repeat the frozen workflow instead of creating a continuation."

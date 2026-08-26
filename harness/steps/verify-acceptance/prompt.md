@@ -38,6 +38,10 @@ for a static visible result and a video for interaction or state transitions. Us
 when recording. Inspect the final image or representative video frames before accepting. Other
 diagnostic logs/JSON may also be registered, but they must not use the `-fixed` publication name.
 Temporary runners belong only below `$TASKER_SCRATCH_ROOT`.
+Every command that produces the primary after artifact must complete successfully. A demo timeout,
+`DEMO_ERROR`, failed assertion, or partially recorded WebM invalidates that run: do not render,
+rename, register, or reuse its media as `-fixed`. Return `changes_requested` with the exact failing
+scenario instead. The artifact's existence is never evidence that its scenario passed.
 Every one-shot Playwright runner must close its browser in `finally`; a failed scenario must
 terminate promptly instead of leaving Chromium handles alive across agent commands.
 

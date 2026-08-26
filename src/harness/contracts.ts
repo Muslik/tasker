@@ -190,6 +190,7 @@ const HarnessFeedbackLoopObligationSchema = z
           .object({
             until: VersionedReferenceSchema,
             requiredSteps: z.array(VersionedReferenceSchema).min(1),
+            forbiddenSteps: z.array(VersionedReferenceSchema).default([]),
           })
           .strict(),
       )

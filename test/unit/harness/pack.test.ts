@@ -214,7 +214,7 @@ describe('file-backed harness pack', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'quality-boundaries',
-          version: '2',
+          version: '3',
         }),
         expect.objectContaining({
           id: 'review-feedback',
