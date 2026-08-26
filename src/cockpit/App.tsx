@@ -22,6 +22,7 @@ import {
   Sparkles,
   Sun,
   Terminal,
+  Trash2,
   Video,
   X,
 } from 'lucide-react';
@@ -52,7 +53,6 @@ import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import type { RetrospectiveResponse } from '../retrospective/index.js';
 import { taskBranchName, taskBranchNameMatches } from '../shared/git-branch.js';
 import {
-  configureTaskDependency,
   answerPlanningClarification,
   completeCodeReview,
   connectOperatorStream,
@@ -71,6 +71,8 @@ import {
   loadOperatorWorkflowProjection,
   loadWorkflow,
   previewJiraIssue,
+  removeOperatorTask,
+  restoreOperatorTask,
   reviewPlan,
   reviewWorkflowChange,
   restartWorkflow,
@@ -170,13 +172,13 @@ type TaskOperation =
   | 'syncing_review'
   | 'completing_review'
   | 'answering_questions'
-  | 'configuring_dependency'
   | 'verifying_dependency'
   | 'configuring_discovered_dependency'
   | 'resuming'
   | 'restarting'
   | 'accepting_continuation'
-  | 'rejecting_continuation';
+  | 'rejecting_continuation'
+  | 'removing';
 
 type DependencySummary = OperatorWorkflowProjection['dependencies'][number];
 type TypedResolutionAction = Extract<
@@ -372,7 +374,10 @@ const StateBadge = ({
   readonly children: string;
   readonly className?: string;
 }) => (
-  <Badge variant="ghost" className={cn('h-5 px-1.5 text-[11px] font-medium', className)}>
+  <Badge
+    variant="outline"
+    className={cn('h-5 border-transparent px-1.5 text-[11px] font-medium', className)}
+  >
     {children}
   </Badge>
 );
@@ -396,6 +401,7 @@ const EmptyState = ({ children }: { readonly children: string }) => (
 type JiraTaskLaunchInput = {
   readonly issueKey: string;
   readonly repository: string;
+  readonly startImmediately: boolean;
   readonly settings: RunStartCommand['settings'];
 };
 
@@ -410,6 +416,9 @@ export const JiraTaskLaunchDialog = ({
   repositories,
   pending,
   error,
+  mode = 'add',
+  initialIssue,
+  initialRepository = '',
   onClose,
   onResolveIssue,
   onSubmit,
@@ -418,14 +427,22 @@ export const JiraTaskLaunchDialog = ({
   readonly repositories: readonly RepositoryCatalogEntry[];
   readonly pending: boolean;
   readonly error: string | null;
+  readonly mode?: 'add' | 'start';
+  readonly initialIssue?: JiraIssueSnapshot;
+  readonly initialRepository?: string;
   readonly onClose: () => void;
   readonly onResolveIssue: (issueKey: string) => Promise<JiraIssueSnapshot>;
   readonly onSubmit: (input: JiraTaskLaunchInput) => Promise<void>;
 }) => {
-  const [issueKey, setIssueKey] = useState('');
-  const [issuePreview, setIssuePreview] = useState<JiraLaunchIssuePreview>({ status: 'idle' });
-  const [branchName, setBranchName] = useState('');
-  const [repository, setRepository] = useState('');
+  const [issueKey, setIssueKey] = useState(initialIssue?.issueKey ?? '');
+  const [issuePreview, setIssuePreview] = useState<JiraLaunchIssuePreview>(
+    initialIssue === undefined ? { status: 'idle' } : { status: 'ready', issue: initialIssue },
+  );
+  const [branchName, setBranchName] = useState(
+    initialIssue === undefined ? '' : taskBranchName(initialIssue.issueKey, initialIssue.summary),
+  );
+  const [repository, setRepository] = useState(initialRepository);
+  const [startImmediately, setStartImmediately] = useState(mode === 'start');
   const [planningStrategy, setPlanningStrategy] = useState<PlanningStrategyRequest>('auto');
   const [requirePlanReview, setRequirePlanReview] = useState(true);
   const [updateJiraStatuses, setUpdateJiraStatuses] = useState(true);
@@ -434,6 +451,7 @@ export const JiraTaskLaunchDialog = ({
   useEffect(() => {
     if (!open) return;
     const normalized = issueKey.trim().toUpperCase();
+    if (initialIssue !== undefined && normalized === initialIssue.issueKey) return;
     const sequence = previewSequence.current + 1;
     previewSequence.current = sequence;
     setBranchName('');
@@ -472,7 +490,7 @@ export const JiraTaskLaunchDialog = ({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [issueKey, onResolveIssue, open]);
+  }, [initialIssue, issueKey, onResolveIssue, open]);
 
   if (!open) return null;
 
@@ -496,10 +514,17 @@ export const JiraTaskLaunchDialog = ({
         aria-labelledby="jira-task-launch-title"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!issueReady || !branchValid || repository.length === 0 || pending) return;
+          if (
+            !issueReady ||
+            pending ||
+            (startImmediately && (!branchValid || repository.length === 0))
+          ) {
+            return;
+          }
           void onSubmit({
             issueKey: normalizedIssueKey,
             repository,
+            startImmediately,
             settings: {
               planReview: requirePlanReview ? 'required' : 'automatic',
               planningStrategy,
@@ -523,10 +548,12 @@ export const JiraTaskLaunchDialog = ({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="jira-task-launch-title" className="text-base font-semibold">
-              Start Jira task
+              {mode === 'start' ? 'Task settings' : 'Add Jira task'}
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Import the issue, bind its repository, and start a recoverable workflow.
+              {mode === 'start'
+                ? 'Review the workspace and planning settings before starting work.'
+                : 'Add an existing Jira issue to Tasker, with optional immediate start.'}
             </p>
           </div>
           <Button
@@ -550,7 +577,7 @@ export const JiraTaskLaunchDialog = ({
               aria-label="Jira task"
               placeholder="FC-2244"
               value={issueKey}
-              disabled={pending}
+              disabled={pending || mode === 'start'}
               onChange={(event) => {
                 setIssueKey(event.target.value);
               }}
@@ -569,26 +596,7 @@ export const JiraTaskLaunchDialog = ({
           </label>
 
           <label className="block space-y-1.5 text-xs font-medium">
-            Branch name
-            <input
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground focus:border-ring"
-              aria-label="Branch name"
-              placeholder="Loaded from the Jira task title"
-              value={branchName}
-              disabled={pending || !issueReady}
-              onChange={(event) => {
-                setBranchName(event.target.value);
-              }}
-            />
-            {issueReady && !branchValid ? (
-              <span className="block text-[11px] text-destructive">
-                Branch must start with {normalizedIssueKey} and be a valid Git branch name.
-              </span>
-            ) : null}
-          </label>
-
-          <label className="block space-y-1.5 text-xs font-medium">
-            Repository
+            Working repository
             <select
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
               aria-label="Repository"
@@ -598,7 +606,7 @@ export const JiraTaskLaunchDialog = ({
                 setRepository(event.target.value);
               }}
             >
-              <option value="">Select repository</option>
+              <option value="">Select when starting work</option>
               {repositories.map((entry) => (
                 <option
                   key={`${entry.repositoryId}:${entry.remoteUrl ?? entry.checkout.path}`}
@@ -608,63 +616,112 @@ export const JiraTaskLaunchDialog = ({
                 </option>
               ))}
             </select>
+            <span className="block text-[11px] font-normal text-muted-foreground">
+              Tasker creates the task worktree here. It is required only when work starts.
+            </span>
           </label>
 
-          <label className="block space-y-1.5 text-xs font-medium">
-            Planning strategy
-            <select
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-              aria-label="Planning strategy"
-              value={planningStrategy}
-              disabled={pending}
-              onChange={(event) => {
-                setPlanningStrategy(event.target.value as PlanningStrategyRequest);
-              }}
-            >
-              <option value="auto">Auto</option>
-              <option value="fast">Fast</option>
-              <option value="ralplan">Ralplan</option>
-            </select>
-          </label>
-
-          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
-            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+          {mode === 'add' ? (
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-muted/20 p-3 text-sm">
               <input
                 className="mt-0.5 size-4 accent-primary"
                 type="checkbox"
-                checked={requirePlanReview}
+                aria-label="Start immediately"
+                checked={startImmediately}
                 disabled={pending}
                 onChange={(event) => {
-                  setRequirePlanReview(event.target.checked);
+                  setStartImmediately(event.target.checked);
                 }}
               />
               <span>
-                <span className="block font-medium">Review plan before execution</span>
+                <span className="block font-medium">Start immediately</span>
                 <span className="block text-xs text-muted-foreground">
-                  Pause after planning for explicit approval.
+                  Create the worktree and begin read-only planning after the task is added.
                 </span>
               </span>
             </label>
-            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+          ) : null}
+
+          {startImmediately ? (
+            <label className="block space-y-1.5 text-xs font-medium">
+              Branch name
               <input
-                className="mt-0.5 size-4 accent-primary"
-                type="checkbox"
-                aria-label="Update Jira statuses"
-                checked={updateJiraStatuses}
-                disabled={pending}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground focus:border-ring"
+                aria-label="Branch name"
+                placeholder="Loaded from the Jira task title"
+                value={branchName}
+                disabled={pending || !issueReady}
                 onChange={(event) => {
-                  setUpdateJiraStatuses(event.target.checked);
+                  setBranchName(event.target.value);
                 }}
               />
-              <span>
-                <span className="block font-medium">Update Jira statuses</span>
-                <span className="block text-xs text-muted-foreground">
-                  Try In Progress and Code Review transitions. Failure never blocks implementation,
-                  evidence, or comments.
+              {issueReady && !branchValid ? (
+                <span className="block text-[11px] text-destructive">
+                  Branch must start with {normalizedIssueKey} and be a valid Git branch name.
                 </span>
-              </span>
+              ) : null}
             </label>
-          </div>
+          ) : null}
+
+          {startImmediately ? (
+            <label className="block space-y-1.5 text-xs font-medium">
+              Planning strategy
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+                aria-label="Planning strategy"
+                value={planningStrategy}
+                disabled={pending}
+                onChange={(event) => {
+                  setPlanningStrategy(event.target.value as PlanningStrategyRequest);
+                }}
+              >
+                <option value="auto">Auto</option>
+                <option value="fast">Fast</option>
+                <option value="ralplan">Ralplan</option>
+              </select>
+            </label>
+          ) : null}
+
+          {startImmediately ? (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                <input
+                  className="mt-0.5 size-4 accent-primary"
+                  type="checkbox"
+                  checked={requirePlanReview}
+                  disabled={pending}
+                  onChange={(event) => {
+                    setRequirePlanReview(event.target.checked);
+                  }}
+                />
+                <span>
+                  <span className="block font-medium">Review plan before execution</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Pause after planning for explicit approval.
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+                <input
+                  className="mt-0.5 size-4 accent-primary"
+                  type="checkbox"
+                  aria-label="Update Jira statuses"
+                  checked={updateJiraStatuses}
+                  disabled={pending}
+                  onChange={(event) => {
+                    setUpdateJiraStatuses(event.target.checked);
+                  }}
+                />
+                <span>
+                  <span className="block font-medium">Update Jira statuses</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Try In Progress and Code Review transitions. Failure never blocks
+                    implementation, evidence, or comments.
+                  </span>
+                </span>
+              </label>
+            </div>
+          ) : null}
         </div>
 
         {error === null ? null : <p className="mt-3 text-xs text-destructive">{error}</p>}
@@ -675,13 +732,93 @@ export const JiraTaskLaunchDialog = ({
           </Button>
           <Button
             type="submit"
-            disabled={pending || !issueReady || !branchValid || repository.length === 0}
+            disabled={
+              pending ||
+              !issueReady ||
+              (startImmediately && (!branchValid || repository.length === 0))
+            }
           >
             {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-            {pending ? 'Starting…' : 'Start task'}
+            {pending
+              ? startImmediately
+                ? 'Starting…'
+                : 'Adding…'
+              : mode === 'start'
+                ? 'Start task'
+                : startImmediately
+                  ? 'Add and start'
+                  : 'Add task'}
           </Button>
         </div>
       </form>
+    </div>
+  );
+};
+
+export const RemoveTaskDialog = ({
+  task,
+  pending,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  readonly task: OperatorTaskSummary;
+  readonly pending: boolean;
+  readonly error: string | null;
+  readonly onClose: () => void;
+  readonly onConfirm: () => void;
+}) => {
+  const [confirmation, setConfirmation] = useState('');
+  const active = task.status !== 'backlog' && task.status !== 'done';
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-destructive/40 bg-background p-5 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remove-task-title"
+      >
+        <h2 id="remove-task-title" className="text-base font-semibold">
+          {active ? 'Stop and remove task' : 'Remove task from Tasker'}
+        </h2>
+        <p className="mt-2 text-sm leading-5 text-muted-foreground">
+          {active
+            ? 'Tasker will terminate the active workflow and remove its managed containers, volumes, worktree, and local branch.'
+            : 'Tasker will hide this task and remove any remaining managed workspace resources.'}{' '}
+          Jira, remote branches, and pull requests are not deleted.
+        </p>
+        <label className="mt-4 block space-y-1.5 text-xs font-medium">
+          Type {task.taskId} to confirm
+          <input
+            autoFocus
+            className="h-9 w-full rounded-md border border-input bg-transparent px-3 font-mono text-sm outline-none focus:border-ring"
+            aria-label="Removal confirmation"
+            value={confirmation}
+            disabled={pending}
+            onChange={(event) => {
+              setConfirmation(event.target.value.toUpperCase());
+            }}
+          />
+        </label>
+        {error === null ? null : <p className="mt-3 text-xs text-destructive">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" type="button" disabled={pending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            type="button"
+            disabled={pending || confirmation !== task.taskId}
+            onClick={onConfirm}
+          >
+            {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
+            {pending ? 'Removing…' : active ? 'Stop and remove' : 'Remove task'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -692,7 +829,7 @@ const TaskQueue = ({
   selectedId,
   onSelect,
   onResolveJiraIssue,
-  onStartJira,
+  onAddJira,
   jiraSync,
   liveStatus,
 }: {
@@ -701,7 +838,7 @@ const TaskQueue = ({
   readonly selectedId: string;
   readonly onSelect: (taskId: string) => void;
   readonly onResolveJiraIssue: (issueKey: string) => Promise<JiraIssueSnapshot>;
-  readonly onStartJira: (input: JiraTaskLaunchInput) => Promise<void>;
+  readonly onAddJira: (input: JiraTaskLaunchInput) => Promise<void>;
   readonly jiraSync: JiraSyncState;
   readonly liveStatus: ConsoleStreamStatus;
 }) => {
@@ -752,28 +889,30 @@ const TaskQueue = ({
             <Tooltip>
               <TooltipTrigger
                 className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Start Jira task"
+                aria-label="Add Jira task"
                 onClick={() => {
                   setImportOpen((open) => !open);
                 }}
               >
                 <Plus className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent>Start Jira task</TooltipContent>
+              <TooltipContent>Add Jira task</TooltipContent>
             </Tooltip>
           </div>
         </div>
-        <JiraTaskLaunchDialog
-          open={importOpen}
-          repositories={repositories}
-          pending={jiraSync.status === 'syncing'}
-          error={jiraSync.status === 'failed' ? jiraSync.message : null}
-          onClose={() => {
-            setImportOpen(false);
-          }}
-          onResolveIssue={onResolveJiraIssue}
-          onSubmit={onStartJira}
-        />
+        {importOpen ? (
+          <JiraTaskLaunchDialog
+            open
+            repositories={repositories}
+            pending={jiraSync.status === 'syncing'}
+            error={jiraSync.status === 'failed' ? jiraSync.message : null}
+            onClose={() => {
+              setImportOpen(false);
+            }}
+            onResolveIssue={onResolveJiraIssue}
+            onSubmit={onAddJira}
+          />
+        ) : null}
         <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
           {visibleCounts.map((status) => (
             <span key={status}>
@@ -842,11 +981,8 @@ const SelectedTaskHeader = ({
   task,
   workflow,
   activity,
-  onGenerate,
-  requirePlanApproval,
-  onRequirePlanApprovalChange,
-  planningStrategy,
-  onPlanningStrategyChange,
+  onOpenSettings,
+  onRemove,
   onSyncJira,
   pendingOperation,
   jiraSync,
@@ -854,17 +990,14 @@ const SelectedTaskHeader = ({
   readonly task: OperatorTaskSummary;
   readonly workflow: WorkflowLoadState;
   readonly activity: ActivityLoadState;
-  readonly onGenerate: () => void;
-  readonly requirePlanApproval: boolean;
-  readonly onRequirePlanApprovalChange: (required: boolean) => void;
-  readonly planningStrategy: PlanningStrategyRequest;
-  readonly onPlanningStrategyChange: (strategy: PlanningStrategyRequest) => void;
+  readonly onOpenSettings: () => void;
+  readonly onRemove: () => void;
   readonly onSyncJira: (issueKey: string) => void;
   readonly pendingOperation: TaskOperation | null;
   readonly jiraSync: JiraSyncState;
 }) => {
   const generating = pendingOperation === 'generating';
-  const canGenerate =
+  const canStart =
     (task.status === 'backlog' || task.status === 'workflow_rejected') &&
     task.planning.status === 'available';
 
@@ -900,50 +1033,15 @@ const SelectedTaskHeader = ({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {canGenerate ? (
-            <>
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="sr-only">Planning strategy</span>
-                <select
-                  className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
-                  aria-label="Planning strategy"
-                  value={planningStrategy}
-                  disabled={generating}
-                  onChange={(event) => {
-                    onPlanningStrategyChange(event.target.value as PlanningStrategyRequest);
-                  }}
-                >
-                  <option value="auto">Auto plan</option>
-                  <option value="fast">Fast plan</option>
-                  <option value="ralplan">Ralplan</option>
-                </select>
-              </label>
-              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                <input
-                  className="size-3.5 accent-primary"
-                  type="checkbox"
-                  aria-label="Review plan before execution"
-                  checked={requirePlanApproval}
-                  disabled={generating}
-                  onChange={(event) => {
-                    onRequirePlanApprovalChange(event.target.checked);
-                  }}
-                />
-                Review plan
-              </label>
-              <Button size="sm" type="button" onClick={onGenerate} disabled={generating}>
-                {generating ? (
-                  <LoaderCircle data-icon="inline-start" className="animate-spin" />
-                ) : (
-                  <Sparkles data-icon="inline-start" />
-                )}
-                {generating
-                  ? 'Generating…'
-                  : task.status === 'workflow_rejected'
-                    ? 'Regenerate workflow'
-                    : 'Generate workflow'}
-              </Button>
-            </>
+          {canStart ? (
+            <Button size="sm" type="button" onClick={onOpenSettings} disabled={generating}>
+              {generating ? (
+                <LoaderCircle data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Sparkles data-icon="inline-start" />
+              )}
+              {generating ? 'Starting…' : 'Start task'}
+            </Button>
           ) : null}
           <>
             {task.origin.browseUrl === null ? null : (
@@ -983,6 +1081,17 @@ const SelectedTaskHeader = ({
                 className={jiraSync.status === 'syncing' ? 'animate-spin' : undefined}
               />
               Refresh Jira
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              disabled={pendingOperation === 'removing'}
+              onClick={onRemove}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 data-icon="inline-start" />
+              Remove
             </Button>
           </>
         </div>
@@ -1503,163 +1612,39 @@ export const DependencyWaitSurface = ({
 
 export const TaskDependencyPanel = ({
   dependencies,
-  links,
-  draft,
-  canConfigure,
-  pending,
-  onChange,
-  onSubmit,
 }: {
   readonly dependencies: readonly DependencySummary[];
-  readonly links: JiraIssueSnapshot['links'];
-  readonly draft: TaskDependencyDraft;
-  readonly canConfigure: boolean;
-  readonly pending: boolean;
-  readonly onChange: (draft: TaskDependencyDraft) => void;
-  readonly onSubmit: () => void;
 }) => {
-  const [editing, setEditing] = useState(false);
-  const availableLinks = links.filter(
-    (link) =>
-      link.linkTypeName.toLocaleLowerCase('en-US') === 'blocks' &&
-      link.direction === 'inward' &&
-      dependencies.every(
-        (dependency) =>
-          dependency.source.kind !== 'jira_link' || dependency.source.linkId !== link.linkId,
-      ),
-  );
-
-  useEffect(() => {
-    if (dependencies.length > 0) setEditing(false);
-  }, [dependencies.length]);
-
-  if (dependencies.length === 0 && (!canConfigure || availableLinks.length === 0)) return null;
-
-  const canSubmit =
-    draft.linkId.length > 0 &&
-    draft.producerRepository.trim().length > 0 &&
-    parsePackageLines(draft.packages).length > 0;
+  if (dependencies.length === 0) return null;
 
   return (
     <section className="border-b border-border px-5 py-4" aria-label="Task dependencies">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <strong className="text-sm">Package dependencies</strong>
-          <p className="mt-1 text-sm text-foreground/90">
-            Packages this task must receive from another Jira task before it can finish.
-          </p>
-        </div>
-        {canConfigure && availableLinks.length > 0 && !editing ? (
-          <Button
-            size="sm"
-            type="button"
-            onClick={() => {
-              setEditing(true);
-            }}
-          >
-            Add dependency
-          </Button>
-        ) : null}
+      <div>
+        <strong className="text-sm">Package dependencies</strong>
+        <p className="mt-1 text-sm text-foreground/90">
+          Exact external versions already declared for this task.
+        </p>
       </div>
-
-      {dependencies.length > 0 ? (
-        <div className="mt-3 space-y-2">
-          {dependencies.map((dependency) => (
-            <div
-              key={dependency.declarationId}
-              className="rounded-md border border-border/70 bg-background/60 p-3 text-sm"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <strong>
-                  {dependency.packages.join(', ')} from{' '}
-                  {dependency.producerTaskReference.replace(/^jira:/u, '')}
-                </strong>
-                <Badge variant="outline">Exact version</Badge>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Repository {dependency.producerRepository} · recorded{' '}
-                {formatShortDateTime(dependency.createdAt)}
-              </p>
+      <div className="mt-3 space-y-2">
+        {dependencies.map((dependency) => (
+          <div
+            key={dependency.declarationId}
+            className="rounded-md border border-border/70 bg-background/60 p-3 text-sm"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <strong>
+                {dependency.packages.join(', ')} from{' '}
+                {dependency.producerTaskReference.replace(/^jira:/u, '')}
+              </strong>
+              <Badge variant="outline">Exact version</Badge>
             </div>
-          ))}
-        </div>
-      ) : null}
-
-      {editing ? (
-        <div className="mt-3 rounded-md border border-border/70 bg-background/60 p-3">
-          <div className="grid gap-3">
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Blocking Jira task
-              <select
-                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
-                value={draft.linkId}
-                disabled={pending}
-                onChange={(event) => {
-                  const link = availableLinks.find(
-                    (candidate) => candidate.linkId === event.target.value,
-                  );
-                  if (link === undefined) return;
-                  onChange({
-                    ...draft,
-                    producerTaskReference: `jira:${link.issueKey}`,
-                    linkId: link.linkId,
-                    linkTypeId: link.linkTypeId,
-                    direction: link.direction,
-                  });
-                }}
-              >
-                <option value="">Select the task that publishes the package</option>
-                {availableLinks.map((link) => (
-                  <option key={link.linkId} value={link.linkId}>
-                    {link.issueKey}: {link.summary}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Package repository
-              <input
-                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
-                placeholder="front-core-packages"
-                value={draft.producerRepository}
-                disabled={pending}
-                onChange={(event) => {
-                  onChange({ ...draft, producerRepository: event.target.value });
-                }}
-              />
-            </label>
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Packages to wait for
-              <textarea
-                className="min-h-20 resize-y rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
-                placeholder="@ott/interceptors"
-                value={draft.packages}
-                disabled={pending}
-                onChange={(event) => {
-                  onChange({ ...draft, packages: event.target.value });
-                }}
-              />
-            </label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Repository {dependency.producerRepository} · recorded{' '}
+              {formatShortDateTime(dependency.createdAt)}
+            </p>
           </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              disabled={pending}
-              onClick={() => {
-                setEditing(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button size="sm" type="button" disabled={pending || !canSubmit} onClick={onSubmit}>
-              {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
-              {pending ? 'Saving…' : 'Save dependency'}
-            </Button>
-          </div>
-        </div>
-      ) : null}
+        ))}
+      </div>
     </section>
   );
 };
@@ -3602,7 +3587,6 @@ const WorkflowSidebar = ({
       const binding = task.origin.repositoryBinding;
       const repositoryResolved = binding.status === 'resolved';
       const jiraSnapshotReady = task.origin.syncStatus === 'current';
-      const workflowReady = jiraSnapshotReady && repositoryResolved;
       const repositoryLabel = repositoryResolved
         ? binding.repository.repositoryId
         : binding.status === 'missing'
@@ -3610,52 +3594,45 @@ const WorkflowSidebar = ({
           : 'reference' in binding
             ? binding.reference
             : null;
+      const readyToStart = jiraSnapshotReady && repositoryResolved;
       const prerequisites = [
-        ['Jira snapshot', jiraSnapshotReady ? 'complete' : 'blocked'],
-        ['Repository mapping', repositoryResolved ? 'complete' : 'blocked'],
-        ['Read-only analysis', workflowReady ? 'ready' : 'waiting'],
-        ['Compile & validate', 'waiting'],
+        ['Jira task', jiraSnapshotReady ? 'ready' : 'blocked'],
+        ['Working repository', repositoryResolved ? 'ready' : 'blocked'],
       ] as const;
       return (
         <aside className="flex min-h-0 flex-col" aria-label="Current workflow">
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold">Workflow</h2>
+              <h2 className="text-sm font-semibold">Ready to start</h2>
               <StateBadge
                 className={
-                  workflowReady
+                  readyToStart
                     ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
                     : 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
                 }
               >
-                {workflowReady ? 'ready' : 'blocked'}
+                {readyToStart ? 'ready' : 'needs setup'}
               </StateBadge>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              No workflow has been compiled for this Jira snapshot.
+              No Tasker run has started. Review settings when you are ready to create the worktree.
             </p>
           </div>
           <div className="px-4 py-4 text-xs">
             <p className="mb-4 text-[11px] uppercase tracking-wide text-muted-foreground">
-              {task.origin.issueKey} · Jira · {task.origin.syncStatus} snapshot
+              {task.origin.issueKey} · Jira imported
               {repositoryLabel === null ? '' : ` · ${repositoryLabel}`}
             </p>
             <ol className="space-y-1" aria-label="Workflow planning prerequisites">
               {prerequisites.map(([label, status], index) => (
                 <li className="relative flex min-h-9 items-start gap-2.5" key={label}>
-                  {index === 3 ? null : (
+                  {index === prerequisites.length - 1 ? null : (
                     <span className="absolute bottom-0 left-[5px] top-3 w-px bg-border" />
                   )}
                   <span
                     className={cn(
                       'relative mt-1 size-3 rounded-full border-2 border-background',
-                      status === 'complete'
-                        ? 'bg-emerald-400'
-                        : status === 'ready'
-                          ? 'bg-cyan-400'
-                          : status === 'blocked'
-                            ? 'bg-amber-400'
-                            : 'bg-muted',
+                      status === 'ready' ? 'bg-cyan-400' : 'bg-amber-400',
                     )}
                   />
                   <div>
@@ -3671,8 +3648,8 @@ const WorkflowSidebar = ({
                 {!jiraSnapshotReady
                   ? 'Restore Jira access and sync this task. The repository mapping is already saved.'
                   : repositoryResolved
-                    ? `Run the read-only workflow analyzer against ${binding.repository.repositoryId}.`
-                    : 'Add repo:name to the Jira description or re-import with a repository.'}
+                    ? 'Open Task settings to review the branch and planning options, then start work.'
+                    : 'Choose the working repository in Task settings before starting.'}
               </p>
             </div>
           </div>
@@ -3806,6 +3783,9 @@ export const App = () => {
   const [streamStatus, setStreamStatus] = useState<ConsoleStreamStatus>('connecting');
   const [runtimeWatchTaskId, setRuntimeWatchTaskId] = useState<string | null>(null);
   const [restartConfirmationTaskId, setRestartConfirmationTaskId] = useState<string | null>(null);
+  const [launchSettingsTaskId, setLaunchSettingsTaskId] = useState<string | null>(null);
+  const [removeConfirmationTaskId, setRemoveConfirmationTaskId] = useState<string | null>(null);
+  const [taskRemovalError, setTaskRemovalError] = useState<string | null>(null);
   const [pendingOperations, setPendingOperations] = useState<ReadonlyMap<string, TaskOperation>>(
     new Map(),
   );
@@ -3829,12 +3809,6 @@ export const App = () => {
   >(new Map());
   const [planningAnswerDrafts, setPlanningAnswerDrafts] = useState<
     ReadonlyMap<string, ReadonlyMap<string, string>>
-  >(new Map());
-  const [planApprovalDrafts, setPlanApprovalDrafts] = useState<ReadonlyMap<string, boolean>>(
-    new Map(),
-  );
-  const [planningStrategyDrafts, setPlanningStrategyDrafts] = useState<
-    ReadonlyMap<string, PlanningStrategyRequest>
   >(new Map());
   const streamCursorRef = useRef(0);
   const tasksRefreshSequenceRef = useRef(0);
@@ -3876,13 +3850,33 @@ export const App = () => {
           ({ status }) => status === 'awaiting_review',
         ) ?? null)
       : null;
+  const linkedProducerTask =
+    jiraIssueState.status === 'ready' && jiraIssueState.state.status !== 'unavailable'
+      ? (jiraIssueState.state.issue.links.find(
+          (link) =>
+            link.linkTypeName.toLocaleLowerCase('en-US') === 'blocks' &&
+            link.direction === 'inward',
+        )?.issueKey ?? null)
+      : null;
   const selectedTaskDependencyDraft =
     selectedTask === null
       ? null
       : (taskDependencyDrafts.get(selectedTask.id) ?? {
-          producerTaskReference: '',
-          producerRepository: '',
-          packages: '',
+          producerTaskReference:
+            selectedDependencyWait?.kind === 'dependency_discovery'
+              ? (selectedDependencyWait.declaration.producerTaskReference ??
+                (linkedProducerTask === null ? '' : `jira:${linkedProducerTask}`))
+              : '',
+          producerRepository:
+            selectedDependencyWait?.kind === 'dependency_discovery'
+              ? selectedDependencyWait.requestedRepository
+              : '',
+          packages:
+            selectedDependencyWait?.kind === 'dependency_discovery'
+              ? selectedDependencyWait.declaration.packages.length > 0
+                ? selectedDependencyWait.declaration.packages.join('\n')
+                : (selectedDependencyWait.expectedPackage ?? '')
+              : '',
           mode: 'final_only',
           linkId: '',
           linkTypeId: '',
@@ -4403,18 +4397,24 @@ export const App = () => {
     [],
   );
 
-  const handleJiraStart = async (input: JiraTaskLaunchInput): Promise<void> => {
+  const handleJiraAdd = async (input: JiraTaskLaunchInput): Promise<void> => {
     const issueKey = input.issueKey.trim().toUpperCase();
     if (issueKey.length === 0) return;
     let taskReference = `jira:${issueKey}`;
     setJiraSyncState({ status: 'syncing', issueKey });
     try {
-      const state = await syncJiraIssue(issueKey, input.repository);
+      const state = await syncJiraIssue(
+        issueKey,
+        input.repository.length === 0 ? undefined : input.repository,
+      );
       const normalizedKey = state.status === 'unavailable' ? state.issueKey : state.issue.issueKey;
       taskReference = `jira:${normalizedKey}`;
-      setRuntimeWatchTaskId(taskReference);
-      setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
-      await generateWorkflow(taskReference, { settings: input.settings });
+      await restoreOperatorTask(taskReference);
+      if (input.startImmediately) {
+        setRuntimeWatchTaskId(taskReference);
+        setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
+        await generateWorkflow(taskReference, { settings: input.settings });
+      }
       await refreshTasks();
       setSelectedId(taskReference);
       await refreshSelection(taskReference);
@@ -4435,50 +4435,28 @@ export const App = () => {
     }
   };
 
-  const handleGenerate = (): void => {
-    if (
-      selectedTask === null ||
-      (selectedTask.status !== 'backlog' && selectedTask.status !== 'workflow_rejected') ||
-      selectedTask.planning.status !== 'available'
-    ) {
-      return;
-    }
-
+  const handleRemoveTask = async (): Promise<void> => {
+    if (selectedTask === null || removeConfirmationTaskId !== selectedTask.id) return;
     const taskReference = selectedTask.id;
-    const requirePlanApproval = planApprovalDrafts.get(taskReference) ?? true;
-    const planningStrategy = planningStrategyDrafts.get(taskReference) ?? 'auto';
-    setRuntimeWatchTaskId(taskReference);
-    setPendingOperations((current) => new Map(current).set(taskReference, 'generating'));
-    void generateWorkflow(taskReference, {
-      settings: {
-        planReview: requirePlanApproval ? 'required' : 'automatic',
-        planningStrategy,
-        trackerStatusUpdates: 'enabled',
-        branchName: taskBranchName(selectedTask.taskId, selectedTask.title),
-      },
-    })
-      .then(async () => {
-        const nextSelectedId = await refreshTasks();
-        if (nextSelectedId !== null) {
-          await refreshSelection(nextSelectedId);
-        }
-      })
-      .catch((error: unknown) => {
-        if (selectedIdRef.current === taskReference) {
-          setWorkflowState({
-            status: 'failed',
-            message: error instanceof Error ? error.message : 'Unexpected generation failure',
-          });
-        }
-      })
-      .finally(() => {
-        setPendingOperations((current) => {
-          if (current.get(taskReference) !== 'generating') return current;
-          const next = new Map(current);
-          next.delete(taskReference);
-          return next;
-        });
+    setTaskRemovalError(null);
+    setPendingOperations((current) => new Map(current).set(taskReference, 'removing'));
+    try {
+      await removeOperatorTask(taskReference, selectedTask.taskId);
+      setRemoveConfirmationTaskId(null);
+      setLaunchSettingsTaskId(null);
+      selectedIdRef.current = '';
+      setSelectedId('');
+      await refreshTasks();
+    } catch (error) {
+      setTaskRemovalError(error instanceof Error ? error.message : 'Task removal did not complete');
+    } finally {
+      setPendingOperations((current) => {
+        if (current.get(taskReference) !== 'removing') return current;
+        const next = new Map(current);
+        next.delete(taskReference);
+        return next;
       });
+    }
   };
 
   const handlePlanReview = (decision: 'approve' | 'request_changes'): void => {
@@ -4597,61 +4575,6 @@ export const App = () => {
       .finally(() => {
         setPendingOperations((current) => {
           if (current.get(taskReference) !== operation) return current;
-          const next = new Map(current);
-          next.delete(taskReference);
-          return next;
-        });
-      });
-  };
-
-  const handleConfigureTaskDependency = (): void => {
-    if (selectedTask === null || selectedTaskDependencyDraft === null) return;
-    const packages = parsePackageLines(selectedTaskDependencyDraft.packages);
-    if (
-      selectedTaskDependencyDraft.producerTaskReference.trim().length === 0 ||
-      selectedTaskDependencyDraft.producerRepository.trim().length === 0 ||
-      selectedTaskDependencyDraft.linkId.trim().length === 0 ||
-      selectedTaskDependencyDraft.linkTypeId.trim().length === 0 ||
-      packages.length === 0
-    ) {
-      return;
-    }
-    const taskReference = selectedTask.id;
-    setPendingOperations((current) =>
-      new Map(current).set(taskReference, 'configuring_dependency'),
-    );
-    void configureTaskDependency(taskReference, {
-      consumerTaskReference: taskReference,
-      producerTaskReference: selectedTaskDependencyDraft.producerTaskReference.trim(),
-      producerRepository: selectedTaskDependencyDraft.producerRepository.trim(),
-      packages,
-      mode: selectedTaskDependencyDraft.mode,
-      source: {
-        kind: 'jira_link',
-        linkId: selectedTaskDependencyDraft.linkId.trim(),
-        linkTypeId: selectedTaskDependencyDraft.linkTypeId.trim(),
-        direction: selectedTaskDependencyDraft.direction,
-      },
-    })
-      .then(async () => {
-        if (selectedIdRef.current === taskReference) {
-          await refreshSelection(taskReference);
-        }
-      })
-      .catch((error: unknown) => {
-        if (selectedIdRef.current === taskReference) {
-          setActivityState({
-            status: 'failed',
-            message:
-              error instanceof Error
-                ? error.message
-                : 'Unexpected dependency configuration failure',
-          });
-        }
-      })
-      .finally(() => {
-        setPendingOperations((current) => {
-          if (current.get(taskReference) !== 'configuring_dependency') return current;
           const next = new Map(current);
           next.delete(taskReference);
           return next;
@@ -5070,7 +4993,7 @@ export const App = () => {
               selectedId={selectedId}
               onSelect={handleSelectTask}
               onResolveJiraIssue={handleResolveJiraIssue}
-              onStartJira={handleJiraStart}
+              onAddJira={handleJiraAdd}
               jiraSync={jiraSyncState}
               liveStatus={streamStatus}
             />
@@ -5085,44 +5008,54 @@ export const App = () => {
                   task={selectedTask}
                   workflow={workflowState}
                   activity={activityState}
-                  onGenerate={handleGenerate}
-                  requirePlanApproval={planApprovalDrafts.get(selectedTask.id) ?? true}
-                  onRequirePlanApprovalChange={(required) => {
-                    setPlanApprovalDrafts((current) =>
-                      new Map(current).set(selectedTask.id, required),
-                    );
+                  onOpenSettings={() => {
+                    setLaunchSettingsTaskId(selectedTask.id);
                   }}
-                  planningStrategy={planningStrategyDrafts.get(selectedTask.id) ?? 'auto'}
-                  onPlanningStrategyChange={(strategy) => {
-                    setPlanningStrategyDrafts((current) =>
-                      new Map(current).set(selectedTask.id, strategy),
-                    );
+                  onRemove={() => {
+                    setTaskRemovalError(null);
+                    setRemoveConfirmationTaskId(selectedTask.id);
                   }}
                   onSyncJira={handleJiraSync}
                   pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
                   jiraSync={jiraSyncState}
                 />
-                {selectedTaskDependencyDraft === null ? null : (
-                  <TaskDependencyPanel
-                    key={selectedTask.id}
-                    dependencies={selectedDependencies}
-                    links={
-                      jiraIssueState.status === 'ready' &&
-                      jiraIssueState.state.status !== 'unavailable'
-                        ? jiraIssueState.state.issue.links
-                        : []
-                    }
-                    draft={selectedTaskDependencyDraft}
-                    canConfigure={['backlog', 'planned', 'queued'].includes(selectedTask.status)}
-                    pending={pendingOperations.get(selectedTask.id) === 'configuring_dependency'}
-                    onChange={(draft) => {
-                      setTaskDependencyDrafts((current) =>
-                        new Map(current).set(selectedTask.id, draft),
-                      );
+                {removeConfirmationTaskId === selectedTask.id ? (
+                  <RemoveTaskDialog
+                    task={selectedTask}
+                    pending={pendingOperations.get(selectedTask.id) === 'removing'}
+                    error={taskRemovalError}
+                    onClose={() => {
+                      setRemoveConfirmationTaskId(null);
+                      setTaskRemovalError(null);
                     }}
-                    onSubmit={handleConfigureTaskDependency}
+                    onConfirm={() => {
+                      void handleRemoveTask();
+                    }}
                   />
-                )}
+                ) : null}
+                {launchSettingsTaskId === selectedTask.id &&
+                jiraIssueState.status === 'ready' &&
+                jiraIssueState.state.status !== 'unavailable' ? (
+                  <JiraTaskLaunchDialog
+                    open
+                    mode="start"
+                    initialIssue={jiraIssueState.state.issue}
+                    initialRepository={
+                      selectedTask.origin.repositoryBinding.status === 'resolved'
+                        ? selectedTask.origin.repositoryBinding.repository.repositoryId
+                        : ''
+                    }
+                    repositories={repositories}
+                    pending={jiraSyncState.status === 'syncing'}
+                    error={jiraSyncState.status === 'failed' ? jiraSyncState.message : null}
+                    onClose={() => {
+                      setLaunchSettingsTaskId(null);
+                    }}
+                    onResolveIssue={handleResolveJiraIssue}
+                    onSubmit={handleJiraAdd}
+                  />
+                ) : null}
+                <TaskDependencyPanel dependencies={selectedDependencies} />
                 {selectedTask.status === 'code_review' ? (
                   <CodeReviewControls
                     pendingOperation={pendingOperations.get(selectedTask.id) ?? null}

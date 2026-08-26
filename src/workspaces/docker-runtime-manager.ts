@@ -260,6 +260,45 @@ export class DockerWorkspaceRuntimeManager implements DockerWorkspaceRuntimePrep
     }
   }
 
+  public async dispose(workspaceId: string): Promise<Outcome<void, DockerWorkspaceRuntimeError>> {
+    try {
+      const receipt = await this.readReceipt(workspaceId);
+      if (receipt === null) return ok(undefined);
+      const listed = await this.docker(
+        ['ps', '--all', '--quiet', '--filter', `label=tasker.workspace-id=${workspaceId}`],
+        30_000,
+      );
+      if (!succeeded(listed)) {
+        return err({ kind: 'docker_unavailable', message: messageFrom(listed) });
+      }
+      const containerIds = listed.stdout.split(/\s+/u).filter((id) => id.length > 0);
+      if (containerIds.length > 0) {
+        const removed = await this.docker(['rm', '--force', ...containerIds], 120_000);
+        if (!succeeded(removed)) {
+          return err({ kind: 'runtime_conflict', message: messageFrom(removed) });
+        }
+      }
+      for (const volume of receipt.volumes) {
+        const removed = await this.docker(['volume', 'rm', volume.name], 120_000);
+        if (!succeeded(removed) && !messageFrom(removed).includes('No such volume')) {
+          return err({ kind: 'runtime_conflict', message: messageFrom(removed) });
+        }
+      }
+      const networkRemoved = await this.docker(['network', 'rm', receipt.networkName], 120_000);
+      if (!succeeded(networkRemoved) && !messageFrom(networkRemoved).includes('not found')) {
+        return err({ kind: 'runtime_conflict', message: messageFrom(networkRemoved) });
+      }
+      await this.store.remove(workspaceId);
+      return ok(undefined);
+    } catch (error) {
+      if (error instanceof RuntimePreparationFailure) return err(error.detail);
+      return err({
+        kind: 'store_failed',
+        message: error instanceof Error ? error.message : 'Docker runtime could not be removed',
+      });
+    }
+  }
+
   private assertIdentity(
     receipt: DockerWorkspaceRuntimeReceipt,
     workspace: WorkspaceLocator,

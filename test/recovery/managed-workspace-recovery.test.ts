@@ -77,6 +77,20 @@ afterEach(() => {
 });
 
 describe('managed workspace recovery', () => {
+  it('removes the managed worktree and local branch when disposed', async () => {
+    const { clock, ledger, configuration, request, repositoryPath } = setup();
+    const store = new WorkspaceStore(ledger.repository, clock);
+    const manager = new ManagedWorkspaceManager(configuration, store, nodeCommandRunner);
+    const prepared = await manager.prepare(request);
+    if (!prepared.ok) throw new Error(prepared.error.kind);
+
+    const removed = await manager.dispose(prepared.value.workspaceId);
+
+    expect(removed).toEqual({ ok: true, value: undefined });
+    expect(store.read(prepared.value.workspaceId)).toEqual({ ok: true, value: null });
+    expect(git(repositoryPath, ['branch', '--list', prepared.value.branch])).toBe('');
+  });
+
   it('uses the operator-selected task branch', () => {
     const { clock, ledger, configuration, request } = setup();
     const manager = new ManagedWorkspaceManager(

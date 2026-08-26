@@ -286,6 +286,36 @@ export class ManagedWorkspaceManager {
     return this.persist(locator);
   }
 
+  public async dispose(workspaceId: string): Promise<Outcome<void, WorkspacePreparationError>> {
+    const stored = this.store.read(workspaceId);
+    if (!stored.ok) return err({ kind: 'store', error: stored.error });
+    if (stored.value === null) return ok(undefined);
+    const workspace = stored.value;
+    if (existsSync(workspace.path)) {
+      const removed = await this.git(
+        workspace.repository.sourcePath,
+        'remove managed worktree',
+        ['worktree', 'remove', '--force', '--', workspace.path],
+        false,
+        10 * 60_000,
+      );
+      if (!removed.ok) return removed;
+    }
+    const branchExists = await this.branchExists(workspace.repository.sourcePath, workspace.branch);
+    if (!branchExists.ok) return branchExists;
+    if (branchExists.value) {
+      const deleted = await this.git(workspace.repository.sourcePath, 'delete managed branch', [
+        'branch',
+        '-D',
+        '--',
+        workspace.branch,
+      ]);
+      if (!deleted.ok) return deleted;
+    }
+    const retired = this.store.retire(workspaceId);
+    return retired.ok ? retired : err({ kind: 'store', error: retired.error });
+  }
+
   private persist(locator: WorkspaceLocator): Outcome<WorkspaceLocator, WorkspacePreparationError> {
     const saved = this.store.save(locator);
     if (!saved.ok) return err({ kind: 'store', error: saved.error });

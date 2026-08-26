@@ -296,6 +296,12 @@ class DependencyTaskRunService implements TaskRunService {
     throw new Error('restart is not used in dependency contract tests');
   }
 
+  public terminate(): Promise<Outcome<void, TaskRunError>> {
+    this.current = null;
+    this.lifecycle = null;
+    return Promise.resolve(ok(undefined));
+  }
+
   public resolveWait(
     taskReference: string,
     command: ResolveBootstrapWaitCommand,

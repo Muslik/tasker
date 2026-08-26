@@ -61,6 +61,8 @@ import { createOperatorWorkflowProjection } from './operator-workflow-projection
 import type { ExecutionActivityReader } from './execution-activity.js';
 import type { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
 import { orderOperatorTasks } from './operator-task-order.js';
+import type { TaskPresenceStore } from './task-presence.js';
+import type { TaskRemovalError, TaskRemovalService } from './task-removal.js';
 import { projectOperatorActivity } from './operator-activity-projection.js';
 import { providerFailureSummary } from './workflow-generator.js';
 import type { VerifiedPackagePublicationStore } from './verified-package-publication.js';
@@ -88,6 +90,7 @@ const JiraAttachmentParamsSchema = z
   .object({ issueKey: z.string().min(1), attachmentId: z.string().min(1) })
   .strict();
 const AssetParamsSchema = z.object({ '*': z.string().min(1) }).strict();
+const RemoveTaskCommandSchema = z.object({ confirmation: z.string().min(1) }).strict();
 const StreamQuerySchema = z
   .object({ after: z.coerce.number().int().nonnegative().optional() })
   .strict();
@@ -112,6 +115,8 @@ export interface BuildOperatorApiOptions {
   readonly planReviews?: PlanReviewStore | undefined;
   readonly retrospectives?: Pick<RetrospectiveStore, 'readLatest'> | undefined;
   readonly completedRuns?: Pick<CompletedRunLifecycleReader, 'read'> | undefined;
+  readonly taskPresence?: Pick<TaskPresenceStore, 'isRemoved' | 'restore'> | undefined;
+  readonly taskRemoval?: Pick<TaskRemovalService, 'remove'> | undefined;
 }
 
 const apiError = (error: string, message: string) =>
@@ -199,6 +204,11 @@ const sendTemporalRunError = (reply: FastifyReply, error: TaskRunError): Fastify
       return reply.code(503).send(apiError(error.kind, error.message));
   }
 };
+
+const sendTaskRemovalError = (reply: FastifyReply, error: TaskRemovalError): FastifyReply =>
+  reply
+    .code(error.kind === 'presence' ? 409 : 503)
+    .send(apiError(`task_removal_${error.kind}`, 'Task removal did not complete; retry safely'));
 
 const sendBitbucketReviewError = (
   reply: FastifyReply,
@@ -415,7 +425,11 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     if (options.jiraIssueService === undefined) {
       return reply.send({
         ...result.value,
-        tasks: orderOperatorTasks(await Promise.all(result.value.tasks.map(withRunState))),
+        tasks: orderOperatorTasks(
+          (await Promise.all(result.value.tasks.map(withRunState))).filter(
+            (task) => options.taskPresence?.isRemoved(task.id) !== true,
+          ),
+        ),
       });
     }
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
@@ -425,12 +439,43 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       hydratedJiraTasks.push(await withRunState(task));
     }
     return reply.send({
-      tasks: orderOperatorTasks([
-        ...hydratedJiraTasks,
-        ...(await Promise.all(result.value.tasks.map(withRunState))),
-      ]),
+      tasks: orderOperatorTasks(
+        [...hydratedJiraTasks, ...(await Promise.all(result.value.tasks.map(withRunState)))].filter(
+          (task) => options.taskPresence?.isRemoved(task.id) !== true,
+        ),
+      ),
       streamCursor: result.value.streamCursor,
     });
+  });
+
+  api.post('/api/operator/tasks/:taskReference/restore', (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const restored = options.taskPresence?.restore(params.data.taskReference);
+    return restored?.ok === false
+      ? reply.code(409).send(apiError('task_restore_conflict', 'Task could not be restored'))
+      : reply.send({ restored: true });
+  });
+
+  api.delete('/api/operator/tasks/:taskReference', async (request, reply) => {
+    if (options.taskRemoval === undefined) {
+      return reply.code(503).send(apiError('task_removal_unavailable', 'Task removal is disabled'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    const command = RemoveTaskCommandSchema.safeParse(request.body);
+    if (!params.success || !command.success) {
+      return reply.code(400).send(apiError('invalid_request', 'Removal confirmation is required'));
+    }
+    const taskKey = params.data.taskReference.replace(/^jira:/u, '');
+    if (command.data.confirmation !== taskKey) {
+      return reply
+        .code(400)
+        .send(apiError('task_removal_confirmation_mismatch', `Type ${taskKey} to confirm`));
+    }
+    const removed = await options.taskRemoval.remove(params.data.taskReference);
+    return removed.ok ? reply.send({ removed: true }) : sendTaskRemovalError(reply, removed.error);
   });
 
   api.get('/api/operator/tasks/:taskReference/retrospective', async (request, reply) => {

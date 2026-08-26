@@ -313,5 +313,10 @@ describe('Docker workspace runtime manager', () => {
       image: 'docker:29-dind',
       imageId: 'sha256:workspace-image',
     });
+
+    expect(await manager.dispose(workspaceId)).toEqual({ ok: true, value: undefined });
+    expect(await store.read(workspaceId)).toBeNull();
+    expect(requests.some(({ args }) => args[0] === 'volume' && args[1] === 'rm')).toBe(true);
+    expect(requests.some(({ args }) => args[0] === 'network' && args[1] === 'rm')).toBe(true);
   });
 });

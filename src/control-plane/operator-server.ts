@@ -31,6 +31,8 @@ import {
 import { systemClock } from '../shared/clock.js';
 import { RetrospectiveStore } from '../retrospective/index.js';
 import { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
+import { TaskPresenceStore } from './task-presence.js';
+import { TaskRemovalService } from './task-removal.js';
 import { DependencyDeclarationStore } from './dependency-declaration.js';
 import { DependencyDeclarationGenerationSubjectResolver } from './dependency-declaration-generation-subject.js';
 import { DependencyOperatorService } from './dependency-operator-service.js';
@@ -56,8 +58,12 @@ import { NexusPackageObserver } from '../integrations/nexus/index.js';
 import { TemporalTaskStepTraceStore } from '../temporal/activities/block-execution.js';
 import {
   DockerWorkspaceCommandRunner,
+  DockerWorkspaceRuntimeManager,
   DockerWorkspaceRuntimeStore,
+  ManagedWorkspaceManager,
   loadDockerWorkspaceConfiguration,
+  loadWorkspaceConfiguration,
+  WorkspaceStore,
 } from '../workspaces/index.js';
 
 const parsePort = (input: string | undefined): number => {
@@ -97,10 +103,24 @@ export const startOperatorServer = async (): Promise<void> => {
   });
   const harnessPack = loadHarnessPack();
   const dockerConfiguration = loadDockerWorkspaceConfiguration();
+  const dockerRuntimeStore = new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath);
   const dockerCommands = new DockerWorkspaceCommandRunner(
     dockerConfiguration,
     nodeCommandRunner,
-    new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath),
+    dockerRuntimeStore,
+  );
+  const workspaceStore = new WorkspaceStore(ledger.repository, systemClock);
+  const workspaceManager = new ManagedWorkspaceManager(
+    loadWorkspaceConfiguration(),
+    workspaceStore,
+    nodeCommandRunner,
+  );
+  const dockerRuntimeManager = new DockerWorkspaceRuntimeManager(
+    dockerConfiguration,
+    nodeCommandRunner,
+    dockerCommands,
+    dockerRuntimeStore,
+    systemClock,
   );
   const dependencyDeclarations = new DependencyDeclarationStore(ledger.repository, systemClock);
   const subjects = new WorkflowGenerationSubjectSource(
@@ -146,6 +166,14 @@ export const startOperatorServer = async (): Promise<void> => {
     new NexusPackageObserver(),
   );
   const temporalRuntime = await connectTemporalTaskRunService(temporalConfiguration);
+  const taskPresence = new TaskPresenceStore(ledger.repository, systemClock);
+  const taskRemoval = new TaskRemovalService(
+    temporalRuntime.service,
+    workspaceStore,
+    dockerRuntimeManager,
+    workspaceManager,
+    taskPresence,
+  );
   const bitbucketReview =
     bitbucketConfiguration === null
       ? undefined
@@ -171,6 +199,8 @@ export const startOperatorServer = async (): Promise<void> => {
     planReviews: new PlanReviewStore(ledger.repository, systemClock),
     retrospectives,
     completedRuns,
+    taskPresence,
+    taskRemoval,
     ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
   });
 

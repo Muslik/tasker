@@ -213,6 +213,12 @@ summaries. Secrets never enter Workflow input or Event History.
 
 ### 5.1 Run isolation
 
+Importing a tracker task and starting work are separate operator decisions. Import creates a
+backlog entry only; Start freezes workspace/planning settings and begins Bootstrap. A removed task
+is hidden by an append-only presence projection. If a run is active, removal terminates it first and
+then disposes only Tasker-managed Docker and local Git resources. It never deletes Jira state,
+remote branches, or pull requests.
+
 `taskReference` is a business identity used to start the current Temporal lifecycle and
 group historical runs. It is never a storage key for mutable run state. Every mutable
 artifact is addressed by the identity of the run boundary that created it:
@@ -524,6 +530,11 @@ requirements. Producer work remains an independent run. Once a human-owned packa
 observed in Nexus, the accepted continuation contains only consumer-repository blocks: await the
 verified artifact, consume its exact version, and re-verify the consumer. Arbitrary child workspaces
 remain unsupported.
+
+Backlog import never asks the operator to guess a package name or producer repository. If exact
+package requirements are already declared, Tasker shows them read-only. Otherwise the implementation
+agent discovers the boundary; Jira Blocks links, the requested repository, and a component path are
+used to prefill the later dependency wait whenever the evidence supports them.
 
 During stabilization, every graph revision is operator-reviewable. Once retrospective
 evidence shows a class is reliable, policy may auto-accept that class. The validator is

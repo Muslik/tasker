@@ -70,31 +70,6 @@ describe('dependency cockpit surfaces', () => {
             createdAt: '2026-08-25T10:00:00.000Z',
           },
         ],
-        links: [
-          {
-            linkId: '118870',
-            linkTypeId: '10016',
-            linkTypeName: 'Blocks',
-            direction: 'outward',
-            issueKey: 'AVIA-11999',
-            summary: 'Publish the shared fare card package',
-            relationship: 'blocks',
-            status: 'Open',
-          },
-        ],
-        draft: {
-          producerTaskReference: '',
-          producerRepository: '',
-          packages: '',
-          mode: 'final_only',
-          linkId: '',
-          linkTypeId: '',
-          direction: 'outward',
-        },
-        canConfigure: false,
-        pending: false,
-        onChange: vi.fn(),
-        onSubmit: vi.fn(),
       }),
     );
 
@@ -107,35 +82,10 @@ describe('dependency cockpit surfaces', () => {
     expect(html).not.toContain('Producer task reference');
   });
 
-  it('hides dependency configuration on a producer task', () => {
+  it('hides package dependency controls until a declaration exists', () => {
     const html = renderToStaticMarkup(
       createElement(TaskDependencyPanel, {
         dependencies: [],
-        links: [
-          {
-            linkId: '118870',
-            linkTypeId: '10016',
-            linkTypeName: 'Blocks',
-            direction: 'outward',
-            issueKey: 'AVIA-12045',
-            summary: 'Consume the shared fare card package',
-            relationship: 'blocks',
-            status: 'Open',
-          },
-        ],
-        draft: {
-          producerTaskReference: '',
-          producerRepository: '',
-          packages: '',
-          mode: 'final_only',
-          linkId: '',
-          linkTypeId: '',
-          direction: 'outward',
-        },
-        canConfigure: true,
-        pending: false,
-        onChange: vi.fn(),
-        onSubmit: vi.fn(),
       }),
     );
 

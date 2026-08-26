@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { z } from 'zod';
@@ -35,6 +35,10 @@ export class DockerWorkspaceRuntimeStore {
       mode: 0o600,
     });
     await rename(temporary, destination);
+  }
+
+  public async remove(workspaceId: string): Promise<void> {
+    await rm(this.pathFor(workspaceId), { force: true });
   }
 
   private pathFor(workspaceId: string): string {

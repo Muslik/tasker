@@ -120,12 +120,16 @@ test('starts a Jira task with immutable repository and status settings', async (
       body: JSON.stringify({ error: 'runtime_unavailable', message: 'Temporal is offline' }),
     }),
   );
+  await page.route('**/api/operator/tasks/jira%3AFC-2244/restore', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ restored: true }) }),
+  );
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Start Jira task' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Start Jira task' });
+  await page.getByRole('button', { name: 'Add Jira task' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Jira task' });
   await dialog.getByRole('textbox', { name: 'Jira task' }).fill('FC-2244');
   await expect(dialog).toContainText('Fix limiter interceptor');
+  await dialog.getByRole('checkbox', { name: 'Start immediately' }).check();
   const branchName = dialog.getByRole('textbox', { name: 'Branch name' });
   await expect(branchName).toHaveValue('FC-2244-fix-limiter-interceptor');
   await branchName.fill('FC-2244-limiter-200');
@@ -135,7 +139,7 @@ test('starts a Jira task with immutable repository and status settings', async (
     request.url().includes('/api/workflows/jira%3AFC-2244/generate'),
   );
 
-  await dialog.getByRole('button', { name: 'Start task' }).click();
+  await dialog.getByRole('button', { name: 'Add and start' }).click();
 
   expect((await generateRequest).postDataJSON()).toMatchObject({
     settings: { branchName: 'FC-2244-limiter-200', trackerStatusUpdates: 'disabled' },
@@ -171,10 +175,10 @@ test('does not start a Jira task that cannot be loaded', async ({ page }) => {
   );
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Start Jira task' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Start Jira task' });
+  await page.getByRole('button', { name: 'Add Jira task' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Jira task' });
   await dialog.getByRole('textbox', { name: 'Jira task' }).fill('NOPE-404');
 
   await expect(dialog).toContainText('Jira task was not found');
-  await expect(dialog.getByRole('button', { name: 'Start task' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Add task' })).toBeDisabled();
 });

@@ -106,6 +106,11 @@ class ContractTaskRunService implements TaskRunService {
     return Promise.resolve(ok(this.current));
   }
 
+  public terminate(): Promise<Outcome<void, TaskRunError>> {
+    this.current = null;
+    return Promise.resolve(ok(undefined));
+  }
+
   public resolveWait(
     taskReference: string,
     command: ResolveBootstrapWaitCommand,
@@ -128,7 +133,7 @@ class ContractTaskRunService implements TaskRunService {
   }
 }
 
-const setup = () => {
+const setup = (taskRemoval?: Parameters<typeof buildOperatorApi>[0]['taskRemoval']) => {
   const clock = makeAdjustableClock('2026-08-09T00:00:00.000Z');
   const ledger = openSqliteLedger({ filename: ':memory:', clock });
   resources.push(ledger);
@@ -138,11 +143,37 @@ const setup = () => {
     temporalRunService: runs,
     blockReceipts: new BlockReceiptStore(ledger.repository, clock),
     planReviews: new PlanReviewStore(ledger.repository, clock),
+    ...(taskRemoval === undefined ? {} : { taskRemoval }),
   });
   return { api, runs };
 };
 
 describe('Temporal bootstrap HTTP contract', () => {
+  it('requires the Jira key before removing a task', async () => {
+    const removed: string[] = [];
+    const { api } = setup({
+      remove: (taskReference) => {
+        removed.push(taskReference);
+        return Promise.resolve(ok(undefined));
+      },
+    });
+    const rejected = await api.inject({
+      method: 'DELETE',
+      url: '/api/operator/tasks/jira:FC-2244',
+      payload: { confirmation: 'WRONG-1' },
+    });
+    const accepted = await api.inject({
+      method: 'DELETE',
+      url: '/api/operator/tasks/jira:FC-2244',
+      payload: { confirmation: 'FC-2244' },
+    });
+
+    expect(rejected.statusCode).toBe(400);
+    expect(accepted.statusCode).toBe(200);
+    expect(removed).toEqual(['jira:FC-2244']);
+    await api.close();
+  });
+
   it('starts a durable run from a neutral task reference', async () => {
     const { api, runs } = setup();
     const response = await api.inject({

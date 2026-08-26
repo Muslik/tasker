@@ -566,9 +566,11 @@ It should not require changing the Temporal interpreter, Workflow messaging mode
 generic IR, plan/question semantics, or retrospective model. If `JiraIssue` or a
 Bitbucket response shape appears in Workflow input, the boundary is broken.
 
-The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. The task-launch
-dialog resolves the Jira issue before Start is enabled, displays its summary, derives an editable
-task-key-prefixed branch name, and freezes that branch with the run settings. It also pins
+The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. `Add Jira task`
+uses a read-only preview, imports only on submission, and starts no work unless `Start immediately`
+is selected. An imported backlog task opens the same settings dialog with its Jira identity locked.
+That dialog displays the summary, derives an editable task-key-prefixed branch name, and freezes the
+branch only when work starts. It also pins
 `trackerStatusUpdates`; the default is enabled, and disabling it suppresses only `In Progress` /
 `Code Review` transition attempts. Its
 account, eligible issue types, excluded labels, admission/review status paths, and
@@ -578,6 +580,12 @@ Temporal code. Optional final-demo upload is a delivery policy, not part of Jira
 admission and not a required reproduction block. Tasker's private before evidence
 remains in its artifact store. Keep any remote-media policy off until a selected pilot
 task and its transition requirements have been inspected.
+
+Removing a task is an explicit operator action guarded by typing its task key. Active work is
+terminated before Tasker removes task-scoped containers, volumes, the managed worktree, and its
+local branch. Ledger history is tombstoned rather than rewritten; Jira, remote branches, and pull
+requests remain untouched. Re-adding the Jira issue appends a restore revision and may start a new
+isolated run.
 
 Required transition fields are not duplicated in Tasker configuration. Jira remains their source of
 truth: before an enabled status update, the adapter reads transition metadata and current issue

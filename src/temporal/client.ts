@@ -54,6 +54,7 @@ export interface TaskRunService {
     taskReference: string,
     expectedRunId: string,
   ): Promise<Outcome<TaskRunPublicState, TaskRunError>>;
+  terminate(taskReference: string): Promise<Outcome<void, TaskRunError>>;
   resolveWait(
     taskReference: string,
     command: ResolveBootstrapWaitCommand,
@@ -184,6 +185,24 @@ export class TemporalTaskRunService implements TaskRunService {
     } catch (error) {
       return causedBy(error, WorkflowNotFoundError)
         ? err({ kind: 'run_not_found', taskReference })
+        : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
+    }
+  }
+
+  public async terminate(taskReference: string): Promise<Outcome<void, TaskRunError>> {
+    const lifecycle = await this.readLifecycle(taskReference);
+    if (!lifecycle.ok) return err(lifecycle.error);
+    if (lifecycle.value === null) return ok(undefined);
+    const active = lifecycle.value.execution ?? lifecycle.value.bootstrap;
+    if (active.status === 'completed') return ok(undefined);
+    try {
+      await this.client.workflow
+        .getHandle(bootstrapWorkflowIdFor(taskReference), lifecycle.value.bootstrap.runId)
+        .terminate('Removed from Tasker by the operator');
+      return ok(undefined);
+    } catch (error) {
+      return causedBy(error, WorkflowNotFoundError)
+        ? ok(undefined)
         : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
     }
   }

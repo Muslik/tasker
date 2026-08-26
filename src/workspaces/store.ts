@@ -15,6 +15,7 @@ export const WORKSPACE_BOOTSTRAP_PROJECTION = 'workspace_bootstrap_by_workspace'
 
 export type WorkspaceStoreError =
   | { readonly kind: 'ledger_conflict'; readonly conflict: LedgerConflict }
+  | { readonly kind: 'aggregate_missing'; readonly workspaceId: string }
   | {
       readonly kind: 'projection_corrupt';
       readonly workspaceId: string;
@@ -47,6 +48,26 @@ export class WorkspaceStore {
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
+  }
+
+  public listByTaskReference(
+    taskReference: string,
+  ): Outcome<readonly WorkspaceLocator[], WorkspaceStoreError> {
+    const workspaces: WorkspaceLocator[] = [];
+    for (const projection of this.ledger.listProjections(WORKSPACE_PROJECTION)) {
+      const parsed = WorkspaceLocatorSchema.safeParse(projection.payload);
+      if (!parsed.success) {
+        return err({
+          kind: 'projection_corrupt',
+          workspaceId: projection.projectionId,
+          issues: parsed.error.issues.map(
+            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+          ),
+        });
+      }
+      if (parsed.data.taskReference === taskReference) workspaces.push(parsed.data);
+    }
+    return ok(workspaces);
   }
 
   public save(locatorInput: WorkspaceLocator): Outcome<WorkspaceLocator, WorkspaceStoreError> {
@@ -92,6 +113,43 @@ export class WorkspaceStore {
     const concurrent = this.read(locator.workspaceId);
     return concurrent.ok && concurrent.value !== null
       ? ok(concurrent.value)
+      : err({ kind: 'ledger_conflict', conflict: committed.error });
+  }
+
+  public retire(workspaceId: string): Outcome<void, WorkspaceStoreError> {
+    const existing = this.read(workspaceId);
+    if (!existing.ok) return existing;
+    if (existing.value === null) return ok(undefined);
+    const aggregateId = aggregateIdFor(workspaceId);
+    const head = this.ledger.readAggregateHead(aggregateId);
+    if (head === null) return err({ kind: 'aggregate_missing', workspaceId });
+    const retiredAt = this.clock.now();
+    const committed = this.ledger.transact({
+      aggregate: {
+        aggregateId,
+        expectedVersion: head.version,
+        events: [
+          {
+            eventId: `event:${aggregateId}:${String(head.version + 1)}`,
+            eventType: 'WorkspaceRetired',
+            eventSchemaVersion: 1,
+            payload: asJson({ workspaceId }),
+            actor: 'workspace_manager',
+          },
+        ],
+      },
+      projections: [
+        { kind: 'delete', projectionType: WORKSPACE_PROJECTION, projectionId: workspaceId },
+        {
+          kind: 'delete',
+          projectionType: WORKSPACE_BOOTSTRAP_PROJECTION,
+          projectionId: workspaceId,
+        },
+      ],
+      timestamp: retiredAt,
+    });
+    return committed.ok
+      ? ok(undefined)
       : err({ kind: 'ledger_conflict', conflict: committed.error });
   }
 }

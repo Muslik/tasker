@@ -540,6 +540,26 @@ export const previewJiraIssue = async (issueKey: string): Promise<JiraIssueSnaps
   return parsed.data;
 };
 
+export const restoreOperatorTask = async (taskReference: string): Promise<void> => {
+  const result = await fetchJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/restore`,
+    { method: 'POST' },
+  );
+  if (!result.response.ok) throw failureFrom(result);
+};
+
+export const removeOperatorTask = async (
+  taskReference: string,
+  confirmation: string,
+): Promise<void> => {
+  const result = await fetchJson(`/api/operator/tasks/${encodeURIComponent(taskReference)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmation }),
+  });
+  if (!result.response.ok) throw failureFrom(result);
+};
+
 export const jiraAttachmentUrl = (issueKey: string, attachmentId: string): string =>
   `/api/jira/issues/${encodeURIComponent(issueKey)}/attachments/${encodeURIComponent(attachmentId)}`;
 

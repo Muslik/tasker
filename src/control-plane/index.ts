@@ -18,3 +18,5 @@ export * from './dependency-contracts.js';
 export * from './dependency-operator-service.js';
 export * from './dependency-declaration-generation-subject.js';
 export * from './verified-package-publication.js';
+export * from './task-presence.js';
+export * from './task-removal.js';
