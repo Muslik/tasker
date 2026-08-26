@@ -105,7 +105,8 @@ const sameImmutableInput = (
 ): boolean =>
   state.settings.planReview === input.settings.planReview &&
   state.settings.planningStrategy === input.settings.planningStrategy &&
-  state.settings.trackerStatusUpdates === input.settings.trackerStatusUpdates;
+  state.settings.trackerStatusUpdates === input.settings.trackerStatusUpdates &&
+  state.settings.branchName === input.settings.branchName;
 
 export class TemporalTaskRunService implements TaskRunService {
   public constructor(

@@ -23,6 +23,26 @@ afterEach(() => {
 });
 
 describe('Jira issue persistence', () => {
+  it('previews a Jira issue without importing it', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-jira-preview-'));
+    const clock = makeAdjustableClock('2026-08-01T19:15:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    resources.push({ directory, ledger });
+    const port: JiraIssuePort = {
+      fetchIssue: vi.fn(() => Promise.resolve(ok(makeJiraSnapshot({ issueKey: 'FC-2244' })))),
+      fetchAttachment: vi.fn(),
+    };
+    const service = createJiraIssueService(ledger.repository, clock, port, {
+      repositoryCatalog: makeRepositoryCatalog(),
+    });
+
+    const preview = await service.preview('FC-2244');
+
+    expect(preview).toMatchObject({ ok: true, value: { issueKey: 'FC-2244' } });
+    expect(service.listOperatorTasks()).toEqual({ ok: true, value: [] });
+    expect(ledger.repository.listEvents()).toEqual([]);
+  });
+
   it('keeps an intake repository when the first Jira request is blocked', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'tasker-jira-blocked-intake-'));
     const clock = makeAdjustableClock('2026-08-01T19:15:00.000Z');

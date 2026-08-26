@@ -184,4 +184,30 @@ describe('planning agent log', () => {
       { kind: 'message', title: 'Agent message', detail: 'Verification accepted' },
     ]);
   });
+
+  it('hides empty planner protocol messages', () => {
+    const raw = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'planning-thread' }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'empty-plan-message',
+          type: 'agent_message',
+          text: JSON.stringify({ decision: null, evidenceRequests: [] }),
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'final-plan-message',
+          type: 'agent_message',
+          text: JSON.stringify({ decision: { status: 'ready' }, evidenceRequests: [] }),
+        },
+      }),
+    ].join('\n');
+
+    expect(planningAgentLogFromRaw(raw).attempts[0]?.events).toEqual([
+      { kind: 'message', title: 'Implementation plan returned', detail: 'ready' },
+    ]);
+  });
 });

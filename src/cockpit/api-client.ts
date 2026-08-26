@@ -57,7 +57,12 @@ import {
   PlanningTranscriptViewSchema,
   type PlanningTranscriptView,
 } from '../control-plane/planning-transcript.js';
-import { JiraIssueStateSchema, type JiraIssueState } from '../integrations/jira/contracts.js';
+import {
+  JiraIssueSnapshotSchema,
+  JiraIssueStateSchema,
+  type JiraIssueSnapshot,
+  type JiraIssueState,
+} from '../integrations/jira/contracts.js';
 import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
@@ -524,6 +529,14 @@ export const syncJiraIssue = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = JiraIssueStateSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Jira sync response does not match the cockpit contract');
+  return parsed.data;
+};
+
+export const previewJiraIssue = async (issueKey: string): Promise<JiraIssueSnapshot> => {
+  const result = await fetchJson(`/api/jira/issues/${encodeURIComponent(issueKey)}/preview`);
+  if (!result.response.ok) throw failureFrom(result);
+  const parsed = JiraIssueSnapshotSchema.safeParse(result.body);
+  if (!parsed.success) throw new Error('Jira preview does not match the cockpit contract');
   return parsed.data;
 };
 

@@ -567,8 +567,10 @@ generic IR, plan/question semantics, or retrospective model. If `JiraIssue` or a
 Bitbucket response shape appears in Workflow input, the boundary is broken.
 
 The current Jira write adapter is opt-in with `TASKER_ENABLE_JIRA_EFFECTS=true`. The task-launch
-dialog pins `trackerStatusUpdates` for the run; the default is enabled, and disabling it suppresses only
-`In Progress` / `Code Review` transition attempts. Its
+dialog resolves the Jira issue before Start is enabled, displays its summary, derives an editable
+task-key-prefixed branch name, and freezes that branch with the run settings. It also pins
+`trackerStatusUpdates`; the default is enabled, and disabling it suppresses only `In Progress` /
+`Code Review` transition attempts. Its
 account, eligible issue types, excluded labels, admission/review status paths, and
 compact review comment prefix live in
 `harness/policies/jira-lifecycle.json`; changing those rules does not change adapter or

@@ -142,6 +142,9 @@ export async function bootstrapWorkflowV3(
     planReview: input.settings.planReview,
     planningStrategy: input.settings.planningStrategy,
     trackerStatusUpdates: trackerStatusUpdatesFrom(input.settings),
+    ...(typeof input.settings.branchName === 'string'
+      ? { branchName: input.settings.branchName }
+      : {}),
   } satisfies TaskRunSettings;
   let workspaceContext: BootstrapWorkspaceContext | null = null;
   let planningContext: BootstrapContextState | null = null;
@@ -255,6 +258,7 @@ export async function bootstrapWorkflowV3(
         taskReference: input.taskReference,
         workflowId: execution.workflowId,
         workflowRunId: execution.runId,
+        ...(settings.branchName === undefined ? {} : { branchName: settings.branchName }),
       });
       nodeStates.workspace = 'succeeded';
       break;

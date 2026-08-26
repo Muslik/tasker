@@ -20,6 +20,7 @@ import {
   type JiraIssueKey,
   type JiraIssueSnapshot,
   type JiraIssueState,
+  type JiraSyncProblem,
 } from './contracts.js';
 import {
   JiraDescriptionRepositoryReferenceSource,
@@ -51,6 +52,10 @@ export type JiraIssueServiceError =
   | {
       readonly kind: 'store_failure';
       readonly error: JiraIssueStoreError;
+    }
+  | {
+      readonly kind: 'preview_failed';
+      readonly problem: JiraSyncProblem;
     };
 
 export type JiraWorkflowPlanningSource =
@@ -260,6 +265,16 @@ export class JiraIssueService {
     });
     this.inFlight.set(parsed.data, pending);
     return pending;
+  }
+
+  public async preview(
+    issueKeyInput: string,
+  ): Promise<Outcome<JiraIssueSnapshot, JiraIssueServiceError>> {
+    const normalized = issueKeyInput.trim().toUpperCase();
+    const parsed = JiraIssueKeySchema.safeParse(normalized);
+    if (!parsed.success) return err({ kind: 'invalid_issue_key', input: issueKeyInput });
+    const fetched = await this.port.fetchIssue(parsed.data, this.clock.now());
+    return fetched.ok ? fetched : err({ kind: 'preview_failed', problem: fetched.error });
   }
 
   public readActivity(

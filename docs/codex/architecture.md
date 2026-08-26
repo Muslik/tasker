@@ -554,8 +554,9 @@ history. Duplicate webhook/poll results are deduplicated by stable external iden
 
 Loop messages and operator input are dependency provenance, not publication proof. The dependency
 wait advances only after a read-only Nexus observation confirms every declared exact package
-version and persists immutable registry/tarball/integrity evidence. Development versions never
-satisfy a final dependency gate.
+version and persists immutable registry/tarball/integrity evidence. The current operator surface
+accepts one exact installable version per dependency wait; it does not expose a separate development
+publication path.
 
 PR conversation is the primary review channel: Tasker imports unresolved Bitbucket
 threads, starts a revision Activity, and posts acknowledgements only through the

@@ -14,6 +14,7 @@ import {
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { ImplementationPlanningFailureSchema } from '../../planning/planning-failure.js';
 import { TrackerStatusUpdatesSchema } from '../../shared/task-run-settings.js';
+import { GitBranchNameSchema } from '../../shared/git-branch.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../../workflow/schema.js';
 import {
   WorkflowFreezeReceiptSchema,
@@ -28,6 +29,7 @@ export const TaskRunSettingsSchema = z
     planReview: z.enum(['required', 'automatic']),
     planningStrategy: PlanningStrategyRequestSchema,
     trackerStatusUpdates: TrackerStatusUpdatesSchema.default('enabled'),
+    branchName: GitBranchNameSchema.optional(),
   })
   .strict()
   .readonly();
@@ -254,6 +256,7 @@ export const PrepareTaskWorkspaceInputSchema = z
     taskReference: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
+    branchName: GitBranchNameSchema.optional(),
   })
   .strict()
   .readonly();

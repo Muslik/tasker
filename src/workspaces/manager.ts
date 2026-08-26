@@ -4,6 +4,7 @@ import { mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 import type { CommandResult, CommandRunner } from '../providers/command-runner.js';
+import { taskBranchName } from '../shared/git-branch.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
   PrepareWorkspaceRequestSchema,
@@ -55,20 +56,9 @@ const isWithin = (parent: string, child: string): boolean => {
   return path.length > 0 && !path.startsWith('..') && !isAbsolute(path);
 };
 
-const branchSlug = (title: string, maximumLength: number): string =>
-  title
-    .normalize('NFKD')
-    .replaceAll(/[\u0300-\u036f]/gu, '')
-    .toLocaleLowerCase('en-US')
-    .replaceAll(/[^a-z0-9]+/gu, '-')
-    .replaceAll(/^-+|-+$/gu, '')
-    .slice(0, maximumLength);
-
 const branchName = (request: PrepareWorkspaceRequest): string => {
-  const key = request.taskKey.toLocaleUpperCase('en-US');
-  const available = Math.max(0, request.gitPolicy.branch.maxLength - key.length - 1);
-  const slug = branchSlug(request.taskTitle, available);
-  return slug.length === 0 ? key : `${key}-${slug}`;
+  if (request.branchName !== undefined) return request.branchName;
+  return taskBranchName(request.taskKey, request.taskTitle, request.gitPolicy.branch.maxLength);
 };
 
 const commandMessage = (result: CommandResult): string => {

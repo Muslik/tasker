@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { HarnessGitPolicySchema } from '../harness/contracts.js';
+import { GitBranchNameSchema } from '../shared/git-branch.js';
 
 const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const GitObjectIdSchema = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u);
@@ -10,6 +11,7 @@ export const PrepareWorkspaceRequestSchema = z
     taskReference: z.string().min(1),
     taskKey: z.string().regex(/^[A-Za-z][A-Za-z0-9]*-\d+$/u),
     taskTitle: z.string().trim().min(1),
+    branchName: GitBranchNameSchema.optional(),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
     repositoryReference: z.string().min(1),
@@ -17,6 +19,20 @@ export const PrepareWorkspaceRequestSchema = z
     gitPolicy: HarnessGitPolicySchema,
   })
   .strict()
+  .superRefine((request, context) => {
+    if (request.branchName === undefined) return;
+    const taskKey = request.taskKey.toLocaleUpperCase('en-US');
+    if (
+      request.branchName.length > request.gitPolicy.branch.maxLength ||
+      (request.branchName !== taskKey && !request.branchName.startsWith(`${taskKey}-`))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['branchName'],
+        message: `Branch must start with ${taskKey} and fit the project branch policy`,
+      });
+    }
+  })
   .readonly();
 
 export const WorkspaceLocatorSchema = z

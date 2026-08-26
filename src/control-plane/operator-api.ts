@@ -8,6 +8,7 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import { type ImplementationPlanningCoordinator } from './implementation-planning.js';
 import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
+import { JiraIssueSnapshotSchema } from '../integrations/index.js';
 import type {
   BitbucketReviewCoordinator,
   BitbucketReviewSyncError,
@@ -165,6 +166,16 @@ const sendJiraServiceError = (reply: FastifyReply, error: JiraIssueServiceError)
         .send(apiError('jira_attachment_unavailable', error.message));
     case 'store_failure':
       return reply.code(500).send(apiError('jira_store_failure', error.error.kind));
+    case 'preview_failed':
+      return reply
+        .code(
+          'httpStatus' in error.problem
+            ? (error.problem.httpStatus ?? 503)
+            : error.problem.retryable
+              ? 503
+              : 422,
+        )
+        .send(apiError(`jira_${error.problem.kind}`, error.problem.message));
   }
 };
 
@@ -772,6 +783,20 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     }
     const result = await options.jiraIssueService.sync(params.data.issueKey, body.data.repository);
     return result.ok ? reply.send(result.value) : sendJiraServiceError(reply, result.error);
+  });
+
+  api.get('/api/jira/issues/:issueKey/preview', async (request, reply) => {
+    if (options.jiraIssueService === undefined) {
+      return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
+    }
+    const params = JiraIssueParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'issueKey is required'));
+    }
+    const result = await options.jiraIssueService.preview(params.data.issueKey);
+    return result.ok
+      ? reply.send(JiraIssueSnapshotSchema.parse(result.value))
+      : sendJiraServiceError(reply, result.error);
   });
 
   api.get('/api/jira/issues/:issueKey/attachments/:attachmentId', async (request, reply) => {

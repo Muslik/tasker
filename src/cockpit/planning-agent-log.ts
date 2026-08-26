@@ -178,6 +178,14 @@ const planningMessage = (text: string): Extract<PlanningAgentEvent, { kind: 'mes
         detail: `${String(value.evidenceRequests.length)} request(s)`,
       };
     }
+    if (
+      isRecord(value) &&
+      value.decision === null &&
+      Array.isArray(value.evidenceRequests) &&
+      value.evidenceRequests.length === 0
+    ) {
+      return null;
+    }
   } catch {
     // Human-readable agent messages are valid provider output too.
   }

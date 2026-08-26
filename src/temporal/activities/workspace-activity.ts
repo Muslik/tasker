@@ -113,6 +113,7 @@ export const createWorkspaceActivity = (
         taskReference: input.taskReference,
         taskKey: subject.value.task.taskId,
         taskTitle: subject.value.task.title,
+        ...(input.branchName === undefined ? {} : { branchName: input.branchName }),
         workflowId: input.workflowId,
         workflowRunId: input.workflowRunId,
         repositoryReference: subject.value.task.repository,

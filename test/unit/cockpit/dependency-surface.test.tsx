@@ -30,7 +30,7 @@ describe('dependency cockpit surfaces', () => {
           producerTaskReference: '',
           producerRepository: '',
           packages: '',
-          mode: 'validate_dev_then_final',
+          mode: 'final_only',
           linkId: '',
           linkTypeId: '',
           direction: 'outward',
@@ -60,7 +60,7 @@ describe('dependency cockpit surfaces', () => {
             producerTaskReference: 'jira:AVIA-11999',
             producerRepository: 'front-core-packages',
             packages: ['@ott/fare-card'],
-            mode: 'validate_dev_then_final',
+            mode: 'final_only',
             source: {
               kind: 'jira_link',
               linkId: '118870',
@@ -86,7 +86,7 @@ describe('dependency cockpit surfaces', () => {
           producerTaskReference: '',
           producerRepository: '',
           packages: '',
-          mode: 'validate_dev_then_final',
+          mode: 'final_only',
           linkId: '',
           linkTypeId: '',
           direction: 'outward',
@@ -101,7 +101,8 @@ describe('dependency cockpit surfaces', () => {
     expect(html).toContain('Package dependencies');
     expect(html).toContain('@ott/fare-card from AVIA-11999');
     expect(html).toContain('front-core-packages');
-    expect(html).toContain('Test dev, then final');
+    expect(html).toContain('Exact version');
+    expect(html).not.toContain('Release validation');
     expect(html).not.toContain('dependency-declaration:');
     expect(html).not.toContain('Producer task reference');
   });
@@ -126,7 +127,7 @@ describe('dependency cockpit surfaces', () => {
           producerTaskReference: '',
           producerRepository: '',
           packages: '',
-          mode: 'validate_dev_then_final',
+          mode: 'final_only',
           linkId: '',
           linkTypeId: '',
           direction: 'outward',

@@ -21,12 +21,14 @@ describe('Jira task launch dialog', () => {
         pending: false,
         error: null,
         onClose: vi.fn(),
+        onResolveIssue: vi.fn(() => Promise.reject(new Error('not called during SSR'))),
         onSubmit: vi.fn(() => Promise.resolve()),
       }),
     );
 
     expect(html).toContain('Start Jira task');
     expect(html).toContain('aria-label="Jira task"');
+    expect(html).toContain('aria-label="Branch name"');
     expect(html).toContain('front-core-packages');
     expect(html).toContain('Update Jira statuses');
     expect(html).toContain('Failure never blocks implementation, evidence, or comments.');

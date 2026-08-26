@@ -11,6 +11,10 @@ undeclared systems, or implement the task.
 Return exactly one object with `decision` and `evidenceRequests`. These are typed JSON values, not
 JSON serialized inside strings.
 
+Write every human-facing plan title, summary, objective, assumption, risk, acceptance criterion,
+and assembly explanation in the language of the task title and description. Keep code identifiers,
+paths, package names, block references, and other technical literals unchanged.
+
 If a declared mediated skill must read Jira, Confluence, Loop, Jenkins, or another external system,
 set `decision` to null and return requests in `evidenceRequests`:
 
@@ -85,11 +89,9 @@ declaration is absent. Tasker does not publish packages and one run never edits 
 repository.
 
 For each declared dependency, use the registered dependency blocks with the exact declaration id,
-revision, channel, and package names. `dependency.await_packages@1` must precede
-`dependency.consume_exact@1`; the consumer then runs normal Verify before Review or Delivery. A
-`final_only` declaration includes only the final wait/consume path. A `validate_dev_then_final`
-declaration may include a bounded dev wait/consume/Verify loop with at most three attempts, followed
-by a separate final wait/consume/Verify path. A dev verification never satisfies final Delivery.
+revision, the `final` channel, and package names. `dependency.await_packages@1` must precede
+`dependency.consume_exact@1`; the consumer then runs normal Verify before Review or Delivery. Emit
+one exact-version wait/consume path per declaration. Do not create a development publication path.
 
 If required dependency blocks are absent from plannerContext, return `needs_clarification`; do not
 replace them with local links, `node_modules` patches, guessed versions, or a publish command.

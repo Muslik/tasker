@@ -77,6 +77,19 @@ afterEach(() => {
 });
 
 describe('managed workspace recovery', () => {
+  it('uses the operator-selected task branch', () => {
+    const { clock, ledger, configuration, request } = setup();
+    const manager = new ManagedWorkspaceManager(
+      configuration,
+      new WorkspaceStore(ledger.repository, clock),
+      nodeCommandRunner,
+    );
+
+    const identity = manager.identity({ ...request, branchName: 'FIX-1-review-name' });
+
+    expect(identity.branch).toBe('FIX-1-review-name');
+  });
+
   it('uses the task key when a title has no safe ASCII branch slug', () => {
     const { clock, ledger, configuration, request } = setup();
     const manager = new ManagedWorkspaceManager(

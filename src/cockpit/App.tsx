@@ -50,6 +50,7 @@ import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/con
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
 import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
 import type { RetrospectiveResponse } from '../retrospective/index.js';
+import { taskBranchName, taskBranchNameMatches } from '../shared/git-branch.js';
 import {
   configureTaskDependency,
   answerPlanningClarification,
@@ -69,6 +70,7 @@ import {
   loadRetrospective,
   loadOperatorWorkflowProjection,
   loadWorkflow,
+  previewJiraIssue,
   reviewPlan,
   reviewWorkflowChange,
   restartWorkflow,
@@ -193,7 +195,7 @@ type TaskDependencyDraft = {
   readonly producerTaskReference: string;
   readonly producerRepository: string;
   readonly packages: string;
-  readonly mode: 'final_only' | 'validate_dev_then_final';
+  readonly mode: 'final_only';
   readonly linkId: string;
   readonly linkTypeId: string;
   readonly direction: 'inward' | 'outward';
@@ -397,12 +399,19 @@ type JiraTaskLaunchInput = {
   readonly settings: RunStartCommand['settings'];
 };
 
+type JiraLaunchIssuePreview =
+  | { readonly status: 'idle' }
+  | { readonly status: 'checking'; readonly issueKey: string }
+  | { readonly status: 'invalid'; readonly issueKey: string; readonly message: string }
+  | { readonly status: 'ready'; readonly issue: JiraIssueSnapshot };
+
 export const JiraTaskLaunchDialog = ({
   open,
   repositories,
   pending,
   error,
   onClose,
+  onResolveIssue,
   onSubmit,
 }: {
   readonly open: boolean;
@@ -410,15 +419,67 @@ export const JiraTaskLaunchDialog = ({
   readonly pending: boolean;
   readonly error: string | null;
   readonly onClose: () => void;
+  readonly onResolveIssue: (issueKey: string) => Promise<JiraIssueSnapshot>;
   readonly onSubmit: (input: JiraTaskLaunchInput) => Promise<void>;
 }) => {
   const [issueKey, setIssueKey] = useState('');
+  const [issuePreview, setIssuePreview] = useState<JiraLaunchIssuePreview>({ status: 'idle' });
+  const [branchName, setBranchName] = useState('');
   const [repository, setRepository] = useState('');
   const [planningStrategy, setPlanningStrategy] = useState<PlanningStrategyRequest>('auto');
   const [requirePlanReview, setRequirePlanReview] = useState(true);
   const [updateJiraStatuses, setUpdateJiraStatuses] = useState(true);
+  const previewSequence = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    const normalized = issueKey.trim().toUpperCase();
+    const sequence = previewSequence.current + 1;
+    previewSequence.current = sequence;
+    setBranchName('');
+    if (normalized.length === 0) {
+      setIssuePreview({ status: 'idle' });
+      return;
+    }
+    if (!/^[A-Z][A-Z0-9]*-\d+$/u.test(normalized)) {
+      setIssuePreview({
+        status: 'invalid',
+        issueKey: normalized,
+        message: 'Enter a Jira key such as FC-2244.',
+      });
+      return;
+    }
+    setIssuePreview({ status: 'checking', issueKey: normalized });
+    const timer = window.setTimeout(() => {
+      void onResolveIssue(normalized)
+        .then((issue) => {
+          if (previewSequence.current !== sequence) return;
+          setIssuePreview({ status: 'ready', issue });
+          setBranchName(taskBranchName(issue.issueKey, issue.summary));
+        })
+        .catch((resolutionError: unknown) => {
+          if (previewSequence.current !== sequence) return;
+          setIssuePreview({
+            status: 'invalid',
+            issueKey: normalized,
+            message:
+              resolutionError instanceof Error
+                ? resolutionError.message
+                : 'Jira task could not be loaded.',
+          });
+        });
+    }, 400);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [issueKey, onResolveIssue, open]);
 
   if (!open) return null;
+
+  const normalizedIssueKey = issueKey.trim().toUpperCase();
+  const issueReady =
+    issuePreview.status === 'ready' && issuePreview.issue.issueKey === normalizedIssueKey;
+  const branchValid = issueReady && taskBranchNameMatches(branchName, normalizedIssueKey);
 
   return (
     <div
@@ -435,18 +496,21 @@ export const JiraTaskLaunchDialog = ({
         aria-labelledby="jira-task-launch-title"
         onSubmit={(event) => {
           event.preventDefault();
-          if (issueKey.trim().length === 0 || repository.length === 0 || pending) return;
+          if (!issueReady || !branchValid || repository.length === 0 || pending) return;
           void onSubmit({
-            issueKey: issueKey.trim().toUpperCase(),
+            issueKey: normalizedIssueKey,
             repository,
             settings: {
               planReview: requirePlanReview ? 'required' : 'automatic',
               planningStrategy,
               trackerStatusUpdates: updateJiraStatuses ? 'enabled' : 'disabled',
+              branchName,
             },
           })
             .then(() => {
               setIssueKey('');
+              setIssuePreview({ status: 'idle' });
+              setBranchName('');
               setRepository('');
               setPlanningStrategy('auto');
               setRequirePlanReview(true);
@@ -491,6 +555,36 @@ export const JiraTaskLaunchDialog = ({
                 setIssueKey(event.target.value);
               }}
             />
+            {issuePreview.status === 'checking' ? (
+              <span className="block text-[11px] text-muted-foreground">Checking Jira…</span>
+            ) : null}
+            {issuePreview.status === 'invalid' ? (
+              <span className="block text-[11px] text-destructive">{issuePreview.message}</span>
+            ) : null}
+            {issueReady ? (
+              <span className="block text-[11px] leading-4 text-muted-foreground">
+                {issuePreview.issue.summary}
+              </span>
+            ) : null}
+          </label>
+
+          <label className="block space-y-1.5 text-xs font-medium">
+            Branch name
+            <input
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 font-mono text-sm outline-none placeholder:font-sans placeholder:text-muted-foreground focus:border-ring"
+              aria-label="Branch name"
+              placeholder="Loaded from the Jira task title"
+              value={branchName}
+              disabled={pending || !issueReady}
+              onChange={(event) => {
+                setBranchName(event.target.value);
+              }}
+            />
+            {issueReady && !branchValid ? (
+              <span className="block text-[11px] text-destructive">
+                Branch must start with {normalizedIssueKey} and be a valid Git branch name.
+              </span>
+            ) : null}
           </label>
 
           <label className="block space-y-1.5 text-xs font-medium">
@@ -581,7 +675,7 @@ export const JiraTaskLaunchDialog = ({
           </Button>
           <Button
             type="submit"
-            disabled={pending || issueKey.trim().length === 0 || repository.length === 0}
+            disabled={pending || !issueReady || !branchValid || repository.length === 0}
           >
             {pending ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}
             {pending ? 'Starting…' : 'Start task'}
@@ -597,6 +691,7 @@ const TaskQueue = ({
   repositories,
   selectedId,
   onSelect,
+  onResolveJiraIssue,
   onStartJira,
   jiraSync,
   liveStatus,
@@ -605,6 +700,7 @@ const TaskQueue = ({
   readonly repositories: readonly RepositoryCatalogEntry[];
   readonly selectedId: string;
   readonly onSelect: (taskId: string) => void;
+  readonly onResolveJiraIssue: (issueKey: string) => Promise<JiraIssueSnapshot>;
   readonly onStartJira: (input: JiraTaskLaunchInput) => Promise<void>;
   readonly jiraSync: JiraSyncState;
   readonly liveStatus: ConsoleStreamStatus;
@@ -675,6 +771,7 @@ const TaskQueue = ({
           onClose={() => {
             setImportOpen(false);
           }}
+          onResolveIssue={onResolveJiraIssue}
           onSubmit={onStartJira}
         />
         <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
@@ -1343,21 +1440,6 @@ export const DependencyWaitSurface = ({
                   onDiscoveryDraftChange({ ...discoveryDraft, packages: event.target.value });
                 }}
               />
-              <select
-                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm outline-none focus:border-ring"
-                aria-label="Discovered dependency mode"
-                value={discoveryDraft.mode}
-                disabled={pending}
-                onChange={(event) => {
-                  onDiscoveryDraftChange({
-                    ...discoveryDraft,
-                    mode: event.target.value as TaskDependencyDraft['mode'],
-                  });
-                }}
-              >
-                <option value="validate_dev_then_final">Validate dev, then final</option>
-                <option value="final_only">Final only</option>
-              </select>
               <p className="text-xs text-muted-foreground">
                 Expected package boundary:{' '}
                 {details.expectedPackage ?? 'Operator must supply the package list'}
@@ -1492,11 +1574,7 @@ export const TaskDependencyPanel = ({
                   {dependency.packages.join(', ')} from{' '}
                   {dependency.producerTaskReference.replace(/^jira:/u, '')}
                 </strong>
-                <Badge variant="outline">
-                  {dependency.mode === 'validate_dev_then_final'
-                    ? 'Test dev, then final'
-                    : 'Final release only'}
-                </Badge>
+                <Badge variant="outline">Exact version</Badge>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 Repository {dependency.producerRepository} · recorded{' '}
@@ -1561,25 +1639,6 @@ export const TaskDependencyPanel = ({
                   onChange({ ...draft, packages: event.target.value });
                 }}
               />
-            </label>
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-              Release validation
-              <select
-                className="rounded-md border border-input bg-background/60 px-2.5 py-2 text-sm text-foreground outline-none focus:border-ring"
-                value={draft.mode}
-                disabled={pending}
-                onChange={(event) => {
-                  onChange({
-                    ...draft,
-                    mode: event.target.value as TaskDependencyDraft['mode'],
-                  });
-                }}
-              >
-                <option value="validate_dev_then_final">
-                  Test a dev release, then wait for final
-                </option>
-                <option value="final_only">Wait for the final release only</option>
-              </select>
             </label>
           </div>
           <div className="mt-3 flex justify-end gap-2">
@@ -3125,11 +3184,13 @@ export const compactCommand = (command: string): string =>
 
 const RunLogSurface = ({
   state,
+  planning,
   open,
   focusedAttempt,
   onOpenChange,
 }: {
   readonly state: RunLogLoadState;
+  readonly planning: ImplementationPlanLoadState;
   readonly open: boolean;
   readonly focusedAttempt: { readonly nodeId: string; readonly blockRun: number } | null;
   readonly onOpenChange: (open: boolean) => void;
@@ -3178,6 +3239,9 @@ const RunLogSurface = ({
       )
     );
   }, 0);
+  const planningRecord = planning.status === 'ready' ? planning.record : null;
+  const plannerReceipt =
+    planningRecord === null || planningRecord.status === 'planning' ? null : planningRecord.receipt;
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
       <section className="border-b border-border bg-background" aria-label="Run log">
@@ -3206,6 +3270,9 @@ const RunLogSurface = ({
               {state.response.entries.map((entry) => {
                 const parsed = planningAgentLogFromRaw(entry.rawLog);
                 const events = parsed.attempts.flatMap((attempt) => attempt.events);
+                const investigationCommandCount = events.filter(
+                  (event) => event.kind === 'command',
+                ).length;
                 const entryTokens =
                   entry.usage === null ? null : entry.usage.inputTokens + entry.usage.outputTokens;
                 const focused =
@@ -3224,7 +3291,9 @@ const RunLogSurface = ({
                       <div>
                         <div className="flex items-center gap-2">
                           <strong className="text-sm">
-                            {entry.reference.replaceAll('.', ' ')}
+                            {entry.runtime === 'bootstrap' && entry.runner === 'planner'
+                              ? 'Planning'
+                              : entry.reference.replaceAll('.', ' ')}
                           </strong>
                           <span className="text-[11px] text-muted-foreground">
                             attempt {entry.blockRun}
@@ -3245,8 +3314,44 @@ const RunLogSurface = ({
                       <StateBadge>{entry.status.replaceAll('_', ' ')}</StateBadge>
                     </div>
 
+                    {entry.runtime === 'bootstrap' && entry.runner === 'planner' ? (
+                      <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3 text-xs">
+                        <strong className="font-medium">Planner input</strong>
+                        <p className="mt-1 leading-5 text-muted-foreground">
+                          Tasker sent the Jira task, repository evidence, project rules, available
+                          workflow steps, and the required result format. The planner had read-only
+                          repository access.
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+                          {plannerReceipt === null ? null : (
+                            <span>Prompt {plannerReceipt.promptHash.slice(0, 8)}</span>
+                          )}
+                          {planningRecord?.planningSnapshot === null ||
+                          planningRecord?.planningSnapshot === undefined ? null : (
+                            <span>
+                              Context {planningRecord.planningSnapshot.checksum.slice(0, 8)}
+                            </span>
+                          )}
+                          {planningRecord === null ? null : (
+                            <span>Evidence r{String(planningRecord.evidenceBundle.revision)}</span>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+
                     {events.length === 0 ? null : (
                       <div className="mt-3 divide-y divide-border/50 border-t border-border/60">
+                        {entry.runtime === 'bootstrap' &&
+                        entry.runner === 'planner' &&
+                        investigationCommandCount > 0 ? (
+                          <div className="py-2 text-[11px] text-muted-foreground">
+                            <strong className="font-medium text-foreground/80">
+                              Read-only investigation
+                            </strong>{' '}
+                            · {String(investigationCommandCount)} commands · expand a command to see
+                            its full input and output
+                          </div>
+                        ) : null}
                         {events.map((event, index) => {
                           if (event.kind === 'command') {
                             return (
@@ -3778,7 +3883,7 @@ export const App = () => {
           producerTaskReference: '',
           producerRepository: '',
           packages: '',
-          mode: 'validate_dev_then_final',
+          mode: 'final_only',
           linkId: '',
           linkTypeId: '',
           direction: 'outward',
@@ -4293,6 +4398,11 @@ export const App = () => {
       });
   };
 
+  const handleResolveJiraIssue = useCallback(
+    (issueKey: string): Promise<JiraIssueSnapshot> => previewJiraIssue(issueKey),
+    [],
+  );
+
   const handleJiraStart = async (input: JiraTaskLaunchInput): Promise<void> => {
     const issueKey = input.issueKey.trim().toUpperCase();
     if (issueKey.length === 0) return;
@@ -4344,6 +4454,7 @@ export const App = () => {
         planReview: requirePlanApproval ? 'required' : 'automatic',
         planningStrategy,
         trackerStatusUpdates: 'enabled',
+        branchName: taskBranchName(selectedTask.taskId, selectedTask.title),
       },
     })
       .then(async () => {
@@ -4629,10 +4740,7 @@ export const App = () => {
     const packages = parsePackageLines(selectedTaskDependencyDraft?.packages ?? '');
     const resolvedPackages =
       packages.length > 0 ? packages : [...selectedDependencyWait.declaration.packages];
-    const mode =
-      selectedDependencyWait.declaration.mode ??
-      selectedTaskDependencyDraft?.mode ??
-      'validate_dev_then_final';
+    const mode = 'final_only';
     if (producerTaskReference.length === 0 || resolvedPackages.length === 0) {
       return;
     }
@@ -4961,6 +5069,7 @@ export const App = () => {
               repositories={repositories}
               selectedId={selectedId}
               onSelect={handleSelectTask}
+              onResolveJiraIssue={handleResolveJiraIssue}
               onStartJira={handleJiraStart}
               jiraSync={jiraSyncState}
               liveStatus={streamStatus}
@@ -5068,7 +5177,7 @@ export const App = () => {
                         producerTaskReference: '',
                         producerRepository: '',
                         packages: '',
-                        mode: 'validate_dev_then_final',
+                        mode: 'final_only',
                         linkId: '',
                         linkTypeId: '',
                         direction: 'outward',
@@ -5131,79 +5240,78 @@ export const App = () => {
                 selectedWorkflowContinuation?.status === 'awaiting_review' ? null : (
                   <ExecutionProgressSurface projection={operatorProjectionState} />
                 )}
+                {selectedTask.status === 'plan_review' ? (
+                  <ImplementationPlanSurface
+                    planning={implementationPlanState}
+                    answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
+                    pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
+                    reviewMode
+                    annotations={
+                      implementationPlanState.status === 'ready' &&
+                      implementationPlanState.record.status === 'ready'
+                        ? (planAnnotationDrafts.get(implementationPlanState.record.artifactId) ??
+                          [])
+                        : []
+                    }
+                    history={
+                      planReviewHistoryState.status === 'ready' ? planReviewHistoryState.rounds : []
+                    }
+                    reviewActions={
+                      <PlanReviewActions
+                        guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
+                        annotationCount={
+                          implementationPlanState.status === 'ready' &&
+                          implementationPlanState.record.status === 'ready'
+                            ? (planAnnotationDrafts.get(implementationPlanState.record.artifactId)
+                                ?.length ?? 0)
+                            : 0
+                        }
+                        pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
+                        onGuidanceChange={(guidance) => {
+                          setPlanGuidanceDrafts((current) =>
+                            new Map(current).set(selectedTask.id, guidance),
+                          );
+                        }}
+                        onApprove={() => {
+                          handlePlanReview('approve');
+                        }}
+                        onRequestChanges={() => {
+                          handlePlanReview('request_changes');
+                        }}
+                      />
+                    }
+                    onAnnotationsChange={(annotations) => {
+                      if (
+                        implementationPlanState.status !== 'ready' ||
+                        implementationPlanState.record.status !== 'ready'
+                      ) {
+                        return;
+                      }
+                      const artifactId = implementationPlanState.record.artifactId;
+                      setPlanAnnotationDrafts((current) =>
+                        new Map(current).set(artifactId, annotations),
+                      );
+                    }}
+                    onAnswerChange={(questionId, answer) => {
+                      setPlanningAnswerDrafts((current) => {
+                        const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
+                        taskAnswers.set(questionId, answer);
+                        return new Map(current).set(selectedTask.id, taskAnswers);
+                      });
+                    }}
+                    onSubmitAnswers={handlePlanningClarification}
+                  />
+                ) : null}
                 {view === null ? null : <ValidationSurface view={view} />}
                 <JiraPlanningSurface task={selectedTask} />
                 <RunLogSurface
                   state={runLogState}
+                  planning={implementationPlanState}
                   open={runLogOpen}
                   focusedAttempt={focusedRunLogAttempt}
                   onOpenChange={setRunLogOpen}
                 />
                 <div>
-                  {selectedTask.status === 'plan_review' ? (
-                    <ImplementationPlanSurface
-                      planning={implementationPlanState}
-                      answers={planningAnswerDrafts.get(selectedTask.id) ?? new Map()}
-                      pending={pendingOperations.get(selectedTask.id) === 'answering_questions'}
-                      reviewMode
-                      annotations={
-                        implementationPlanState.status === 'ready' &&
-                        implementationPlanState.record.status === 'ready'
-                          ? (planAnnotationDrafts.get(implementationPlanState.record.artifactId) ??
-                            [])
-                          : []
-                      }
-                      history={
-                        planReviewHistoryState.status === 'ready'
-                          ? planReviewHistoryState.rounds
-                          : []
-                      }
-                      reviewActions={
-                        <PlanReviewActions
-                          guidance={planGuidanceDrafts.get(selectedTask.id) ?? ''}
-                          annotationCount={
-                            implementationPlanState.status === 'ready' &&
-                            implementationPlanState.record.status === 'ready'
-                              ? (planAnnotationDrafts.get(implementationPlanState.record.artifactId)
-                                  ?.length ?? 0)
-                              : 0
-                          }
-                          pendingOperation={pendingOperations.get(selectedTask.id) ?? null}
-                          onGuidanceChange={(guidance) => {
-                            setPlanGuidanceDrafts((current) =>
-                              new Map(current).set(selectedTask.id, guidance),
-                            );
-                          }}
-                          onApprove={() => {
-                            handlePlanReview('approve');
-                          }}
-                          onRequestChanges={() => {
-                            handlePlanReview('request_changes');
-                          }}
-                        />
-                      }
-                      onAnnotationsChange={(annotations) => {
-                        if (
-                          implementationPlanState.status !== 'ready' ||
-                          implementationPlanState.record.status !== 'ready'
-                        ) {
-                          return;
-                        }
-                        const artifactId = implementationPlanState.record.artifactId;
-                        setPlanAnnotationDrafts((current) =>
-                          new Map(current).set(artifactId, annotations),
-                        );
-                      }}
-                      onAnswerChange={(questionId, answer) => {
-                        setPlanningAnswerDrafts((current) => {
-                          const taskAnswers = new Map(current.get(selectedTask.id) ?? []);
-                          taskAnswers.set(questionId, answer);
-                          return new Map(current).set(selectedTask.id, taskAnswers);
-                        });
-                      }}
-                      onSubmitAnswers={handlePlanningClarification}
-                    />
-                  ) : null}
                   {selectedTask.status === 'done' ? (
                     <RetrospectiveSurface retrospective={retrospectiveState} />
                   ) : null}
