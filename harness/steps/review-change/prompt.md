@@ -10,8 +10,8 @@ and require fresh successful evidence. Block only when evidence is absent for an
 development loop cannot repair or when a safe decision genuinely needs the operator.
 
 Review product changes and accepted evidence, not Delivery's unfinished bookkeeping.
-`prepare.delivery@1` runs only after this review is accepted and owns finalizing
-`.ai/workspace/<TASK-ID>/result.md`, `verification.md`, and `.tasker/pull-request/draft.json`. Do not
-request changes solely because those files are missing, provisional, or stale before Delivery
-preparation. A tracked support artifact is a review finding only when its current content itself
-misrepresents the product change or exposes unsafe data independently of later finalization.
+`prepare.delivery@1` runs only after this review is accepted and owns finalizing the
+repository-required support artifacts and typed pull-request draft. Do not request changes solely
+because Delivery-owned files are missing, provisional, or stale before that step. A tracked support
+artifact is a review finding only when its current content itself misrepresents the product change or
+exposes unsafe data independently of later finalization.

@@ -484,6 +484,17 @@ describe('file-backed harness pack', () => {
     });
   });
 
+  it('accepts idempotent delivery preparation from preserved workspace files', () => {
+    const prepare = getHarnessStepDefinition('prepare.delivery@1');
+    if (prepare === undefined) throw new Error('Expected semantic Delivery preparation block');
+
+    expect(prepare.block.completion).toEqual({
+      kind: 'structured_evidence',
+      source: 'workspace_files',
+      requiredArtifactKinds: ['delivery-draft'],
+    });
+  });
+
   it('models reusable runtime observations with an explicit claim and evidence request', () => {
     const observe = getHarnessStepDefinition('runtime.observe@1');
     if (observe === undefined) throw new Error('Expected semantic runtime observation block');
