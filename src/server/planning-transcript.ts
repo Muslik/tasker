@@ -1,10 +1,13 @@
 import { z } from 'zod';
 
 import type { LedgerRepository } from '../store/repository.js';
-import type { LedgerConflict } from '../store/types.js';
+import {
+  TRANSCRIPT_TRUNCATION_SENTINEL_STREAM,
+  type LedgerConflict,
+  type TranscriptRecord,
+} from '../store/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../graph/schema.js';
 
 const TranscriptStreamSchema = z.enum(['stdout', 'stderr']);
 
@@ -21,17 +24,6 @@ const PlanningTranscriptChunkSchema = z
     recordedAt: z.iso.datetime(),
   })
   .strict();
-
-const PlanningTranscriptEventSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('chunk'),
-      artifactId: z.string().min(1),
-      byteLength: z.number().int().positive(),
-    })
-    .strict(),
-  z.object({ kind: z.literal('truncated') }).strict(),
-]);
 
 export const PlanningTranscriptViewSchema = z
   .object({
@@ -52,16 +44,17 @@ export type PlanningTranscriptStoreError =
       readonly kind: 'transcript_corrupt';
       readonly transcriptId: string;
       readonly issues: readonly string[];
-    }
-  | {
-      readonly kind: 'transcript_artifact_missing';
-      readonly transcriptId: string;
-      readonly artifactId: string;
     };
 
-const asJson = (value: unknown) => JsonValueSchema.parse(value);
 export const planningTranscriptIdFor = (operationId: string): string =>
   `planning-transcript:${operationId}`;
+
+const providerAttemptFrom = (row: TranscriptRecord): number | null => {
+  const match = /:provider-attempt-(\d+):seq-\d+$/u.exec(row.id);
+  if (match?.[1] === undefined) return null;
+  const attempt = Number(match[1]);
+  return Number.isSafeInteger(attempt) && attempt > 0 ? attempt : null;
+};
 
 const takeUtf8 = (
   content: string,
@@ -119,18 +112,31 @@ export class PlanningTranscriptStore {
     providerAttempt: number,
     stream: PlanningTranscriptStream,
     content: string,
+    taskReference: string,
   ): Outcome<PlanningTranscriptView, PlanningTranscriptStoreError> {
     if (content.length === 0) return this.read(operationId);
     const current = this.read(operationId);
     if (!current.ok || current.value.truncated) return current;
     const bounded = takeUtf8(content, this.maxBytes - current.value.totalBytes);
     for (const chunk of splitUtf8(bounded.content, this.chunkBytes)) {
-      const appended = this.appendChunk(operationId, providerAttempt, stream, chunk);
-      if (!appended.ok) return appended;
+      this.ledger.appendTranscript({
+        idPrefix: `${planningTranscriptIdFor(operationId)}:provider-attempt-${String(providerAttempt)}`,
+        taskReference,
+        operationId,
+        stream,
+        content: chunk,
+        recordedAt: this.clock.now(),
+      });
     }
     if (bounded.truncated) {
-      const marked = this.appendTruncation(operationId);
-      if (!marked.ok) return marked;
+      this.ledger.appendTranscript({
+        idPrefix: `${planningTranscriptIdFor(operationId)}:provider-attempt-${String(providerAttempt)}`,
+        taskReference,
+        operationId,
+        stream: TRANSCRIPT_TRUNCATION_SENTINEL_STREAM,
+        content: '',
+        recordedAt: this.clock.now(),
+      });
     }
     return this.read(operationId);
   }
@@ -140,41 +146,33 @@ export class PlanningTranscriptStore {
     const chunks: z.infer<typeof PlanningTranscriptChunkSchema>[] = [];
     let totalBytes = 0;
     let truncated = false;
-    for (const event of this.ledger.listEvents(transcriptId)) {
-      const payload = PlanningTranscriptEventSchema.safeParse(event.payload);
-      if (!payload.success) {
-        return err({
-          kind: 'transcript_corrupt',
-          transcriptId,
-          issues: payload.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
-      }
-      if (payload.data.kind === 'truncated') {
+    for (const row of this.ledger.listTranscripts(operationId)) {
+      if (row.stream === TRANSCRIPT_TRUNCATION_SENTINEL_STREAM) {
         truncated = true;
         continue;
       }
-      const artifact = this.ledger.readArtifact(payload.data.artifactId);
-      if (artifact === null) {
-        return err({
-          kind: 'transcript_artifact_missing',
-          transcriptId,
-          artifactId: payload.data.artifactId,
-        });
-      }
-      const chunk = PlanningTranscriptChunkSchema.safeParse(artifact.payload);
-      if (!chunk.success) {
+      const parsed = PlanningTranscriptChunkSchema.safeParse({
+        schemaVersion: 1,
+        transcriptId,
+        operationId: row.operationId,
+        sequence: row.seq,
+        providerAttempt: providerAttemptFrom(row),
+        stream: row.stream,
+        content: row.content,
+        byteLength: row.byteLength,
+        recordedAt: row.recordedAt,
+      });
+      if (!parsed.success) {
         return err({
           kind: 'transcript_corrupt',
           transcriptId,
-          issues: chunk.error.issues.map(
+          issues: parsed.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
       }
-      chunks.push(chunk.data);
-      totalBytes += chunk.data.byteLength;
+      chunks.push(parsed.data);
+      totalBytes += parsed.data.byteLength;
     }
     return ok(
       PlanningTranscriptViewSchema.parse({
@@ -187,88 +185,10 @@ export class PlanningTranscriptStore {
     );
   }
 
-  private appendChunk(
-    operationId: string,
-    providerAttempt: number,
-    stream: PlanningTranscriptStream,
-    content: string,
-  ): Outcome<PlanningTranscriptView, PlanningTranscriptStoreError> {
-    const transcriptId = planningTranscriptIdFor(operationId);
-    const expectedVersion = this.ledger.readAggregateHead(transcriptId)?.version ?? 0;
-    const sequence = expectedVersion + 1;
-    const artifactId = `${transcriptId}:chunk-${String(sequence)}`;
-    const recordedAt = this.clock.now();
-    const chunk = PlanningTranscriptChunkSchema.parse({
-      schemaVersion: 1,
-      transcriptId,
-      operationId,
-      sequence,
-      providerAttempt,
-      stream,
-      content,
-      byteLength: Buffer.byteLength(content, 'utf8'),
-      recordedAt,
+  public listOperationIds(taskReference: string, prefix = ''): readonly string[] {
+    return this.ledger.listTranscriptOperationIds({
+      taskReference,
+      operationIdPrefix: prefix,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: transcriptId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${transcriptId}:${String(sequence)}`,
-            eventType: 'PlanningTranscriptChunkAppended',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              kind: 'chunk',
-              artifactId,
-              byteLength: chunk.byteLength,
-            }),
-            actor: 'provider',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'planning_transcript_chunk',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(chunk),
-          metadata: asJson({ operationId, providerAttempt, stream, sequence }),
-          createdAt: recordedAt,
-        },
-      ],
-      timestamp: recordedAt,
-    });
-    return committed.ok
-      ? this.read(operationId)
-      : err({ kind: 'ledger_conflict', conflict: committed.error });
-  }
-
-  private appendTruncation(
-    operationId: string,
-  ): Outcome<PlanningTranscriptView, PlanningTranscriptStoreError> {
-    const transcriptId = planningTranscriptIdFor(operationId);
-    const expectedVersion = this.ledger.readAggregateHead(transcriptId)?.version ?? 0;
-    const sequence = expectedVersion + 1;
-    const recordedAt = this.clock.now();
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: transcriptId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${transcriptId}:${String(sequence)}`,
-            eventType: 'PlanningTranscriptTruncated',
-            eventSchemaVersion: 1,
-            payload: asJson({ kind: 'truncated' }),
-            actor: 'kernel',
-          },
-        ],
-      },
-      timestamp: recordedAt,
-    });
-    return committed.ok
-      ? this.read(operationId)
-      : err({ kind: 'ledger_conflict', conflict: committed.error });
   }
 }

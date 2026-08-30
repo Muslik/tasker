@@ -21,6 +21,7 @@ describe('execution retrospective', () => {
     const record = (attempt: number, status: 'blocked' | 'completed', inputTokens: number) =>
       traces.persistOutputArtifact({
         operationId: `${workflowId}:${workflowRunId}:verify:attempt-${String(attempt)}`,
+        taskReference,
         workflowId,
         workflowRunId,
         nodeId: 'verify',

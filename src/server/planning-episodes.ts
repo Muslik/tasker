@@ -8,7 +8,6 @@ import type {
   VALIDATION_PROCESS_COMMAND_REFERENCES,
   ValidationProcessCommandReference,
 } from '../harness/index.js';
-import { AgentInvocationReferencesSchema } from '../steps/agent-invocation.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../graph/schema.js';
@@ -130,29 +129,12 @@ export class ImplementationPlanningStore {
       : this.ledger.listEvents(aggregateIdFor(planningEpisodeId));
   }
 
+  public listStreamEventsAfter(sequence: number) {
+    return this.ledger.listStreamEventsAfter(sequence);
+  }
+
   public nextAgentInvocationNumber(planningEpisodeId: string, planningAttempt: number): number {
-    let highest = 0;
-    for (const event of this.ledger.listEvents()) {
-      if (
-        event.eventType !== 'AgentInvocationStarted' &&
-        event.eventType !== 'AgentInvocationFinished'
-      ) {
-        continue;
-      }
-      const payload = z
-        .looseObject({ references: AgentInvocationReferencesSchema })
-        .safeParse(event.payload);
-      if (
-        !payload.success ||
-        payload.data.references.kind !== 'planning' ||
-        payload.data.references.planningEpisodeId !== planningEpisodeId ||
-        payload.data.references.planningAttempt !== planningAttempt
-      ) {
-        continue;
-      }
-      highest = Math.max(highest, payload.data.references.invocationNumber);
-    }
-    return highest + 1;
+    return this.ledger.nextPlanningInvocationNumber(planningEpisodeId, planningAttempt);
   }
 
   public persistRunSnapshot(

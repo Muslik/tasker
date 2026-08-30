@@ -54,6 +54,7 @@ describe('execution activity', () => {
       1,
       'stdout',
       '{"type":"turn.completed"}\n',
+      'jira:AVIA-13417',
     );
     const lifecycle = TaskRunLifecycleSchema.parse({
       bootstrap: {
@@ -94,6 +95,7 @@ describe('execution activity', () => {
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     traces.persistOutputArtifact({
       operationId: 'tasker:jira:AVIA-12329:observe-ci:attempt-1',
+      taskReference: 'jira:AVIA-12329',
       workflowId: 'tasker:jira:AVIA-12329',
       workflowRunId: 'run-1',
       nodeId: 'observe-ci',
@@ -124,6 +126,7 @@ describe('execution activity', () => {
     });
     traces.persistOutputArtifact({
       operationId: 'tasker:jira:AVIA-12329:implement:attempt-1',
+      taskReference: 'jira:AVIA-12329',
       workflowId: 'tasker:jira:AVIA-12329',
       workflowRunId: 'run-1',
       nodeId: 'implement',
@@ -146,7 +149,10 @@ describe('execution activity', () => {
       },
     });
     expect(
-      new LedgerExecutionActivityReader(ledger.repository).readActivity('tasker:jira:AVIA-12329'),
+      new LedgerExecutionActivityReader(ledger.repository).readActivity(
+        'jira:AVIA-12329',
+        'tasker:jira:AVIA-12329',
+      ),
     ).toEqual([
       expect.objectContaining({
         source: 'tool',
@@ -162,6 +168,7 @@ describe('execution activity', () => {
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     traces.persistOutputArtifact({
       operationId: 'tasker:jira:AVIA-12045:observe-ci:attempt-1',
+      taskReference: 'jira:AVIA-12045',
       workflowId: 'tasker:jira:AVIA-12045',
       workflowRunId: 'run-1',
       nodeId: 'observe-ci',
@@ -194,6 +201,7 @@ describe('execution activity', () => {
     });
 
     const entries = new LedgerExecutionActivityReader(ledger.repository).readActivity(
+      'jira:AVIA-12045',
       'tasker:jira:AVIA-12045',
     );
     expect(entries).toEqual([
@@ -210,7 +218,7 @@ describe('execution activity', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const operationId = 'tasker:jira:AVIA-12045:execution-run:implement-fix:attempt-2';
-    traces.append(operationId, 1, 'stdout', '{"type":"turn.started"}\n');
+    traces.append(operationId, 1, 'stdout', '{"type":"turn.started"}\n', 'jira:AVIA-12045');
 
     const transcript = new LedgerExecutionActivityReader(ledger.repository).readCurrentTranscript({
       runtime: 'execution',
@@ -260,9 +268,10 @@ describe('execution activity', () => {
         },
       ],
     });
-    traces.append(operationId, 1, 'stdout', '{"type":"turn.started"}\n');
+    traces.append(operationId, 1, 'stdout', '{"type":"turn.started"}\n', 'jira:AVIA-12045');
     traces.persistOutputArtifact({
       operationId,
+      taskReference: 'jira:AVIA-12045',
       workflowId,
       workflowRunId: runId,
       nodeId,
@@ -337,6 +346,19 @@ describe('execution activity', () => {
         },
       ],
     });
+    const receipt = BlockReceiptSchema.parse(ledger.repository.readArtifact(receiptId)?.payload);
+    ledger.repository.insertReceipt({
+      receiptId: receipt.receiptId,
+      taskReference: receipt.taskReference,
+      workflowId: receipt.workflowId,
+      runId: receipt.workflowRunId,
+      nodeId: receipt.nodeId,
+      blockRun: receipt.blockRun,
+      blockReference: receipt.blockReference,
+      verdict: receipt.verdict.status,
+      payload: JsonValueSchema.parse(receipt),
+      completedAt: receipt.completedAt,
+    });
     const execution = {
       runtime: 'execution' as const,
       schemaVersion: 2 as const,
@@ -390,6 +412,7 @@ describe('execution activity', () => {
       1,
       'stdout',
       '{"type":"thread.started","thread_id":"planning-thread"}\n',
+      execution.taskReference,
     );
     const lifecycle = TaskRunLifecycleSchema.parse({
       bootstrap: {

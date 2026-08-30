@@ -1309,7 +1309,7 @@ describe('temporal block execution activity', () => {
       2,
       expect.objectContaining({ command: 'pnpm', args: ['test'] }),
     );
-    expect(traces.readRunStepEvidence(stubWorkspace.workflowId)).toMatchObject({
+    expect(traces.readRunStepEvidence('task-ref', stubWorkspace.workflowId)).toMatchObject({
       ok: true,
       value: [
         {

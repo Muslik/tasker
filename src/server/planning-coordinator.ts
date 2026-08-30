@@ -733,7 +733,7 @@ export class ImplementationPlanningCoordinator {
   }
 
   public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {
-    return listImplementationPlanningStreamEventsAfter(this.store.listEvents(), sequence);
+    return listImplementationPlanningStreamEventsAfter(this.store.listStreamEventsAfter(sequence));
   }
 
   private async prepareOnce(
@@ -871,7 +871,13 @@ export class ImplementationPlanningCoordinator {
         ],
         outputReferences: planningOutputReferencesFor(planning),
         onTranscriptDegradation: (message) => {
-          const appended = this.transcripts.append(commandId, planning.attempt, 'stderr', message);
+          const appended = this.transcripts.append(
+            commandId,
+            planning.attempt,
+            'stderr',
+            message,
+            taskReference,
+          );
           void appended;
         },
         repositoryPath: planningInput.subject.repositoryPath,

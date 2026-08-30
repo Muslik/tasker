@@ -25,6 +25,7 @@ export interface PlanningTranscriptSink {
     providerAttempt: number,
     stream: 'stdout' | 'stderr',
     content: string,
+    taskReference: string,
   ): Outcome<unknown, { readonly kind: string }>;
 }
 
@@ -211,11 +212,15 @@ export const createTemporalActivityCommandRunner = (
         cancellationSignal: context.cancellationSignal,
         onOutput: (stream, chunk) => {
           if (request.operationId !== undefined && transcripts !== undefined) {
+            if (request.taskReference === undefined) {
+              throw new Error('Planning transcript task reference is missing');
+            }
             const persisted = transcripts.append(
               request.operationId,
               context.info.attempt,
               stream,
               chunk,
+              request.taskReference,
             );
             if (!persisted.ok) {
               throw new Error(`Planning transcript persistence failed: ${persisted.error.kind}`);

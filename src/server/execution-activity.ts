@@ -1,6 +1,5 @@
 import { z } from 'zod';
-
-import { BlockReceiptSchema, blockReceiptId } from '../steps/index.js';
+import { BlockReceiptStore, blockReceiptId } from '../steps/index.js';
 import type { LedgerRepository } from '../store/repository.js';
 import { TaskStepOutputArtifactSchema } from '../steps/task-step-output.js';
 import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../kernel/index.js';
@@ -19,8 +18,6 @@ import {
   type OperatorActivityResponse,
   type OperatorRunLogResponse,
 } from './operator-contracts.js';
-
-const ArtifactPointerSchema = z.object({ artifactId: z.string().min(1) }).strict();
 
 const JenkinsEvidenceSchema = z
   .object({
@@ -58,7 +55,7 @@ const jenkinsEvidenceFrom = (details: unknown): z.infer<typeof JenkinsEvidenceSc
 };
 
 export interface ExecutionActivityReader {
-  readActivity(workflowId: string): OperatorActivityResponse['entries'];
+  readActivity(taskReference: string, workflowId: string): OperatorActivityResponse['entries'];
   readCurrentTranscript(execution: ExecutionWorkflowPublicState): PlanningTranscriptView | null;
   readAttempt(
     execution: ExecutionWorkflowPublicState,
@@ -120,10 +117,9 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
       nodeId,
       blockRun,
     });
-    const receiptArtifact = this.ledger.readArtifact(receiptId);
-    const receipt = BlockReceiptSchema.safeParse(receiptArtifact?.payload);
-    const mutation = receipt.success
-      ? receipt.data.evidence.find((item) => item.kind === 'workspace_mutation')
+    const receipt = new BlockReceiptStore(this.ledger, systemClock).read(receiptId);
+    const mutation = receipt.ok
+      ? receipt.value?.evidence.find((item) => item.kind === 'workspace_mutation')
       : undefined;
     return OperatorExecutionAttemptSchema.parse({
       schemaVersion: 1,
@@ -151,16 +147,11 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
   public readRunLog(lifecycle: TaskRunLifecycle): OperatorRunLogResponse {
     const entries = [];
     const planningOperationPrefix = `${lifecycle.bootstrap.workflowId}:${lifecycle.bootstrap.runId}:planning:`;
-    const planningTranscriptPrefix = `planning-transcript:${planningOperationPrefix}`;
-    const planningOperationIds = [
-      ...new Set(
-        this.ledger
-          .listEvents()
-          .filter(({ aggregateId }) => aggregateId.startsWith(planningTranscriptPrefix))
-          .map(({ aggregateId }) => aggregateId.slice('planning-transcript:'.length)),
-      ),
-    ].sort();
     const planningTranscripts = new PlanningTranscriptStore(this.ledger, systemClock);
+    const planningOperationIds = planningTranscripts.listOperationIds(
+      lifecycle.bootstrap.taskReference,
+      planningOperationPrefix,
+    );
     for (const operationId of planningOperationIds) {
       const transcript = planningTranscripts.read(operationId);
       if (!transcript.ok) continue;
@@ -239,44 +230,38 @@ export class LedgerExecutionActivityReader implements ExecutionActivityReader {
     });
   }
 
-  public readActivity(workflowId: string): OperatorActivityResponse['entries'] {
-    const prefix = `task-step-output:${workflowId}:`;
-    return this.ledger
-      .listEvents()
-      .filter(
-        (event) =>
-          event.eventType === 'TaskStepOutputRecorded' && event.aggregateId.startsWith(prefix),
-      )
-      .flatMap((event) => {
-        const pointer = ArtifactPointerSchema.safeParse(event.payload);
-        const artifact = pointer.success ? this.ledger.readArtifact(pointer.data.artifactId) : null;
-        const output =
-          artifact === null ? null : TaskStepOutputArtifactSchema.safeParse(artifact.payload);
-        if (
-          output === null ||
-          !output.success ||
-          output.data.stepReference !== 'deliver.pull-request@1'
-        ) {
-          return [];
-        }
-        const evidence = jenkinsEvidenceFrom(output.data.details);
-        const delivery = deliveryEvidenceFrom(output.data.details);
-        return [
-          OperatorActivityEntrySchema.parse({
-            sequence: event.sequence,
-            occurredAt: event.occurredAt,
-            source: 'tool',
-            level: output.data.status === 'completed' ? 'info' : 'warning',
-            title: output.data.result?.summary ?? 'Jenkins observation recorded',
-            detail:
-              output.data.status === 'completed'
-                ? delivery?.outcome === 'repair_required'
-                  ? 'CI produced repair evidence; the frozen delivery feedback loop will repeat with the same worktree and pull request.'
-                  : 'Jenkins verified the exact commit prepared by this task.'
-                : 'The task is paused with its completed work preserved. Resume it after the CI condition is resolved.',
-            ...(evidence === null ? {} : { externalUrl: evidence.build.url }),
-          }),
-        ];
-      });
+  public readActivity(
+    taskReference: string,
+    workflowId: string,
+  ): OperatorActivityResponse['entries'] {
+    const artifacts = this.ledger.listArtifacts({
+      artifactKind: 'task_step_output',
+      taskReference,
+    });
+    return artifacts.flatMap((artifact, index) => {
+      const output = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
+      if (!output.success || output.data.stepReference !== 'deliver.pull-request@1') {
+        return [];
+      }
+      if (output.data.workflowId !== workflowId) return [];
+      const evidence = jenkinsEvidenceFrom(output.data.details);
+      const delivery = deliveryEvidenceFrom(output.data.details);
+      return [
+        OperatorActivityEntrySchema.parse({
+          sequence: index + 1,
+          occurredAt: output.data.recordedAt,
+          source: 'tool',
+          level: output.data.status === 'completed' ? 'info' : 'warning',
+          title: output.data.result?.summary ?? 'Jenkins observation recorded',
+          detail:
+            output.data.status === 'completed'
+              ? delivery?.outcome === 'repair_required'
+                ? 'CI produced repair evidence; the frozen delivery feedback loop will repeat with the same worktree and pull request.'
+                : 'Jenkins verified the exact commit prepared by this task.'
+              : 'The task is paused with its completed work preserved. Resume it after the CI condition is resolved.',
+          ...(evidence === null ? {} : { externalUrl: evidence.build.url }),
+        }),
+      ];
+    });
   }
 }

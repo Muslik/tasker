@@ -479,6 +479,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
       }
       const execution = await this.runner.run({
         ...(request.operationId === null ? {} : { operationId: request.operationId }),
+        taskReference: request.taskReference,
         command,
         args,
         cwd: request.repositoryPath,

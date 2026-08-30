@@ -422,6 +422,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
               request.providerAttempt,
               'stderr',
               diagnosticsLine,
+              request.taskReference,
             );
             if (!appended.ok) {
               this.finishInvocation(request, recorder, {
@@ -557,6 +558,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
           request.providerAttempt,
           stream,
           chunk,
+          request.taskReference,
         );
         if (!appended.ok) {
           throw new Error(`Task step transcript persistence failed: ${appended.error.kind}`);
@@ -691,6 +693,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         request.providerAttempt,
         'stderr',
         `\n[tasker observability] ${message}\n`,
+        request.taskReference,
       );
     } catch {
       return;

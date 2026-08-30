@@ -43,7 +43,7 @@ describe('openSqliteLedger', () => {
       clock: { now: () => FIXED_NOW },
     });
 
-    expect(first.appliedMigrations).toHaveLength(1);
+    expect(first.appliedMigrations).toHaveLength(2);
     expect(first.database.pragma('journal_mode', { simple: true })).toBe('wal');
     expect(first.database.pragma('foreign_keys', { simple: true })).toBe(1);
     expect(first.database.pragma('busy_timeout', { simple: true })).toBe(1_234);

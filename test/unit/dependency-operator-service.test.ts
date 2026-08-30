@@ -271,6 +271,7 @@ describe('DependencyOperatorService', () => {
               ? {
                   artifactId,
                   artifactKind: 'task_step_output',
+                  taskReference: null,
                   storageUri: `ledger://artifacts/${artifactId}`,
                   payload: JSON.parse(JSON.stringify(requestArtifact.payload)) as JsonValue,
                   metadata: {},

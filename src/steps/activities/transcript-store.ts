@@ -1,26 +1,18 @@
 import { z } from 'zod';
 
 import type { TaskRunEvidence } from '../../integrations/index.js';
-
-import { PlanningTranscriptViewSchema } from '../../server/planning-transcript.js';
-
-import type { Clock } from '../../shared/clock.js';
-
-import { err, ok, type Outcome } from '../../shared/outcome.js';
-
 import { JsonValueSchema } from '../../graph/schema.js';
-
+import { PlanningTranscriptViewSchema } from '../../server/planning-transcript.js';
+import type { Clock } from '../../shared/clock.js';
+import { err, ok, type Outcome } from '../../shared/outcome.js';
 import type { LedgerRepository } from '../../store/repository.js';
-
+import { TRANSCRIPT_TRUNCATION_SENTINEL_STREAM, type TranscriptRecord } from '../../store/types.js';
 import {
   LedgerAgentInvocationRecorder,
   type AgentInvocationRecorder,
 } from '../../steps/agent-invocation.js';
-
 import type { AgentInvocationUsage } from '../../steps/agent-usage.js';
-
 import { TaskStepOutputArtifactSchema, type TaskStepOutputArtifact } from '../task-step-output.js';
-
 import {
   ExecuteTaskStepResultSchema,
   type ExecuteTaskStepResult,
@@ -40,16 +32,6 @@ const TaskStepTranscriptChunkSchema = z
   })
   .strict();
 
-const TaskStepTranscriptEventSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('chunk'),
-      artifactId: z.string().min(1),
-    })
-    .strict(),
-  z.object({ kind: z.literal('truncated') }).strict(),
-]);
-
 type TemporalTaskStepTraceStoreError =
   | { readonly kind: 'ledger_conflict' }
   | {
@@ -57,10 +39,16 @@ type TemporalTaskStepTraceStoreError =
       readonly artifactId: string;
       readonly issues: readonly string[];
     }
-  | { readonly kind: 'transcript_corrupt'; readonly issues: readonly string[] }
-  | { readonly kind: 'artifact_missing'; readonly artifactId: string };
+  | { readonly kind: 'transcript_corrupt'; readonly issues: readonly string[] };
 
 const asJson = (value: unknown) => JsonValueSchema.parse(value);
+
+const providerAttemptFrom = (row: TranscriptRecord): number | null => {
+  const match = /:provider-attempt-(\d+):seq-\d+$/u.exec(row.id);
+  if (match?.[1] === undefined) return null;
+  const attempt = Number(match[1]);
+  return Number.isSafeInteger(attempt) && attempt > 0 ? attempt : null;
+};
 
 const takeUtf8 = (
   content: string,
@@ -157,38 +145,25 @@ export class TemporalTaskStepTraceStore {
   }
 
   public readRunStepEvidence(
+    taskReference: string,
     workflowId: string,
   ): Outcome<TaskRunEvidence['completedSteps'], TemporalTaskStepTraceStoreError> {
-    const prefix = `task-step-output:${workflowId}:`;
     const steps: TaskRunEvidence['completedSteps'][number][] = [];
-    for (const event of this.ledger.listEvents()) {
-      if (event.eventType !== 'TaskStepOutputRecorded' || !event.aggregateId.startsWith(prefix)) {
-        continue;
-      }
-      const pointer = z.object({ artifactId: z.string().min(1) }).safeParse(event.payload);
-      if (!pointer.success) {
-        return err({
-          kind: 'output_corrupt',
-          artifactId: event.aggregateId,
-          issues: pointer.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
-      }
-      const artifact = this.ledger.readArtifact(pointer.data.artifactId);
-      if (artifact === null) {
-        return err({ kind: 'artifact_missing', artifactId: pointer.data.artifactId });
-      }
+    for (const artifact of this.ledger.listArtifacts({
+      artifactKind: 'task_step_output',
+      taskReference,
+    })) {
       const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
       if (!parsed.success) {
         return err({
           kind: 'output_corrupt',
-          artifactId: pointer.data.artifactId,
+          artifactId: artifact.artifactId,
           issues: parsed.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
       }
+      if (parsed.data.workflowId !== workflowId) continue;
       steps.push({
         operationId: parsed.data.operationId,
         nodeId: parsed.data.nodeId,
@@ -208,18 +183,31 @@ export class TemporalTaskStepTraceStore {
     providerAttempt: number,
     stream: 'stdout' | 'stderr',
     content: string,
+    taskReference: string,
   ): Outcome<z.infer<typeof PlanningTranscriptViewSchema>, TemporalTaskStepTraceStoreError> {
     if (content.length === 0) return this.read(operationId);
     const current = this.read(operationId);
     if (!current.ok || current.value.truncated) return current;
     const bounded = takeUtf8(content, this.maxBytes - current.value.totalBytes);
     for (const chunk of splitUtf8(bounded.content, this.chunkBytes)) {
-      const appended = this.appendChunk(operationId, providerAttempt, stream, chunk);
-      if (!appended.ok) return appended;
+      this.ledger.appendTranscript({
+        idPrefix: `${this.transcriptIdFor(operationId)}:provider-attempt-${String(providerAttempt)}`,
+        taskReference,
+        operationId,
+        stream,
+        content: chunk,
+        recordedAt: this.clock.now(),
+      });
     }
     if (bounded.truncated) {
-      const marked = this.appendTruncation(operationId);
-      if (!marked.ok) return marked;
+      this.ledger.appendTranscript({
+        idPrefix: `${this.transcriptIdFor(operationId)}:provider-attempt-${String(providerAttempt)}`,
+        taskReference,
+        operationId,
+        stream: TRANSCRIPT_TRUNCATION_SENTINEL_STREAM,
+        content: '',
+        recordedAt: this.clock.now(),
+      });
     }
     return this.read(operationId);
   }
@@ -231,8 +219,22 @@ export class TemporalTaskStepTraceStore {
     const chunks: z.infer<typeof TaskStepTranscriptChunkSchema>[] = [];
     let totalBytes = 0;
     let truncated = false;
-    for (const event of this.ledger.listEvents(transcriptId)) {
-      const parsed = TaskStepTranscriptEventSchema.safeParse(event.payload);
+    for (const row of this.ledger.listTranscripts(operationId)) {
+      if (row.stream === TRANSCRIPT_TRUNCATION_SENTINEL_STREAM) {
+        truncated = true;
+        continue;
+      }
+      const parsed = TaskStepTranscriptChunkSchema.safeParse({
+        schemaVersion: 1,
+        transcriptId,
+        operationId: row.operationId,
+        sequence: row.seq,
+        providerAttempt: providerAttemptFrom(row),
+        stream: row.stream,
+        content: row.content,
+        byteLength: row.byteLength,
+        recordedAt: row.recordedAt,
+      });
       if (!parsed.success) {
         return err({
           kind: 'transcript_corrupt',
@@ -241,25 +243,8 @@ export class TemporalTaskStepTraceStore {
           ),
         });
       }
-      if (parsed.data.kind === 'truncated') {
-        truncated = true;
-        continue;
-      }
-      const artifact = this.ledger.readArtifact(parsed.data.artifactId);
-      if (artifact === null) {
-        return err({ kind: 'artifact_missing', artifactId: parsed.data.artifactId });
-      }
-      const chunk = TaskStepTranscriptChunkSchema.safeParse(artifact.payload);
-      if (!chunk.success) {
-        return err({
-          kind: 'transcript_corrupt',
-          issues: chunk.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
-      }
-      chunks.push(chunk.data);
-      totalBytes += chunk.data.byteLength;
+      chunks.push(parsed.data);
+      totalBytes += parsed.data.byteLength;
     }
     return ok(
       PlanningTranscriptViewSchema.parse({
@@ -274,6 +259,7 @@ export class TemporalTaskStepTraceStore {
 
   public persistOutputArtifact(input: {
     readonly operationId: string;
+    readonly taskReference: string;
     readonly workflowId: string;
     readonly workflowRunId: string;
     readonly nodeId: string;
@@ -356,9 +342,11 @@ export class TemporalTaskStepTraceStore {
         {
           artifactId,
           artifactKind: 'task_step_output',
+          taskReference: input.taskReference,
           storageUri: `ledger://artifacts/${artifactId}`,
           payload: asJson(payload),
           metadata: asJson({
+            taskReference: input.taskReference,
             operationId: input.operationId,
             workflowId: input.workflowId,
             workflowRunId: input.workflowRunId,
@@ -372,81 +360,5 @@ export class TemporalTaskStepTraceStore {
       timestamp: recordedAt,
     });
     return committed.ok ? ok({ artifactId, result }) : err({ kind: 'ledger_conflict' });
-  }
-
-  private appendChunk(
-    operationId: string,
-    providerAttempt: number,
-    stream: 'stdout' | 'stderr',
-    content: string,
-  ): Outcome<z.infer<typeof PlanningTranscriptViewSchema>, TemporalTaskStepTraceStoreError> {
-    const transcriptId = this.transcriptIdFor(operationId);
-    const expectedVersion = this.ledger.readAggregateHead(transcriptId)?.version ?? 0;
-    const sequence = expectedVersion + 1;
-    const artifactId = `${transcriptId}:chunk-${String(sequence)}`;
-    const recordedAt = this.clock.now();
-    const payload = TaskStepTranscriptChunkSchema.parse({
-      schemaVersion: 1,
-      transcriptId,
-      operationId,
-      sequence,
-      providerAttempt,
-      stream,
-      content,
-      byteLength: Buffer.byteLength(content, 'utf8'),
-      recordedAt,
-    });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: transcriptId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${transcriptId}:${String(sequence)}`,
-            eventType: 'TaskStepTranscriptChunkAppended',
-            eventSchemaVersion: 1,
-            payload: asJson({ kind: 'chunk', artifactId }),
-            actor: 'provider',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'task_step_transcript_chunk',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(payload),
-          metadata: asJson({ operationId, providerAttempt, stream, sequence }),
-          createdAt: recordedAt,
-        },
-      ],
-      timestamp: recordedAt,
-    });
-    return committed.ok ? this.read(operationId) : err({ kind: 'ledger_conflict' });
-  }
-
-  private appendTruncation(
-    operationId: string,
-  ): Outcome<z.infer<typeof PlanningTranscriptViewSchema>, TemporalTaskStepTraceStoreError> {
-    const transcriptId = this.transcriptIdFor(operationId);
-    const expectedVersion = this.ledger.readAggregateHead(transcriptId)?.version ?? 0;
-    const sequence = expectedVersion + 1;
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: transcriptId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${transcriptId}:${String(sequence)}`,
-            eventType: 'TaskStepTranscriptTruncated',
-            eventSchemaVersion: 1,
-            payload: asJson({ kind: 'truncated' }),
-            actor: 'kernel',
-          },
-        ],
-      },
-      timestamp: this.clock.now(),
-    });
-    return committed.ok ? this.read(operationId) : err({ kind: 'ledger_conflict' });
   }
 }

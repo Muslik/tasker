@@ -111,6 +111,7 @@ export const persistBlockedArtifact = (
 ): readonly string[] => {
   const persisted = traces.persistOutputArtifact({
     operationId: executionOperationId(input),
+    taskReference: input.taskReference,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeId: input.nodeId,
@@ -154,6 +155,7 @@ export const persistAgentBlockedResult = (
   );
   const persisted = traces.persistOutputArtifact({
     operationId: executionOperationId(input),
+    taskReference: input.taskReference,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeId: input.nodeId,
@@ -194,6 +196,7 @@ export const persistAgentFailedResult = (
   const result = fail(summary, category, retryable, withRecoveryArtifact(recovery, artifactIds));
   const persisted = traces.persistOutputArtifact({
     operationId: executionOperationId(input),
+    taskReference: input.taskReference,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeId: input.nodeId,

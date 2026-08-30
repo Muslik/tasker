@@ -108,6 +108,15 @@ export const planningAgentInvocationId = (
 ): string =>
   `agent-invocation:${planningEpisodeId}:attempt-${String(planningAttempt)}:invocation-${String(invocationNumber)}`;
 
+const invocationEpisodeId = (references: AgentInvocationReferences): string =>
+  references.kind === 'execution' ? references.runId : references.planningEpisodeId;
+
+const invocationNodeId = (references: AgentInvocationReferences): string | null =>
+  references.kind === 'execution' ? references.nodeId : null;
+
+const invocationBlockRun = (references: AgentInvocationReferences): number =>
+  references.kind === 'execution' ? references.blockRun : references.planningAttempt;
+
 export class LedgerAgentInvocationRecorder implements AgentInvocationRecorder {
   public constructor(
     private readonly ledger: LedgerRepository,
@@ -124,31 +133,20 @@ export class LedgerAgentInvocationRecorder implements AgentInvocationRecorder {
     readonly references: AgentInvocationReferences;
     readonly startedAt: string;
   }): Outcome<void, AgentInvocationRecorderError> {
-    const current = this.ledger.readAggregateHead(input.invocationId);
-    if (current !== null) return ok(undefined);
-    const result = this.ledger.transact({
-      aggregate: {
-        aggregateId: input.invocationId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${input.invocationId}:started`,
-            eventType: 'AgentInvocationStarted',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              invocationId: input.invocationId,
-              taskReference: input.taskReference,
-              scope: input.references.kind,
-              status: 'running',
-              references: input.references,
-            }),
-            actor: 'provider',
-          },
-        ],
-      },
-      timestamp: input.startedAt,
+    const started = this.ledger.startAgentInvocation({
+      invocationId: input.invocationId,
+      taskReference: input.taskReference,
+      nodeId: invocationNodeId(input.references),
+      blockRun: invocationBlockRun(input.references),
+      episodeId: invocationEpisodeId(input.references),
+      startedAt: input.startedAt,
     });
-    return result.ok || this.ledger.readAggregateHead(input.invocationId) !== null
+    if (started) return ok(undefined);
+    const existing = this.ledger.readAgentInvocation(input.invocationId);
+    return existing?.taskReference === input.taskReference &&
+      existing.nodeId === invocationNodeId(input.references) &&
+      existing.blockRun === invocationBlockRun(input.references) &&
+      existing.episodeId === invocationEpisodeId(input.references)
       ? ok(undefined)
       : err({ kind: 'ledger_conflict' });
   }
@@ -164,44 +162,39 @@ export class LedgerAgentInvocationRecorder implements AgentInvocationRecorder {
         ? ok(parsed.data)
         : err({ kind: 'artifact_corrupt', invocationId: artifact.invocationId });
     }
-    const expectedVersion = this.ledger.readAggregateHead(artifact.invocationId)?.version ?? 0;
-    const result = this.ledger.transact({
-      aggregate: {
-        aggregateId: artifact.invocationId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${artifact.invocationId}:finished`,
-            eventType: 'AgentInvocationFinished',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              invocationId: artifact.invocationId,
-              taskReference: artifact.taskReference,
-              scope: artifact.references.kind,
-              status: artifact.status,
-              references: artifact.references,
-            }),
-            actor: 'provider',
-          },
-        ],
+    const finished = this.ledger.finishAgentInvocation(
+      {
+        invocationId: artifact.invocationId,
+        taskReference: artifact.taskReference,
+        nodeId: invocationNodeId(artifact.references),
+        blockRun: invocationBlockRun(artifact.references),
+        episodeId: invocationEpisodeId(artifact.references),
+        status: artifact.status,
+        model: artifact.model,
+        profile: artifact.profile,
+        promptBytes: artifact.promptBytes,
+        durationMs: artifact.durationMs,
+        usage: asJson(artifact.usage),
+        cost: asJson(artifact.cost),
+        startedAt: artifact.startedAt,
+        finishedAt: artifact.finishedAt,
+        payloadArtifactId: artifact.invocationId,
       },
-      artifacts: [
-        {
-          artifactId: artifact.invocationId,
-          artifactKind: 'agent_invocation',
-          storageUri: `ledger://artifacts/${encodeURIComponent(artifact.invocationId)}`,
-          payload: asJson(artifact),
-          metadata: asJson({
-            taskReference: artifact.taskReference,
-            scope: artifact.references.kind,
-            status: artifact.status,
-          }),
-          createdAt: artifact.finishedAt,
-        },
-      ],
-      timestamp: artifact.finishedAt,
-    });
-    if (result.ok) return ok(artifact);
+      {
+        artifactId: artifact.invocationId,
+        artifactKind: 'agent_invocation',
+        taskReference: artifact.taskReference,
+        storageUri: `ledger://artifacts/${encodeURIComponent(artifact.invocationId)}`,
+        payload: asJson(artifact),
+        metadata: asJson({
+          taskReference: artifact.taskReference,
+          scope: artifact.references.kind,
+          status: artifact.status,
+        }),
+        createdAt: artifact.finishedAt,
+      },
+    );
+    if (finished) return ok(artifact);
     const concurrent = this.ledger.readArtifact(artifact.invocationId);
     const parsed = AgentInvocationArtifactSchema.safeParse(concurrent?.payload);
     return parsed.success ? ok(parsed.data) : err({ kind: 'ledger_conflict' });

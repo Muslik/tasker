@@ -104,6 +104,7 @@ describe('task step evidence store', () => {
     try {
       const persisted = traces.persistOutputArtifact({
         operationId: 'workflow:verify:attempt-1',
+        taskReference: 'jira:AVIA-1',
         workflowId: 'workflow',
         workflowRunId: 'run',
         nodeId: 'verify',

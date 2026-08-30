@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { PlanningStrategySchema } from '../planning/implementation-plan.js';
-import type { EventRecord } from '../store/types.js';
+import type { EventRecord, StreamEventRecord } from '../store/types.js';
 import {
   OperatorActivityEntrySchema,
   OperatorStreamEventSchema,
@@ -174,20 +174,17 @@ export const readImplementationPlanningActivity = (
 };
 
 export const listImplementationPlanningStreamEventsAfter = (
-  planningEvents: readonly EventRecord[],
-  sequence: number,
+  streamEvents: readonly StreamEventRecord[],
 ): readonly OperatorStreamEvent[] =>
-  planningEvents
-    .filter((event) => event.sequence > sequence)
-    .flatMap((event) => {
-      const payload = z.looseObject({ taskReference: z.string().min(1) }).safeParse(event.payload);
-      return payload.success
-        ? [
-            OperatorStreamEventSchema.parse({
-              sequence: event.sequence,
-              taskReference: payload.data.taskReference,
-              eventType: event.eventType,
-            }),
-          ]
-        : [];
-    });
+  streamEvents
+    .filter(
+      (event) =>
+        event.eventType.startsWith('Implementation') || event.eventType.startsWith('Planning'),
+    )
+    .map((event) =>
+      OperatorStreamEventSchema.parse({
+        sequence: event.seq,
+        taskReference: event.taskReference,
+        eventType: event.eventType,
+      }),
+    );

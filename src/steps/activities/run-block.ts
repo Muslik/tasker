@@ -69,8 +69,7 @@ export class LedgerTaskRunEvidenceSource implements TaskRunEvidenceSource {
     taskReference: string,
     workflowId: string,
   ): Outcome<TaskRunEvidence, { readonly kind: string }> {
-    void taskReference;
-    const completedSteps = this.traces.readRunStepEvidence(workflowId);
+    const completedSteps = this.traces.readRunStepEvidence(taskReference, workflowId);
     if (!completedSteps.ok) return err({ kind: completedSteps.error.kind });
     const reviewInputs = this.reviews?.list(workflowId) ?? ok([]);
     if (!reviewInputs.ok) return err({ kind: reviewInputs.error.kind });

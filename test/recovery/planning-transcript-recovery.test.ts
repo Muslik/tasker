@@ -19,8 +19,12 @@ describe('planning transcript recovery', () => {
       chunkBytes: 16,
     });
 
-    expect(firstStore.append(operationId, 1, 'stdout', 'first provider output\n').ok).toBe(true);
-    expect(firstStore.append(operationId, 1, 'stderr', 'warning\n').ok).toBe(true);
+    expect(
+      firstStore.append(operationId, 1, 'stdout', 'first provider output\n', 'jira:AVIA-13236').ok,
+    ).toBe(true);
+    expect(firstStore.append(operationId, 1, 'stderr', 'warning\n', 'jira:AVIA-13236').ok).toBe(
+      true,
+    );
     firstLedger.close();
 
     const restartedLedger = openSqliteLedger({ filename: databasePath, clock });
@@ -35,6 +39,7 @@ describe('planning transcript recovery', () => {
           2,
           'stdout',
           'second provider attempt has enough output to cross the configured transcript limit',
+          'jira:AVIA-13236',
         ).ok,
       ).toBe(true);
 
@@ -51,6 +56,53 @@ describe('planning transcript recovery', () => {
       expect(transcript.value.truncated).toBe(true);
     } finally {
       restartedLedger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('lists planning transcript operations by prefix and reads each stream in sequence order', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-planning-transcript-range-'));
+    const databasePath = join(directory, 'ledger.sqlite');
+    const clock = makeAdjustableClock('2026-08-03T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: databasePath, clock });
+
+    try {
+      const store = new PlanningTranscriptStore(ledger.repository, clock, {
+        maxBytes: 256,
+        chunkBytes: 8,
+      });
+      const prefix = 'tasker:avia-13236-short-bug:planning:';
+      const firstOperationId = `${prefix}1`;
+      const secondOperationId = `${prefix}2`;
+
+      expect(store.append(firstOperationId, 1, 'stdout', 'abcdefghijk', 'jira:AVIA-13236').ok).toBe(
+        true,
+      );
+      expect(store.append(secondOperationId, 2, 'stderr', 'warning', 'jira:AVIA-13236').ok).toBe(
+        true,
+      );
+
+      expect(store.listOperationIds('jira:AVIA-13236', prefix)).toEqual([
+        firstOperationId,
+        secondOperationId,
+      ]);
+      expect(store.read(firstOperationId)).toMatchObject({
+        ok: true,
+        value: {
+          chunks: [
+            { sequence: 1, providerAttempt: 1, content: 'abcdefgh' },
+            { sequence: 2, providerAttempt: 1, content: 'ijk' },
+          ],
+        },
+      });
+      expect(store.read(secondOperationId)).toMatchObject({
+        ok: true,
+        value: {
+          chunks: [{ sequence: 1, providerAttempt: 2, content: 'warning' }],
+        },
+      });
+    } finally {
+      ledger.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

@@ -593,7 +593,10 @@ export type BitbucketReviewSyncError =
 export class BitbucketReviewCoordinator {
   public constructor(
     private readonly traces: {
-      readRunStepEvidence(workflowId: string): Outcome<readonly TaskRunStepEvidence[], unknown>;
+      readRunStepEvidence(
+        taskReference: string,
+        workflowId: string,
+      ): Outcome<readonly TaskRunStepEvidence[], unknown>;
     },
     private readonly reviews: BitbucketReviewPort,
     private readonly evidence: PullRequestReviewEvidenceStore,
@@ -604,7 +607,7 @@ export class BitbucketReviewCoordinator {
     readonly workflowId: string;
     readonly workflowRunId: string;
   }): Promise<Outcome<BitbucketReviewSyncResult, BitbucketReviewSyncError>> {
-    const steps = this.traces.readRunStepEvidence(input.workflowId);
+    const steps = this.traces.readRunStepEvidence(input.taskReference, input.workflowId);
     if (!steps.ok) return err({ kind: 'invalid_pull_request_evidence' });
     const pullRequest = pullRequestReferenceFrom(steps.value);
     if (pullRequest === null) return err({ kind: 'pull_request_evidence_missing' });

@@ -432,7 +432,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       return withExecution;
     };
     if (options.jiraIssueService === undefined) {
-      return reply.send({ tasks: [], streamCursor: 0 });
+      return reply.send({ tasks: [], streamCursor: options.service.readLatestStreamSequence() });
     }
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
     if (!jiraTasks.ok) return sendJiraServiceError(reply, jiraTasks.error);
@@ -444,7 +444,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       tasks: orderOperatorTasks(
         hydratedJiraTasks.filter((task) => options.taskPresence?.isRemoved(task.id) !== true),
       ),
-      streamCursor: 0,
+      streamCursor: options.service.readLatestStreamSequence(),
     });
   });
 
@@ -529,7 +529,10 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         execution:
           executionWorkflowId === null
             ? []
-            : (options.executionActivity?.readActivity(executionWorkflowId) ?? []),
+            : (options.executionActivity?.readActivity(
+                params.data.taskReference,
+                executionWorkflowId,
+              ) ?? []),
       });
       return reply.send(
         OperatorActivityResponseSchema.parse({
@@ -558,7 +561,10 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       execution:
         executionWorkflowId === null
           ? []
-          : (options.executionActivity?.readActivity(executionWorkflowId) ?? []),
+          : (options.executionActivity?.readActivity(
+              params.data.taskReference,
+              executionWorkflowId,
+            ) ?? []),
     });
     return reply.send(
       OperatorActivityResponseSchema.parse({
@@ -932,11 +938,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     reply.raw.write(': connected\n\n');
 
     const flush = (): void => {
-      const events = [
-        ...options.service.listStreamEventsAfter(cursor),
-        ...(options.implementationPlanning?.listStreamEventsAfter(cursor) ?? []),
-        ...(options.agentInvocations?.listStreamEventsAfter(cursor) ?? []),
-      ].sort((left, right) => left.sequence - right.sequence);
+      const events = options.service.listStreamEventsAfter(cursor);
       for (const event of events) {
         reply.raw.write(
           `id: ${String(event.sequence)}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`,

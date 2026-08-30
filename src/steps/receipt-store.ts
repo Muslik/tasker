@@ -94,9 +94,9 @@ export class BlockReceiptStore {
   ) {}
 
   public read(receiptId: string): Outcome<BlockReceipt | null, BlockReceiptStoreError> {
-    const artifact = this.ledger.readArtifact(receiptId);
-    if (artifact === null) return ok(null);
-    const parsed = BlockReceiptSchema.safeParse(artifact.payload);
+    const receipt = this.ledger.readReceipt(receiptId);
+    if (receipt === null) return ok(null);
+    const parsed = BlockReceiptSchema.safeParse(receipt.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
@@ -121,51 +121,46 @@ export class BlockReceiptStore {
       ...comparableInput(input),
       completedAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: receiptId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${receiptId}:1`,
-            eventType: 'BlockReceiptRecorded',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              receiptId,
-              blockReference: receipt.blockReference,
-              verdict: receipt.verdict.status,
-            }),
-            actor: 'kernel',
-          },
-        ],
+    const inserted = this.ledger.insertReceipt(
+      {
+        receiptId: receipt.receiptId,
+        taskReference: receipt.taskReference,
+        workflowId: receipt.workflowId,
+        runId: receipt.workflowRunId,
+        nodeId: receipt.nodeId,
+        blockRun: receipt.blockRun,
+        blockReference: receipt.blockReference,
+        verdict: receipt.verdict.status,
+        payload: asJson(receipt),
+        completedAt: receipt.completedAt,
       },
-      artifacts: [
-        {
-          artifactId: receiptId,
-          artifactKind: 'block_receipt',
-          storageUri: `ledger://artifacts/${receiptId}`,
-          payload: asJson(receipt),
-          metadata: asJson({
-            taskReference: receipt.taskReference,
-            workflowId: receipt.workflowId,
-            workflowRunId: receipt.workflowRunId,
-            nodeId: receipt.nodeId,
-            blockRun: receipt.blockRun,
-            blockReference: receipt.blockReference,
-            verdict: receipt.verdict.status,
-          }),
-          createdAt: completedAt,
-        },
-      ],
-      timestamp: completedAt,
-    });
-    if (committed.ok) return ok(receipt);
+      {
+        artifactId: receipt.receiptId,
+        artifactKind: 'block_receipt',
+        taskReference: receipt.taskReference,
+        storageUri: `ledger://artifacts/${receipt.receiptId}`,
+        payload: asJson(receipt),
+        metadata: asJson({
+          taskReference: receipt.taskReference,
+          workflowId: receipt.workflowId,
+          workflowRunId: receipt.workflowRunId,
+          nodeId: receipt.nodeId,
+          blockRun: receipt.blockRun,
+          blockReference: receipt.blockReference,
+          verdict: receipt.verdict.status,
+        }),
+        createdAt: completedAt,
+      },
+    );
+    if (!inserted) {
+      const concurrent = this.read(receiptId);
+      if (!concurrent.ok) return concurrent;
+      return concurrent.value === null
+        ? err({ kind: 'ledger_conflict' })
+        : this.restoreExact(receiptId, concurrent.value, input);
+    }
 
-    const concurrent = this.read(receiptId);
-    if (!concurrent.ok) return concurrent;
-    return concurrent.value === null
-      ? err({ kind: 'ledger_conflict' })
-      : this.restoreExact(receiptId, concurrent.value, input);
+    return ok(receipt);
   }
 
   private restoreExact(

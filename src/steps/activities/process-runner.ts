@@ -107,6 +107,7 @@ export const runProcessStep = async (
           runtime.attempt,
           stream,
           chunk,
+          input.taskReference,
         );
         if (!appended.ok) {
           throw new Error(`Task step transcript persistence failed: ${appended.error.kind}`);
@@ -188,6 +189,7 @@ export const runProcessStep = async (
   }
   const persisted = dependencies.traces.persistOutputArtifact({
     operationId: executionOperationId(input),
+    taskReference: input.taskReference,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeId: input.nodeId,

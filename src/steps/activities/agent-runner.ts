@@ -361,6 +361,7 @@ export const runAgentStep = async (
     });
     const persisted = dependencies.traces.persistOutputArtifact({
       operationId: executionOperationId(input),
+      taskReference: input.taskReference,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
       nodeId: input.nodeId,
@@ -398,6 +399,7 @@ export const runAgentStep = async (
   });
   const persisted = dependencies.traces.persistOutputArtifact({
     operationId: executionOperationId(input),
+    taskReference: input.taskReference,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeId: input.nodeId,

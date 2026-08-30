@@ -239,6 +239,14 @@ export class OperatorWorkflowStore {
       : events.filter((event) => eventBelongsToTask(event, taskReference));
   }
 
+  public listStreamEventsAfter(sequence: number) {
+    return this.ledger.listStreamEventsAfter(sequence);
+  }
+
+  public readLatestStreamSequence(): number {
+    return this.ledger.readLatestStreamEventSequence();
+  }
+
   public readAnalyzerSessionForEpisode(
     taskReference: string,
     planningEpisodeId: string,

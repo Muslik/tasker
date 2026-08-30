@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 
 export interface CommandRequest {
   readonly operationId?: string;
+  readonly taskReference?: string;
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;

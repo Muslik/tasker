@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlockReceiptStore } from '../../src/steps/index.js';
+import { BlockReceiptSchema, BlockReceiptStore, blockReceiptId } from '../../src/steps/index.js';
 import { loadHarnessPack } from '../../src/harness/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { systemClock } from '../../src/shared/clock.js';
@@ -52,6 +52,7 @@ describe('BlockReceiptStore', () => {
   it('restores an identical durable receipt and rejects conflicting redelivery', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const store = new BlockReceiptStore(ledger.repository, systemClock);
+    const receiptId = blockReceiptId(input);
 
     const first = store.record(input);
     const redelivered = store.record(input);
@@ -73,8 +74,59 @@ describe('BlockReceiptStore', () => {
       ok: false,
       error: {
         kind: 'receipt_conflict',
-        receiptId: 'block-receipt:tasker:jira:AVIA-1:execution:run-1:test-plan:run-1',
+        receiptId,
       },
     });
+
+    const receiptRow = ledger.repository.readReceipt(receiptId);
+    const artifact = ledger.repository.readArtifact(receiptId);
+
+    expect(receiptRow).toMatchObject({
+      taskReference: input.taskReference,
+      workflowId: input.workflowId,
+      runId: input.workflowRunId,
+      nodeId: input.nodeId,
+      blockRun: input.blockRun,
+      blockReference: input.block.reference,
+      verdict: input.verdict.status,
+    });
+    expect(BlockReceiptSchema.parse(receiptRow?.payload ?? null)).toMatchObject({
+      receiptId,
+      taskReference: input.taskReference,
+    });
+    expect(receiptRow?.completedAt).toBe(first.ok ? first.value.completedAt : null);
+    expect(artifact).toMatchObject({
+      artifactId: receiptId,
+      artifactKind: 'block_receipt',
+      taskReference: input.taskReference,
+    });
+    expect(artifact?.payload).toMatchObject({
+      receiptId,
+      taskReference: input.taskReference,
+    });
+    expect(artifact?.metadata).toMatchObject({ taskReference: input.taskReference });
+    expect(ledger.repository.listEvents()).toEqual([]);
+  });
+
+  it('reads block receipts from the receipts row rather than the artifact payload', () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const store = new BlockReceiptStore(ledger.repository, systemClock);
+    const receiptId = blockReceiptId(input);
+
+    const recorded = store.record(input);
+    expect(recorded.ok).toBe(true);
+    if (!recorded.ok) return;
+
+    ledger.database
+      .prepare<[string, string]>(
+        `
+          UPDATE artifacts
+          SET payload_json = ?
+          WHERE artifact_id = ?
+        `,
+      )
+      .run('{"schemaVersion":0}', receiptId);
+
+    expect(store.read(receiptId)).toEqual(recorded);
   });
 });

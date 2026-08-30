@@ -86,7 +86,9 @@ size ceiling ~400 lines.
 - `.tasker` run history is disposable; one breaking-change window for the store rewrite.
 - Corpus priority: codex first, claude second.
 - Research archetype terminal artifact: markdown report + Jira comment with a link.
-- SQLite: worker is the single writer; the API reads.
+- SQLite: both processes keep writing under WAL (revised from "worker single writer" —
+  the measured problem was unindexed full scans, not write contention; routing operator
+  actions through the worker would add IPC for no gain). Revisit only if contention shows.
 - Plan review defaults to `required` until the rebuild converges.
 - Commits: one line, no trailers.
 

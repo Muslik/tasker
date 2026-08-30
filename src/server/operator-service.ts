@@ -401,20 +401,17 @@ export class OperatorWorkflowService {
   }
 
   public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {
-    return this.store
-      .listEvents()
-      .filter((event) => event.sequence > sequence)
-      .flatMap((event) => {
-        if (!isJsonRecord(event.payload) || typeof event.payload.taskReference !== 'string')
-          return [];
-        return [
-          OperatorStreamEventSchema.parse({
-            sequence: event.sequence,
-            taskReference: event.payload.taskReference,
-            eventType: event.eventType,
-          }),
-        ];
-      });
+    return this.store.listStreamEventsAfter(sequence).map((event) =>
+      OperatorStreamEventSchema.parse({
+        sequence: event.seq,
+        taskReference: event.taskReference,
+        eventType: event.eventType,
+      }),
+    );
+  }
+
+  public readLatestStreamSequence(): number {
+    return this.store.readLatestStreamSequence();
   }
 
   public readPlanningOperation(
