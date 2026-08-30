@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "9",
+  "version": "10",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -39,6 +39,7 @@
         "bitbucket",
         "confluence",
         "confluence-edit",
+        "grill-me",
         "jenkins",
         "jira",
         "jira-edit",

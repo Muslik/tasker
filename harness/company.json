@@ -57,7 +57,7 @@
   },
   "systemPrompts": {
     "implementationPlanner": "prompts/implementation-planner.md",
-    "implementationPlannerSkills": ["jira", "confluence", "loop"],
+    "implementationPlannerSkills": ["jira", "confluence", "loop", "grill-me"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
   },
   "retrospective": { "enabled": true },
