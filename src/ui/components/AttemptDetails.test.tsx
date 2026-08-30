@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   OperatorExecutionAttempt,
   OperatorRunLogEntry,
+  OperatorTaskInvocationDetail,
 } from '../../control-plane/operator-contracts.js';
 import {
   AttemptDetails,
@@ -93,20 +94,63 @@ const attempt: OperatorExecutionAttempt = {
   workspaceChanges: null,
 };
 
+const invocationDetail: OperatorTaskInvocationDetail = {
+  schemaVersion: 1,
+  invocationId: 'invocation-deliver-1',
+  taskReference: 'TASK-1',
+  prompt: 'Run the task.',
+  promptBytes: 13,
+  provider: 'codex',
+  profile: 'default',
+  profileSha256: 'a'.repeat(64),
+  model: 'gpt-5.4',
+  effort: 'high',
+  serviceTier: 'fast',
+  argv: ['codex', 'exec', '--json'],
+  skills: ['typescript-design'],
+  inputEvidenceArtifactIds: ['artifact-1'],
+  startedAt: '2026-08-30T10:03:00.000Z',
+  finishedAt: '2026-08-30T10:03:05.000Z',
+  durationMs: 5_000,
+  status: 'completed',
+  exitStatus: { kind: 'exited', exitCode: 0 },
+  usage: {
+    inputTokens: 11,
+    cachedInputTokens: 2,
+    outputTokens: 5,
+    reasoningOutputTokens: 3,
+  },
+  cost: { source: 'provider_reported', amountUsd: 0.34 },
+  references: {
+    kind: 'execution',
+    workflowId: 'workflow-1',
+    runId: 'run-1',
+    nodeId: 'deliver-pr',
+    blockRun: 1,
+    providerAttempt: 1,
+    transcriptId: 'transcript-1',
+    outputArtifactIds: ['artifact-1'],
+    receiptArtifactId: null,
+  },
+};
+
 describe('AttemptDetails', () => {
-  it('renders transcript, output, and prompt placeholders in SSR', () => {
+  it('renders the invocation prompt panel inside the prompt tab in SSR', () => {
     const html = renderToStaticMarkup(
       createElement(AttemptDetails, {
         entry,
         attempt,
-        selectedTab: 'output',
+        invocationId: invocationDetail.invocationId,
+        invocationDetail,
+        selectedTab: 'prompt',
       }),
     );
 
     expect(html).toContain('Attempt #1');
-    expect(html).toContain('pnpm test');
-    expect(html).toContain('tests passed');
-    expect(html).toContain('Prompt');
+    expect(html).toContain('Copy prompt');
+    expect(html).toContain('codex exec --json');
+    expect(html).toContain('Run the task.');
+    expect(html).toContain('13 bytes');
     expect(html).toContain('role="tablist"');
   });
 

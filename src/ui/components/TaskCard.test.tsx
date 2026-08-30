@@ -1,15 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
-  OperatorActivityResponse,
+  OperatorTaskInvocationListResponse,
   OperatorTaskSummary,
   OperatorWorkflowProjection,
 } from '../../control-plane/operator-contracts.js';
 import { operatorQueryKeys } from '../api/index.js';
-import { TaskCard, buildTaskHeaderView } from './TaskCard.js';
+import { TaskCard, triggerTaskInvocationOpen } from './TaskCard.js';
 
 const task: OperatorTaskSummary = {
   id: 'jira:AVIA-42',
@@ -35,7 +35,7 @@ const task: OperatorTaskSummary = {
 };
 
 const projection: OperatorWorkflowProjection = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   taskReference: task.id,
   status: 'waiting',
   activeRuntime: 'execution',
@@ -52,22 +52,56 @@ const projection: OperatorWorkflowProjection = {
     reason: 'The canary must remain healthy for the full observation window.',
     intervention: { kind: 'external_prerequisite' },
   },
+  currentAttempt: {
+    latestInvocationId: 'invocation-42',
+    nodeId: 'verify-runtime',
+    blockRun: 3,
+    startedAt: '2026-08-30T09:40:00.000Z',
+    waitingSince: '2026-08-30T09:45:00.000Z',
+  },
   dependencies: [],
   stages: [],
   continuations: [],
 };
 
-const activity: OperatorActivityResponse = {
+const invocations: OperatorTaskInvocationListResponse = {
+  schemaVersion: 1,
   taskReference: task.id,
-  providerSession: { status: 'not_started', reason: 'planning_only' },
-  entries: [
+  totals: {
+    invocationCount: 1,
+    inputTokens: 800,
+    cachedInputTokens: 200,
+    outputTokens: 500,
+    reasoningOutputTokens: 100,
+    totalTokens: 1_300,
+    costUsd: 0.125,
+    unratedCount: 0,
+  },
+  invocations: [
     {
-      sequence: 1,
-      occurredAt: '2026-08-30T09:45:00.000Z',
-      source: 'kernel',
-      level: 'info',
-      title: 'Waiting',
-      detail: 'Observation window opened',
+      invocationId: 'invocation-42',
+      taskReference: task.id,
+      scope: 'execution',
+      nodeId: 'verify-runtime',
+      planningEpisodeId: null,
+      blockRun: 3,
+      provider: 'codex',
+      profile: 'default',
+      model: 'gpt-5.4',
+      effort: 'high',
+      serviceTier: 'fast',
+      promptBytes: 3_072,
+      durationMs: 300_000,
+      status: 'waiting',
+      startedAt: '2026-08-30T09:40:00.000Z',
+      finishedAt: '2026-08-30T09:45:00.000Z',
+      usage: {
+        inputTokens: 800,
+        cachedInputTokens: 200,
+        outputTokens: 500,
+        reasoningOutputTokens: 100,
+      },
+      cost: { source: 'provider_reported', amountUsd: 0.125 },
     },
   ],
 };
@@ -78,9 +112,9 @@ describe('TaskCard', () => {
       defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } },
     });
     client.setQueryData(operatorQueryKeys.projection(task.id), projection);
-    client.setQueryData(operatorQueryKeys.activity(task.id), activity);
     client.setQueryData(operatorQueryKeys.runLog(task.id), null);
     client.setQueryData(operatorQueryKeys.currentRun(task.id), null);
+    client.setQueryData(operatorQueryKeys.invocations(task.id), invocations);
 
     const html = renderToStaticMarkup(
       createElement(QueryClientProvider, { client }, createElement(TaskCard, { task })),
@@ -88,20 +122,26 @@ describe('TaskCard', () => {
 
     expect(html).toContain('Stabilize checkout recovery');
     expect(html).toContain('verify-runtime');
-    expect(html).toContain('Attempt</dt><dd class="mt-1 font-medium text-foreground">3');
-    expect(html).toContain('The canary must remain healthy for the full observation window.');
+    expect(html).toContain('Block run');
+    expect(html).toContain(
+      'waiting for external.result@1 / The canary must remain healthy for the full observation window.',
+    );
+    expect(html).toContain('Open invocation');
     expect(html).toContain('Tokens');
+    expect(html).toContain('1,300');
   });
 
-  it('derives time in state from the latest activity transition', () => {
-    const header = buildTaskHeaderView(
-      projection,
-      activity,
-      task.updatedAt,
-      Date.parse('2026-08-30T10:00:00.000Z'),
-    );
+  it('opens an exact invocation on the prompt tab', () => {
+    const selectAttempt = vi.fn();
+    const selectTab = vi.fn();
+    const selection = {
+      nodeId: 'verify-runtime',
+      blockRun: 3,
+      invocationId: 'invocation-42',
+    };
 
-    expect(header.timeInState).toBe('15m');
-    expect(header.attempt).toBe('3');
+    expect(triggerTaskInvocationOpen(selection, selectAttempt, selectTab)).toEqual(selection);
+    expect(selectAttempt).toHaveBeenCalledWith(selection);
+    expect(selectTab).toHaveBeenCalledWith('prompt');
   });
 });

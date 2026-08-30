@@ -34,7 +34,7 @@ const task: OperatorTaskSummary = {
 };
 
 const projection: OperatorWorkflowProjection = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   taskReference: task.id,
   status: 'waiting',
   activeRuntime: 'execution',
@@ -50,6 +50,13 @@ const projection: OperatorWorkflowProjection = {
     waitKind: 'operator.input@1',
     reason: 'Choose the recovery path',
     intervention: { kind: 'operator_guidance' },
+  },
+  currentAttempt: {
+    latestInvocationId: 'invocation-1',
+    nodeId: 'deliver-pr',
+    blockRun: 2,
+    startedAt: '2026-08-30T10:00:00.000Z',
+    waitingSince: '2026-08-30T10:05:00.000Z',
   },
   dependencies: [],
   stages: [],

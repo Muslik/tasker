@@ -100,6 +100,7 @@ class LiveOperatorRealtime implements OperatorRealtimeHandle {
     invalidateTaskQueries(this.queryClient, event.taskReference, {
       includeRunLog: true,
       includeAttempts: true,
+      includeInvocations: true,
     });
   };
 }

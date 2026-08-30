@@ -19,6 +19,12 @@ export {
 export type { TaskExecutionAttemptIdentity } from './run-log.js';
 export { fetchTaskCurrentRun, taskCurrentRunQueryOptions } from './current-run.js';
 export {
+  fetchTaskInvocations,
+  taskInvocationsQueryOptions,
+  fetchTaskInvocation,
+  taskInvocationQueryOptions,
+} from './invocations.js';
+export {
   resumeTaskWorkflow,
   approveTaskPlan,
   requestTaskPlanChanges,

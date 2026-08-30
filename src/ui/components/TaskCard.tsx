@@ -1,64 +1,45 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import type {
-  OperatorActivityResponse,
-  OperatorTaskSummary,
-  OperatorWorkflowProjection,
-} from '../../control-plane/operator-contracts.js';
+import type { OperatorTaskSummary } from '../../control-plane/operator-contracts.js';
 import {
-  taskActivityQueryOptions,
   taskCurrentRunQueryOptions,
   taskExecutionAttemptQueryOptions,
+  taskInvocationQueryOptions,
+  taskInvocationsQueryOptions,
   taskProjectionQueryOptions,
   taskRunLogQueryOptions,
 } from '../api/index.js';
-import { formatDuration } from '../lib/format.js';
 import { AttemptDetails, type AttemptDetailsTab } from './AttemptDetails.js';
 import { AttemptsList, type AttemptSelection } from './AttemptsList.js';
+import { CurrentAttemptStatus, type InvocationSelection } from './CurrentAttemptStatus.js';
+import { InvocationTokens } from './InvocationTokens.js';
 import { StatusChip } from './StatusChip.js';
 import { TaskActions } from './TaskActions.js';
 import { WorkflowRail } from './WorkflowRail.js';
 
-export type TaskHeaderView = {
-  readonly node: string;
-  readonly attempt: string;
-  readonly timeInState: string;
-  readonly waitReason: string | null;
-};
-
-export const buildTaskHeaderView = (
-  projection: OperatorWorkflowProjection,
-  activity: OperatorActivityResponse | undefined,
-  updatedAt: string | null,
-  now = Date.now(),
-): TaskHeaderView => {
-  const latestActivity = activity?.entries.at(-1)?.occurredAt ?? updatedAt;
-  return {
-    node: projection.current?.nodeId ?? 'No active node',
-    attempt:
-      projection.current?.blockRun === null || projection.current?.blockRun === undefined
-        ? '—'
-        : String(projection.current.blockRun),
-    timeInState: formatDuration(latestActivity, null, now),
-    waitReason:
-      projection.current?.status === 'waiting'
-        ? (projection.current.reason ?? 'The workflow is waiting for operator input.')
-        : null,
-  };
-};
-
 export type TaskCardProps = {
   readonly task: OperatorTaskSummary;
+};
+
+export const triggerTaskInvocationOpen = (
+  selection: InvocationSelection,
+  selectAttempt: (selection: AttemptSelection) => void,
+  selectTab: (tab: AttemptDetailsTab) => void,
+): InvocationSelection => {
+  selectAttempt(selection);
+  selectTab('prompt');
+  return selection;
 };
 
 export const TaskCard = ({ task }: TaskCardProps) => {
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection | null>(null);
   const [selectedTab, setSelectedTab] = useState<AttemptDetailsTab>('log');
   const projectionQuery = useQuery(taskProjectionQueryOptions(task.id));
-  const activityQuery = useQuery(taskActivityQueryOptions(task.id));
   const runLogQuery = useQuery(taskRunLogQueryOptions(task.id));
   const currentRunQuery = useQuery(taskCurrentRunQueryOptions(task.id));
+  const invocationsQuery = useQuery(taskInvocationsQueryOptions(task.id));
+  const selectedInvocationId = selectedAttempt?.invocationId ?? null;
 
   const selectedEntry =
     selectedAttempt === null
@@ -71,6 +52,12 @@ export const TaskCard = ({ task }: TaskCardProps) => {
   const attemptQuery = useQuery({
     ...taskExecutionAttemptQueryOptions(task.id, attemptIdentity),
     enabled: selectedEntry?.runtime === 'execution',
+  });
+  const invocationQuery = useQuery({
+    ...(selectedInvocationId === null
+      ? taskInvocationQueryOptions(task.id, 'unselected')
+      : taskInvocationQueryOptions(task.id, selectedInvocationId)),
+    enabled: selectedTab === 'prompt' && selectedInvocationId !== null,
   });
 
   const projection = projectionQuery.data;
@@ -90,10 +77,28 @@ export const TaskCard = ({ task }: TaskCardProps) => {
     );
   }
 
-  const header = buildTaskHeaderView(projection, activityQuery.data, task.updatedAt);
-  const errors = [activityQuery.error, runLogQuery.error, currentRunQuery.error, attemptQuery.error]
+  const openInvocation = (selection: InvocationSelection) => {
+    triggerTaskInvocationOpen(selection, setSelectedAttempt, setSelectedTab);
+  };
+  const errors = [
+    runLogQuery.error,
+    currentRunQuery.error,
+    invocationsQuery.error,
+    attemptQuery.error,
+    invocationQuery.error,
+  ]
     .filter((error): error is Error => error instanceof Error)
     .map((error) => error.message);
+  const attemptDetailsProps = {
+    entry: selectedEntry,
+    attempt: selectedEntry?.runtime === 'execution' ? (attemptQuery.data ?? null) : null,
+    selectedTab,
+    onTabChange: setSelectedTab,
+    invocationDetail: invocationQuery.data ?? null,
+    invocationDetailPending: selectedInvocationId !== null && invocationQuery.isPending,
+    invocationDetailError: invocationQuery.error instanceof Error ? invocationQuery.error : null,
+    invocationId: selectedInvocationId,
+  };
 
   return (
     <article className="min-h-0 overflow-y-auto bg-background">
@@ -109,27 +114,8 @@ export const TaskCard = ({ task }: TaskCardProps) => {
             <h1 className="mt-2 text-xl font-semibold tracking-tight">{task.title}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{task.currentStage}</p>
           </div>
-          <dl className="grid grid-cols-3 gap-x-5 gap-y-2 text-right text-xs tabular-nums">
-            <div>
-              <dt className="text-muted-foreground">Current node</dt>
-              <dd className="mt-1 max-w-48 truncate font-medium text-foreground">{header.node}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Attempt</dt>
-              <dd className="mt-1 font-medium text-foreground">{header.attempt}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Time in state</dt>
-              <dd className="mt-1 font-medium text-foreground">{header.timeInState}</dd>
-            </div>
-          </dl>
+          <CurrentAttemptStatus projection={projection} onOpenInvocation={openInvocation} />
         </div>
-        {header.waitReason === null ? null : (
-          <div className="mt-4 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-2.5">
-            <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">Wait reason</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{header.waitReason}</p>
-          </div>
-        )}
       </header>
 
       <div className="grid gap-4 p-5 xl:grid-cols-[minmax(16rem,0.72fr)_minmax(32rem,1.8fr)]">
@@ -138,12 +124,10 @@ export const TaskCard = ({ task }: TaskCardProps) => {
             stages={projection.stages}
             currentNodeId={projection.current?.nodeId ?? null}
           />
-          <section aria-label="Tokens" className="rounded-xl border border-dashed bg-card p-4">
-            <h2 className="text-sm font-semibold">Tokens</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Token totals will appear here when the operator API exposes them.
-            </p>
-          </section>
+          <InvocationTokens
+            invocations={invocationsQuery.data ?? null}
+            onOpenInvocation={openInvocation}
+          />
         </div>
         <div className="space-y-4">
           <TaskActions
@@ -158,18 +142,15 @@ export const TaskCard = ({ task }: TaskCardProps) => {
           )}
           <AttemptsList
             runLog={runLogQuery.data ?? null}
+            invocations={invocationsQuery.data?.invocations ?? null}
             selectedAttempt={selectedAttempt}
+            onOpenInvocation={openInvocation}
             onSelectAttempt={(selection) => {
               setSelectedAttempt(selection);
               setSelectedTab('log');
             }}
           />
-          <AttemptDetails
-            entry={selectedEntry}
-            attempt={selectedEntry?.runtime === 'execution' ? (attemptQuery.data ?? null) : null}
-            selectedTab={selectedTab}
-            onTabChange={setSelectedTab}
-          />
+          <AttemptDetails {...attemptDetailsProps} />
         </div>
       </div>
     </article>
