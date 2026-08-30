@@ -19,13 +19,10 @@ export default defineConfig({
   },
   test: {
     projects: [
-      project('unit', ['test/unit/**/*.test.ts', 'test/unit/**/*.test.tsx']),
-      project('property', ['test/property/**/*.test.ts']),
-      project('repository', ['test/repository/**/*.test.ts']),
+      project('unit', ['src/**/*.test.ts', 'src/**/*.test.tsx']),
+      project('integration', ['test/integration/**/*.test.ts']),
       project('contract', ['test/contract/**/*.test.ts']),
-      project('recovery', ['test/recovery/**/*.test.ts']),
-      project('operator', ['test/operator/**/*.test.ts']),
-      project('ui', ['src/ui/**/*.test.ts', 'src/ui/**/*.test.tsx']),
+      project('property', ['test/property/**/*.test.ts']),
     ],
     coverage: {
       provider: 'v8',

@@ -62,6 +62,6 @@ module.exports = {
     tsPreCompilationDeps: true,
     doNotFollow: { path: '(^|/)node_modules/' },
     enhancedResolveOptions: { extensions: ['.ts', '.tsx', '.js', '.jsx'] },
-    exclude: ['(^|/)test/'],
+    exclude: ['(^|/)test/', '(^|/)src/.*\\.test\\.[cm]?[jt]sx?$'],
   },
 };

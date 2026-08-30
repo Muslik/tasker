@@ -42,7 +42,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/ui/**/*.{ts,tsx}', 'test/unit/**/*.tsx'],
+    files: ['src/ui/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         projectService: false,

@@ -13,20 +13,19 @@ Temporal is the execution kernel. Tasker owns the product-specific layers around
 - Jira, Bitbucket, Jenkins/Allure, Confluence, provider, process, and worktree adapters;
 - operator UI, artifacts, transcripts, shadow API cost, elapsed time, and retrospective.
 
-There are no base workflow templates. Bootstrap first persists a graph-free planning
-context and Evidence Bundle. The mandatory planner may request bounded pre-plan
-investigation, then returns the plan and the complete task-specific workflow using
-registered building blocks plus company/project policy. Tasker compiles and validates
-that untrusted candidate; no product graph exists before planning. After optional plan
-review and freeze, the graph is immutable input to a generic Temporal
-graph interpreter. Agent calls, project shell commands, builds, tests, and Playwright
-run only in Docker-backed Temporal Activities; typed remote APIs remain Activity
-adapters; review, clarification, translation, publication, CI, and
-infrastructure pauses use durable Temporal messages and conditions.
+Bootstrap persists a graph-free planning context and Evidence Bundle. The implementation
+planner chooses the registered archetype, optional segments, and typed plan slots;
+deterministic code materializes the workflow skeleton, compiles and validates it, and
+freezes the resulting graph. Execution then uses the generic Temporal graph interpreter.
+Agent calls, project shell commands, builds, tests, and Playwright run only in
+Docker-backed Temporal Activities; typed remote APIs remain Activity adapters; review,
+clarification, translation, publication, CI, and infrastructure pauses use durable
+Temporal messages and conditions.
 
-The project is mid-rebuild: the canon, target architecture, and phase status live in
-[`docs/REBUILD.md`](docs/REBUILD.md). Historical design documents are archived in
-[`docs/archive`](docs/archive) and no longer describe the system.
+The built-system reference is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); operator
+procedures are in [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Rebuild phase status is
+tracked in [`docs/REBUILD.md`](docs/REBUILD.md). Historical design documents are
+archived in [`docs/archive`](docs/archive) and no longer describe the system.
 
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
 Company step packages and policies are file-backed under [`harness/steps`](harness/steps) and
@@ -50,15 +49,21 @@ dedicated recovery tests have been deleted. Current development data is disposab
 only the current run-snapshot schema is accepted. Reproduction evidence is private run
 evidence and is not attached to Jira automatically.
 
-Block Contract v3 is authoritative: an agent may return a candidate claim, but only
-independently collected process, artifact, workspace, or reconciled-effect evidence can
-produce the immutable receipt that advances the graph. Provider/model selection is a
-strict versioned execution-profile decision resolved before freeze.
+The typed step outcome contract is authoritative: normal agent steps return completed,
+waiting, or failed envelopes (with explicit workflow-change control where needed). An
+agent may return a candidate claim, but only independently collected process, artifact,
+workspace, or reconciled-effect evidence can produce the immutable receipt that advances
+the graph. Provider/model selection is a strict versioned execution-profile decision
+resolved before freeze.
 
 ```bash
-fnm exec --using=24.16.0 /usr/local/bin/pnpm verify
-fnm exec --using=24.16.0 /usr/local/bin/pnpm test:e2e
-fnm exec --using=24.16.0 /usr/local/bin/pnpm dev
+pnpm verify
+pnpm test:unit
+pnpm test:integration
+pnpm test:contract
+pnpm test:property
+pnpm test:e2e
+pnpm dev
 ```
 
 `pnpm dev` is the normal local entry point. It builds Tasker, starts or reuses the local

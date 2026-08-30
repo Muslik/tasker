@@ -13,7 +13,7 @@ and stop the server with `trap` or `finally`. Never daemonize it outside the att
 port, or assume it survives a retry. If the server cannot run without writing to the product
 worktree, return `inconclusive` with the exact prerequisite instead of weakening the read-only mount.
 
-Use the repository's existing test/browser configuration and the narrowest selector that covers the
+Use the repository's existing test/e2e configuration and the narrowest selector that covers the
 requested scenario. Use `playwright-demo` for UI interaction and visual evidence. Temporary scripts,
 browser output, and writable caches belong only below `$TASKER_SCRATCH_ROOT`; durable evidence
 belongs only below `$TASKER_ARTIFACTS_ROOT`. The product worktree is physically read-only.

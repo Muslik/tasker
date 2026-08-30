@@ -11,7 +11,7 @@ const parsePort = (input: string | undefined, fallback: number, name: string): n
 const uiPort = parsePort(process.env.TASKER_E2E_UI_PORT, 4312, 'TASKER_E2E_UI_PORT');
 
 export default defineConfig({
-  testDir: './test/browser',
+  testDir: './test/e2e',
   fullyParallel: false,
   workers: 1,
   retries: 0,

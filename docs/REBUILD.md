@@ -1,9 +1,9 @@
 # Tasker rebuild — canon
 
-This file is the single source of truth during the rebuild (August 2026). The old
-design documents in [`docs/archive/`](archive) describe a system that partially never
-existed; do not consult them for decisions. A final `ARCHITECTURE.md` and
-`OPERATIONS.md` will replace this file when the rebuild converges.
+The built-system canon is [`ARCHITECTURE.md`](ARCHITECTURE.md); operator procedures are
+in [`OPERATIONS.md`](OPERATIONS.md). This file now records rebuild phase status and the
+target taxonomy. The old design documents in [`docs/archive/`](archive) describe a
+system that partially never existed; do not consult them for decisions.
 
 ## Why (audit findings, verified against code and the run ledger)
 
@@ -110,9 +110,10 @@ size ceiling ~400 lines.
 - [x] Phase 2c — `validation.run@1` process step feeds a judging Verify agent;
       planner picks only the validation profile; missing project validation
       config fails assembly loudly (`project_validation_missing`).
-- [ ] Phase 3 — structure surgery: dead code removal, target layout, store rewrite,
-      test relayout, docs from code, credentials out of agent containers.
+- [x] Phase 3 — structure surgery: dead code removal, target layout, store rewrite,
+      test relayout, and docs from code.
 - [x] Phase 4 — operator UI v2: TanStack Query, component decomposition, SSE realtime;
       legacy cockpit removed and the server serves `dist/ui`.
 - [ ] Phase 5 — extensions: review packet (screens + MSW mocks), figma skill, more
-      archetypes, then parallelism.
+      archetypes, then parallelism. Credentials out of agent containers are deferred
+      until after the pilot run.

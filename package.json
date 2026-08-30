@@ -27,12 +27,9 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:property": "vitest run --project property",
-    "test:repository": "vitest run --project repository",
     "test:contract": "vitest run --project contract",
-    "test:recovery": "vitest run --project recovery",
-    "test:operator": "vitest run --project operator",
     "test:e2e": "playwright test",
-    "test:integration": "pnpm test:repository && pnpm test:contract",
+    "test:integration": "vitest run --project integration",
     "test:coverage": "vitest run --coverage.enabled",
     "depcruise": "dependency-cruiser src --config .dependency-cruiser.cjs --validate",
     "dev": "pnpm build && node scripts/start-local.mjs",
@@ -43,7 +40,7 @@
     "temporal:worker": "pnpm build:server && node dist/kernel/worker-main.js",
     "harness:setup": "node scripts/setup-harness-imports.mjs",
     "harness:smoke": "pnpm build:server && node scripts/smoke-project-harness.mjs",
-    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm depcruise && pnpm test && pnpm build"
+    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm depcruise && pnpm test:unit && pnpm test:integration && pnpm test:contract && pnpm test:property && pnpm build"
   },
   "dependencies": {
     "@base-ui/react": "1.6.0",

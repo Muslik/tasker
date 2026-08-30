@@ -7,5 +7,5 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client"]
   },
-  "include": ["src/ui/**/*.ts", "src/ui/**/*.tsx", "test/unit/**/*.test.tsx"]
+  "include": ["src/ui/**/*.ts", "src/ui/**/*.tsx"]
 }
