@@ -18,10 +18,6 @@ import {
 import { openSqliteLedger } from '../../../src/ledger/index.js';
 import { makeAdjustableClock } from '../../../src/shared/clock.js';
 import { err, ok } from '../../../src/shared/outcome.js';
-import {
-  SemanticWorkflowSourceSchema,
-  type SemanticNodeSource,
-} from '../../../src/workflow/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 import { makePlanningTaskSnapshot, makeWorkflowProposal } from '../../support/planning.js';
@@ -76,24 +72,7 @@ afterAll(() => {
   rmSync(plannerRepositoryPath, { recursive: true, force: true });
 });
 const proposal = makeWorkflowProposal();
-const workflowSource = SemanticWorkflowSourceSchema.parse(proposal.source);
-const findVerificationStep = (node: SemanticNodeSource): string | null => {
-  switch (node.kind) {
-    case 'step':
-      return node.uses === 'verify.acceptance@1' ? node.id : null;
-    case 'sequence': {
-      for (const child of node.children) {
-        const found = findVerificationStep(child);
-        if (found !== null) return found;
-      }
-      return null;
-    }
-    case 'bounded_loop':
-      return findVerificationStep(node.body);
-  }
-};
-const verificationStepId = findVerificationStep(workflowSource.root);
-if (verificationStepId === null) throw new Error('Planner fixture has no Verify step');
+const verificationStepId = 'verify-change';
 
 const readyDecision = {
   status: 'ready',
@@ -130,12 +109,15 @@ const readyDecision = {
       },
     ],
   },
-  followUps: [],
-  workflow: {
-    assemblyDecisions: proposal.assemblyDecisions,
-    source: workflowSource,
-    verificationPlan: proposal.verificationPlan,
+  archetype: 'deliver-pr',
+  segments: [],
+  verification: {
+    checks: proposal.verificationPlan.checks,
+    profile: proposal.verificationPlan.profile,
+    rationale: proposal.verificationPlan.rationale,
   },
+  rationale:
+    'deliver-pr covers the implementation, verification, review, and PR delivery path without optional segments.',
 } as const;
 
 const providerReadyDecision = readyDecision;
@@ -496,6 +478,29 @@ describe('Codex CLI implementation planner', () => {
     const result = await planner.plan(request('fast'));
 
     expect(result).toMatchObject({ ok: false, error: { kind: 'invalid_planner_output' } });
+  });
+
+  it('reports invalid segment selections on decision.segments for correction feedback', async () => {
+    const runner = new RecordingRunner(
+      JSON.stringify({
+        decision: {
+          ...providerReadyDecision,
+          segments: ['runtime_observe'],
+        },
+        evidenceRequests: [],
+      }),
+    );
+    const planner = new SubscriptionCliImplementationPlanner(runner);
+
+    const result = await planner.plan(request('fast'));
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.kind !== 'invalid_planner_output') {
+      throw new Error('Expected planner output validation failure');
+    }
+    expect(result.error.issues).toEqual(
+      expect.arrayContaining([expect.stringContaining('decision.segments.0')]),
+    );
   });
 
   it('rejects the removed double-encoded planner transport', async () => {

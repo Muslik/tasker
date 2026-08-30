@@ -44,7 +44,7 @@ export const ValidatedPlanningCandidateSchema = z
   .readonly();
 
 const PlanningRecordBaseSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   taskReference: z.string().min(1),
   planningEpisodeId: z.string().min(1),
   commandId: z.string().min(1).nullable(),

@@ -1,10 +1,18 @@
 {
   "schemaVersion": 1,
   "id": "quality-boundaries",
-  "version": "3",
+  "version": "4",
   "enabled": true,
   "description": "Require product mutation to pass semantic verification and independent review before delivery.",
-  "configuration": {},
+  "configuration": {
+    "deliverPr": {
+      "loopMaxAttempts": 3,
+      "optionalSegments": {
+        "dependency_await": ["dependency.await_packages@1", "dependency.consume_exact@1"],
+        "translations": ["translations.extract@1", "translations.pull@1"]
+      }
+    }
+  },
   "obligations": [
     {
       "id": "local-ready-before-delivery",

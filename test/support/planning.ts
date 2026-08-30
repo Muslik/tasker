@@ -1,10 +1,11 @@
 import {
   type WorkflowAnalyzerOutput,
   type ImplementationPlanningDecision,
+  type ReadyImplementationPlanningDecision,
   createWorkflowProposalFromAnalyzerOutput,
 } from '../../src/planning/index.js';
 import { type ImplementationPlanner } from '../../src/providers/index.js';
-import { type SemanticNodeSource, type SemanticWorkflowSource } from '../../src/workflow/index.js';
+import type { SemanticWorkflowSource } from '../../src/workflow/index.js';
 import {
   WorkflowGenerationSubjectSource,
   type PlanningTaskSnapshot,
@@ -272,38 +273,38 @@ const semanticWorkflow = (task: TestTaskFixture): SemanticWorkflowSource => {
   };
 };
 
+const verificationPlanFor = (task: TestTaskFixture): WorkflowAnalyzerOutput['verificationPlan'] =>
+  task.family === 'short_bugfix'
+    ? {
+        checks: ['reproduction evidence', 'targeted tests for changed behavior'],
+        profile: 'targeted' as const,
+        rationale:
+          'A localized bug fix needs proof of reproduction and focused regression coverage.',
+      }
+    : task.family === 'shared_component'
+      ? {
+          checks: ['translation resources pulled', 'targeted consumer tests'],
+          profile: 'translation_and_targeted' as const,
+          rationale:
+            'The component project uses external translation and must verify the consuming surface.',
+        }
+      : task.verification === 'full_with_visual'
+        ? {
+            checks: ['full test suite', 'visual comparison of affected screens'],
+            profile: 'full_with_visual' as const,
+            rationale: 'The feature spans a booking flow and changes visible frontend behavior.',
+          }
+        : {
+            checks: ['full test suite'],
+            profile: 'full' as const,
+            rationale: 'The feature spans multiple behaviors, so targeted checks are insufficient.',
+          };
+
 export const makeAnalyzerOutput = (
   task: TestTaskFixture = makeTaskFixture(),
 ): WorkflowAnalyzerOutput => {
   const source = semanticWorkflow(task);
-
-  const verificationPlan =
-    task.family === 'short_bugfix'
-      ? {
-          checks: ['reproduction evidence', 'targeted tests for changed behavior'],
-          profile: 'targeted' as const,
-          rationale:
-            'A localized bug fix needs proof of reproduction and focused regression coverage.',
-        }
-      : task.family === 'shared_component'
-        ? {
-            checks: ['translation resources pulled', 'targeted consumer tests'],
-            profile: 'translation_and_targeted' as const,
-            rationale:
-              'The component project uses external translation and must verify the consuming surface.',
-          }
-        : task.verification === 'full_with_visual'
-          ? {
-              checks: ['full test suite', 'visual comparison of affected screens'],
-              profile: 'full_with_visual' as const,
-              rationale: 'The feature spans a booking flow and changes visible frontend behavior.',
-            }
-          : {
-              checks: ['full test suite'],
-              profile: 'full' as const,
-              rationale:
-                'The feature spans multiple behaviors, so targeted checks are insufficient.',
-            };
+  const verificationPlan = verificationPlanFor(task);
 
   return {
     assemblyDecisions: [
@@ -336,61 +337,59 @@ export const makeWorkflowProposal = (
   return proposal.value;
 };
 
-const stepIdByUse = (node: SemanticNodeSource, reference: string): string | null => {
-  switch (node.kind) {
-    case 'step':
-      return node.uses === reference ? node.id : null;
-    case 'sequence':
-      for (const child of node.children) {
-        const found = stepIdByUse(child, reference);
-        if (found !== null) return found;
-      }
-      return null;
-    case 'bounded_loop':
-      return stepIdByUse(node.body, reference);
-  }
+const READY_VERIFICATION_STEP_ID = 'verify-change';
+
+type ReadyPlanningDecisionOptions = {
+  readonly task?: TestTaskFixture;
+  readonly segments?: ReadyImplementationPlanningDecision['segments'];
+  readonly plan?: Partial<ReadyImplementationPlanningDecision['plan']>;
 };
 
-export const makeReadyPlanningDecision = (): ImplementationPlanningDecision => {
-  const workflow = makeAnalyzerOutput();
-  const verificationStepId = stepIdByUse(workflow.source.root, 'verify.acceptance@1');
-  if (verificationStepId === null) throw new Error('Test workflow has no Verify block');
+export const makeReadyPlanningDecision = (
+  options: ReadyPlanningDecisionOptions = {},
+): ImplementationPlanningDecision => {
+  const task = options.task ?? makeTaskFixture();
+  const verificationPlan = verificationPlanFor(task);
+  const plan: ReadyImplementationPlanningDecision['plan'] = {
+    schemaVersion: 2,
+    title: 'Repair the reported behavior',
+    summary: 'Inspect the bounded surface, implement the repair, and verify the result.',
+    steps: [
+      {
+        id: 'repair-behavior',
+        title: 'Repair the reported behavior',
+        objective: 'Make the smallest change that satisfies the task.',
+        repository: task.repository,
+        files: [],
+        verification: ['Run the workflow verification step.'],
+      },
+    ],
+    assumptions: [],
+    risks: [],
+    acceptanceCriteria: [
+      {
+        id: 'reported-behavior-fixed',
+        expected: 'The reported behavior satisfies the task description.',
+        verification: [
+          {
+            kind: 'process',
+            profile: verificationPlan.profile,
+            scenario: 'Run the workflow verification step.',
+            workflowStepIds: [READY_VERIFICATION_STEP_ID],
+          },
+        ],
+      },
+    ],
+    ...options.plan,
+  };
   return {
     status: 'ready',
     executionStrategy: 'simple',
-    plan: {
-      schemaVersion: 2,
-      title: 'Repair the reported behavior',
-      summary: 'Inspect the bounded surface, implement the repair, and verify the result.',
-      steps: [
-        {
-          id: 'repair-behavior',
-          title: 'Repair the reported behavior',
-          objective: 'Make the smallest change that satisfies the task.',
-          repository: 'onetwotrip/front-avia',
-          files: [],
-          verification: ['Run the workflow verification step.'],
-        },
-      ],
-      assumptions: [],
-      risks: [],
-      acceptanceCriteria: [
-        {
-          id: 'reported-behavior-fixed',
-          expected: 'The reported behavior satisfies the task description.',
-          verification: [
-            {
-              kind: 'process',
-              profile: 'targeted',
-              scenario: 'Run the workflow verification step.',
-              workflowStepIds: [verificationStepId],
-            },
-          ],
-        },
-      ],
-    },
-    followUps: [],
-    workflow,
+    plan,
+    archetype: 'deliver-pr',
+    segments: options.segments ?? [],
+    verification: verificationPlan,
+    rationale: verificationPlan.rationale,
   };
 };
 
@@ -403,7 +402,7 @@ export const makeTestImplementationPlanner = (): ImplementationPlanner => ({
         receipt: {
           status: 'completed',
           provider: 'codex_cli',
-          plannerVersion: 'implementation-planner@3',
+          plannerVersion: 'implementation-planner@4',
           profile: 'test-planner',
           profileSha256: '0'.repeat(64),
           cliVersion: 'test@1',

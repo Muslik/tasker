@@ -513,7 +513,7 @@ describe('Bootstrap planning failure recovery', () => {
         return Promise.resolve(
           ok(
             ImplementationPlanningRecordSchema.parse({
-              schemaVersion: 2,
+              schemaVersion: 3,
               taskReference,
               planningEpisodeId,
               commandId,

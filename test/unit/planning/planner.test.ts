@@ -79,6 +79,35 @@ describe('semantic workflow proposal planning', () => {
     expect(result.error.validatorReport.issues.map(({ code }) => code)).toContain('invalid_source');
   });
 
+  it('throws when an internal scaffold violates workflow obligations', () => {
+    const proposal = makeWorkflowProposal();
+    const source = {
+      schemaVersion: 1,
+      id: 'invalid-deliver-pr-scaffold',
+      version: 1,
+      root: {
+        kind: 'sequence',
+        id: 'task-work',
+        children: [
+          {
+            kind: 'step',
+            id: 'deliver-change',
+            uses: 'deliver.pull-request@1',
+            with: {
+              objective: 'Deliver the change',
+              repository: proposal.task.repository,
+              taskId: proposal.task.taskId,
+            },
+          },
+        ],
+      },
+    };
+
+    expect(() =>
+      planWorkflowProposal({ ...proposal, source }, { internalInvariant: 'deliver-pr scaffold' }),
+    ).toThrow('Internal deliver-pr scaffold invariant violated');
+  });
+
   it('rejects capabilities unavailable in the active harness', () => {
     const proposal = makeWorkflowProposal();
     const result = planWorkflowProposal({

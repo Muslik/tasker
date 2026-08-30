@@ -4,6 +4,29 @@ import {
   ReadyImplementationPlanningDecisionSchema,
   validateAcceptanceVerificationLinks,
 } from '../../../src/planning/index.js';
+import { SemanticWorkflowSourceSchema } from '../../../src/workflow/index.js';
+
+const workflowSource = SemanticWorkflowSourceSchema.parse({
+  schemaVersion: 1,
+  id: 'payment-spacing-repair',
+  version: 1,
+  root: {
+    kind: 'sequence',
+    id: 'delivery',
+    children: [
+      {
+        kind: 'step',
+        id: 'verify-change',
+        uses: 'verify.acceptance@1',
+        with: {
+          objective: 'Verify the repair',
+          repository: 'onetwotrip/front-avia',
+          taskId: 'AVIA-12045',
+        },
+      },
+    ],
+  },
+});
 
 const decision = {
   status: 'ready',
@@ -33,50 +56,20 @@ const decision = {
             kind: 'runtime_evidence',
             scenario: 'Repeat the investigated payment-page scenario after the repair.',
             evidence: ['video'],
-            workflowStepIds: ['validate-fixed-spacing'],
+            workflowStepIds: ['verify-change'],
           },
         ],
       },
     ],
   },
-  followUps: [],
-  workflow: {
-    assemblyDecisions: [
-      {
-        id: 'verify-spacing',
-        title: 'Verify repaired spacing',
-        source: 'bug investigation',
-        reason: 'The reported behavior was reproduced.',
-        effect: 'Repeat the same scenario after implementation.',
-      },
-    ],
-    source: {
-      schemaVersion: 1,
-      id: 'payment-spacing-repair',
-      version: 1,
-      root: {
-        kind: 'sequence',
-        id: 'delivery',
-        children: [
-          {
-            kind: 'step',
-            id: 'validate-fixed-spacing',
-            uses: 'verify.acceptance@1',
-            with: {
-              objective: 'Verify the repair',
-              repository: 'onetwotrip/front-avia',
-              taskId: 'AVIA-12045',
-            },
-          },
-        ],
-      },
-    },
-    verificationPlan: {
-      checks: ['Repeat the investigated scenario.'],
-      profile: 'targeted',
-      rationale: 'The change is bounded to the payment page.',
-    },
+  archetype: 'deliver-pr',
+  segments: [],
+  verification: {
+    checks: ['Repeat the investigated scenario.'],
+    profile: 'targeted',
+    rationale: 'The change is bounded to the payment page.',
   },
+  rationale: 'deliver-pr is sufficient because no dependency or translation segment is required.',
 } as const;
 
 describe('implementation plan acceptance contract', () => {
@@ -85,7 +78,7 @@ describe('implementation plan acceptance contract', () => {
 
     expect(parsed.plan.acceptanceCriteria[0]?.verification[0]).toMatchObject({
       kind: 'runtime_evidence',
-      workflowStepIds: ['validate-fixed-spacing'],
+      workflowStepIds: ['verify-change'],
     });
   });
 
@@ -108,8 +101,28 @@ describe('implementation plan acceptance contract', () => {
       },
     });
 
-    expect(validateAcceptanceVerificationLinks(candidate)).toEqual([
+    expect(validateAcceptanceVerificationLinks(candidate, workflowSource)).toEqual([
       'Acceptance criterion payment-spacing-restored references missing workflow step missing-validation-step.',
+    ]);
+  });
+
+  it('rejects duplicate acceptance criterion ids while using the explicit workflow source', () => {
+    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+      ...decision,
+      plan: {
+        ...decision.plan,
+        acceptanceCriteria: [
+          ...decision.plan.acceptanceCriteria,
+          {
+            ...decision.plan.acceptanceCriteria[0],
+            expected: 'The same criterion id appears twice.',
+          },
+        ],
+      },
+    });
+
+    expect(validateAcceptanceVerificationLinks(candidate, workflowSource)).toEqual([
+      'Duplicate acceptance criterion id payment-spacing-restored.',
     ]);
   });
 
@@ -121,6 +134,15 @@ describe('implementation plan acceptance contract', () => {
         schemaVersion: 1,
         acceptanceCriteria: ['The payment spacing is restored.'],
       },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate segment selections instead of deduplicating them', () => {
+    const result = ReadyImplementationPlanningDecisionSchema.safeParse({
+      ...decision,
+      segments: ['translations', 'translations'],
     });
 
     expect(result.success).toBe(false);

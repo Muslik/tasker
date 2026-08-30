@@ -22,6 +22,7 @@ import {
   type PlanningStrategyRequest,
   type PlanningQuestionAnswer,
   type ImplementationPlanLink,
+  type ReadyImplementationPlanningDecision,
 } from '../planning/implementation-plan.js';
 import type { TaskExecutionStrategy } from '../harness/execution-profile-contracts.js';
 import type {
@@ -51,6 +52,7 @@ import type {
 } from '../providers/implementation-planner.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import { resolveDeliverPrScaffoldConfig, scaffoldDeliverPr } from '../workflow/index.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../workflow/schema.js';
 import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
 import {
@@ -82,7 +84,6 @@ import type {
   PlanningEvidenceReaderRegistry,
   PlanningEvidenceReadError,
 } from './planning-evidence.js';
-import { providerFailureSummary } from './workflow-generator.js';
 
 export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_episode';
 export { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
@@ -366,7 +367,7 @@ export class ImplementationPlanningStore {
     const attempt = (current.value?.attempt ?? 0) + 1;
     const startedAt = this.clock.now();
     const record = ImplementationPlanningRecordSchema.parse({
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: 'planning',
       taskReference: input.taskReference,
       planningEpisodeId: input.planningEpisodeId,
@@ -659,10 +660,8 @@ export class ImplementationPlanningStore {
   public recordValidationRejection(
     planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     issues: readonly string[],
-    rejectedDecision: Extract<
-      ImplementationPlanningRecord,
-      { readonly status: 'ready' }
-    >['decision'],
+    rejectedDecision:
+      Extract<ImplementationPlanningRecord, { readonly status: 'ready' }>['decision'] | null,
   ): Outcome<
     Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
     ImplementationPlanningStoreError
@@ -901,49 +900,6 @@ const planningFailureView = (
   }
 };
 
-const ledgerConflictDetail = (conflict: LedgerConflict): string => {
-  switch (conflict.kind) {
-    case 'version_conflict':
-      return `aggregate ${conflict.aggregateId} expected version ${String(conflict.expectedVersion)} but found ${String(conflict.actualVersion)}`;
-    case 'duplicate_event_id':
-      return `duplicate event id ${conflict.eventId}`;
-    case 'unsupported_schema_version':
-      return `${conflict.schemaKind} schema version ${String(conflict.receivedVersion)} is unsupported; supported version is ${String(conflict.supportedVersion)} (${conflict.recovery})`;
-  }
-};
-
-const operatorStoreErrorDetail = (
-  error: Extract<OperatorServiceError, { readonly kind: 'store_failure' }>['error'],
-): string => {
-  switch (error.kind) {
-    case 'ledger_conflict':
-      return `operator store conflict: ${ledgerConflictDetail(error.conflict)}`;
-    case 'projection_corrupt':
-      return `operator store projection for task ${error.taskReference} is corrupt: ${error.issues.join('; ')}`;
-    case 'generation_subject_conflict':
-      return `operator store already recorded a different generation subject for task ${error.taskReference}`;
-  }
-};
-
-const operatorServiceErrorDetail = (error: OperatorServiceError): string => {
-  switch (error.kind) {
-    case 'task_not_found':
-      return `task ${error.taskReference} was not found`;
-    case 'generation_blocked':
-      return `task ${error.taskReference} is blocked: ${error.reason}`;
-    case 'planner_contract_failure':
-      return `planner contract failed at ${error.stage}`;
-    case 'non_json_artifact':
-      return `artifact ${error.artifact} is not valid JSON`;
-    case 'store_failure':
-      return operatorStoreErrorDetail(error.error);
-    case 'provider_failure':
-      return providerFailureSummary(error.failure);
-    case 'generation_runtime_unavailable':
-      return error.message;
-  }
-};
-
 export type ImplementationPlanningError =
   | { readonly kind: 'subject'; readonly error: OperatorServiceError }
   | { readonly kind: 'workflow_not_ready'; readonly taskReference: string }
@@ -1077,6 +1033,61 @@ const selectStrategy = (
     reason:
       'No operator override requested consensus planning; the planner may still propose a durable continuation when investigation discovers another repository.',
   };
+};
+
+const INTERNAL_DELIVER_PR_INVARIANT = 'deliver-pr scaffold';
+
+const throwInternalDeliverPrInvariant = (detail: string): never => {
+  throw new Error(`Internal ${INTERNAL_DELIVER_PR_INVARIANT} invariant violated: ${detail}`);
+};
+
+const requireInvariantValue = <T>(value: T | null | undefined, detail: string): T =>
+  value ?? throwInternalDeliverPrInvariant(detail);
+
+const isSegmentSchemaFeedback = (issues: readonly string[]): boolean =>
+  issues.length > 0 && issues.every((issue) => /^decision\.segments(?:\.|:|$)/u.test(issue));
+
+const materializeDeliverPrScaffold = (input: {
+  readonly task: WorkflowGenerationSubject['task'];
+  readonly taskSnapshot: WorkflowGenerationSubject['taskSnapshot'];
+  readonly blocks: readonly LoadedHarnessPack['steps'][number]['block'][];
+  readonly policies: readonly LoadedHarnessPack['policies'][number][];
+  readonly decision: ReadyImplementationPlanningDecision;
+}): Outcome<
+  z.infer<typeof SemanticWorkflowSourceSchema>,
+  { readonly kind: 'slot_error'; readonly issues: readonly string[] }
+> => {
+  const config = resolveDeliverPrScaffoldConfig(input.policies);
+  const blockByReference = new Map(input.blocks.map((block) => [block.reference, block] as const));
+
+  for (const reference of config.requiredStages) {
+    const block = blockByReference.get(reference);
+    if (block?.availableDuring.includes('execution') === true) continue;
+    throwInternalDeliverPrInvariant(`missing required execution block ${reference}`);
+  }
+
+  const unavailableSegments = input.decision.segments.flatMap((segment) => {
+    const references = config.optionalSegments[segment];
+    return references.every((reference) => {
+      const block = blockByReference.get(reference);
+      return block?.availableDuring.includes('execution') === true;
+    })
+      ? []
+      : [`Segment ${segment} is unavailable in the frozen block catalog.`];
+  });
+  if (unavailableSegments.length > 0) {
+    return err({ kind: 'slot_error', issues: unavailableSegments });
+  }
+
+  return scaffoldDeliverPr(
+    {
+      task: input.task,
+      taskSnapshot: input.taskSnapshot,
+      objective: input.decision.plan.summary,
+      segments: input.decision.segments,
+    },
+    config,
+  );
 };
 
 export class ImplementationPlanningCoordinator {
@@ -1657,6 +1668,7 @@ export class ImplementationPlanningCoordinator {
     const planningInput = {
       subject,
       blocks: loaded.value.harness.steps.map(({ block }) => block),
+      policies: loaded.value.harness.policies,
       promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
       plannerSkills: loaded.value.harness.implementationPlanner.skills,
       plannerProfiles: loaded.value.harness.implementationPlanner.profiles,
@@ -1775,6 +1787,27 @@ export class ImplementationPlanningCoordinator {
         promptTemplate: planningInput.promptTemplate,
       });
       if (!result.ok) {
+        if (
+          result.error.kind === 'invalid_planner_output' &&
+          isSegmentSchemaFeedback(result.error.issues)
+        ) {
+          if (planning.validationRevision >= 2) {
+            const failed = this.store.fail(
+              planning,
+              result.error,
+              plannerFailureReceipt(result.error),
+            );
+            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+          }
+          const rejected = this.store.recordValidationRejection(
+            planning,
+            result.error.issues,
+            null,
+          );
+          if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
+          planning = rejected.value;
+          continue;
+        }
         const failed = this.store.fail(planning, result.error, plannerFailureReceipt(result.error));
         return failed.ok ? failed : err({ kind: 'store', error: failed.error });
       }
@@ -1812,7 +1845,35 @@ export class ImplementationPlanningCoordinator {
         }
 
         if (result.value.decision.status === 'ready') {
-          const acceptanceIssues = validateAcceptanceVerificationLinks(result.value.decision);
+          const scaffold = materializeDeliverPrScaffold({
+            task: planningInput.subject.task,
+            taskSnapshot: planningInput.subject.taskSnapshot,
+            blocks: planningInput.blocks,
+            policies: planningInput.policies,
+            decision: result.value.decision,
+          });
+          if (!scaffold.ok) {
+            if (planning.validationRevision >= 2) {
+              const failed = this.store.fail(
+                planning,
+                { kind: 'invalid_planner_output', issues: scaffold.error.issues },
+                result.value.receipt,
+              );
+              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+            }
+            const rejected = this.store.recordValidationRejection(
+              planning,
+              scaffold.error.issues,
+              result.value.decision,
+            );
+            if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
+            planning = rejected.value;
+            continue;
+          }
+          const acceptanceIssues = validateAcceptanceVerificationLinks(
+            result.value.decision,
+            scaffold.value,
+          );
           if (acceptanceIssues.length > 0) {
             if (planning.validationRevision >= 2) {
               const failed = this.store.fail(
@@ -1835,95 +1896,62 @@ export class ImplementationPlanningCoordinator {
           const operationId = `${commandId}:workflow-candidate:${String(candidateNumber)}`;
           const assembled = this.workflows.assembleFromImplementationPlanAtOperation(
             planningInput.subject.task,
-            result.value.decision.workflow,
+            result.value.decision,
+            { source: scaffold.value },
             operationId,
           );
           if (!assembled.ok) {
-            const detail = operatorServiceErrorDetail(assembled.error);
-            const message = `Workflow assembly failed: ${assembled.error.kind}${detail.length > 0 ? `: ${detail}` : ''}`;
-            const failed = this.store.fail(
-              planning,
-              {
-                kind: 'invalid_planner_output',
-                issues: [message.slice(0, 4_000)],
-              },
-              result.value.receipt,
-            );
-            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+            return err({ kind: 'subject', error: assembled.error });
           }
           if (
             assembled.value.status !== 'ready' ||
             assembled.value.view.workflow.graphHash === null
           ) {
-            const issues = assembled.value.view.workflow.validatorReport.issues.map(
-              ({ message }) => message,
+            throwInternalDeliverPrInvariant(
+              assembled.value.view.workflow.validatorReport.issues
+                .map(({ message }) => message)
+                .join('; '),
             );
-            if (planning.validationRevision >= 2) {
-              const failed = this.store.fail(
-                planning,
-                { kind: 'invalid_planner_output', issues },
-                result.value.receipt,
-              );
-              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
-            }
-            const rejected = this.store.recordValidationRejection(
-              planning,
-              issues,
-              result.value.decision,
-            );
-            if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
-            planning = rejected.value;
-            continue;
           }
-          const workflowHash = assembled.value.view.workflow.graphHash;
-          const semanticHash = assembled.value.view.workflow.semanticHash;
-          const compilerVersion = assembled.value.view.workflow.compilerVersion;
-          if (semanticHash === null || compilerVersion === null) {
-            const failed = this.store.fail(
-              planning,
-              {
-                kind: 'invalid_planner_output',
-                issues: ['Semantic workflow provenance is absent from the compiled candidate.'],
-              },
-              result.value.receipt,
-            );
-            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+          const workflowHash = requireInvariantValue(
+            assembled.value.view.workflow.graphHash,
+            'compiled workflow hash is absent',
+          );
+          const semanticHash = requireInvariantValue(
+            assembled.value.view.workflow.semanticHash,
+            'semantic workflow provenance is absent from the compiled candidate',
+          );
+          const compilerVersion = requireInvariantValue(
+            assembled.value.view.workflow.compilerVersion,
+            'semantic workflow provenance is absent from the compiled candidate',
+          );
+          const parsedGraph = CompiledWorkflowSchema.safeParse(assembled.value.view.workflow.graph);
+          if (!parsedGraph.success) {
+            throwInternalDeliverPrInvariant('compiled workflow graph is corrupt');
           }
-          const graph = CompiledWorkflowSchema.safeParse(assembled.value.view.workflow.graph);
-          if (!graph.success) {
-            const failed = this.store.fail(
-              planning,
-              { kind: 'invalid_planner_output', issues: ['Compiled workflow graph is corrupt.'] },
-              result.value.receipt,
-            );
-            return failed.ok ? failed : err({ kind: 'store', error: failed.error });
-          }
+          const graph = requireInvariantValue(
+            parsedGraph.data,
+            'compiled workflow graph is corrupt',
+          );
           const blockByReference = new Map(
             planningInput.blocks.map((block) => [block.reference, block] as const),
           );
-          const phaseIssues = graph.data.metadata.references.stepTypes.flatMap((reference) => {
+          const phaseIssues = graph.metadata.references.stepTypes.flatMap((reference) => {
             const block = blockByReference.get(reference);
             return block?.availableDuring.includes('execution') === true
               ? []
               : [`Block ${reference} is not available during execution.`];
           });
           if (phaseIssues.length > 0) {
-            if (planning.validationRevision >= 2) {
-              const failed = this.store.fail(
-                planning,
-                { kind: 'invalid_planner_output', issues: phaseIssues },
-                result.value.receipt,
-              );
-              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
-            }
-            const rejected = this.store.recordValidationRejection(
-              planning,
-              phaseIssues,
-              result.value.decision,
+            throwInternalDeliverPrInvariant(phaseIssues.join('; '));
+          }
+          const semanticSource = SemanticWorkflowSourceSchema.safeParse(
+            assembled.value.view.workflow.semanticSource,
+          );
+          if (!semanticSource.success) {
+            throwInternalDeliverPrInvariant(
+              'semantic workflow source is absent from the compiled candidate',
             );
-            if (!rejected.ok) return err({ kind: 'store', error: rejected.error });
-            planning = rejected.value;
-            continue;
           }
           const checkpointed = this.store.recordValidatedCandidate(planning, {
             decision: result.value.decision,

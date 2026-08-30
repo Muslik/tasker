@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   createWorkflowProposalFromAnalyzerOutput,
   planWorkflowProposal,
+  type ReadyImplementationPlanningDecision,
   type PlanningTaskSnapshot,
   type PlanningFailure,
   type WorkflowProposalArtifact,
@@ -11,7 +12,12 @@ import {
   type WorkflowGenerationSubject,
 } from '../planning/index.js';
 import type { WorkflowAnalyzerFailure, WorkflowAnalyzerReceipt } from '../providers/index.js';
-import { JsonValueSchema, type JsonValue, type ValidationReport } from '../workflow/index.js';
+import {
+  JsonValueSchema,
+  type JsonValue,
+  type SemanticWorkflowSource,
+  type ValidationReport,
+} from '../workflow/index.js';
 import {
   PlanningTaskSummarySchema,
   OPERATOR_VIEW_SCHEMA_VERSION,
@@ -67,6 +73,10 @@ export type OperatorServiceError =
 interface BuiltView {
   readonly artifacts: OperatorWorkflowArtifacts;
   readonly view: WorkflowView;
+}
+
+interface MaterializedImplementationPlanScaffold {
+  readonly source: SemanticWorkflowSource;
 }
 
 const isJsonRecord = (value: JsonValue): value is Readonly<Record<string, JsonValue>> =>
@@ -491,26 +501,38 @@ export class OperatorWorkflowService {
 
   public assembleFromImplementationPlanAtOperation(
     task: PlanningTaskSnapshot,
-    output: WorkflowAnalyzerOutput,
+    decision: ReadyImplementationPlanningDecision,
+    scaffold: MaterializedImplementationPlanScaffold,
     operationId: string,
   ): Outcome<WorkflowResponse, OperatorServiceError> {
     const completed = this.readPlanningOperation(task.reference, operationId);
     if (!completed.ok) return completed;
     if (completed.value !== null) return ok(completed.value);
 
-    const proposal = createWorkflowProposalFromAnalyzerOutput(
-      task,
-      'implementation-planner@3',
-      output,
-    );
+    const proposal = createWorkflowProposalFromAnalyzerOutput(task, 'implementation-planner@4', {
+      assemblyDecisions: [
+        {
+          id: 'deterministic-deliver-pr-scaffold',
+          title: 'Deterministic deliver-pr scaffold',
+          source: decision.archetype,
+          reason: decision.rationale,
+          effect: decision.rationale,
+        },
+      ],
+      source: scaffold.source,
+      verificationPlan: decision.verification,
+    });
     if (!proposal.ok) {
-      return err({
-        kind: 'planner_contract_failure',
-        stage: 'proposal',
-      });
+      throw new Error(
+        `Internal deliver-pr scaffold invariant violated: ${proposal.error.issues.map(({ message }) => message).join('; ')}`,
+      );
     }
 
-    return this.persistPlanning(task, planWorkflowProposal(proposal.value), operationId);
+    return this.persistPlanning(
+      task,
+      planWorkflowProposal(proposal.value, { internalInvariant: 'deliver-pr scaffold' }),
+      operationId,
+    );
   }
 
   public reviseFromAnalyzerOutputForTask(

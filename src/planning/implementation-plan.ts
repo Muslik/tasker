@@ -1,9 +1,10 @@
 import { z } from 'zod';
 
+import { DeliverPrArchetypeSchema, DeliverPrSegmentsSchema } from '../workflow/archetypes/index.js';
 import { JsonValueSchema, NodeIdSchema } from '../workflow/schema.js';
-import type { SemanticNodeSource } from '../workflow/semantic-schema.js';
+import type { SemanticNodeSource, SemanticWorkflowSource } from '../workflow/semantic-schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
-import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
+import { VerificationPlanSchema } from './workflow-proposal-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import { BlockDefinitionSchema } from '../blocks/contracts.js';
 import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
@@ -120,14 +121,6 @@ export const PlanningClarificationAnswerCommandSchema = z
   })
   .strict();
 
-export const ImplementationPlanFollowUpSchema = z
-  .object({
-    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
-    title: z.string().min(1).max(200),
-    reason: z.string().min(1).max(2_000),
-  })
-  .strict();
-
 export const PrePlanInvestigationStepSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
@@ -176,16 +169,19 @@ export const ReadyImplementationPlanningDecisionSchema = z
     status: z.literal('ready'),
     executionStrategy: TaskExecutionStrategySchema,
     plan: ImplementationPlanSchema,
-    followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
-    workflow: WorkflowAnalyzerOutputSchema,
+    archetype: DeliverPrArchetypeSchema,
+    segments: DeliverPrSegmentsSchema,
+    verification: VerificationPlanSchema,
+    rationale: z.string().min(1).max(1_000),
   })
   .strict();
 
 export const validateAcceptanceVerificationLinks = (
   decision: z.infer<typeof ReadyImplementationPlanningDecisionSchema>,
+  workflowSource: SemanticWorkflowSource,
 ): readonly string[] => {
   const criterionIds = new Set<string>();
-  const stepIds = workflowStepIds(decision.workflow.source.root);
+  const stepIds = workflowStepIds(workflowSource.root);
   const issues: string[] = [];
   decision.plan.acceptanceCriteria.forEach((criterion) => {
     if (criterionIds.has(criterion.id)) {

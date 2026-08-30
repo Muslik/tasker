@@ -140,26 +140,31 @@ describe('file-backed harness pack', () => {
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  it('teaches the implementation planner the authoritative workflow source grammar', () => {
+  it('teaches the implementation planner the Phase 2a archetype slot contract', () => {
     const prompt = loadHarnessPack(join(process.cwd(), 'harness')).prompts.implementationPlanner;
 
-    expect(prompt.content).toContain('{"kind":"sequence","id":"...","children":[node,...]}');
-    expect(prompt.content).toContain(
-      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","body":sequence}',
-    );
-    expect(prompt.content).toContain(
-      '{"kind":"step","id":"...","uses":"registered.step@version","with":{}}',
-    );
-    expect(prompt.content).toContain('Never emit branch, wait, gate, finalize');
-    expect(prompt.content).toContain('`code.implement`, `code.repair`, `ci.repair`');
+    expect(prompt.content).toContain('Tasker owns workflow topology.');
+    expect(prompt.content).toContain('`archetype` must be `deliver-pr`');
+    expect(prompt.content).toContain('`segments` is a closed unique array.');
+    expect(prompt.content).toContain('`dependency_await`');
+    expect(prompt.content).toContain('`translations`');
+    expect(prompt.content).toContain('`verify-change`');
+    expect(prompt.content).toContain('taskSnapshot.dependencyDeclarations');
     expect(prompt.content).toContain('Every acceptance criterion has a unique kebab-case');
     expect(prompt.content).toContain('`workflowStepIds`');
     expect(prompt.content).toContain('do not add a generic test-materialization step');
     expect(prompt.content).toContain('typed JSON values, not');
+    expect(prompt.content).not.toContain('"followUps"');
+    expect(prompt.content).not.toContain('"workflow"');
     expect(prompt.content).not.toContain('decisionJson');
     expect(prompt.content).not.toContain('evidenceRequestsJson');
-    expect(prompt.content).not.toContain('"checkBefore"');
-    expect(prompt.content).not.toContain('"exhaustedWait"');
+    expect(prompt.content).not.toContain('{"kind":"sequence","id":"...","children":[node,...]}');
+    expect(prompt.content).not.toContain(
+      '{"kind":"bounded_loop","id":"...","maxAttempts":3,"until":"registered.predicate@version","body":sequence}',
+    );
+    expect(prompt.content).not.toContain(
+      '{"kind":"step","id":"...","uses":"registered.step@version","with":{}}',
+    );
   });
 
   it('rejects obsolete step manifests instead of upcasting them', async () => {
@@ -214,7 +219,7 @@ describe('file-backed harness pack', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'quality-boundaries',
-          version: '3',
+          version: '4',
         }),
         expect.objectContaining({
           id: 'review-feedback',

@@ -5,23 +5,13 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 import { renderPromptTemplate, type ResolvedExecutionProfile } from '../harness/index.js';
-import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
 import {
-  ImplementationPlanFollowUpSchema,
-  ImplementationPlanSchema,
   ImplementationPlannerContextSchema,
   ImplementationPlanningDecisionSchema,
-  PlanningQuestionSchema,
-  PrePlanInvestigationRequestSchema,
   type ImplementationPlannerContext,
   type ImplementationPlanningDecision,
   type PlanningStrategy,
 } from '../planning/implementation-plan.js';
-import {
-  VerificationPlanSchema,
-  WorkflowAssemblyDecisionSchema,
-} from '../planning/workflow-proposal-contracts.js';
-import { SemanticWorkflowSourceSchema } from '../workflow/index.js';
 import {
   PlanningEvidenceRequestSchema,
   type PlanningEvidenceRequest,
@@ -56,41 +46,9 @@ import {
 } from './contracts.js';
 import { estimateApiCost } from './api-cost.js';
 
-const ProviderWorkflowAnalyzerOutputSchema = z
-  .object({
-    assemblyDecisions: z.array(WorkflowAssemblyDecisionSchema).min(1),
-    source: SemanticWorkflowSourceSchema,
-    verificationPlan: VerificationPlanSchema,
-  })
-  .strict();
-
-const ProviderImplementationPlanningDecisionSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('ready'),
-      executionStrategy: TaskExecutionStrategySchema,
-      plan: ImplementationPlanSchema,
-      followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
-      workflow: ProviderWorkflowAnalyzerOutputSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('needs_clarification'),
-      questions: z.array(PlanningQuestionSchema).min(1).max(10),
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('investigation_required'),
-      request: PrePlanInvestigationRequestSchema,
-    })
-    .strict(),
-]);
-
 const ImplementationPlannerProviderOutputSchema = z
   .object({
-    decision: ProviderImplementationPlanningDecisionSchema.nullable(),
+    decision: ImplementationPlanningDecisionSchema.nullable(),
     evidenceRequests: z.array(PlanningEvidenceRequestSchema).max(10),
   })
   .strict();
@@ -236,7 +194,7 @@ const buildReceipt = (
   ImplementationPlannerReceiptSchema.parse({
     status: 'completed',
     provider: profile.provider === 'codex' ? 'codex_cli' : 'claude_cli',
-    plannerVersion: 'implementation-planner@3',
+    plannerVersion: 'implementation-planner@4',
     profile: profile.name,
     profileSha256: profile.configurationSha256,
     cliVersion,

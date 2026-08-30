@@ -266,7 +266,7 @@ describe('implementation planning recovery', () => {
                   receipt: {
                     status: 'completed',
                     provider: 'codex_cli',
-                    plannerVersion: 'implementation-planner@3',
+                    plannerVersion: 'implementation-planner@4',
                     profile: 'test-planner',
                     profileSha256: '0'.repeat(64),
                     cliVersion: 'test@1',
@@ -528,7 +528,7 @@ describe('implementation planning recovery', () => {
     );
   });
 
-  it('feeds deterministic validator errors and the rejected candidate back to the planner', async () => {
+  it('feeds deterministic slot errors and the rejected candidate back to the planner', async () => {
     await withPlanningFixture(
       'tasker-plan-validator-loop-',
       async ({ directory, clock, ledger }) => {
@@ -542,29 +542,11 @@ describe('implementation planning recovery', () => {
             const base = await fallback.plan(request);
             if (!base.ok || base.value.decision?.status !== 'ready') return base;
             if (calls === 1) {
-              const source = base.value.decision.workflow.source;
               return ok({
                 ...base.value,
                 decision: {
                   ...base.value.decision,
-                  workflow: {
-                    ...base.value.decision.workflow,
-                    source: {
-                      ...source,
-                      root: {
-                        ...source.root,
-                        children: [
-                          {
-                            kind: 'step',
-                            id: 'unknown-step',
-                            uses: 'unknown.step@1',
-                            with: {},
-                          },
-                          ...source.root.children,
-                        ],
-                      },
-                    },
-                  },
+                  segments: ['translations'],
                 },
               });
             }
@@ -586,7 +568,9 @@ describe('implementation planning recovery', () => {
           ok: true,
           value: { status: 'ready', validationRevision: 1 },
         });
-        expect(feedback.join('\n')).toContain('unknown.step@1');
+        expect(feedback).toContain(
+          'Segment translations is unavailable in the frozen block catalog.',
+        );
         expect(previousStatus).toBe('ready');
         expect(calls).toBe(2);
         expect(
@@ -622,33 +606,15 @@ describe('implementation planning recovery', () => {
               inputEvidenceArtifactIds: request.inputEvidenceArtifactIds,
             });
             const base = await fallback.plan(request);
-            if (!base.ok || base.value.decision?.status !== 'ready' || invocations.length !== 1) {
+            if (!base.ok || invocations.length !== 1) {
               return base;
             }
-            const source = base.value.decision.workflow.source;
-            return ok({
-              ...base.value,
-              decision: {
-                ...base.value.decision,
-                workflow: {
-                  ...base.value.decision.workflow,
-                  source: {
-                    ...source,
-                    root: {
-                      ...source.root,
-                      children: [
-                        {
-                          kind: 'step',
-                          id: 'unknown-step',
-                          uses: 'unknown.step@1',
-                          with: {},
-                        },
-                        ...source.root.children,
-                      ],
-                    },
-                  },
-                },
-              },
+            return err({
+              kind: 'invalid_planner_output',
+              issues: [
+                'decision.segments.0: Invalid option: expected one of "dependency_await"|"translations"',
+              ],
+              receipt: base.value.receipt,
             });
           },
         });
@@ -719,32 +685,14 @@ describe('implementation planning recovery', () => {
         const fixture = planningFixture(ledger, clock, directory, {
           plan: async (request) => {
             const base = await fallback.plan(request);
-            if (!base.ok || base.value.decision?.status !== 'ready') return base;
+            if (!base.ok) return base;
             if (request.operationId === firstCommand) {
-              const source = base.value.decision.workflow.source;
-              return ok({
-                ...base.value,
-                decision: {
-                  ...base.value.decision,
-                  workflow: {
-                    ...base.value.decision.workflow,
-                    source: {
-                      ...source,
-                      root: {
-                        ...source.root,
-                        children: [
-                          {
-                            kind: 'step',
-                            id: 'unknown-step',
-                            uses: 'unknown.step@1',
-                            with: {},
-                          },
-                          ...source.root.children,
-                        ],
-                      },
-                    },
-                  },
-                },
+              return err({
+                kind: 'invalid_planner_output',
+                issues: [
+                  'decision.segments.0: Invalid option: expected one of "dependency_await"|"translations"',
+                ],
+                receipt: base.value.receipt,
               });
             }
             inheritedFeedback = request.context.validationFeedback;
@@ -781,11 +729,13 @@ describe('implementation planning recovery', () => {
         );
 
         expect(revised).toMatchObject({ ok: true, value: { status: 'ready', attempt: 2 } });
-        expect(inheritedFeedback.join('\n')).toContain('unknown.step@1');
-        expect(inheritedFeedback.filter((issue) => issue.includes('unknown.step@1'))).toHaveLength(
-          1,
+        expect(inheritedFeedback).toContain(
+          'decision.segments.0: Invalid option: expected one of "dependency_await"|"translations"',
         );
-        expect(inheritedDecision).toBe('ready');
+        expect(
+          inheritedFeedback.filter((issue) => issue.includes('decision.segments.0')),
+        ).toHaveLength(1);
+        expect(inheritedDecision).toBeNull();
       },
     );
   });
