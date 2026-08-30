@@ -5,6 +5,7 @@ import type { LedgerRepository } from '../ledger/repository.js';
 import type { JsonValue } from '../ledger/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import { canonicalJson } from '../shared/json.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 import {
   DependencyDeclarationSchema,
@@ -31,15 +32,6 @@ const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 
 const issues = (error: ZodError): readonly string[] =>
   error.issues.map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`);
-
-const canonicalJson = (value: unknown): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-    .join(',')}}`;
-};
 
 const normalizePackages = (packages: readonly string[]): string[] => [...packages].sort();
 

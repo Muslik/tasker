@@ -19,14 +19,10 @@ const childrenFor = (node: CompiledWorkflowNode): readonly CompiledWorkflowNode[
   switch (node.kind) {
     case 'sequence':
       return node.children;
-    case 'branch':
-      return [node.then, node.otherwise];
     case 'bounded_loop':
       return [node.body];
     case 'finalize':
-    case 'gate':
     case 'step':
-    case 'wait':
       return [];
   }
 };
@@ -39,17 +35,8 @@ const completedNodeStates = (
   const visit = (node: CompiledWorkflowNode): boolean => {
     const childRan = childrenFor(node).map(visit).some(Boolean);
     const ran = node.kind === 'step' ? (blockRuns[node.id] ?? 0) > 0 : childRan;
-    states[node.id] =
-      node.kind === 'step'
-        ? ran
-          ? 'succeeded'
-          : 'skipped'
-        : node.kind === 'branch'
-          ? ran
-            ? 'succeeded'
-            : 'skipped'
-          : 'succeeded';
-    return ran || node.kind === 'wait' || node.kind === 'gate' || node.kind === 'finalize';
+    states[node.id] = node.kind === 'step' ? (ran ? 'succeeded' : 'skipped') : 'succeeded';
+    return ran || node.kind === 'finalize';
   };
   visit(root);
   return states;

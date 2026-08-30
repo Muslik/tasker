@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 
 import { z } from 'zod';
 
+import { canonicalJson } from '../shared/json.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { compileWorkflow, type WorkflowCompilerContracts } from './compiler.js';
 import {
   CompiledWorkflowArtifactSchema,
   JsonValueSchema,
   ValidationReportSchema,
-  type JsonValue,
   type ValidationReport,
   type WorkflowNodeSource,
   type WorkflowSource,
@@ -40,19 +40,6 @@ export interface CompileSemanticWorkflowOptions {
   readonly loopExhaustedWait: string;
   readonly terminalOutcome?: string;
 }
-
-const canonicalizeJson = (value: JsonValue): JsonValue => {
-  if (Array.isArray(value)) return value.map(canonicalizeJson);
-  if (value !== null && typeof value === 'object') {
-    const canonical = Object.create(null) as Record<string, JsonValue>;
-    for (const key of Object.keys(value).sort((left, right) => left.localeCompare(right))) {
-      const child = value[key];
-      if (child !== undefined) canonical[key] = canonicalizeJson(child);
-    }
-    return canonical;
-  }
-  return value;
-};
 
 const validationReportFor = (source: unknown, issues: z.core.$ZodIssue[]): ValidationReport => {
   const workflowId =
@@ -101,7 +88,6 @@ const lowerNode = (node: SemanticNodeSource, loopExhaustedWait: string): Workflo
         id: node.id,
         maxAttempts: node.maxAttempts,
         until: node.until,
-        checkBefore: false,
         exhaustedWait: loopExhaustedWait,
         body: lowerNode(node.body, loopExhaustedWait),
       };
@@ -131,10 +117,8 @@ export const compileSemanticWorkflow = (
   const parsed = SemanticWorkflowSourceSchema.safeParse(options.source);
   if (!parsed.success) return err(validationReportFor(options.source, parsed.error.issues));
 
-  const canonicalSource = canonicalizeJson(
-    JsonValueSchema.parse(parsed.data),
-  ) as unknown as SemanticWorkflowSource;
-  const semanticCanonicalJson = JSON.stringify(canonicalSource);
+  const canonicalSource = JsonValueSchema.parse(parsed.data) as unknown as SemanticWorkflowSource;
+  const semanticCanonicalJson = canonicalJson(canonicalSource);
   const semanticHash = createHash('sha256').update(semanticCanonicalJson).digest('hex');
   const compiled = compileWorkflow({
     contracts: options.contracts,

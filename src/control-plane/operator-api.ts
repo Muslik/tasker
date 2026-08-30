@@ -408,8 +408,6 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
   });
 
   api.get('/api/operator/tasks', async (_request, reply) => {
-    const result = options.service.listOperatorTasks();
-    if (!result.ok) return sendServiceError(reply, result.error);
     const withRunState = async (task: OperatorTaskSummary): Promise<OperatorTaskSummary> => {
       const withPlanning = options.implementationPlanning?.decorateTask(task) ?? task;
       const retrospective = options.retrospectives?.readLatest(task.id);
@@ -434,14 +432,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       return withExecution;
     };
     if (options.jiraIssueService === undefined) {
-      return reply.send({
-        ...result.value,
-        tasks: orderOperatorTasks(
-          (await Promise.all(result.value.tasks.map(withRunState))).filter(
-            (task) => options.taskPresence?.isRemoved(task.id) !== true,
-          ),
-        ),
-      });
+      return reply.send({ tasks: [], streamCursor: 0 });
     }
     const jiraTasks = options.jiraIssueService.listOperatorTasks();
     if (!jiraTasks.ok) return sendJiraServiceError(reply, jiraTasks.error);
@@ -451,11 +442,9 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     }
     return reply.send({
       tasks: orderOperatorTasks(
-        [...hydratedJiraTasks, ...(await Promise.all(result.value.tasks.map(withRunState)))].filter(
-          (task) => options.taskPresence?.isRemoved(task.id) !== true,
-        ),
+        hydratedJiraTasks.filter((task) => options.taskPresence?.isRemoved(task.id) !== true),
       ),
-      streamCursor: result.value.streamCursor,
+      streamCursor: 0,
     });
   });
 
@@ -524,15 +513,13 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     const executionWorkflowId = lifecycle?.execution?.workflowId ?? null;
 
     if (params.data.taskReference.startsWith('jira:') && options.jiraIssueService !== undefined) {
-      const jiraResult = options.jiraIssueService.readActivity(params.data.taskReference);
-      if (!jiraResult.ok) return sendJiraServiceError(reply, jiraResult.error);
       const workflowResult = options.service.readActivity(
         params.data.taskReference,
         planningEpisodeId,
       );
       if (!workflowResult.ok) return sendServiceError(reply, workflowResult.error);
       const entries = projectOperatorActivity({
-        jira: jiraResult.value.entries,
+        jira: [],
         workflow: workflowResult.value.entries,
         implementationPlanning:
           planningEpisodeId === null
@@ -550,7 +537,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
           providerSession:
             workflowResult.value.providerSession.status === 'completed'
               ? workflowResult.value.providerSession
-              : jiraResult.value.providerSession,
+              : { status: 'not_started', reason: 'planning_only' },
           entries,
         }),
       );
@@ -1689,30 +1676,6 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       )
       .type('application/json; charset=utf-8')
       .send(result.value.view.workflow.graph);
-  });
-
-  api.get('/api/graphs/:taskReference', async (request, reply) => {
-    const params = TaskReferenceParamsSchema.safeParse(request.params);
-    if (!params.success) {
-      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
-    }
-
-    const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
-    if (reply.sent) return reply;
-    const operationId =
-      lifecycle?.bootstrap.planning?.status === 'ready'
-        ? lifecycle.bootstrap.planning.workflowOperationId
-        : null;
-    const result =
-      operationId === null
-        ? { ok: true as const, value: null }
-        : options.service.readPlanningOperation(params.data.taskReference, operationId);
-    if (!result.ok) return sendServiceError(reply, result.error);
-    if (result.value === null) {
-      return reply.code(404).send(apiError('workflow_not_found', 'Generate this workflow first'));
-    }
-
-    return reply.send(result.value.view.workflow);
   });
 
   if (options.cockpitDirectory !== undefined) {

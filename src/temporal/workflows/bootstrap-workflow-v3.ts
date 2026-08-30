@@ -10,6 +10,7 @@ import {
 } from '@temporalio/workflow';
 
 import type { JsonValue } from '../../workflow/index.js';
+import { isRecord } from '../../shared/is-record.js';
 import type {
   BootstrapDraftState,
   BootstrapContextState,
@@ -58,9 +59,6 @@ type AvailableBootstrapState = Extract<
   BootstrapWorkflowPublicState,
   { readonly status: 'running' | 'waiting' | 'completed' }
 >;
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const trackerStatusUpdatesFrom = (settings: unknown): TaskRunSettings['trackerStatusUpdates'] =>
   isRecord(settings) && settings.trackerStatusUpdates === 'disabled' ? 'disabled' : 'enabled';

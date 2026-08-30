@@ -1,4 +1,5 @@
 import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
+import { isRecord } from '../shared/is-record.js';
 
 export type PlanningAgentEvent =
   | {
@@ -39,9 +40,6 @@ type MutableAttempt = {
   usage: PlanningAgentAttempt['usage'];
   stderr: string;
 };
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const stringField = (value: Readonly<Record<string, unknown>>, key: string): string | null =>
   typeof value[key] === 'string' ? value[key] : null;

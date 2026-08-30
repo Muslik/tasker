@@ -666,7 +666,6 @@ describe('operator workflow projection', () => {
             activityDelivery: { kind: 'read_only' },
             with: { objective: 'Verify', repository: 'front-avia', taskId: 'AVIA-1' },
           },
-          { kind: 'wait', id: 'review', for: 'code_review@1' },
         ],
       },
     });
@@ -746,8 +745,8 @@ describe('operator workflow projection', () => {
       blockRun: 1,
       transcript: { operationId: 'implement-fix' },
     });
-    expect(executionStages.map(({ label }) => label)).toEqual(['Development', 'Review']);
-    expect(executionStages.map(({ steps }) => steps.length)).toEqual([1, 0]);
+    expect(executionStages.map(({ label }) => label)).toEqual(['Development']);
+    expect(executionStages.map(({ steps }) => steps.length)).toEqual([1]);
   });
 
   it('keeps repair loops visible inside their surrounding operator phase', () => {
@@ -789,7 +788,6 @@ describe('operator workflow projection', () => {
             id: 'repair-validation',
             maxAttempts: 3,
             until: 'verification.accepted@1',
-            checkBefore: true,
             exhaustedWait: 'operator_guidance@1',
             body: {
               kind: 'sequence',

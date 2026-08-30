@@ -1,7 +1,6 @@
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
-  ConfigureTaskDependencyCommandSchema,
   DependencyAvailableCommandSchema,
   DependencyDiscoveryCommandSchema,
   ExpectedRunCommandSchema,
@@ -12,7 +11,6 @@ import {
   WorkflowChangeReviewCommandSchema,
   ExecutionRunViewSchema,
   OperatorActivityResponseSchema,
-  OperatorExecutionAttemptSchema,
   OperatorRunLogResponseSchema,
   OperatorWorkflowProjectionSchema,
   OperatorStreamEventSchema,
@@ -23,12 +21,10 @@ import type {
   RunStartCommand,
   RestartRunCommand,
   ResumeRunCommand,
-  ConfigureTaskDependencyCommand,
   DependencyAvailableCommand,
   DependencyDiscoveryCommand,
   WorkflowChangeReviewCommand,
   OperatorActivityResponse,
-  OperatorExecutionAttempt,
   OperatorRunLogResponse,
   OperatorStreamEvent,
   OperatorTaskListResponse,
@@ -39,10 +35,6 @@ import type {
   ExpectedRunCommand,
   PlanningClarificationSubmission,
 } from '../control-plane/operator-contracts.js';
-import {
-  DependencyDeclarationSchema,
-  type DependencyDeclaration,
-} from '../control-plane/dependency-contracts.js';
 import {
   PlanReviewCommandSchema,
   PlanReviewHistoryResponseSchema,
@@ -187,22 +179,6 @@ export const loadOperatorWorkflowProjection = async (
   return parsed.data;
 };
 
-export const loadOperatorExecutionAttempt = async (
-  taskReference: string,
-  nodeId: string,
-  blockRun: number,
-): Promise<OperatorExecutionAttempt> => {
-  const result = await fetchJson(
-    `/api/operator/tasks/${encodeURIComponent(taskReference)}/execution-attempts/${encodeURIComponent(nodeId)}/${encodeURIComponent(String(blockRun))}`,
-  );
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = OperatorExecutionAttemptSchema.safeParse(result.body);
-  if (!parsed.success) {
-    throw new Error('Operator execution attempt does not match the cockpit contract');
-  }
-  return parsed.data;
-};
-
 export const loadOperatorRunLog = async (
   taskReference: string,
 ): Promise<OperatorRunLogResponse | null> => {
@@ -295,14 +271,6 @@ export const generateWorkflow = async (
   return parsed.data;
 };
 
-export const loadExecutionRun = async (taskReference: string): Promise<ExecutionRunView> => {
-  const result = await fetchJson(`/api/workflows/${encodeURIComponent(taskReference)}/run`);
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = ExecutionRunViewSchema.safeParse(result.body);
-  if (!parsed.success) throw new Error('Execution run does not match the cockpit contract');
-  return parsed.data;
-};
-
 export const resumeWorkflow = async (
   taskReference: string,
   commandInput: ResumeRunCommand,
@@ -316,27 +284,6 @@ export const resumeWorkflow = async (
   if (!result.response.ok) throw failureFrom(result);
   const parsed = ExecutionRunViewSchema.safeParse(result.body);
   if (!parsed.success) throw new Error('Resume response does not match the cockpit contract');
-  return parsed.data;
-};
-
-export const configureTaskDependency = async (
-  taskReference: string,
-  commandInput: ConfigureTaskDependencyCommand,
-): Promise<DependencyDeclaration> => {
-  const command = ConfigureTaskDependencyCommandSchema.parse(commandInput);
-  const result = await fetchJson(
-    `/api/operator/tasks/${encodeURIComponent(taskReference)}/dependencies/configure`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(command),
-    },
-  );
-  if (!result.response.ok) throw failureFrom(result);
-  const parsed = DependencyDeclarationSchema.safeParse(result.body);
-  if (!parsed.success) {
-    throw new Error('Dependency configuration response does not match the cockpit contract');
-  }
   return parsed.data;
 };
 

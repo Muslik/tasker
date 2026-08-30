@@ -10,14 +10,7 @@ import {
   createHarnessWorkflowContracts,
   getHarnessStepDefinition,
 } from '../../../src/planning/index.js';
-import {
-  compileWorkflow,
-  defineWorkflow,
-  finalize,
-  sequence,
-  step,
-  type StepTypeContract,
-} from '../../../src/workflow/index.js';
+import { compileWorkflow, type StepTypeContract } from '../../../src/workflow/index.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -79,17 +72,23 @@ describe('file-backed harness pack', () => {
 
     const contracts = createHarnessWorkflowContracts([...pack.steps, customStep]);
     const result = compileWorkflow({
-      source: defineWorkflow({
+      source: {
         id: 'custom-step-workflow',
         version: 1,
-        root: sequence('delivery', [
-          step('custom', {
-            uses: 'company.custom@1',
-            with: { objective: 'Produce report', repository: 'company/repo', taskId: 'TASK-1' },
-          }),
-          finalize('done', { outcome: 'accepted' }),
-        ]),
-      }),
+        root: {
+          kind: 'sequence',
+          id: 'delivery',
+          children: [
+            {
+              kind: 'step',
+              id: 'custom',
+              uses: 'company.custom@1',
+              with: { objective: 'Produce report', repository: 'company/repo', taskId: 'TASK-1' },
+            },
+            { kind: 'finalize', id: 'done', outcome: 'accepted' },
+          ],
+        },
+      },
       contracts,
     });
 

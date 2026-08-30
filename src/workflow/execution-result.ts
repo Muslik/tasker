@@ -61,24 +61,8 @@ export const WorkflowChangeRequestSchema = z
   })
   .strict();
 
-export const StepExecutionResultSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('completed'),
-      outputArtifactIds: z.array(nonEmptyString),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('workflow_change_required'),
-      request: WorkflowChangeRequestSchema,
-    })
-    .strict(),
-]);
-
 export type WorkflowScopeChange = z.infer<typeof WorkflowScopeChangeSchema>;
 export type WorkflowChangeRequest = z.infer<typeof WorkflowChangeRequestSchema>;
-export type StepExecutionResult = z.infer<typeof StepExecutionResultSchema>;
 
 export type WorkflowChangeRequestFailure =
   | {

@@ -20,7 +20,7 @@ interface PolicyTask {
 
 interface ExecutionMarker {
   readonly id: string;
-  readonly kind: 'gate' | 'predicate' | 'step' | 'wait';
+  readonly kind: 'predicate' | 'step';
   readonly reference: string;
   readonly input?: JsonValue;
 }
@@ -35,23 +35,11 @@ const executionPaths = (node: CompiledWorkflowNode): readonly (readonly Executio
   switch (node.kind) {
     case 'step':
       return [[{ id: node.id, kind: 'step', reference: node.uses, input: node.with }]];
-    case 'wait':
-      return [[{ id: node.id, kind: 'wait', reference: node.for }]];
-    case 'gate':
-      return [[{ id: node.id, kind: 'gate', reference: node.resumeWhen }]];
     case 'sequence':
       return node.children.reduce<readonly (readonly ExecutionMarker[])[]>(
         (paths, child) => concatenatePaths(paths, executionPaths(child)),
         [[]],
       );
-    case 'branch':
-      return [
-        ...executionPaths(node.then).map((path) => [
-          { id: `${node.id}:then`, kind: 'predicate' as const, reference: node.when },
-          ...path,
-        ]),
-        ...executionPaths(node.otherwise),
-      ];
     case 'bounded_loop': {
       const completion = {
         id: `${node.id}:until`,
@@ -59,7 +47,7 @@ const executionPaths = (node: CompiledWorkflowNode): readonly (readonly Executio
         reference: node.until,
       };
       const afterIteration = executionPaths(node.body).map((path) => [...path, completion]);
-      return node.checkBefore ? [[completion], ...afterIteration] : afterIteration;
+      return afterIteration;
     }
     case 'finalize':
       return [[]];
@@ -92,38 +80,23 @@ const markerMatches = (marker: ExecutionMarker, required: HarnessPolicyMarker): 
       harnessPolicyStepMarkerMatches(required, marker.reference, marker.input)
     );
   }
-  return marker.kind === required.kind && marker.reference === required.reference;
+  return false;
 };
 
 const compiledStepReferences = (node: CompiledWorkflowNode): ReadonlySet<string> => {
   if (node.kind === 'step') return new Set([node.uses]);
-  if (node.kind === 'wait' || node.kind === 'gate' || node.kind === 'finalize') return new Set();
-  const children =
-    node.kind === 'sequence'
-      ? node.children
-      : node.kind === 'branch'
-        ? [node.then, node.otherwise]
-        : [node.body];
+  if (node.kind === 'finalize') return new Set();
+  const children = node.kind === 'sequence' ? node.children : [node.body];
   return new Set(children.flatMap((child) => [...compiledStepReferences(child)]));
 };
 
 const compiledLoops = (
   node: CompiledWorkflowNode,
 ): readonly Extract<CompiledWorkflowNode, { readonly kind: 'bounded_loop' }>[] => {
-  if (
-    node.kind === 'step' ||
-    node.kind === 'wait' ||
-    node.kind === 'gate' ||
-    node.kind === 'finalize'
-  ) {
+  if (node.kind === 'step' || node.kind === 'finalize') {
     return [];
   }
-  const children =
-    node.kind === 'sequence'
-      ? node.children
-      : node.kind === 'branch'
-        ? [node.then, node.otherwise]
-        : [node.body];
+  const children = node.kind === 'sequence' ? node.children : [node.body];
   return [...(node.kind === 'bounded_loop' ? [node] : []), ...children.flatMap(compiledLoops)];
 };
 
@@ -195,14 +168,9 @@ const validateFeedbackLoops = (
       }
       return;
     }
-    if (node.kind === 'wait' || node.kind === 'gate' || node.kind === 'finalize') return;
+    if (node.kind === 'finalize') return;
     const nextAncestors = node.kind === 'bounded_loop' ? [...ancestors, node] : ancestors;
-    const children =
-      node.kind === 'sequence'
-        ? node.children
-        : node.kind === 'branch'
-          ? [node.then, node.otherwise]
-          : [node.body];
+    const children = node.kind === 'sequence' ? node.children : [node.body];
     for (const child of children) visit(child, nextAncestors);
   };
   visit(root, []);
@@ -223,9 +191,7 @@ const validateRequiredArtifacts = (
           const artifacts =
             candidate.kind === 'step'
               ? HARNESS_WORKFLOW_CONTRACTS.stepTypes.get(candidate.reference)?.artifactContracts
-              : candidate.kind === 'wait'
-                ? HARNESS_WORKFLOW_CONTRACTS.waits.get(candidate.reference)?.artifactContracts
-                : undefined;
+              : undefined;
           return artifacts?.includes(requiredArtifact) === true;
         });
         if (!hasProducer) {

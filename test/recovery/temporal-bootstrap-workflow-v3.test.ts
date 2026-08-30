@@ -212,7 +212,9 @@ describe('Bootstrap Jira admission recovery', () => {
       workflowsPath,
       activities: {
         ...testTemporalActivities,
-        admitTaskExecution: (input) => {
+        admitTaskExecution: (
+          input: Parameters<BootstrapWorkflowActivities['admitTaskExecution']>[0],
+        ) => {
           attempts.push({
             workflowRunId: input.workflowRunId,
             workspaceId: input.workspace.workspaceId,
@@ -231,7 +233,7 @@ describe('Bootstrap Jira admission recovery', () => {
                 },
           );
         },
-      } satisfies BootstrapWorkflowActivities,
+      },
       maxCachedWorkflows: 0,
     });
     const workerRun = worker.run();
@@ -308,7 +310,7 @@ describe('Bootstrap infrastructure failure visibility', () => {
       activities: {
         ...testTemporalActivities,
         prepareTaskWorkspace: () => Promise.reject(new Error(failure)),
-      } satisfies BootstrapWorkflowActivities,
+      },
       maxCachedWorkflows: 0,
     });
     const workerRun = worker.run();

@@ -4,6 +4,7 @@ import type { JsonValue } from '../ledger/types.js';
 import type { Clock } from '../shared/clock.js';
 import type { AgentInvocationUsage } from '../observability/agent-usage.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import { canonicalJson } from '../shared/json.js';
 import { JsonValueSchema } from '../workflow/schema.js';
 import {
   BlockDefinitionSchema,
@@ -36,15 +37,6 @@ export type BlockReceiptStoreError =
   | { readonly kind: 'ledger_conflict' }
   | { readonly kind: 'receipt_conflict'; readonly receiptId: string }
   | { readonly kind: 'receipt_corrupt'; readonly receiptId: string; readonly issues: string[] };
-
-const canonicalJson = (value: unknown): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-    .join(',')}}`;
-};
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 

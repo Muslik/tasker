@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { canonicalJson } from '../shared/json.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { PredicateRegistry, StepTypeRegistry, WaitRegistry } from './contracts.js';
 import type {
@@ -82,32 +83,6 @@ const deepFreeze = <T>(value: T): T => {
     for (const child of Object.values(value as Record<string, unknown>)) {
       deepFreeze(child);
     }
-  }
-
-  return value;
-};
-
-const canonicalizeJson = (value: JsonValue): JsonValue => {
-  if (Array.isArray(value)) {
-    return value.map((item) => canonicalizeJson(item));
-  }
-
-  if (value !== null && typeof value === 'object') {
-    const record = value as Record<string, JsonValue>;
-    // Null-prototype objects preserve literal "__proto__" keys during normalization.
-    const canonical = Object.create(null) as Record<string, JsonValue>;
-
-    for (const key of Object.keys(record).sort((left, right) => left.localeCompare(right))) {
-      const child = record[key];
-
-      if (child === undefined) {
-        continue;
-      }
-
-      canonical[key] = canonicalizeJson(child);
-    }
-
-    return canonical;
   }
 
   return value;
@@ -348,20 +323,9 @@ const normalizeNode = (
         id: node.id,
         uses: node.uses,
         activityDelivery: stepContract?.activityDelivery ?? { kind: 'single_attempt' },
-        with: canonicalizeJson(node.with),
+        with: node.with,
       };
     }
-
-    case 'branch':
-      validatePredicateReference(context, node.when, [...path, 'when']);
-
-      return {
-        kind: 'branch',
-        id: node.id,
-        when: node.when,
-        then: normalizeNode(context, node.then, [...path, 'then']),
-        otherwise: normalizeNode(context, node.otherwise, [...path, 'otherwise']),
-      };
 
     case 'bounded_loop':
       validatePredicateReference(context, node.until, [...path, 'until']);
@@ -385,79 +349,9 @@ const normalizeNode = (
         id: node.id,
         maxAttempts: node.maxAttempts,
         until: node.until,
-        checkBefore: node.checkBefore,
         ...(node.exhaustedWait === undefined ? {} : { exhaustedWait: node.exhaustedWait }),
         body: normalizeNode(context, node.body, [...path, 'body']),
       };
-
-    case 'wait': {
-      const waitContract = validateWaitReference(context, node.for, [...path, 'for']);
-      for (const [caseName, facts] of Object.entries(
-        waitContract?.resolutionMapping?.cases ?? {},
-      )) {
-        for (const reference of Object.keys(facts)) {
-          validatePredicateReference(context, reference, [
-            ...path,
-            'for',
-            'resolutionMapping',
-            'cases',
-            caseName,
-            reference,
-          ]);
-        }
-      }
-
-      if (node.resumeAt !== undefined) {
-        context.resumeTargets.push({
-          nodeId: node.id,
-          path: [...path, 'resumeAt'],
-          target: node.resumeAt,
-        });
-      }
-
-      return {
-        kind: 'wait',
-        id: node.id,
-        for: node.for,
-        ...(waitContract?.resolutionMapping === undefined
-          ? {}
-          : { resolutionMapping: waitContract.resolutionMapping }),
-        ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
-      };
-    }
-
-    case 'gate': {
-      const predicateContract = validatePredicateReference(context, node.resumeWhen, [
-        ...path,
-        'resumeWhen',
-      ]);
-      const predicateInput = node.with ?? {};
-
-      if (predicateContract !== undefined) {
-        const parsedInput = predicateContract.inputSchema.safeParse(predicateInput);
-
-        if (!parsedInput.success) {
-          addIssue(context, {
-            code: 'invalid_predicate_input',
-            message: `Gate "${node.id}" payload does not match "${node.resumeWhen}" predicate schema`,
-            path: [...path, 'with'],
-            details: {
-              reference: node.resumeWhen,
-              issues: (toSchemaIssueDetails(parsedInput.error) as { readonly issues: JsonValue })
-                .issues,
-            },
-          });
-        }
-      }
-
-      return {
-        kind: 'gate',
-        id: node.id,
-        reason: node.reason,
-        resumeWhen: node.resumeWhen,
-        with: canonicalizeJson(predicateInput),
-      };
-    }
 
     case 'finalize':
       return {
@@ -493,34 +387,11 @@ const analyzeTerminalStructure = (
       };
 
     case 'step':
-    case 'wait':
-    case 'gate':
       return {
         allPathsFinalize: false,
         containsFinalize: false,
         mayContinue: true,
       };
-
-    case 'branch': {
-      const thenAnalysis = analyzeTerminalStructure(
-        context,
-        node.then,
-        [...path, 'then'],
-        insideLoopBody,
-      );
-      const otherwiseAnalysis = analyzeTerminalStructure(
-        context,
-        node.otherwise,
-        [...path, 'otherwise'],
-        insideLoopBody,
-      );
-
-      return {
-        allPathsFinalize: thenAnalysis.allPathsFinalize && otherwiseAnalysis.allPathsFinalize,
-        containsFinalize: thenAnalysis.containsFinalize || otherwiseAnalysis.containsFinalize,
-        mayContinue: thenAnalysis.mayContinue || otherwiseAnalysis.mayContinue,
-      };
-    }
 
     case 'bounded_loop': {
       const bodyAnalysis = analyzeTerminalStructure(context, node.body, [...path, 'body'], true);
@@ -643,14 +514,11 @@ const compileValidWorkflow = (
     root,
   };
 
-  const canonicalGraph = canonicalizeJson(
-    graph as unknown as JsonValue,
-  ) as unknown as CompiledWorkflow;
-  const canonicalJson = JSON.stringify(canonicalGraph);
-  const hash = createHash('sha256').update(canonicalJson).digest('hex');
+  const canonicalJsonValue = canonicalJson(graph);
+  const hash = createHash('sha256').update(canonicalJsonValue).digest('hex');
   const artifact = deepFreeze({
-    canonicalJson,
-    graph: deepFreeze(canonicalGraph),
+    canonicalJson: canonicalJsonValue,
+    graph: deepFreeze(graph),
     hash,
     validatorReport: buildValidationReport(source.id, []),
   });
@@ -658,19 +526,6 @@ const compileValidWorkflow = (
   CompiledWorkflowArtifactSchema.parse(artifact);
 
   return ok(deepFreeze(artifact));
-};
-
-export const validateWorkflow = (options: CompileWorkflowOptions): ValidationReport => {
-  const sourceOrReport = validateSource(options.source);
-
-  if (isValidationReport(sourceOrReport)) {
-    return sourceOrReport;
-  }
-
-  const context = createValidationContext(options.contracts);
-  const result = compileValidWorkflow(sourceOrReport, context);
-
-  return result.ok ? result.value.validatorReport : result.error;
 };
 
 export const compileWorkflow = (

@@ -16,6 +16,7 @@ import {
 } from '../planning/index.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import { isRecord } from '../shared/is-record.js';
 import { WorkflowViewSchema, type WorkflowView } from './operator-contracts.js';
 
 export const OPERATOR_WORKFLOW_OPERATION_PROJECTION = 'operator_workflow_by_operation';
@@ -57,9 +58,6 @@ export interface OperatorGenerationSubjectSaveResult {
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 
 const workflowAggregateId = (operationId: string): string => `workflow-operation:${operationId}`;
-
-const isRecord = (value: JsonValue): value is Readonly<Record<string, JsonValue>> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const eventBelongsToTask = (event: EventRecord, taskReference: string): boolean =>
   isRecord(event.payload) && event.payload.taskReference === taskReference;

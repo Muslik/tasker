@@ -23,7 +23,6 @@ import {
   OPERATOR_VIEW_SCHEMA_VERSION,
   OperatorActivityResponseSchema,
   OperatorStreamEventSchema,
-  OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
   WorkflowViewSchema,
   type PlanningTaskSummary,
@@ -286,14 +285,6 @@ export class OperatorWorkflowService {
     private readonly store: OperatorWorkflowStore,
     private readonly clock: Clock,
   ) {}
-
-  public listOperatorTasks(): Outcome<
-    ReturnType<typeof OperatorTaskListResponseSchema.parse>,
-    OperatorServiceError
-  > {
-    const streamCursor = this.store.listEvents().at(-1)?.sequence ?? 0;
-    return ok(OperatorTaskListResponseSchema.parse({ tasks: [], streamCursor }));
-  }
 
   public readActivity(
     taskReference: string,

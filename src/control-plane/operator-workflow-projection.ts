@@ -1,7 +1,7 @@
 import { blockReceiptId, type BlockReceipt, type BlockReceiptStore } from '../blocks/index.js';
 import { processExecutionPlanFor } from '../harness/index.js';
 import type { DependencyDeclaration } from './dependency-declaration.js';
-import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from '../planning/index.js';
+import { getHarnessStepDefinition } from '../planning/index.js';
 import type { RunPlanningSnapshot } from '../planning/run-planning-snapshot.js';
 import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../temporal/index.js';
 import type { PlanningTranscriptView } from './planning-transcript.js';
@@ -95,14 +95,10 @@ const childrenFor = (node: CompiledWorkflowNode): readonly CompiledWorkflowNode[
   switch (node.kind) {
     case 'sequence':
       return node.children;
-    case 'branch':
-      return [node.then, node.otherwise];
     case 'bounded_loop':
       return [node.body];
     case 'finalize':
-    case 'gate':
     case 'step':
-    case 'wait':
       return [];
   }
 };
@@ -266,12 +262,6 @@ const executionStageDescriptor = (
     }
     return definition.block.stage;
   }
-  if (node.kind === 'wait') {
-    const contract = HARNESS_WORKFLOW_CONTRACTS.waits.get(node.for);
-    if (contract === undefined)
-      throw new Error(`Compiled workflow references unregistered wait ${node.for}`);
-    return contract.stage;
-  }
   if (node.kind === 'finalize') return { id: 'complete', label: 'Complete' };
   return null;
 };
@@ -356,16 +346,6 @@ const createExecutionStages = (
             }),
           );
         }
-      } else if (node.kind === 'wait' && showConfigurableStep) {
-        stage.steps.push(
-          OperatorWorkflowStepSchema.parse({
-            kind: 'wait',
-            id: node.id,
-            label: titleCaseIdentifier(node.id),
-            status,
-            reference: node.for,
-          }),
-        );
       }
     }
     for (const child of childrenFor(node)) visit(child);
@@ -591,12 +571,7 @@ export const createOperatorWorkflowProjection = (
       : {
           runtime: currentRuntime,
           nodeId: activeNodeId,
-          reference:
-            executionNode?.kind === 'step'
-              ? executionNode.uses
-              : executionNode?.kind === 'wait'
-                ? executionNode.for
-                : null,
+          reference: executionNode?.kind === 'step' ? executionNode.uses : null,
           status: active.status,
           blockRun:
             execution === null || executionNodeId === null

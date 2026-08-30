@@ -11,16 +11,10 @@ export const collectExecutionNodeIds = (node: CompiledWorkflowNode): readonly st
       case 'sequence':
         for (const child of current.children) visit(child);
         return;
-      case 'branch':
-        visit(current.then);
-        visit(current.otherwise);
-        return;
       case 'bounded_loop':
         visit(current.body);
         return;
       case 'step':
-      case 'wait':
-      case 'gate':
       case 'finalize':
         return;
     }
@@ -31,28 +25,3 @@ export const collectExecutionNodeIds = (node: CompiledWorkflowNode): readonly st
 
 export const createExecutionNodeStates = (node: CompiledWorkflowNode): MutableExecutionNodeStates =>
   Object.fromEntries(collectExecutionNodeIds(node).map((nodeId) => [nodeId, 'planned' as const]));
-
-export const setExecutionSubtreeStatus = (
-  node: CompiledWorkflowNode,
-  status: ExecutionNodeStatus,
-  nodeStates: MutableExecutionNodeStates,
-): void => {
-  nodeStates[node.id] = status;
-  switch (node.kind) {
-    case 'sequence':
-      for (const child of node.children) setExecutionSubtreeStatus(child, status, nodeStates);
-      return;
-    case 'branch':
-      setExecutionSubtreeStatus(node.then, status, nodeStates);
-      setExecutionSubtreeStatus(node.otherwise, status, nodeStates);
-      return;
-    case 'bounded_loop':
-      setExecutionSubtreeStatus(node.body, status, nodeStates);
-      return;
-    case 'step':
-    case 'wait':
-    case 'gate':
-    case 'finalize':
-      return;
-  }
-};

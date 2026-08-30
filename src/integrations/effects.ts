@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { LedgerRepository } from '../ledger/repository.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import { canonicalJson } from '../shared/json.js';
 import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
 
 const ExternalEffectIdentitySchema = z
@@ -49,15 +50,6 @@ const receiptArtifactIdFor = (aggregateId: string): string => `${aggregateId}:re
 
 const issues = (error: z.ZodError): readonly string[] =>
   error.issues.map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`);
-
-const canonicalJson = (value: JsonValue): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-    .join(',')}}`;
-};
 
 const sameJson = (left: JsonValue, right: JsonValue): boolean =>
   canonicalJson(left) === canonicalJson(right);

@@ -54,7 +54,6 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
           id: 'repair-loop',
           maxAttempts: 3,
           until: 'repair.done@1',
-          checkBefore: false,
           body: {
             kind: 'step',
             id: 'repair',
@@ -93,7 +92,7 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
         { kind: 'finalize', id: 'accepted', outcome: 'accepted' },
       ],
     },
-  },
+  } as never,
 });
 
 const activities: ExecutionWorkflowActivities = {
@@ -210,7 +209,6 @@ const activities: ExecutionWorkflowActivities = {
       },
     });
   },
-  evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
   runExecutionRetrospective: (input) =>
     Promise.resolve({
       status: 'ready',

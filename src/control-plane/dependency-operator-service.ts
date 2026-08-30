@@ -104,14 +104,10 @@ const childrenFor = (node: CompiledWorkflowNode): readonly CompiledWorkflowNode[
   switch (node.kind) {
     case 'sequence':
       return node.children;
-    case 'branch':
-      return [node.then, node.otherwise];
     case 'bounded_loop':
       return [node.body];
     case 'finalize':
-    case 'gate':
     case 'step':
-    case 'wait':
       return [];
   }
 };

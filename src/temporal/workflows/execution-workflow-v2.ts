@@ -9,6 +9,7 @@ import {
 } from '@temporalio/workflow';
 
 import type { CompiledWorkflowNode, JsonValue } from '../../workflow/index.js';
+import { isRecord } from '../../shared/is-record.js';
 import type {
   ExecutionBlockResult,
   ExecutionContinuationState,
@@ -18,10 +19,7 @@ import type {
   ExecutionWorkflowResult,
   ResolveExecutionWaitCommand,
 } from '../execution-kernel/contracts.js';
-import {
-  createExecutionNodeStates,
-  setExecutionSubtreeStatus,
-} from '../execution-kernel/graph-state.js';
+import { createExecutionNodeStates } from '../execution-kernel/graph-state.js';
 import {
   executionWorkflowStateQuery,
   resolveExecutionWaitUpdate,
@@ -51,9 +49,6 @@ type AvailableExecutionState = Extract<
 >;
 type Traversal =
   { readonly kind: 'continue' } | { readonly kind: 'finalized'; readonly outcome: string };
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const guidanceFrom = (resolution: JsonValue): string | null =>
   isRecord(resolution) &&
@@ -172,40 +167,10 @@ export async function executionWorkflowV2(
     return resolution;
   };
 
-  const evaluate = async (reference: string): Promise<boolean> => {
+  const evaluate = (reference: string): boolean => {
     const known = predicateFacts[reference];
     if (known !== undefined) return known;
-    return recoverableDeliveryActivities.evaluateExecutionPredicate({
-      schemaVersion: 2,
-      taskReference: input.taskReference,
-      reference,
-      facts: { ...predicateFacts },
-      contextReferences: input.contextReferences,
-    });
-  };
-
-  const applyWaitResolution = (
-    node: Extract<CompiledWorkflowNode, { readonly kind: 'wait' }>,
-    resolution: JsonValue,
-  ): void => {
-    const mapping = node.resolutionMapping;
-    if (mapping === undefined) return;
-    if (!isRecord(resolution)) {
-      throw ApplicationFailure.nonRetryable(`Wait ${node.id} received a non-object resolution`);
-    }
-    const outcome = resolution[mapping.discriminator];
-    if (typeof outcome !== 'string') {
-      throw ApplicationFailure.nonRetryable(
-        `Wait ${node.id} resolution has no ${mapping.discriminator} outcome`,
-      );
-    }
-    const facts = mapping.cases[outcome];
-    if (facts === undefined) {
-      throw ApplicationFailure.nonRetryable(
-        `Wait ${node.id} received unsupported outcome ${outcome}`,
-      );
-    }
-    Object.assign(predicateFacts, facts);
+    return false;
   };
 
   const runBlock = async (
@@ -391,20 +356,7 @@ export async function executionWorkflowV2(
           markRunning(node.id);
         }
       }
-      case 'branch': {
-        const takeThen = await evaluate(node.when);
-        const selected = takeThen ? node.then : node.otherwise;
-        const skipped = takeThen ? node.otherwise : node.then;
-        setExecutionSubtreeStatus(skipped, 'skipped', nodeStates);
-        const traversal = await executeNode(selected);
-        nodeStates[node.id] = 'succeeded';
-        return traversal;
-      }
       case 'bounded_loop': {
-        if (node.checkBefore && (await evaluate(node.until))) {
-          nodeStates[node.id] = 'succeeded';
-          return { kind: 'continue' };
-        }
         for (;;) {
           for (let iteration = 1; iteration <= node.maxAttempts; iteration += 1) {
             loopIterations[node.id] = iteration;
@@ -413,7 +365,7 @@ export async function executionWorkflowV2(
               nodeStates[node.id] = 'succeeded';
               return traversal;
             }
-            if (await evaluate(node.until)) {
+            if (evaluate(node.until)) {
               nodeStates[node.id] = 'succeeded';
               return { kind: 'continue' };
             }
@@ -434,14 +386,6 @@ export async function executionWorkflowV2(
           queuedGuidance = guidance;
         }
       }
-      case 'wait': {
-        const resolution = await openWait(node.id, node.for);
-        applyWaitResolution(node, resolution);
-        return { kind: 'continue' };
-      }
-      case 'gate':
-        await openWait(node.id, node.resumeWhen, node.reason);
-        return { kind: 'continue' };
       case 'finalize':
         nodeStates[node.id] = 'succeeded';
         return { kind: 'finalized', outcome: node.outcome };

@@ -89,7 +89,7 @@ export const testTemporalActivities = {
               { kind: 'finalize' as const, id: 'accepted', outcome: 'accepted' },
             ],
           },
-        },
+        } as never,
         planningSnapshot: {
           artifactId: `planning-snapshot:${input.taskReference}:execution`,
           checksum: HASH,
@@ -136,7 +136,6 @@ export const testTemporalActivities = {
       summary: 'No continuation is configured for this test fixture',
       waitKind: 'workflow_change.test-fixture@1',
     }),
-  evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
   runExecutionRetrospective: (input) =>
     Promise.resolve({
       status: 'ready',

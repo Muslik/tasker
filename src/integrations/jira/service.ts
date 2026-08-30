@@ -1,7 +1,5 @@
 import {
-  OperatorActivityResponseSchema,
   OperatorTaskSummarySchema,
-  type OperatorActivityResponse,
   type OperatorTaskSummary,
 } from '../../control-plane/operator-contracts.js';
 import type { LedgerRepository } from '../../ledger/repository.js';
@@ -275,24 +273,6 @@ export class JiraIssueService {
     if (!parsed.success) return err({ kind: 'invalid_issue_key', input: issueKeyInput });
     const fetched = await this.port.fetchIssue(parsed.data, this.clock.now());
     return fetched.ok ? fetched : err({ kind: 'preview_failed', problem: fetched.error });
-  }
-
-  public readActivity(
-    taskReference: string,
-  ): Outcome<OperatorActivityResponse, JiraIssueServiceError> {
-    const issueKeyInput = taskReference.startsWith('jira:')
-      ? taskReference.slice('jira:'.length)
-      : taskReference;
-    const parsed = JiraIssueKeySchema.safeParse(issueKeyInput);
-    if (!parsed.success) return err({ kind: 'invalid_issue_key', input: taskReference });
-
-    return ok(
-      OperatorActivityResponseSchema.parse({
-        taskReference: taskReference,
-        providerSession: { status: 'not_started', reason: 'planning_only' },
-        entries: [],
-      }),
-    );
   }
 
   public async readAttachment(

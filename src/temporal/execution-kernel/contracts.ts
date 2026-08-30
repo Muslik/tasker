@@ -197,17 +197,6 @@ export const ExecutionBlockResultSchema = z.discriminatedUnion('status', [
     .readonly(),
 ]);
 
-export const EvaluateExecutionPredicateInputSchema = z
-  .object({
-    schemaVersion: z.literal(EXECUTION_WORKFLOW_SCHEMA_VERSION),
-    taskReference: z.string().min(1),
-    reference: z.string().min(1),
-    facts: z.record(z.string(), z.boolean()),
-    contextReferences: z.array(ExecutionContextReferenceSchema),
-  })
-  .strict()
-  .readonly();
-
 export const PlanExecutionContinuationInputSchema = z
   .object({
     taskReference: z.string().min(1),
@@ -267,7 +256,6 @@ export type ResolveExecutionWaitCommand = z.infer<typeof ResolveExecutionWaitCom
 export type ResolveExecutionWaitReceipt = z.infer<typeof ResolveExecutionWaitReceiptSchema>;
 export type RunExecutionBlockInput = z.infer<typeof RunExecutionBlockInputSchema>;
 export type ExecutionBlockResult = z.infer<typeof ExecutionBlockResultSchema>;
-export type EvaluateExecutionPredicateInput = z.infer<typeof EvaluateExecutionPredicateInputSchema>;
 export type ExecutionContinuationCandidate = z.infer<typeof ExecutionContinuationCandidateSchema>;
 export type ExecutionContinuationState = z.infer<typeof ExecutionContinuationStateSchema>;
 export type PlanExecutionContinuationInput = z.infer<typeof PlanExecutionContinuationInputSchema>;
@@ -281,7 +269,6 @@ export interface ExecutionWorkflowActivities {
   planExecutionContinuation(
     input: PlanExecutionContinuationInput,
   ): Promise<PlanExecutionContinuationResult>;
-  evaluateExecutionPredicate(input: EvaluateExecutionPredicateInput): Promise<boolean>;
   runExecutionRetrospective(
     input: RunExecutionRetrospectiveInput,
   ): Promise<RunExecutionRetrospectiveResult>;

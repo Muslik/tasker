@@ -11,21 +11,13 @@ import {
   type TaskExecutionRole,
   type TaskExecutionStrategy,
 } from './execution-profile-contracts.js';
+import { canonicalJson } from '../shared/json.js';
 
 export interface ExecutionProfileConfiguration {
   readonly executionProfiles: Readonly<Record<string, ExecutionProfile>>;
   readonly executionProfileRouting: ExecutionProfileRouting;
   readonly apiPricing: ApiPricingTable;
 }
-
-const canonicalJson = (value: unknown): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-    .join(',')}}`;
-};
 
 const resolveNamedProfile = (
   company: ExecutionProfileConfiguration,

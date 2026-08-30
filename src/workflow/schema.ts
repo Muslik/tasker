@@ -28,37 +28,13 @@ export const StepActivityDeliverySchema = z.discriminatedUnion('kind', [
 
 export type StepActivityDelivery = z.infer<typeof StepActivityDeliverySchema>;
 
-export interface BranchNodeSource {
-  readonly kind: 'branch';
-  readonly id: string;
-  readonly when: string;
-  readonly then: WorkflowNodeSource;
-  readonly otherwise: WorkflowNodeSource;
-}
-
 export interface BoundedLoopNodeSource {
   readonly kind: 'bounded_loop';
   readonly id: string;
   readonly maxAttempts: number;
   readonly until: string;
-  readonly checkBefore: boolean;
   readonly exhaustedWait?: string | undefined;
   readonly body: WorkflowNodeSource;
-}
-
-export interface WaitNodeSource {
-  readonly kind: 'wait';
-  readonly id: string;
-  readonly for: string;
-  readonly resumeAt?: string | undefined;
-}
-
-export interface GateNodeSource {
-  readonly kind: 'gate';
-  readonly id: string;
-  readonly reason: string;
-  readonly resumeWhen: string;
-  readonly with?: JsonValue | undefined;
 }
 
 export interface FinalizeNodeSource {
@@ -68,13 +44,7 @@ export interface FinalizeNodeSource {
 }
 
 export type WorkflowNodeSource =
-  | BranchNodeSource
-  | BoundedLoopNodeSource
-  | FinalizeNodeSource
-  | GateNodeSource
-  | SequenceNodeSource
-  | StepNodeSource
-  | WaitNodeSource;
+  BoundedLoopNodeSource | FinalizeNodeSource | SequenceNodeSource | StepNodeSource;
 
 export interface WorkflowSource {
   readonly id: string;
@@ -121,20 +91,11 @@ export interface CompiledStepNode {
   readonly with: JsonValue;
 }
 
-export interface CompiledBranchNode {
-  readonly kind: 'branch';
-  readonly id: string;
-  readonly when: string;
-  readonly then: CompiledWorkflowNode;
-  readonly otherwise: CompiledWorkflowNode;
-}
-
 export interface CompiledBoundedLoopNode {
   readonly kind: 'bounded_loop';
   readonly id: string;
   readonly maxAttempts: number;
   readonly until: string;
-  readonly checkBefore: boolean;
   readonly exhaustedWait?: string | undefined;
   readonly body: CompiledWorkflowNode;
 }
@@ -150,22 +111,6 @@ export interface OutputPredicateMapping {
   readonly defaultFacts?: Readonly<Record<string, boolean>> | undefined;
 }
 
-export interface CompiledWaitNode {
-  readonly kind: 'wait';
-  readonly id: string;
-  readonly for: string;
-  readonly resolutionMapping?: WaitResolutionMapping | undefined;
-  readonly resumeAt?: string | undefined;
-}
-
-export interface CompiledGateNode {
-  readonly kind: 'gate';
-  readonly id: string;
-  readonly reason: string;
-  readonly resumeWhen: string;
-  readonly with?: JsonValue | undefined;
-}
-
 export interface CompiledFinalizeNode {
   readonly kind: 'finalize';
   readonly id: string;
@@ -173,13 +118,7 @@ export interface CompiledFinalizeNode {
 }
 
 export type CompiledWorkflowNode =
-  | CompiledBranchNode
-  | CompiledBoundedLoopNode
-  | CompiledFinalizeNode
-  | CompiledGateNode
-  | CompiledSequenceNode
-  | CompiledStepNode
-  | CompiledWaitNode;
+  CompiledBoundedLoopNode | CompiledFinalizeNode | CompiledSequenceNode | CompiledStepNode;
 
 export interface CompiledWorkflow {
   readonly metadata: {
@@ -242,44 +181,14 @@ export const StepNodeSourceSchema = z
   })
   .strict();
 
-export const BranchNodeSourceSchema = z
-  .object({
-    kind: z.literal('branch'),
-    id: NodeIdSchema,
-    when: PredicateReferenceSchema,
-    then: z.lazy(() => WorkflowNodeSourceSchema),
-    otherwise: z.lazy(() => WorkflowNodeSourceSchema),
-  })
-  .strict();
-
 export const BoundedLoopNodeSourceSchema = z
   .object({
     kind: z.literal('bounded_loop'),
     id: NodeIdSchema,
     maxAttempts: z.number(),
     until: PredicateReferenceSchema,
-    checkBefore: z.boolean().default(false),
     exhaustedWait: WaitReferenceSchema.optional(),
     body: z.lazy(() => WorkflowNodeSourceSchema),
-  })
-  .strict();
-
-export const WaitNodeSourceSchema = z
-  .object({
-    kind: z.literal('wait'),
-    id: NodeIdSchema,
-    for: WaitReferenceSchema,
-    resumeAt: z.string().min(1).optional(),
-  })
-  .strict();
-
-export const GateNodeSourceSchema = z
-  .object({
-    kind: z.literal('gate'),
-    id: NodeIdSchema,
-    reason: z.string().min(1),
-    resumeWhen: PredicateReferenceSchema,
-    with: JsonValueSchema.optional(),
   })
   .strict();
 
@@ -295,10 +204,7 @@ export const WorkflowNodeSourceSchema = z.lazy(() =>
   z.union([
     SequenceNodeSourceSchema,
     StepNodeSourceSchema,
-    BranchNodeSourceSchema,
     BoundedLoopNodeSourceSchema,
-    WaitNodeSourceSchema,
-    GateNodeSourceSchema,
     FinalizeNodeSourceSchema,
   ]),
 ) as z.ZodType<WorkflowNodeSource>;
@@ -353,20 +259,11 @@ const CompiledStepNodeSchema = z.object({
   with: JsonValueSchema,
 });
 
-const CompiledBranchNodeSchema = z.object({
-  kind: z.literal('branch'),
-  id: NodeIdSchema,
-  when: PredicateReferenceSchema,
-  then: z.lazy(() => CompiledWorkflowNodeSchema),
-  otherwise: z.lazy(() => CompiledWorkflowNodeSchema),
-});
-
 const CompiledBoundedLoopNodeSchema = z.object({
   kind: z.literal('bounded_loop'),
   id: NodeIdSchema,
   maxAttempts: z.number(),
   until: PredicateReferenceSchema,
-  checkBefore: z.boolean(),
   exhaustedWait: WaitReferenceSchema.optional(),
   body: z.lazy(() => CompiledWorkflowNodeSchema),
 });
@@ -436,22 +333,6 @@ export const resolveOutputPredicateFacts = (
   return mapping.defaultFacts ?? {};
 };
 
-const CompiledWaitNodeSchema = z.object({
-  kind: z.literal('wait'),
-  id: NodeIdSchema,
-  for: WaitReferenceSchema,
-  resolutionMapping: WaitResolutionMappingSchema.optional(),
-  resumeAt: z.string().min(1).optional(),
-});
-
-const CompiledGateNodeSchema = z.object({
-  kind: z.literal('gate'),
-  id: NodeIdSchema,
-  reason: z.string().min(1),
-  resumeWhen: PredicateReferenceSchema,
-  with: JsonValueSchema.optional(),
-});
-
 const CompiledFinalizeNodeSchema = z.object({
   kind: z.literal('finalize'),
   id: NodeIdSchema,
@@ -462,10 +343,7 @@ export const CompiledWorkflowNodeSchema = z.lazy(() =>
   z.union([
     CompiledSequenceNodeSchema,
     CompiledStepNodeSchema,
-    CompiledBranchNodeSchema,
     CompiledBoundedLoopNodeSchema,
-    CompiledWaitNodeSchema,
-    CompiledGateNodeSchema,
     CompiledFinalizeNodeSchema,
   ]),
 ) as z.ZodType<CompiledWorkflowNode>;

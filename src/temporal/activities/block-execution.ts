@@ -2483,7 +2483,7 @@ const executionResultFromReceipt = (receipt: BlockReceipt) => {
 export const createTaskExecutionActivity = (
   dependencies: TaskExecutionActivityDependencies,
   runtimeFactory: () => TaskStepActivityContext = temporalRuntime,
-): Pick<ExecutionWorkflowActivities, 'runExecutionBlock' | 'evaluateExecutionPredicate'> => ({
+): Pick<ExecutionWorkflowActivities, 'runExecutionBlock'> => ({
   runExecutionBlock: async (input: RunExecutionBlockInput) => {
     const workspaceReference = input.contextReferences.find(({ kind }) => kind === 'workspace');
     const planningReference = input.contextReferences.find(
@@ -2676,7 +2676,6 @@ export const createTaskExecutionActivity = (
           waitKind: `${input.uses}.receipt-persistence-required@1`,
         };
   },
-  evaluateExecutionPredicate: (input) => Promise.resolve(input.facts[input.reference] ?? false),
 });
 
 export const createCurrentStepRegistry = (
