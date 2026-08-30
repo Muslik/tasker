@@ -69,6 +69,7 @@ export const researchInputSchema = taskInputSchema
     questions: z.array(z.string().min(1)).min(1).max(10),
     product: HarnessProductManifestSchema,
     repositoryReference: z.string().min(1).optional(),
+    operatorBrief: z.string().max(10_000).nullable().default(null),
   })
   .strict();
 
@@ -254,6 +255,7 @@ export const researchPublicationOutputSchema = z
 export const researchTaskFilingOutputSchema = z
   .object({
     issueKeys: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/u)).min(1),
+    pageVersion: z.number().int().positive(),
   })
   .strict();
 

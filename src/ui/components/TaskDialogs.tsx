@@ -70,6 +70,7 @@ export const JiraTaskLaunchDialog = ({
   const [planningStrategy, setPlanningStrategy] = useState<'auto' | 'fast' | 'ralplan'>('auto');
   const [planReview, setPlanReview] = useState(true);
   const [trackerStatusUpdates, setTrackerStatusUpdates] = useState(true);
+  const [operatorBrief, setOperatorBrief] = useState('');
 
   useEffect(() => {
     if (!open || initialIssue === undefined) return;
@@ -150,6 +151,7 @@ export const JiraTaskLaunchDialog = ({
               planReview: planReview ? 'required' : 'automatic',
               planningStrategy,
               trackerStatusUpdates: trackerStatusUpdates ? 'enabled' : 'disabled',
+              ...(operatorBrief.length === 0 ? {} : { operatorBrief }),
               ...(branchName.length === 0 ? {} : { branchName }),
             },
           });
@@ -251,6 +253,19 @@ export const JiraTaskLaunchDialog = ({
           ) : null}
           <fieldset className="space-y-2 rounded-lg border p-3">
             <legend className="px-1 text-xs font-semibold">Settings</legend>
+            <label className="block space-y-1.5 text-xs font-medium">
+              Бриф оператора
+              <textarea
+                aria-label="Бриф оператора"
+                className="min-h-24 w-full resize-y"
+                maxLength={10_000}
+                value={operatorBrief}
+                disabled={pending}
+                onChange={(event) => {
+                  setOperatorBrief(event.target.value);
+                }}
+              />
+            </label>
             <label className="flex items-center justify-between gap-3 text-sm">
               <span>Planning strategy</span>
               <select

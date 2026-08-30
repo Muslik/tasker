@@ -263,6 +263,20 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         const stdin = [
           request.prompt,
           '',
+          ...((request.linkedRepositories ?? []).length === 0
+            ? []
+            : [
+                'Mounted linked repositories (read-only):',
+                JSON.stringify(
+                  (request.linkedRepositories ?? []).map(({ repository, target }) => ({
+                    repository,
+                    path: target,
+                  })),
+                  null,
+                  2,
+                ),
+                'Read linked repository sources at these exact paths; do not write to them.',
+              ]),
           'Mounted immutable input evidence:',
           JSON.stringify(inputArtifacts.value, null, 2),
           'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
@@ -326,6 +340,11 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
                 readOnly: false,
               },
               ...extraMounts,
+              ...(request.linkedRepositories ?? []).map(({ source, target }) => ({
+                source,
+                target,
+                readOnly: true,
+              })),
               ...inputEvidenceMounts,
             ],
             stdin,

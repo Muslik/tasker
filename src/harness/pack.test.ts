@@ -276,7 +276,7 @@ describe('file-backed harness pack', () => {
         },
         repositories: {
           primary: 'front-avia',
-          linked: ['front-components'],
+          linked: ['front-components', 'front-core-packages'],
         },
       },
       {
@@ -289,7 +289,7 @@ describe('file-backed harness pack', () => {
         },
         repositories: {
           primary: 'front-railways',
-          linked: ['front-components'],
+          linked: ['front-components', 'front-core-packages'],
         },
       },
     ]);
@@ -343,7 +343,16 @@ describe('file-backed harness pack', () => {
       kind: 'agent',
       profile: 'implementation',
       strategyRole: 'implementation',
-      skills: ['confluence', 'jira', 'loop', 'delegation', 'figma-inspector', 'figma-parity'],
+      skills: [
+        'confluence',
+        'confluence-edit',
+        'system-analysis',
+        'jira',
+        'loop',
+        'delegation',
+        'figma-inspector',
+        'figma-parity',
+      ],
     });
     expect(draft?.block.stage).toEqual({ id: 'development', label: 'Development' });
     expect(review?.block).toMatchObject({
@@ -351,7 +360,16 @@ describe('file-backed harness pack', () => {
         kind: 'agent',
         profile: 'review',
         strategyRole: 'review',
-        skills: ['confluence', 'jira', 'loop', 'delegation', 'figma-inspector', 'figma-parity'],
+        skills: [
+          'confluence',
+          'confluence-edit',
+          'system-analysis',
+          'jira',
+          'loop',
+          'delegation',
+          'figma-inspector',
+          'figma-parity',
+        ],
       },
       outputPredicates: {
         discriminator: 'decision',
@@ -379,7 +397,7 @@ describe('file-backed harness pack', () => {
         kind: 'agent',
         profile: 'documentation',
         strategyRole: null,
-        skills: ['jira-issue', 'jira-edit'],
+        skills: ['jira-issue', 'jira-edit', 'confluence-edit'],
       },
       outputPredicates: {
         facts: { 'research.tasks_filed@1': true },
@@ -448,6 +466,7 @@ describe('file-backed harness pack', () => {
     expect(
       fileTasks?.contract.outputSchema.safeParse({
         issueKeys: ['RR-9060', 'RR-9061'],
+        pageVersion: 3,
       }).success,
     ).toBe(true);
   });

@@ -398,6 +398,7 @@ const materializeResearchScaffold = (input: {
     { readonly archetype: 'research' }
   >;
   readonly repositoryReference: string;
+  readonly operatorBrief: string | null;
 }): Outcome<
   z.infer<typeof SemanticWorkflowSourceSchema>,
   { readonly kind: 'slot_error'; readonly issues: readonly string[] } | ProductNotMappedFailure
@@ -433,6 +434,7 @@ const materializeResearchScaffold = (input: {
     product,
     repositoryReference: input.repositoryReference,
     segments: input.decision.segments,
+    operatorBrief: input.operatorBrief,
   });
 };
 
@@ -649,6 +651,7 @@ export class ImplementationPlanningCoordinator {
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
     operatorGuidance: string | null = null,
+    operatorBrief: string | null = null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
     const inFlightKey = `${taskReference}:${commandId}`;
     const current = this.inFlight.get(inFlightKey);
@@ -661,6 +664,7 @@ export class ImplementationPlanningCoordinator {
       snapshotReference,
       evidenceReference,
       operatorGuidance,
+      operatorBrief,
     ).finally(() => {
       this.inFlight.delete(inFlightKey);
     });
@@ -702,6 +706,7 @@ export class ImplementationPlanningCoordinator {
           snapshotReference,
           evidenceReference,
           current.value.operatorGuidance,
+          current.value.operatorBrief ?? null,
         );
       }
       return Promise.resolve(ok(current.value));
@@ -766,6 +771,7 @@ export class ImplementationPlanningCoordinator {
       snapshotReference,
       evidenceReference,
       guidance,
+      current.value.operatorBrief ?? null,
     );
   }
 
@@ -853,6 +859,7 @@ export class ImplementationPlanningCoordinator {
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
     operatorGuidance: string | null,
+    operatorBrief: string | null,
   ): Promise<Outcome<ImplementationPlanningRecord, ImplementationPlanningError>> {
     const existing = this.store.read(planningEpisodeId);
     if (!existing.ok) return err({ kind: 'store', error: existing.error });
@@ -904,6 +911,7 @@ export class ImplementationPlanningCoordinator {
             selectedStrategy: selection.strategy,
             selectionReason: selection.reason,
             operatorGuidance,
+            operatorBrief,
             validationFeedback:
               operatorGuidance !== null && existing.value?.status === 'failed'
                 ? existing.value.validationFeedback
@@ -1088,6 +1096,7 @@ export class ImplementationPlanningCoordinator {
                   products: planningInput.products,
                   decision: result.value.decision,
                   repositoryReference: planningInput.workspace.reference,
+                  operatorBrief: planning.operatorBrief ?? null,
                 });
           if (!scaffold.ok) {
             if (

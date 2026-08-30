@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "6",
+  "version": "7",
   "availableCapabilities": [
     "ci.read",
     "command.run",

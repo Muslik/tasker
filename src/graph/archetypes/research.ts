@@ -49,6 +49,7 @@ const ResearchScaffoldInputSchema = z
     product: ResearchProductConfigSchema,
     repositoryReference: z.string().min(1),
     segments: ResearchSegmentsSchema,
+    operatorBrief: z.string().max(10_000).nullable().default(null),
   })
   .strict();
 
@@ -100,6 +101,7 @@ export const scaffoldResearch = (
     repository: task.repository,
     repositoryReference: input.data.repositoryReference,
     taskId: task.taskId,
+    operatorBrief: input.data.operatorBrief,
   } as const;
 
   return ok({

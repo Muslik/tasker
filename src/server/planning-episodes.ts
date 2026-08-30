@@ -259,6 +259,7 @@ export class ImplementationPlanningStore {
     readonly selectedStrategy: PlanningStrategy;
     readonly selectionReason: string;
     readonly operatorGuidance: string | null;
+    readonly operatorBrief?: string | null;
     readonly validationFeedback: readonly string[];
     readonly previousDecision:
       Extract<ImplementationPlanningRecord, { readonly status: 'ready' }>['decision'] | null;
@@ -283,6 +284,7 @@ export class ImplementationPlanningStore {
       selectionReason: input.selectionReason,
       startedAt,
       operatorGuidance: input.operatorGuidance,
+      ...(input.operatorBrief === undefined ? {} : { operatorBrief: input.operatorBrief }),
       validationFeedback: input.validationFeedback,
       validationRevision: 0,
       previousDecision: input.previousDecision,

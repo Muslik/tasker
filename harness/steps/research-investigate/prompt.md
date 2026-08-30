@@ -17,3 +17,5 @@ Return `completed` only with an output object matching `research_investigation_o
   dated measurement note.
 
 Do not draft or publish the SA page here. Do not create Jira tasks here.
+
+Связные компоненты: исходники доступны в read-only путях `/workspace-linked/<repo>`, перечисленных в Execution context.

@@ -21,6 +21,8 @@ describe('task dialogs', () => {
     );
     expect(html).toContain('Add Jira task');
     expect(html).toContain('Start immediately');
+    expect(html).toContain('Бриф оператора');
+    expect(html).toContain('aria-label="Бриф оператора"');
     expect(html).not.toContain('aria-label="Branch name"');
   });
 

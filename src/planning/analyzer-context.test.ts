@@ -106,7 +106,10 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.product).toMatchObject({
       id: 'avia',
       confluence: { researchRootPageId: '39748148' },
-      repositories: { primary: 'front-avia', linked: ['front-components'] },
+      repositories: {
+        primary: 'front-avia',
+        linked: ['front-components', 'front-core-packages'],
+      },
     });
     expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
       'local-ready-before-delivery',

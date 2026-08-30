@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "12",
+  "version": "13",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -34,7 +34,8 @@
         "playwright-demo",
         "review-process",
         "figma-inspector",
-        "figma-parity"
+        "figma-parity",
+        "system-analysis"
       ]
     },
     {

@@ -143,6 +143,9 @@ export async function bootstrapWorkflowV3(
     ...(typeof input.settings.branchName === 'string'
       ? { branchName: input.settings.branchName }
       : {}),
+    ...(input.settings.operatorBrief === undefined
+      ? {}
+      : { operatorBrief: input.settings.operatorBrief }),
   } satisfies TaskRunSettings;
   let workspaceContext: BootstrapWorkspaceContext | null = null;
   let planningContext: BootstrapContextState | null = null;
@@ -315,6 +318,7 @@ export async function bootstrapWorkflowV3(
             evidenceBundle: activeContext.evidenceBundle,
             commandId,
             requestedStrategy: settings.planningStrategy,
+            initialOperatorGuidance: settings.operatorBrief ?? null,
             command,
           });
           break;

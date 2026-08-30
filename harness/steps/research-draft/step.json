@@ -11,7 +11,16 @@
     "profile": "implementation",
     "strategyRole": "implementation",
     "prompt": "prompt.md",
-    "skills": ["confluence", "jira", "loop", "delegation", "figma-inspector", "figma-parity"]
+    "skills": [
+      "confluence",
+      "confluence-edit",
+      "system-analysis",
+      "jira",
+      "loop",
+      "delegation",
+      "figma-inspector",
+      "figma-parity"
+    ]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": {

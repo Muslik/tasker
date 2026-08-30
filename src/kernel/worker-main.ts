@@ -353,6 +353,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       integrations: integrationAdapters,
       evidence: new LedgerTaskRunEvidenceSource(executionTraces, reviewEvidence),
       workspaces: workspaceStore,
+      repositories: repositoryCatalog,
     });
     const runtime = await connectTaskerTemporalWorker(configuration, {
       ...createWorkspaceActivity(subjects, workspaces, bootstrap, dockerRuntimes, {

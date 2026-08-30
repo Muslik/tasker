@@ -8,6 +8,6 @@
   },
   "repositories": {
     "primary": "front-avia",
-    "linked": ["front-components"]
+    "linked": ["front-components", "front-core-packages"]
   }
 }

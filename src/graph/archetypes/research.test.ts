@@ -82,6 +82,33 @@ const compileScaffold = () => {
 };
 
 describe('research archetype scaffold', () => {
+  it('carries the operator brief verbatim into every research step input', () => {
+    const brief = '  Проверь связанные компоненты и сохрани переносы\n';
+    const result = scaffoldResearch({
+      task,
+      objective: 'Prepare the system analysis and publish it for review.',
+      questions: ['Which current frontend and backend constraints shape the design?'],
+      product,
+      repositoryReference: task.repository,
+      segments: [],
+      operatorBrief: brief,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const loop = result.value.root.children[0];
+    if (loop === undefined || loop.kind !== 'bounded_loop') {
+      throw new Error('Research loop is missing');
+    }
+    expect(loop.body.children.every((child) => child.kind === 'step')).toBe(true);
+    expect(
+      loop.body.children.map((child) => {
+        if (child.kind !== 'step' || child.with === null || Array.isArray(child.with)) return null;
+        return typeof child.with === 'object' ? child.with.operatorBrief : null;
+      }),
+    ).toEqual([brief, brief, brief]);
+  });
+
   it('keeps the public node-id scheme stable', () => {
     expect(RESEARCH_NODE_IDS).toEqual({
       root: 'task-work',

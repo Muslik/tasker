@@ -35,6 +35,50 @@ import { executeRegisteredTaskStep, type RegisteredTaskStepDependencies } from '
 import type { TaskStepActivityContext } from './agent-runner.js';
 
 import type { WorkspaceMutationRecoveryStore } from './workspace-mutation-recovery.js';
+import type { RepositoryCatalog } from '../../workspace/catalog.js';
+import type { LinkedRepositoryMount } from './agent-runner.js';
+
+const isResearchExecution = (snapshot: RunPlanningSnapshot): boolean =>
+  snapshot.kind === 'execution' && snapshot.semanticSource.id.startsWith('research-');
+
+const linkedRepositoryMountsFor = async (
+  snapshot: RunPlanningSnapshot,
+  repositories: RepositoryCatalog | undefined,
+): Promise<
+  | { readonly status: 'ready'; readonly mounts: readonly LinkedRepositoryMount[] }
+  | { readonly status: 'blocked'; readonly summary: string }
+> => {
+  if (!isResearchExecution(snapshot)) return { status: 'ready', mounts: [] };
+  const jiraProjectKey = (snapshot.task.taskId.split('-')[0] ?? '').toUpperCase();
+  const product = snapshot.harness.products.find(({ jiraProjects }) =>
+    jiraProjects.includes(jiraProjectKey),
+  );
+  if (product === undefined || product.repositories.linked.length === 0) {
+    return { status: 'ready', mounts: [] };
+  }
+  if (repositories === undefined) {
+    return {
+      status: 'blocked',
+      summary: 'Research execution requires the managed repository catalog for linked repositories',
+    };
+  }
+  const mounts: LinkedRepositoryMount[] = [];
+  for (const reference of product.repositories.linked) {
+    const resolved = await repositories.resolve(reference);
+    if (resolved.status !== 'found') {
+      return {
+        status: 'blocked',
+        summary: `Linked research repository ${reference} is unavailable: ${resolved.status}`,
+      };
+    }
+    mounts.push({
+      repository: resolved.repository.repositoryId,
+      source: resolved.repository.checkout.path,
+      target: `/workspace-linked/${resolved.repository.repositoryId}`,
+    });
+  }
+  return { status: 'ready', mounts };
+};
 
 const snapshottedStepFrom = (
   snapshot: RunPlanningSnapshot,
@@ -63,6 +107,7 @@ export interface TaskExecutionActivityDependencies extends Omit<
   readonly receipts: BlockReceiptStore;
 
   readonly runtimes: DockerWorkspaceRuntimePreparer;
+  readonly repositories?: RepositoryCatalog;
 }
 
 export const createTaskExecutionActivity = (
@@ -119,6 +164,17 @@ export const createTaskExecutionActivity = (
         status: 'needs_input',
         summary: `Block ${input.uses} is absent from the immutable execution snapshot`,
         waitKind: `${input.uses}.definition-required@1`,
+      };
+    }
+    const linked =
+      snapshottedStep.block.executor.kind === 'agent'
+        ? await linkedRepositoryMountsFor(loadedSnapshot.value, dependencies.repositories)
+        : { status: 'ready' as const, mounts: [] as const };
+    if (linked.status === 'blocked') {
+      return {
+        status: 'needs_input',
+        summary: linked.summary,
+        waitKind: `${input.uses}.linked-repository-required@1`,
       };
     }
     const receiptId = blockReceiptId({
@@ -191,6 +247,7 @@ export const createTaskExecutionActivity = (
       },
       dependencies,
       runtime,
+      linked.mounts,
     );
     const operationId = executionOperationIdFor(
       input.workflowId,

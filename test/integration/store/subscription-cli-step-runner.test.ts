@@ -330,6 +330,13 @@ describe('subscription CLI task-step runner', () => {
         outputSchema,
         cwd: repositoryPath,
         workspaceAccess: 'read_write',
+        linkedRepositories: [
+          {
+            repository: 'front-components',
+            source: '/managed/front-components',
+            target: '/workspace-linked/front-components',
+          },
+        ],
         runtime: {
           attempt: 1,
           cancellationSignal: new AbortController().signal,
@@ -358,6 +365,12 @@ describe('subscription CLI task-step runner', () => {
       expect(observations[0]?.outputSchema).not.toContain('propertyNames');
       expect(observations[0]?.outputSchema).not.toContain('oneOf');
       expect(observations[0]?.outputSchema).toContain('anyOf');
+      expect(observations[0]?.mounts).toContainEqual({
+        source: '/managed/front-components',
+        target: '/workspace-linked/front-components',
+        readOnly: true,
+      });
+      expect(observations[0]?.stdin).toContain('/workspace-linked/front-components');
       expect(observations[0]?.outputSchema).toContain('additionalProperties');
       expect(observations[0]?.args).toContain('--dangerously-bypass-approvals-and-sandbox');
       expect(observations[0]?.workspaceAccess).toBe('read_write');

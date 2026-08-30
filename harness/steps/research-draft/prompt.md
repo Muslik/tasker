@@ -92,3 +92,18 @@ data matching the output schema, and the list of open questions with addressees.
 The review step will judge: human voice, manager readability outside the technical
 section, sources on claims, master-measured «Как сейчас», questions addressed and
 decision-shaped, tables where enumerable, and the tasks table ready to file.
+
+Связные компоненты: исходники доступны в read-only путях `/workspace-linked/<repo>`, перечисленных в Execution context.
+
+## Page frame
+
+Start from the system-analysis skill asset `assets/sa-page.template.xml`, the mirror of
+Feature Tech Passport with `templateId 41713665`. Fill the Responsible/Links placeholders
+per `references/page-anatomy.md`: Dev via `ri:user`, Epic/SA Jira macros with real keys only,
+and a Макеты row when design exists. Apply the title rules from `page-anatomy.md`: no ticket
+keys in the title and `[FE]` prefix for frontend-scoped SA. Leave the Release placeholder
+untouched at draft time; an unresolvable JQL macro renders as an error box. Use
+`confluence-edit`'s `references/storage-format.md` for macros; never hand-guess Confluence XML.
+
+СА — это CONCLUSION, а не обзор. СА устанавливает, что возможно и сколько это стоит; что
+продукт должен делать, относится к продукту и дизайну — это «не твоё решение».

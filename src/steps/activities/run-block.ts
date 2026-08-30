@@ -14,6 +14,7 @@ import {
 import {
   type TaskStepActivityContext,
   type TaskStepAgentRunner,
+  type LinkedRepositoryMount,
   runAgentStep,
 } from './agent-runner.js';
 import {
@@ -85,6 +86,7 @@ export const executeRegisteredTaskStep = async (
   inputValue: ExecuteTaskStepInput,
   dependencies: RegisteredTaskStepDependencies,
   runtime: TaskStepActivityContext,
+  linkedRepositories: readonly LinkedRepositoryMount[] = [],
 ): Promise<ExecuteTaskStepResult> => {
   const input = ExecuteTaskStepInputSchema.parse(inputValue);
   const priorResult = dependencies.traces.readOutputResult(executionOperationId(input));
@@ -188,6 +190,7 @@ export const executeRegisteredTaskStep = async (
       current,
       evidence,
       validatedInput.data,
+      linkedRepositories,
     );
   }
 

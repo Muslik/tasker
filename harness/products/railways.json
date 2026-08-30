@@ -8,6 +8,6 @@
   },
   "repositories": {
     "primary": "front-railways",
-    "linked": ["front-components"]
+    "linked": ["front-components", "front-core-packages"]
   }
 }

@@ -69,6 +69,13 @@ export interface TaskStepAgentRequest {
   readonly workspaceAccess: 'read_only' | 'read_write';
   readonly runtime: TaskStepActivityContext;
   readonly transcriptStore: TemporalTaskStepTraceStore;
+  readonly linkedRepositories?: readonly LinkedRepositoryMount[];
+}
+
+export interface LinkedRepositoryMount {
+  readonly repository: string;
+  readonly source: string;
+  readonly target: string;
 }
 
 export interface TaskStepAgentResult {
@@ -125,6 +132,7 @@ export const runAgentStep = async (
   current: LoadedHarnessStep,
   evidence: TaskRunEvidence,
   validatedInput: unknown,
+  linkedRepositories: readonly LinkedRepositoryMount[] = [],
 ): Promise<ExecuteTaskStepResult> => {
   if (snapshottedStep.executionProfile === null) {
     return block(
@@ -205,6 +213,7 @@ export const runAgentStep = async (
     waitResolution: input.waitResolution,
     evidence: agentEvidence,
     historyIndex: runHistoryIndex(evidence.completedSteps),
+    linkedRepositories,
   });
   const outcomeSchema = agentStepOutcomeSchema(current.contract.outputSchema);
   const provider = await dependencies.agentRunner.run({
@@ -233,6 +242,7 @@ export const runAgentStep = async (
       : 'read_only',
     runtime,
     transcriptStore: dependencies.traces,
+    linkedRepositories,
   });
   if (!provider.ok) {
     if (provider.error.kind === 'invalid_output') {

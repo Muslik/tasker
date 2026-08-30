@@ -74,6 +74,10 @@ export const promptForAgentStep = (input: {
   readonly waitResolution: unknown;
   readonly evidence: TaskRunEvidence;
   readonly historyIndex: ReturnType<typeof runHistoryIndex>;
+  readonly linkedRepositories?: readonly {
+    readonly repository: string;
+    readonly target: string;
+  }[];
 }): string => {
   const runEvidence = {
     acceptedPlan: input.evidence.acceptedPlan,
@@ -104,6 +108,9 @@ export const promptForAgentStep = (input: {
         waitResolution: input.waitResolution,
         runEvidence,
         runHistoryIndex: input.historyIndex,
+        ...(input.linkedRepositories === undefined || input.linkedRepositories.length === 0
+          ? {}
+          : { linkedRepositories: input.linkedRepositories }),
       },
       null,
       2,

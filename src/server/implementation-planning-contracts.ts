@@ -58,6 +58,7 @@ const PlanningRecordBaseSchema = z.object({
   selectionReason: z.string().min(1),
   startedAt: z.iso.datetime(),
   operatorGuidance: z.string().min(1).max(10_000).nullable(),
+  operatorBrief: z.string().max(10_000).nullable().optional(),
   validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),
   validationRevision: z.number().int().nonnegative().max(3),
   previousDecision: ReadyImplementationPlanningDecisionSchema.nullable(),

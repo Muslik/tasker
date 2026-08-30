@@ -38,6 +38,7 @@ export interface TemporalImplementationPlanningCoordinator {
     snapshotReference: PlanningSnapshotReference,
     evidenceReference: EvidenceBundleReference,
     operatorGuidance?: string | null,
+    operatorBrief?: string | null,
   ): Promise<PlanningOutcome>;
   answer(
     taskReference: string,
@@ -139,6 +140,8 @@ export const createPlanningActivity = (
     const input = PlanTaskImplementationInputSchema.parse(inputValue);
     const context = Context.current();
     context.heartbeat({ phase: 'planning', commandId: input.commandId });
+    const initialOperatorGuidance =
+      input.initialOperatorGuidance === '' ? null : input.initialOperatorGuidance;
 
     const outcome = await (() => {
       switch (input.command.kind) {
@@ -150,7 +153,8 @@ export const createPlanningActivity = (
             input.planningEpisodeId,
             input.planningSnapshot,
             input.evidenceBundle,
-            null,
+            initialOperatorGuidance,
+            input.initialOperatorGuidance,
           );
         case 'clarification':
           return coordinator.answer(
@@ -170,6 +174,7 @@ export const createPlanningActivity = (
             input.planningSnapshot,
             input.evidenceBundle,
             'The requested pre-plan investigation completed. Use the appended evidence and produce the plan and execution workflow.',
+            input.initialOperatorGuidance,
           );
         case 'revision':
           return coordinator.prepare(
@@ -180,6 +185,7 @@ export const createPlanningActivity = (
             input.planningSnapshot,
             input.evidenceBundle,
             input.command.guidance,
+            input.initialOperatorGuidance,
           );
       }
     })();

@@ -30,6 +30,7 @@ export const TaskRunSettingsSchema = z
     planningStrategy: PlanningStrategyRequestSchema,
     trackerStatusUpdates: TrackerStatusUpdatesSchema.default('enabled'),
     branchName: GitBranchNameSchema.optional(),
+    operatorBrief: z.string().max(10_000).optional(),
   })
   .strict()
   .readonly();
@@ -246,6 +247,7 @@ export const PlanTaskImplementationInputSchema = z
     evidenceBundle: EvidenceBundleReferenceSchema,
     commandId: z.string().min(1),
     requestedStrategy: PlanningStrategyRequestSchema,
+    initialOperatorGuidance: z.string().max(10_000).nullable(),
     command: PlanningActivityCommandSchema,
   })
   .strict()

@@ -16,7 +16,7 @@
     "profile": "documentation",
     "strategyRole": null,
     "prompt": "prompt.md",
-    "skills": ["jira-issue", "jira-edit"]
+    "skills": ["jira-issue", "jira-edit", "confluence-edit"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": {
