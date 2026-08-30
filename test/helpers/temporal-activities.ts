@@ -62,8 +62,8 @@ export const testTemporalActivities = {
             workflowVersion: 1,
             references: {
               predicates: ['review.completed@1'],
-              stepTypes: ['fixture.implement@1'],
-              waits: ['code_review@1'],
+              stepTypes: ['fixture.code-review@1', 'fixture.implement@1'],
+              waits: [],
             },
           },
           root: {
@@ -78,13 +78,11 @@ export const testTemporalActivities = {
                 with: {},
               },
               {
-                kind: 'wait' as const,
+                kind: 'step' as const,
                 id: 'code-review',
-                for: 'code_review@1',
-                resolutionMapping: {
-                  discriminator: 'decision',
-                  cases: { approved: { 'review.completed@1': true } },
-                },
+                uses: 'fixture.code-review@1',
+                activityDelivery: { kind: 'read_only' as const },
+                with: {},
               },
               { kind: 'finalize' as const, id: 'accepted', outcome: 'accepted' },
             ],
@@ -124,12 +122,18 @@ export const testTemporalActivities = {
       frozenAt: '2026-08-09T00:00:00.000Z',
     }),
   runExecutionBlock: (input) =>
-    Promise.resolve({
-      status: 'completed' as const,
-      summary: `${input.uses} completed`,
-      predicateFacts: {},
-      receiptReference: `block-receipt:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
-    }),
+    input.nodeId === 'code-review' && input.waitResolution === null
+      ? Promise.resolve({
+          status: 'needs_input' as const,
+          summary: 'Code review is required by this fixture',
+          waitKind: 'code_review@1',
+        })
+      : Promise.resolve({
+          status: 'completed' as const,
+          summary: `${input.uses} completed`,
+          predicateFacts: input.nodeId === 'code-review' ? { 'review.completed@1': true } : {},
+          receiptReference: `block-receipt:${input.workflowId}:${input.nodeId}:${String(input.blockRun)}`,
+        }),
   planExecutionContinuation: () =>
     Promise.resolve({
       status: 'needs_input' as const,

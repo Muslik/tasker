@@ -50,6 +50,13 @@ type AvailableExecutionState = Extract<
 type Traversal =
   { readonly kind: 'continue' } | { readonly kind: 'finalized'; readonly outcome: string };
 
+const unexpectedNodeKind = (node: never): never => {
+  const invalidNode = node as { readonly kind: string; readonly id: string };
+  throw ApplicationFailure.nonRetryable(
+    `Unknown execution node kind "${invalidNode.kind}" for node "${invalidNode.id}"`,
+  );
+};
+
 const guidanceFrom = (resolution: JsonValue): string | null =>
   isRecord(resolution) &&
   typeof resolution.guidance === 'string' &&
@@ -390,6 +397,7 @@ export async function executionWorkflowV2(
         nodeStates[node.id] = 'succeeded';
         return { kind: 'finalized', outcome: node.outcome };
     }
+    return unexpectedNodeKind(node);
   };
 
   const traversal = await executeNode(input.graph.root);

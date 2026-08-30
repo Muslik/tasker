@@ -32,8 +32,13 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
       irVersion: 'workflow-ir-v1',
       references: {
         predicates: ['investigation.ready@1', 'repair.done@1', 'review.accepted@1'],
-        stepTypes: ['fixture.inspect@1', 'fixture.repair@1'],
-        waits: ['human.review@1'],
+        stepTypes: [
+          'fixture.approval@1',
+          'fixture.human-review@1',
+          'fixture.inspect@1',
+          'fixture.repair@1',
+        ],
+        waits: [],
       },
       workflowId: 'execution-kernel-fixture',
       workflowVersion: 1,
@@ -63,31 +68,18 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
           },
         },
         {
-          kind: 'branch',
-          id: 'admission',
-          when: 'investigation.ready@1',
-          then: {
-            kind: 'sequence',
-            id: 'review-path',
-            children: [
-              {
-                kind: 'gate',
-                id: 'approval',
-                reason: 'Operator approval is required by this fixture',
-                resumeWhen: 'review.accepted@1',
-              },
-              {
-                kind: 'wait',
-                id: 'human-review',
-                for: 'human.review@1',
-                resolutionMapping: {
-                  discriminator: 'decision',
-                  cases: { approved: { 'review.accepted@1': true } },
-                },
-              },
-            ],
-          },
-          otherwise: { kind: 'finalize', id: 'rejected', outcome: 'rejected' },
+          kind: 'step',
+          id: 'approval',
+          uses: 'fixture.approval@1',
+          activityDelivery: { kind: 'read_only' },
+          with: {},
+        },
+        {
+          kind: 'step',
+          id: 'human-review',
+          uses: 'fixture.human-review@1',
+          activityDelivery: { kind: 'read_only' },
+          with: {},
         },
         { kind: 'finalize', id: 'accepted', outcome: 'accepted' },
       ],
@@ -113,6 +105,30 @@ const activities: ExecutionWorkflowActivities = {
         status: 'needs_input',
         summary: 'The change is published and waiting on a reviewer outside this run',
         waitKind: 'fixture.repair@1.external-review@1',
+      });
+    }
+    if (
+      input.taskReference !== 'fixture:continuation-dismissed' &&
+      input.nodeId === 'approval' &&
+      input.waitResolution === null &&
+      input.blockRun === 1
+    ) {
+      return Promise.resolve({
+        status: 'needs_input',
+        summary: 'Operator approval is required by this fixture',
+        waitKind: 'review.accepted@1',
+      });
+    }
+    if (
+      input.taskReference !== 'fixture:continuation-dismissed' &&
+      input.nodeId === 'human-review' &&
+      input.waitResolution === null &&
+      input.blockRun === 1
+    ) {
+      return Promise.resolve({
+        status: 'needs_input',
+        summary: 'Human review is required by this fixture',
+        waitKind: 'human.review@1',
       });
     }
     if (
@@ -577,7 +593,7 @@ describe('Execution Workflow v2 recovery', () => {
       ok: true,
       value: {
         status: 'completed',
-        outcome: 'rejected',
+        outcome: 'accepted',
         blockRuns: { inspect: 1 },
         continuations: [{ attempt: 1, status: 'dismissed' }],
       },
