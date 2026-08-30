@@ -70,7 +70,7 @@ const attempt: OperatorExecutionAttempt = {
     ],
   },
   output: {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operationId: 'op-1',
     workflowId: 'workflow-1',
     workflowRunId: 'run-1',
