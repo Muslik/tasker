@@ -31,6 +31,8 @@ import {
   OperatorActivityResponseSchema,
   OperatorExecutionAttemptSchema,
   OperatorRunLogResponseSchema,
+  OperatorTaskInvocationDetailSchema,
+  OperatorTaskInvocationListResponseSchema,
   PlanningClarificationSubmissionSchema,
   OperatorWorkflowProjectionSchema,
   OperatorTaskSummarySchema,
@@ -58,6 +60,7 @@ import {
 import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
 import { RetrospectiveResponseSchema, type RetrospectiveStore } from '../retrospective/index.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
+import type { AgentInvocationReader } from './agent-invocation-reader.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
 import type { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
 import { JsonValueSchema } from '../workflow/schema.js';
@@ -82,6 +85,12 @@ const ExecutionAttemptParamsSchema = z
     blockRun: z.coerce.number().int().positive(),
   })
   .strict();
+const InvocationParamsSchema = z
+  .object({
+    taskReference: z.string().min(1),
+    invocationId: z.string().min(1),
+  })
+  .strict();
 const TaskEvidenceParamsSchema = z
   .object({ taskReference: z.string().min(1), artifactId: z.string().min(1) })
   .strict();
@@ -103,6 +112,7 @@ export interface BuildOperatorApiOptions {
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
   readonly executionActivity?: ExecutionActivityReader | undefined;
+  readonly agentInvocations?: AgentInvocationReader | undefined;
   readonly bitbucketReview?: Pick<BitbucketReviewCoordinator, 'sync'> | undefined;
   readonly dependencyOperator?: DependencyOperatorService | undefined;
   readonly dependencyDeclarations?: Pick<
@@ -624,10 +634,57 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
             },
             readArtifact: (artifactId) => options.artifacts?.readArtifact(artifactId) ?? null,
           },
+          {
+            readLatestExecutionInvocation: (input) =>
+              options.agentInvocations?.readLatestExecutionInvocation(input) ?? null,
+            readLatestPlanningInvocation: (input) =>
+              options.agentInvocations?.readLatestPlanningInvocation(input) ?? null,
+          },
         ),
       ),
     );
   });
+
+  api.get('/api/operator/tasks/:taskReference/invocations', async (request, reply) => {
+    if (options.agentInvocations === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('agent_invocations_unavailable', 'Agent invocations are unavailable'));
+    }
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    return reply.send(
+      OperatorTaskInvocationListResponseSchema.parse(
+        options.agentInvocations.list(params.data.taskReference),
+      ),
+    );
+  });
+
+  api.get(
+    '/api/operator/tasks/:taskReference/invocations/:invocationId',
+    async (request, reply) => {
+      if (options.agentInvocations === undefined) {
+        return reply
+          .code(503)
+          .send(apiError('agent_invocations_unavailable', 'Agent invocations are unavailable'));
+      }
+      const params = InvocationParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply
+          .code(400)
+          .send(apiError('invalid_request', 'Valid invocation identity is required'));
+      }
+      const detail = options.agentInvocations.read(
+        params.data.taskReference,
+        params.data.invocationId,
+      );
+      return detail === null
+        ? reply.code(404).send(apiError('invocation_not_found', 'Agent invocation does not exist'))
+        : reply.send(OperatorTaskInvocationDetailSchema.parse(detail));
+    },
+  );
 
   api.post('/api/operator/tasks/:taskReference/dependencies/configure', async (request, reply) => {
     if (
@@ -891,6 +948,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       const events = [
         ...options.service.listStreamEventsAfter(cursor),
         ...(options.implementationPlanning?.listStreamEventsAfter(cursor) ?? []),
+        ...(options.agentInvocations?.listStreamEventsAfter(cursor) ?? []),
       ].sort((left, right) => left.sequence - right.sequence);
       for (const event of events) {
         reply.raw.write(

@@ -7,9 +7,14 @@ import {
   createImplementationPlanningCoordinator,
   createOperatorWorkflowService,
   EvidenceBundleStore,
+  ImplementationPlanningStore,
   type ImplementationPlanningCoordinator,
 } from '../../src/control-plane/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import {
+  LedgerAgentInvocationRecorder,
+  planningAgentInvocationId,
+} from '../../src/observability/agent-invocation.js';
 import {
   ImplementationPlanningDecisionSchema,
   WorkflowGenerationSubjectSource,
@@ -599,6 +604,107 @@ describe('implementation planning recovery', () => {
         );
       },
     );
+  });
+
+  it('assigns stable invocation ordinals and passes planning inputs back through the validation loop', async () => {
+    await withPlanningFixture(
+      'tasker-plan-invocation-loop-',
+      async ({ directory, clock, ledger }) => {
+        const fallback = makeTestImplementationPlanner();
+        const invocations: Array<{
+          readonly invocationNumber: number;
+          readonly inputEvidenceArtifactIds: readonly string[];
+        }> = [];
+        const fixture = planningFixture(ledger, clock, directory, {
+          plan: async (request) => {
+            invocations.push({
+              invocationNumber: request.invocationNumber,
+              inputEvidenceArtifactIds: request.inputEvidenceArtifactIds,
+            });
+            const base = await fallback.plan(request);
+            if (!base.ok || base.value.decision?.status !== 'ready' || invocations.length !== 1) {
+              return base;
+            }
+            const source = base.value.decision.workflow.source;
+            return ok({
+              ...base.value,
+              decision: {
+                ...base.value.decision,
+                workflow: {
+                  ...base.value.decision.workflow,
+                  source: {
+                    ...source,
+                    root: {
+                      ...source.root,
+                      children: [
+                        {
+                          kind: 'step',
+                          id: 'unknown-step',
+                          uses: 'unknown.step@1',
+                          with: {},
+                        },
+                        ...source.root.children,
+                      ],
+                    },
+                  },
+                },
+              },
+            });
+          },
+        });
+
+        const result = await fixture.coordinator.prepare(
+          TASK_REFERENCE,
+          'fast',
+          'tasker:test:planning:invocation-loop',
+          PLANNING_EPISODE_ID,
+          fixture.snapshot,
+          fixture.evidence,
+        );
+
+        expect(result).toMatchObject({
+          ok: true,
+          value: { status: 'ready', validationRevision: 1 },
+        });
+        expect(invocations).toEqual([
+          {
+            invocationNumber: 1,
+            inputEvidenceArtifactIds: [fixture.snapshot.artifactId, fixture.evidence.artifactId],
+          },
+          {
+            invocationNumber: 2,
+            inputEvidenceArtifactIds: [fixture.snapshot.artifactId, fixture.evidence.artifactId],
+          },
+        ]);
+      },
+    );
+  });
+
+  it('advances the invocation ordinal after an interrupted provider run', async () => {
+    await withPlanningFixture('tasker-plan-invocation-retry-', ({ clock, ledger }) => {
+      const recorder = new LedgerAgentInvocationRecorder(ledger.repository, clock);
+      const invocationId = planningAgentInvocationId(PLANNING_EPISODE_ID, 1, 1);
+      const references = {
+        kind: 'planning' as const,
+        planningEpisodeId: PLANNING_EPISODE_ID,
+        planningAttempt: 1,
+        invocationNumber: 1,
+        operationId: 'interrupted-command',
+        transcriptId: 'planning-transcript:interrupted-command',
+        outputArtifactIds: [],
+        receiptArtifactId: null,
+      };
+      recorder.start({
+        invocationId,
+        taskReference: TASK_REFERENCE,
+        references,
+        startedAt: clock.now(),
+      });
+      const store = new ImplementationPlanningStore(ledger.repository, clock);
+
+      expect(store.nextAgentInvocationNumber(PLANNING_EPISODE_ID, 1)).toBe(2);
+      return Promise.resolve();
+    });
   });
 
   it('preserves the rejected candidate and validator feedback for an operator-guided revision', async () => {

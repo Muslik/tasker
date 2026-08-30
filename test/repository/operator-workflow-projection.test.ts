@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BlockReceiptSchema } from '../../src/blocks/contracts.js';
+import { LedgerAgentInvocationReader } from '../../src/control-plane/agent-invocation-reader.js';
 import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { LedgerAgentInvocationRecorder } from '../../src/observability/agent-invocation.js';
 import { planWorkflowProposal } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
@@ -150,6 +152,94 @@ describe('operator workflow projection', () => {
     });
   });
 
+  it('uses a started planning invocation to expose the current attempt before completion', () => {
+    const clock = makeAdjustableClock('2026-08-09T00:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: ':memory:', clock });
+    resources.push(ledger);
+    const invocations = new LedgerAgentInvocationReader(ledger.repository);
+    new LedgerAgentInvocationRecorder(ledger.repository, clock).start({
+      invocationId: 'agent-invocation:planning-running',
+      taskReference: 'AVIA-1',
+      references: {
+        kind: 'planning',
+        planningEpisodeId: 'bootstrap-workflow:bootstrap-run:planning',
+        planningAttempt: 1,
+        invocationNumber: 1,
+        operationId: 'bootstrap-workflow:bootstrap-run:planning:1',
+        transcriptId: 'planning-transcript:bootstrap-workflow:bootstrap-run:planning:1',
+        outputArtifactIds: [],
+        receiptArtifactId: null,
+      },
+      startedAt: '2026-08-09T00:00:15.000Z',
+    });
+    const operationId = 'bootstrap-workflow:bootstrap-run:planning:1';
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: 'AVIA-1',
+        workflowId: 'bootstrap-workflow',
+        runId: 'bootstrap-run',
+        workflowHash: null,
+        settings: { planReview: 'required', planningStrategy: 'fast' },
+        phase: 'planning',
+        workspaceContext: null,
+        context: null,
+        draft: null,
+        planning: {
+          status: 'blocked',
+          planningEpisodeId: 'bootstrap-workflow:bootstrap-run:planning',
+          commandId: operationId,
+          attempt: 1,
+          evidenceBundle: { artifactId: 'evidence', checksum: 'a'.repeat(64), revision: 1 },
+          requestedStrategy: 'fast',
+          selectedStrategy: 'fast',
+          transcriptId: null,
+          failure: {
+            kind: 'provider_failed',
+            message: 'still running in provider logs',
+            retryable: true,
+          },
+          validationFeedback: [],
+          validationRevision: 0,
+        },
+        activeTranscriptOperationId: operationId,
+        freezeReceipt: null,
+        executionWorkflowId: null,
+        nodeStates: { workspace: 'succeeded', planning: 'running' },
+        attempts: { planning: 1 },
+        status: 'running',
+        currentNodeId: 'planning',
+        wait: null,
+        outcome: null,
+      },
+      execution: null,
+    });
+
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      lifecycle,
+      { read: () => ok(null) },
+      () => null,
+      () => null,
+      () => null,
+      undefined,
+      {
+        readLatestExecutionInvocation: (input) => invocations.readLatestExecutionInvocation(input),
+        readLatestPlanningInvocation: (input) => invocations.readLatestPlanningInvocation(input),
+      },
+    );
+
+    expect(projection.current).toMatchObject({ status: 'running' });
+    expect(projection.currentAttempt).toEqual({
+      latestInvocationId: 'agent-invocation:planning-running',
+      nodeId: 'planning',
+      blockRun: 1,
+      startedAt: '2026-08-09T00:00:15.000Z',
+      waitingSince: null,
+    });
+  });
+
   it('classifies an integration failure as an external prerequisite', () => {
     const projection = createOperatorWorkflowProjection(
       'AVIA-1',
@@ -164,6 +254,96 @@ describe('operator workflow projection', () => {
     expect(projection.current).toMatchObject({
       status: 'waiting',
       intervention: { kind: 'external_prerequisite' },
+    });
+  });
+
+  it('uses the latest finished execution invocation for waiting timing', () => {
+    const clock = makeAdjustableClock('2026-08-09T00:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: ':memory:', clock });
+    resources.push(ledger);
+    const recorder = new LedgerAgentInvocationRecorder(ledger.repository, clock);
+    const invocations = new LedgerAgentInvocationReader(ledger.repository);
+    recorder.start({
+      invocationId: 'agent-invocation:deliver-1',
+      taskReference: 'AVIA-1',
+      references: {
+        kind: 'execution',
+        workflowId: 'execution-workflow',
+        runId: 'execution-run',
+        nodeId: 'active-step',
+        blockRun: 1,
+        providerAttempt: 1,
+        transcriptId: 'execution-transcript:1',
+        outputArtifactIds: [],
+        receiptArtifactId: 'receipt:1',
+      },
+      startedAt: '2026-08-09T00:01:00.000Z',
+    });
+    recorder.finish({
+      schemaVersion: 1,
+      invocationId: 'agent-invocation:deliver-1',
+      taskReference: 'AVIA-1',
+      prompt: 'Deliver the task',
+      promptBytes: 256,
+      provider: 'codex',
+      profile: 'delivery',
+      profileSha256: 'd'.repeat(64),
+      model: 'gpt-5.4',
+      effort: 'high',
+      serviceTier: 'fast',
+      argv: ['codex'],
+      skills: ['deliver-pr'],
+      inputEvidenceArtifactIds: [],
+      startedAt: '2026-08-09T00:01:00.000Z',
+      finishedAt: '2026-08-09T00:01:20.000Z',
+      durationMs: 20_000,
+      status: 'waiting',
+      exitStatus: { kind: 'timed_out' },
+      usage: {
+        inputTokens: 10,
+        cachedInputTokens: 2,
+        outputTokens: 3,
+        reasoningOutputTokens: 1,
+      },
+      cost: { source: 'unrated' },
+      references: {
+        kind: 'execution',
+        workflowId: 'execution-workflow',
+        runId: 'execution-run',
+        nodeId: 'active-step',
+        blockRun: 1,
+        providerAttempt: 1,
+        transcriptId: 'execution-transcript:1',
+        outputArtifactIds: [],
+        receiptArtifactId: 'receipt:1',
+      },
+    });
+
+    const projection = createOperatorWorkflowProjection(
+      'AVIA-1',
+      waitingLifecycleFor(
+        'deliver.pull-request@1',
+        'remote_reconciled',
+        'deliver.pull-request@1.invalid_request@1',
+      ),
+      { read: () => ok(null) },
+      () => null,
+      () => null,
+      () => null,
+      undefined,
+      {
+        readLatestExecutionInvocation: (input) => invocations.readLatestExecutionInvocation(input),
+        readLatestPlanningInvocation: (input) => invocations.readLatestPlanningInvocation(input),
+      },
+    );
+
+    expect(projection.current).toMatchObject({ status: 'waiting' });
+    expect(projection.currentAttempt).toEqual({
+      latestInvocationId: 'agent-invocation:deliver-1',
+      nodeId: 'active-step',
+      blockRun: 1,
+      startedAt: '2026-08-09T00:01:00.000Z',
+      waitingSince: '2026-08-09T00:01:20.000Z',
     });
   });
 

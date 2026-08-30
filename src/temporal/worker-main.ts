@@ -64,6 +64,7 @@ import {
   UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
+import { LedgerAgentInvocationRecorder } from '../observability/index.js';
 import { RetrospectiveStore } from '../retrospective/index.js';
 import {
   loadWorkspaceConfiguration,
@@ -268,7 +269,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     evidenceBundles,
     evidenceReaders,
     harnessPack,
-    planner: new SubscriptionCliImplementationPlanner(temporalCommandRunner),
+    planner: new SubscriptionCliImplementationPlanner(
+      temporalCommandRunner,
+      new LedgerAgentInvocationRecorder(ledger.repository, systemClock),
+    ),
   });
   const planningContexts = new BootstrapContextAssembler(subjects, contextDiscovery, planning);
   const executionTraces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

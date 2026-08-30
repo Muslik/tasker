@@ -21,6 +21,7 @@ import {
   type OperatorWorkflowStep,
   type WorkflowNodeStatus,
 } from './operator-contracts.js';
+import type { CurrentAgentInvocationSummary } from './agent-invocation-reader.js';
 import {
   describeDependencyAvailableWait,
   describeDependencyDiscoveryWait,
@@ -49,6 +50,21 @@ interface DependencyProjectionReaders {
   readonly readDeclaration: (declarationId: string) => DependencyDeclaration | null;
   readonly readPublication: (observationId: string) => VerifiedPackagePublication | null;
   readonly readArtifact: (artifactId: string) => ProjectionArtifactRecord | null;
+}
+
+interface ProjectionInvocationReaders {
+  readonly readLatestExecutionInvocation: (input: {
+    readonly taskReference: string;
+    readonly workflowId: string;
+    readonly runId: string;
+    readonly nodeId: string;
+    readonly blockRun: number;
+  }) => CurrentAgentInvocationSummary | null;
+  readonly readLatestPlanningInvocation: (input: {
+    readonly taskReference: string;
+    readonly planningEpisodeId: string;
+    readonly planningAttempt: number;
+  }) => CurrentAgentInvocationSummary | null;
 }
 
 const TYPED_RESOLUTION_WAITS = new Set([
@@ -479,16 +495,21 @@ export const createOperatorWorkflowProjection = (
     readPublication: () => null,
     readArtifact: () => null,
   },
+  invocationReaders: ProjectionInvocationReaders = {
+    readLatestExecutionInvocation: () => null,
+    readLatestPlanningInvocation: () => null,
+  },
 ): OperatorWorkflowProjection => {
   if (lifecycle === null) {
     return OperatorWorkflowProjectionSchema.parse({
-      schemaVersion: 8,
+      schemaVersion: 9,
       taskReference,
       status: 'not_started',
       activeRuntime: null,
       activeRunId: null,
       graphHash: null,
       current: null,
+      currentAttempt: null,
       dependencies: dependencyReaders.listDeclarations(taskReference),
       stages: [],
       continuations: [],
@@ -528,6 +549,37 @@ export const createOperatorWorkflowProjection = (
     ({ status }) =>
       status === 'planning' || status === 'needs_input' || status === 'awaiting_review',
   );
+  const currentInvocation =
+    execution !== null && executionNodeId !== null
+      ? invocationReaders.readLatestExecutionInvocation({
+          taskReference,
+          workflowId: execution.workflowId,
+          runId: execution.runId,
+          nodeId: executionNodeId,
+          blockRun: execution.blockRuns[executionNodeId] ?? 0,
+        })
+      : lifecycle.bootstrap.status !== 'completed' &&
+          lifecycle.bootstrap.currentNodeId === 'planning' &&
+          lifecycle.bootstrap.planning !== null
+        ? invocationReaders.readLatestPlanningInvocation({
+            taskReference,
+            planningEpisodeId: lifecycle.bootstrap.planning.planningEpisodeId,
+            planningAttempt: lifecycle.bootstrap.planning.attempt,
+          })
+        : null;
+  const currentAttempt =
+    currentInvocation === null
+      ? null
+      : {
+          latestInvocationId: currentInvocation.invocationId,
+          nodeId: activeNodeId ?? 'planning',
+          blockRun: currentInvocation.blockRun,
+          startedAt: currentInvocation.startedAt,
+          waitingSince:
+            active.status === 'waiting'
+              ? (currentInvocation.finishedAt ?? currentInvocation.startedAt)
+              : null,
+        };
   const current =
     activeNodeId === null || active.status === 'completed'
       ? null
@@ -570,13 +622,14 @@ export const createOperatorWorkflowProjection = (
               : readContinuationTranscript(activeContinuation.transcriptOperationId),
         };
   return OperatorWorkflowProjectionSchema.parse({
-    schemaVersion: 8,
+    schemaVersion: 9,
     taskReference,
     status: active.status,
     activeRuntime: execution === null ? 'bootstrap' : 'execution',
     activeRunId: active.runId,
     graphHash: lifecycle.bootstrap.workflowHash,
     current,
+    currentAttempt,
     dependencies: dependencyReaders.listDeclarations(taskReference),
     stages: [
       ...createBootstrapStages(lifecycle),

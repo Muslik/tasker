@@ -13,7 +13,12 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { blockReceiptId } from '../../../src/blocks/index.js';
 import { openSqliteLedger } from '../../../src/ledger/index.js';
+import {
+  AgentInvocationArtifactSchema,
+  executionAgentInvocationId,
+} from '../../../src/observability/agent-invocation.js';
 import type {
   CommandRequest,
   CommandResult,
@@ -75,6 +80,7 @@ const outputSchema = z.discriminatedUnion('status', [
 const writeSkillCatalog = (repositoryPath: string): void => {
   mkdirSync(join(repositoryPath, '.tasker', 'harness'), { recursive: true });
   mkdirSync(join(repositoryPath, '.tasker', 'harness', 'lib'), { recursive: true });
+  mkdirSync(join(repositoryPath, '.tasker', 'harness', 'skills'), { recursive: true });
   writeFileSync(
     join(repositoryPath, '.tasker', 'harness', 'lib', 'harness_env.py'),
     'def load_env(): pass\n',
@@ -112,6 +118,27 @@ const writeSkillCatalog = (repositoryPath: string): void => {
     '{"profile":"front-avia"}\n',
     'utf8',
   );
+  for (const skill of ['jira', 'pr-finalize']) {
+    const directory = join(repositoryPath, '.tasker', 'harness', 'skills', skill);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, 'SKILL.md'),
+      `---\nname: ${skill}\ndescription: ${skill} test skill\n---\n`,
+      'utf8',
+    );
+  }
+};
+
+const readInvocationArtifact = (
+  ledger: ReturnType<typeof openSqliteLedger>,
+  operationId: string,
+  providerAttempt: number,
+) => {
+  const artifact = ledger.repository.readArtifact(
+    executionAgentInvocationId(operationId, providerAttempt),
+  );
+  expect(artifact).not.toBeNull();
+  return AgentInvocationArtifactSchema.parse(artifact?.payload);
 };
 
 describe('subscription CLI task-step runner', () => {
@@ -142,8 +169,14 @@ describe('subscription CLI task-step runner', () => {
 
     try {
       const result = runner.run({
+        taskReference: 'task-ref',
         inputArtifactIds: [],
         operationId: 'workflow:cancelled-step:attempt-1',
+        workflowId: 'tasker:task-ref',
+        workflowRunId: 'run-1',
+        nodeId: 'cancelled-step',
+        blockRun: 1,
+        providerAttempt: 1,
         stepReference: 'implement.change@1',
         profile: TEST_CODEX_PROFILE,
         prompt: 'Return the result.',
@@ -282,8 +315,14 @@ describe('subscription CLI task-step runner', () => {
 
     try {
       const result = await runner.run({
+        taskReference: 'task-ref',
         inputArtifactIds: [registeredInput.value[0]],
         operationId: 'workflow:step:attempt-1',
+        workflowId: 'tasker:task-ref',
+        workflowRunId: 'run-1',
+        nodeId: 'implement-feature',
+        blockRun: 1,
+        providerAttempt: 1,
         stepReference: 'implement.change@1',
         profile: TEST_CODEX_PROFILE,
         prompt: 'Return the result.',
@@ -347,11 +386,374 @@ describe('subscription CLI task-step runner', () => {
       );
       expect(existsSync(observations[0]?.artifactsRoot ?? '')).toBe(true);
       expect(existsSync(observations[0]?.scratchRoot ?? '')).toBe(false);
+      expect(readInvocationArtifact(ledger, 'workflow:step:attempt-1', 1)).toMatchObject({
+        invocationId: 'agent-invocation:workflow:step:attempt-1:provider-attempt-1',
+        taskReference: 'task-ref',
+        prompt: observations[0]?.stdin,
+        promptBytes: Buffer.byteLength(observations[0]?.stdin ?? '', 'utf8'),
+        argv: [TEST_CODEX_PROFILE.command, ...(observations[0]?.args ?? [])],
+        skills: ['jira'],
+        inputEvidenceArtifactIds: [registeredInput.value[0]],
+        status: 'completed',
+        exitStatus: { kind: 'exited', exitCode: 0 },
+        usage: {
+          inputTokens: 10,
+          cachedInputTokens: 2,
+          outputTokens: 4,
+          reasoningOutputTokens: 0,
+        },
+        references: {
+          kind: 'execution',
+          workflowId: 'tasker:task-ref',
+          runId: 'run-1',
+          nodeId: 'implement-feature',
+          blockRun: 1,
+          providerAttempt: 1,
+          transcriptId: 'task-step-transcript:workflow:step:attempt-1',
+          outputArtifactIds: [
+            'task-step-output:workflow:step:attempt-1:artifact',
+            expect.stringMatching(/^task-step-evidence:[a-f0-9]{64}$/u),
+          ],
+          receiptArtifactId: blockReceiptId({
+            workflowId: 'tasker:task-ref',
+            workflowRunId: 'run-1',
+            nodeId: 'implement-feature',
+            blockRun: 1,
+          }),
+        },
+      });
     } finally {
       ledger.close();
       rmSync(repositoryPath, { recursive: true, force: true });
       rmSync(stepDataPath, { recursive: true, force: true });
       rmSync(inputRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('records a failed invocation for a provider command that exits non-zero', async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-failed-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-failed-step-data-'));
+    writeSkillCatalog(repositoryPath);
+    const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run: (request) =>
+        Promise.resolve(
+          request.args[0] === '--version'
+            ? {
+                status: 'exited' as const,
+                exitCode: 0,
+                stdout: 'codex-cli 0.120.0\n',
+                stderr: '',
+                durationMs: 1,
+              }
+            : {
+                status: 'exited' as const,
+                exitCode: 17,
+                stdout: '',
+                stderr: 'controlled failure',
+                durationMs: 25,
+              },
+        ),
+    };
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
+    );
+
+    try {
+      const result = await runner.run({
+        taskReference: 'task-ref',
+        inputArtifactIds: [],
+        operationId: 'workflow:failed-step:attempt-1',
+        workflowId: 'tasker:task-ref',
+        workflowRunId: 'run-1',
+        nodeId: 'implement-feature',
+        blockRun: 1,
+        providerAttempt: 2,
+        stepReference: 'implement.change@1',
+        profile: TEST_CODEX_PROFILE,
+        prompt: 'Return the result.',
+        skills: [],
+        recovery: { kind: 'single_attempt' },
+        outputSchema,
+        cwd: repositoryPath,
+        workspaceAccess: 'read_write',
+        runtime: {
+          attempt: 2,
+          cancellationSignal: new AbortController().signal,
+          heartbeat: () => {},
+        },
+        transcriptStore: traces,
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: { kind: 'provider_failed', exitCode: 17 },
+      });
+      expect(readInvocationArtifact(ledger, 'workflow:failed-step:attempt-1', 2)).toMatchObject({
+        status: 'failed',
+        durationMs: 25,
+        exitStatus: { kind: 'exited', exitCode: 17 },
+        references: {
+          providerAttempt: 2,
+          receiptArtifactId: blockReceiptId({
+            workflowId: 'tasker:task-ref',
+            workflowRunId: 'run-1',
+            nodeId: 'implement-feature',
+            blockRun: 1,
+          }),
+        },
+      });
+    } finally {
+      ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('records a waiting invocation when the agent reports a blocked outcome', async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-blocked-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-blocked-step-data-'));
+    writeSkillCatalog(repositoryPath);
+    const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run: (request) =>
+        Promise.resolve(
+          request.args[0] === '--version'
+            ? {
+                status: 'exited' as const,
+                exitCode: 0,
+                stdout: 'codex-cli 0.120.0\n',
+                stderr: '',
+                durationMs: 1,
+              }
+            : {
+                status: 'exited' as const,
+                exitCode: 0,
+                stdout: codexStream(
+                  JSON.stringify({
+                    status: 'blocked',
+                    outputJson: '{}',
+                    requestJson: null,
+                    blockingReason: 'Awaiting operator input',
+                  }),
+                ),
+                stderr: '',
+                durationMs: 30,
+              },
+        ),
+    };
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
+    );
+    const providerOutcomeSchema = z
+      .object({
+        status: z.enum(['completed', 'workflow_change_required', 'blocked']),
+        outputJson: z.string().nullable(),
+        requestJson: z.string().nullable(),
+        blockingReason: z.string().nullable(),
+      })
+      .strict();
+
+    try {
+      const result = await runner.run({
+        taskReference: 'task-ref',
+        inputArtifactIds: [],
+        operationId: 'workflow:blocked-step:attempt-1',
+        workflowId: 'tasker:task-ref',
+        workflowRunId: 'run-1',
+        nodeId: 'implement-feature',
+        blockRun: 1,
+        providerAttempt: 1,
+        stepReference: 'implement.change@1',
+        profile: TEST_CODEX_PROFILE,
+        prompt: 'Return the result.',
+        skills: [],
+        recovery: { kind: 'single_attempt' },
+        outputSchema: providerOutcomeSchema,
+        cwd: repositoryPath,
+        workspaceAccess: 'read_write',
+        runtime: {
+          attempt: 1,
+          cancellationSignal: new AbortController().signal,
+          heartbeat: () => {},
+        },
+        transcriptStore: traces,
+      });
+
+      expect(result).toMatchObject({ ok: true });
+      expect(readInvocationArtifact(ledger, 'workflow:blocked-step:attempt-1', 1)).toMatchObject({
+        status: 'waiting',
+        durationMs: 30,
+        exitStatus: { kind: 'exited', exitCode: 0 },
+      });
+    } finally {
+      ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('records a failed invocation before rethrowing a provider exception', async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-thrown-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-thrown-step-data-'));
+    writeSkillCatalog(repositoryPath);
+    const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run: (request) => {
+        if (request.args[0] === '--version') {
+          return Promise.resolve({
+            status: 'exited',
+            exitCode: 0,
+            stdout: 'codex-cli 0.120.0\n',
+            stderr: '',
+            durationMs: 1,
+          });
+        }
+        throw new Error('provider command threw');
+      },
+    };
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
+    );
+
+    try {
+      await expect(
+        runner.run({
+          taskReference: 'task-ref',
+          inputArtifactIds: [],
+          operationId: 'workflow:thrown-step:attempt-1',
+          workflowId: 'tasker:task-ref',
+          workflowRunId: 'run-1',
+          nodeId: 'implement-feature',
+          blockRun: 1,
+          providerAttempt: 1,
+          stepReference: 'implement.change@1',
+          profile: TEST_CODEX_PROFILE,
+          prompt: 'Return the result.',
+          skills: [],
+          recovery: { kind: 'single_attempt' },
+          outputSchema,
+          cwd: repositoryPath,
+          workspaceAccess: 'read_write',
+          runtime: {
+            attempt: 1,
+            cancellationSignal: new AbortController().signal,
+            heartbeat: () => {},
+          },
+          transcriptStore: traces,
+        }),
+      ).rejects.toThrow('provider command threw');
+      const artifact = readInvocationArtifact(ledger, 'workflow:thrown-step:attempt-1', 1);
+      expect(artifact).toMatchObject({
+        status: 'failed',
+        exitStatus: { kind: 'thrown', message: 'provider command threw' },
+      });
+      expect(artifact.prompt).toContain('Return the result.');
+    } finally {
+      ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('logs observability persistence failures to the transcript without changing success', async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-observability-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-observability-step-data-'));
+    writeSkillCatalog(repositoryPath);
+    const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const operationId = 'workflow:observability-step:attempt-1';
+    const providerAttempt = 1;
+    const invocationId = executionAgentInvocationId(operationId, providerAttempt);
+    ledger.repository.transact({
+      artifacts: [
+        {
+          artifactId: invocationId,
+          artifactKind: 'agent_invocation',
+          storageUri: `ledger://artifacts/${invocationId}`,
+          payload: { invalid: true },
+          metadata: {},
+          createdAt: systemClock.now(),
+        },
+      ],
+      timestamp: systemClock.now(),
+    });
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run: (request) =>
+        Promise.resolve(
+          request.args[0] === '--version'
+            ? {
+                status: 'exited' as const,
+                exitCode: 0,
+                stdout: 'codex-cli 0.120.0\n',
+                stderr: '',
+                durationMs: 1,
+              }
+            : {
+                status: 'exited' as const,
+                exitCode: 0,
+                stdout: codexStream(
+                  JSON.stringify({ status: 'done', done: true, labels: { result: 'verified' } }),
+                ),
+                stderr: '',
+                durationMs: 2,
+              },
+        ),
+    };
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
+    );
+
+    try {
+      const result = await runner.run({
+        taskReference: 'task-ref',
+        inputArtifactIds: [],
+        operationId,
+        workflowId: 'tasker:task-ref',
+        workflowRunId: 'run-1',
+        nodeId: 'implement-feature',
+        blockRun: 1,
+        providerAttempt,
+        stepReference: 'implement.change@1',
+        profile: TEST_CODEX_PROFILE,
+        prompt: 'Return the result.',
+        skills: [],
+        recovery: { kind: 'single_attempt' },
+        outputSchema,
+        cwd: repositoryPath,
+        workspaceAccess: 'read_write',
+        runtime: {
+          attempt: 1,
+          cancellationSignal: new AbortController().signal,
+          heartbeat: () => {},
+        },
+        transcriptStore: traces,
+      });
+
+      expect(result).toMatchObject({ ok: true });
+      const transcript = traces.read(operationId);
+      expect(
+        transcript.ok ? transcript.value.chunks.map(({ content }) => content).join('') : '',
+      ).toContain('[tasker observability] agent invocation finish persistence failed');
+    } finally {
+      ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
     }
   });
 
@@ -392,8 +794,14 @@ describe('subscription CLI task-step runner', () => {
 
     try {
       const result = await runner.run({
+        taskReference: 'task-ref',
         inputArtifactIds: [],
         operationId: 'workflow:claude-step:attempt-1',
+        workflowId: 'tasker:task-ref',
+        workflowRunId: 'run-1',
+        nodeId: 'implement-feature',
+        blockRun: 1,
+        providerAttempt: 1,
         stepReference: 'implement.change@1',
         profile: TEST_CLAUDE_PROFILE,
         prompt: 'Return the result.',

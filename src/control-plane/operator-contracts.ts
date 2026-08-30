@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 import { BlockedClaimCategorySchema, CompletionEvidenceSchema } from '../blocks/contracts.js';
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
-import { AgentInvocationUsageSchema } from '../observability/agent-usage.js';
+import { AgentApiCostSchema, AgentInvocationUsageSchema } from '../observability/agent-usage.js';
+import {
+  AgentInvocationExitStatusSchema,
+  AgentInvocationReferencesSchema,
+  AgentInvocationTokenUsageSchema,
+} from '../observability/agent-invocation.js';
 import { WorkflowAnalyzerReceiptSchema } from '../providers/contracts.js';
 import { JiraRepositoryBindingSchema } from '../repositories/contracts.js';
 import { TaskRunPublicStateSchema } from '../temporal/public-state.js';
@@ -18,6 +23,7 @@ import {
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 
 export const OPERATOR_VIEW_SCHEMA_VERSION = 7;
+export const OPERATOR_WORKFLOW_PROJECTION_SCHEMA_VERSION = 9;
 
 export const PlanningTaskSummarySchema = z
   .object({
@@ -318,9 +324,20 @@ const OperatorWorkflowCurrentBaseSchema = {
   transcript: PlanningTranscriptViewSchema.nullable(),
 };
 
+export const OperatorWorkflowCurrentAttemptSchema = z
+  .object({
+    latestInvocationId: z.string().min(1),
+    nodeId: z.string().min(1),
+    blockRun: z.number().int().positive(),
+    startedAt: z.iso.datetime(),
+    waitingSince: z.iso.datetime().nullable(),
+  })
+  .strict()
+  .readonly();
+
 export const OperatorWorkflowProjectionSchema = z
   .object({
-    schemaVersion: z.literal(8),
+    schemaVersion: z.literal(OPERATOR_WORKFLOW_PROJECTION_SCHEMA_VERSION),
     taskReference: z.string().min(1),
     status: z.enum(['not_started', 'running', 'waiting', 'completed']),
     activeRuntime: z.enum(['bootstrap', 'execution']).nullable(),
@@ -351,6 +368,7 @@ export const OperatorWorkflowProjectionSchema = z
           .strict(),
       ])
       .nullable(),
+    currentAttempt: OperatorWorkflowCurrentAttemptSchema.nullable(),
     dependencies: z.array(
       z
         .object({
@@ -383,6 +401,82 @@ export const OperatorWorkflowProjectionSchema = z
     ),
     stages: z.array(OperatorWorkflowStageSchema),
     continuations: z.array(OperatorWorkflowContinuationSchema),
+  })
+  .strict()
+  .readonly();
+
+export const OperatorTaskInvocationListRowSchema = z
+  .object({
+    invocationId: z.string().min(1),
+    taskReference: z.string().min(1),
+    scope: z.enum(['execution', 'planning']),
+    nodeId: z.string().min(1).nullable(),
+    planningEpisodeId: z.string().min(1).nullable(),
+    blockRun: z.number().int().positive().nullable(),
+    provider: z.enum(['codex', 'claude']),
+    profile: z.string().min(1),
+    model: z.string().min(1),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    serviceTier: z.enum(['fast', 'flex']).nullable(),
+    promptBytes: z.number().int().nonnegative(),
+    durationMs: z.number().nonnegative(),
+    status: z.enum(['completed', 'waiting', 'failed']),
+    startedAt: z.iso.datetime(),
+    finishedAt: z.iso.datetime(),
+    usage: AgentInvocationTokenUsageSchema,
+    cost: AgentApiCostSchema,
+  })
+  .strict()
+  .readonly();
+
+export const OperatorTaskInvocationTotalsSchema = z
+  .object({
+    invocationCount: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    reasoningOutputTokens: z.number().int().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+    costUsd: z.number().nonnegative(),
+    unratedCount: z.number().int().nonnegative(),
+  })
+  .strict()
+  .readonly();
+
+export const OperatorTaskInvocationListResponseSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    taskReference: z.string().min(1),
+    invocations: z.array(OperatorTaskInvocationListRowSchema),
+    totals: OperatorTaskInvocationTotalsSchema,
+  })
+  .strict()
+  .readonly();
+
+export const OperatorTaskInvocationDetailSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    invocationId: z.string().min(1),
+    taskReference: z.string().min(1),
+    prompt: z.string(),
+    promptBytes: z.number().int().nonnegative(),
+    provider: z.enum(['codex', 'claude']),
+    profile: z.string().min(1),
+    profileSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    model: z.string().min(1),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    serviceTier: z.enum(['fast', 'flex']).nullable(),
+    argv: z.array(z.string()).min(1),
+    skills: z.array(z.string().min(1)),
+    inputEvidenceArtifactIds: z.array(z.string().min(1)),
+    startedAt: z.iso.datetime(),
+    finishedAt: z.iso.datetime(),
+    durationMs: z.number().nonnegative(),
+    status: z.enum(['completed', 'waiting', 'failed']),
+    exitStatus: AgentInvocationExitStatusSchema,
+    usage: AgentInvocationTokenUsageSchema,
+    cost: AgentApiCostSchema,
+    references: AgentInvocationReferencesSchema,
   })
   .strict()
   .readonly();
@@ -754,6 +848,7 @@ export type OperatorWorkflowStage = z.infer<typeof OperatorWorkflowStageSchema>;
 export type OperatorWorkflowContinuation = z.infer<typeof OperatorWorkflowContinuationSchema>;
 export type OperatorInterventionAction = z.infer<typeof OperatorInterventionActionSchema>;
 export type OperatorWorkflowProjection = z.infer<typeof OperatorWorkflowProjectionSchema>;
+export type OperatorWorkflowCurrentAttempt = z.infer<typeof OperatorWorkflowCurrentAttemptSchema>;
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>;
 export type WorkflowResponse = z.infer<typeof WorkflowResponseSchema>;
 export type ExecutionRunView = z.infer<typeof ExecutionRunViewSchema>;
@@ -771,3 +866,9 @@ export type OperatorTaskSummary = z.infer<typeof OperatorTaskSummarySchema>;
 export type OperatorTaskListResponse = z.infer<typeof OperatorTaskListResponseSchema>;
 export type OperatorActivityResponse = z.infer<typeof OperatorActivityResponseSchema>;
 export type OperatorStreamEvent = z.infer<typeof OperatorStreamEventSchema>;
+export type OperatorTaskInvocationListRow = z.infer<typeof OperatorTaskInvocationListRowSchema>;
+export type OperatorTaskInvocationTotals = z.infer<typeof OperatorTaskInvocationTotalsSchema>;
+export type OperatorTaskInvocationListResponse = z.infer<
+  typeof OperatorTaskInvocationListResponseSchema
+>;
+export type OperatorTaskInvocationDetail = z.infer<typeof OperatorTaskInvocationDetailSchema>;

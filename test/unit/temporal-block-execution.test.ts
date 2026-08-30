@@ -396,12 +396,16 @@ describe('temporal block execution activity', () => {
     const selectedSkills: (readonly string[])[] = [];
     const stepReferences: string[] = [];
     const workspaceAccess: string[] = [];
+    const providerAttempts: number[] = [];
+    const blockRuns: number[] = [];
     const agentRunner: TaskStepAgentRunner = {
       run: (request) => {
         prompts.push(request.prompt);
         selectedSkills.push(request.skills);
         stepReferences.push(request.stepReference);
         workspaceAccess.push(request.workspaceAccess);
+        providerAttempts.push(request.providerAttempt);
+        blockRuns.push(request.blockRun);
         return Promise.resolve(
           ok({
             artifactIds: [],
@@ -422,7 +426,6 @@ describe('temporal block execution activity', () => {
         );
       },
     };
-
     const result = await executeRegisteredTaskStep(
       {
         taskReference: 'task-ref',
@@ -473,6 +476,8 @@ describe('temporal block execution activity', () => {
     expect(selectedSkills).toEqual([[]]);
     expect(stepReferences).toEqual(['review.change@1']);
     expect(workspaceAccess).toEqual(['read_only']);
+    expect(providerAttempts).toEqual([1]);
+    expect(blockRuns).toEqual([1]);
   });
 
   it('returns the durable result without invoking the agent again after response loss', async () => {
@@ -640,6 +645,22 @@ describe('temporal block execution activity', () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const reason = 'pnpm start cannot find Node.js in the prepared execution environment';
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        ok({
+          artifactIds: [],
+          stdout: '',
+          stderr: '',
+          usage: TEST_AGENT_USAGE,
+          finalMessage: {
+            status: 'blocked',
+            outputJson: JSON.stringify({ command: 'pnpm start', exitCode: 127 }),
+            requestJson: null,
+            blockingReason: reason,
+          },
+        }),
+      ),
+    );
     const result = await executeRegisteredTaskStep(
       {
         taskReference: 'task-ref',
@@ -670,23 +691,7 @@ describe('temporal block execution activity', () => {
         currentSteps: createCurrentStepRegistry(pack),
         traces,
         mutationRecovery,
-        agentRunner: {
-          run: () =>
-            Promise.resolve(
-              ok({
-                artifactIds: [],
-                stdout: '',
-                stderr: '',
-                usage: TEST_AGENT_USAGE,
-                finalMessage: {
-                  status: 'blocked',
-                  outputJson: JSON.stringify({ command: 'pnpm start', exitCode: 127 }),
-                  requestJson: null,
-                  blockingReason: reason,
-                },
-              }),
-            ),
-        },
+        agentRunner: { run },
         commands: workspaceCommands(),
         workspaces: stubWorkspaceStore,
       },
@@ -702,6 +707,16 @@ describe('temporal block execution activity', () => {
       summary: `Agent execution for verify.acceptance@1 is blocked: ${reason}`,
       waitKind: 'verify.acceptance.1.blocked@1',
     });
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        nodeId: 'validate-bug-fix',
+        blockRun: 1,
+        providerAttempt: 1,
+      }),
+    );
   });
 
   it('keeps a valid blocking reason when optional diagnostic JSON is malformed', async () => {
@@ -798,6 +813,82 @@ describe('temporal block execution activity', () => {
       }),
     ).rejects.toThrow(
       'Agent execution for verify.acceptance@1 returned an invalid outcome: outputJson is not valid JSON',
+    );
+  });
+
+  it('passes runtime retry metadata to the agent runner before a thrown invalid outcome', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        ok({
+          artifactIds: [],
+          stdout: '',
+          stderr: '',
+          usage: TEST_AGENT_USAGE,
+          finalMessage: {
+            status: 'completed',
+            outputJson: '{',
+            requestJson: null,
+            blockingReason: null,
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      executeRegisteredTaskStep(
+        {
+          taskReference: 'task-ref',
+          workflowId: stubWorkspace.workflowId,
+          workflowRunId: stubWorkspace.workflowRunId,
+          workflowHash: WORKFLOW_HASH,
+          nodeId: 'validate-bug-fix',
+          stepAttempt: 1,
+          uses: 'verify.acceptance@1',
+          activityDelivery: { kind: 'read_only' },
+          workspace: stubWorkspace,
+          planningSnapshot: {
+            artifactId: 'planning-snapshot:test',
+            checksum: 'd'.repeat(64),
+          },
+          operatorGuidance: null,
+          waitResolution: null,
+          input: {
+            objective: 'Repeat the investigated scenario and prove the fix',
+            repository: fixture.repository,
+            taskId: fixture.taskId,
+          },
+        },
+        {
+          snapshots: {
+            readRunSnapshot: () => ok(makeSnapshot('verify.acceptance@1')),
+          },
+          currentSteps: createCurrentStepRegistry(pack),
+          traces,
+          mutationRecovery,
+          agentRunner: { run },
+          commands: workspaceCommands(),
+          workspaces: stubWorkspaceStore,
+        },
+        {
+          attempt: 2,
+          cancellationSignal: new AbortController().signal,
+          heartbeat: () => {},
+        },
+      ),
+    ).rejects.toThrow(
+      'Agent execution for verify.acceptance@1 returned an invalid outcome: outputJson is not valid JSON',
+    );
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        nodeId: 'validate-bug-fix',
+        blockRun: 1,
+        providerAttempt: 2,
+      }),
     );
   });
 
@@ -1708,6 +1799,16 @@ describe('temporal block execution activity', () => {
     });
     expect(redelivered).toEqual(first);
     expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        nodeId: 'agent-review',
+        blockRun: 1,
+        providerAttempt: 1,
+      }),
+    );
   });
 
   it('opens a durable wait when an agent claims completion without proving a mutation', async () => {

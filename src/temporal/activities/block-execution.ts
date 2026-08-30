@@ -51,6 +51,14 @@ import {
   type AgentProvider,
   workspaceHarnessEnvironment,
 } from '../../providers/agent-skills.js';
+import {
+  AgentInvocationReferencesSchema,
+  executionAgentInvocationId,
+  LedgerAgentInvocationRecorder,
+  type AgentInvocationArtifact,
+  type AgentInvocationRecorder,
+  type AgentInvocationReferences,
+} from '../../observability/agent-invocation.js';
 import type { AgentInvocationUsage } from '../../observability/agent-usage.js';
 import { estimateApiCost } from '../../providers/api-cost.js';
 import type {
@@ -245,8 +253,14 @@ export interface TaskStepActivityContext {
 }
 
 export interface TaskStepAgentRequest {
+  readonly taskReference: string;
   readonly inputArtifactIds: readonly string[];
   readonly operationId: string;
+  readonly workflowId: string;
+  readonly workflowRunId: string;
+  readonly nodeId: string;
+  readonly blockRun: number;
+  readonly providerAttempt: number;
   readonly stepReference: string;
   readonly profile: ResolvedExecutionProfile;
   readonly prompt: string;
@@ -297,6 +311,42 @@ export type TaskStepAgentFailure =
 export interface TaskStepAgentRunner {
   run(request: TaskStepAgentRequest): Promise<Outcome<TaskStepAgentResult, TaskStepAgentFailure>>;
 }
+
+const invocationUsageTokens = (usage?: AgentInvocationUsage): AgentInvocationArtifact['usage'] => ({
+  inputTokens: usage?.inputTokens ?? null,
+  cachedInputTokens: usage?.cachedInputTokens ?? null,
+  outputTokens: usage?.outputTokens ?? null,
+  reasoningOutputTokens: usage?.reasoningOutputTokens ?? null,
+});
+
+const invocationCost = (usage?: AgentInvocationUsage): AgentInvocationArtifact['cost'] =>
+  usage?.apiCost ?? { source: 'unrated' };
+
+const invocationStatusFromFinalMessage = (
+  finalMessage: unknown,
+): AgentInvocationArtifact['status'] => {
+  const parsed = AgentStepProviderOutcomeSchema.safeParse(finalMessage);
+  if (!parsed.success) return 'completed';
+  const decoded = decodeAgentStepOutcome(parsed.data);
+  if (!decoded.ok) return 'failed';
+  return decoded.value.status === 'blocked' ? 'waiting' : 'completed';
+};
+
+const commandExitStatus = (result: CommandResult): AgentInvocationArtifact['exitStatus'] => {
+  switch (result.status) {
+    case 'exited':
+      return { kind: 'exited', exitCode: result.exitCode };
+    case 'timed_out':
+      return { kind: 'timed_out' };
+    case 'spawn_failed':
+      return { kind: 'spawn_failed', message: result.message };
+  }
+};
+
+const thrownExitStatus = (error: unknown): AgentInvocationArtifact['exitStatus'] => ({
+  kind: 'thrown',
+  message: error instanceof Error ? error.message : String(error),
+});
 
 export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
   public constructor(
@@ -422,151 +472,178 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
                 },
               ]
             : [];
-        heartbeat({ stdoutBytes, stderrBytes });
-        const execution = await this.runCommand(request, {
-          command,
-          args:
-            profile.provider === 'codex'
-              ? [
-                  'exec',
-                  '--model',
-                  profile.model,
-                  '-c',
-                  `service_tier="${profile.serviceTier}"`,
-                  '-c',
-                  `model_reasoning_effort="${profile.effort}"`,
-                  '--ephemeral',
-                  '--skip-git-repo-check',
-                  '--dangerously-bypass-approvals-and-sandbox',
-                  '--cd',
-                  request.cwd,
-                  '--output-schema',
-                  schemaPath,
-                  '--json',
-                  '-',
-                ]
-              : [
-                  '--print',
-                  '--model',
-                  profile.model,
-                  '--effort',
-                  profile.effort,
-                  '--output-format',
-                  'stream-json',
-                  '--verbose',
-                  '--no-session-persistence',
-                  '--dangerously-skip-permissions',
-                  '--json-schema',
-                  JSON.stringify(outputSchema),
-                  ...preparedSkills.value.cliArguments,
-                ],
-          cwd: request.cwd,
-          workspaceAccess: request.workspaceAccess,
-          env: {
-            ...(profile.provider === 'codex'
-              ? { CODEX_HOME: isolatedConfigurationRoot }
-              : { HOME: isolatedConfigurationRoot }),
-            ...harnessEnvironment,
-            TASKER_SCRATCH_ROOT: workspaceScratchPath,
-            TASKER_ARTIFACTS_ROOT: stepFilesystem.artifactsPath,
-          },
-          mounts: [
-            { source: directory, target: directory, readOnly: false },
-            {
-              source: stepFilesystem.scratchPath,
-              target: workspaceScratchPath,
-              readOnly: false,
-            },
-            {
-              source: stepFilesystem.artifactsPath,
-              target: stepFilesystem.artifactsPath,
-              readOnly: false,
-            },
-            ...extraMounts,
-            ...inputEvidenceMounts,
-          ],
-          stdin: [
-            request.prompt,
-            '',
-            'Mounted immutable input evidence:',
-            JSON.stringify(inputArtifacts.value, null, 2),
-            'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
-          ].join('\n'),
-          timeoutMs: profile.timeoutMs,
-          onOutput: (stream, chunk) => {
-            if (stream === 'stdout') stdoutBytes += Buffer.byteLength(chunk, 'utf8');
-            else stderrBytes += Buffer.byteLength(chunk, 'utf8');
-            heartbeat({ stdoutBytes, stderrBytes });
-          },
+        const args =
+          profile.provider === 'codex'
+            ? [
+                'exec',
+                '--model',
+                profile.model,
+                '-c',
+                `service_tier="${profile.serviceTier}"`,
+                '-c',
+                `model_reasoning_effort="${profile.effort}"`,
+                '--ephemeral',
+                '--skip-git-repo-check',
+                '--dangerously-bypass-approvals-and-sandbox',
+                '--cd',
+                request.cwd,
+                '--output-schema',
+                schemaPath,
+                '--json',
+                '-',
+              ]
+            : [
+                '--print',
+                '--model',
+                profile.model,
+                '--effort',
+                profile.effort,
+                '--output-format',
+                'stream-json',
+                '--verbose',
+                '--no-session-persistence',
+                '--dangerously-skip-permissions',
+                '--json-schema',
+                JSON.stringify(outputSchema),
+                ...preparedSkills.value.cliArguments,
+              ];
+        const stdin = [
+          request.prompt,
+          '',
+          'Mounted immutable input evidence:',
+          JSON.stringify(inputArtifacts.value, null, 2),
+          'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
+        ].join('\n');
+        const argv = [command, ...args];
+        const recorder = request.transcriptStore.agentInvocationRecorder();
+        const invocationId = executionAgentInvocationId(
+          request.operationId,
+          request.providerAttempt,
+        );
+        const invocationReferences = AgentInvocationReferencesSchema.parse({
+          kind: 'execution',
+          workflowId: request.workflowId,
+          runId: request.workflowRunId,
+          nodeId: request.nodeId,
+          blockRun: request.blockRun,
+          providerAttempt: request.providerAttempt,
+          transcriptId: request.transcriptStore.transcriptIdFor(request.operationId),
+          outputArtifactIds: [request.transcriptStore.outputArtifactIdFor(request.operationId)],
+          receiptArtifactId: blockReceiptId({
+            workflowId: request.workflowId,
+            workflowRunId: request.workflowRunId,
+            nodeId: request.nodeId,
+            blockRun: request.blockRun,
+          }),
         });
-        throwIfHeartbeatFailed();
-        if (execution.status === 'spawn_failed') {
-          return err({ kind: 'provider_unavailable', message: execution.message });
-        }
-        if (execution.status === 'timed_out') {
-          return err({
-            kind: 'provider_timed_out',
-            durationMs: execution.durationMs,
-            stderr: execution.stderr,
+        const startedAt = recorder.now();
+        this.recordInvocationStart(
+          request,
+          recorder,
+          invocationId,
+          invocationReferences,
+          startedAt,
+        );
+        heartbeat({ stdoutBytes, stderrBytes });
+        let execution: CommandResult | null = null;
+        try {
+          execution = await this.runCommand(request, {
+            command,
+            args,
+            cwd: request.cwd,
+            workspaceAccess: request.workspaceAccess,
+            env: {
+              ...(profile.provider === 'codex'
+                ? { CODEX_HOME: isolatedConfigurationRoot }
+                : { HOME: isolatedConfigurationRoot }),
+              ...harnessEnvironment,
+              TASKER_SCRATCH_ROOT: workspaceScratchPath,
+              TASKER_ARTIFACTS_ROOT: stepFilesystem.artifactsPath,
+            },
+            mounts: [
+              { source: directory, target: directory, readOnly: false },
+              {
+                source: stepFilesystem.scratchPath,
+                target: workspaceScratchPath,
+                readOnly: false,
+              },
+              {
+                source: stepFilesystem.artifactsPath,
+                target: stepFilesystem.artifactsPath,
+                readOnly: false,
+              },
+              ...extraMounts,
+              ...inputEvidenceMounts,
+            ],
+            stdin,
+            timeoutMs: profile.timeoutMs,
+            onOutput: (stream, chunk) => {
+              if (stream === 'stdout') stdoutBytes += Buffer.byteLength(chunk, 'utf8');
+              else stderrBytes += Buffer.byteLength(chunk, 'utf8');
+              heartbeat({ stdoutBytes, stderrBytes });
+            },
           });
-        }
-        if (execution.exitCode !== 0) {
-          return err({
-            kind: 'provider_failed',
-            exitCode: execution.exitCode,
-            message: providerFailureMessage(execution.stdout, execution.stderr),
-            stdout: execution.stdout,
-            stderr: execution.stderr,
-          });
-        }
-        const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
-        if (!stream.ok) return err(stream.error);
-        if (stream.value.skippedCount > 0) {
-          const samplesNote =
-            stream.value.skippedCount > stream.value.diagnostics.length
-              ? ' (showing first 20)'
-              : '';
-          const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.skippedCount)} non-JSON line(s)${samplesNote}:\n${stream.value.diagnostics.join('\n')}\n`;
-          const appended = request.transcriptStore.append(
-            request.operationId,
-            request.runtime.attempt,
-            'stderr',
-            diagnosticsLine,
-          );
-          if (!appended.ok) {
+          throwIfHeartbeatFailed();
+          if (execution.status === 'spawn_failed') {
+            this.finishInvocation(request, recorder, {
+              invocationId,
+              references: invocationReferences,
+              startedAt,
+              prompt: stdin,
+              argv,
+              status: 'failed',
+              result: execution,
+            });
+            return err({ kind: 'provider_unavailable', message: execution.message });
+          }
+          if (execution.status === 'timed_out') {
+            this.finishInvocation(request, recorder, {
+              invocationId,
+              references: invocationReferences,
+              startedAt,
+              prompt: stdin,
+              argv,
+              status: 'failed',
+              result: execution,
+            });
             return err({
-              kind: 'evidence_persistence_failed',
-              message: `Task step transcript persistence failed: ${appended.error.kind}`,
+              kind: 'provider_timed_out',
+              durationMs: execution.durationMs,
+              stderr: execution.stderr,
             });
           }
-        }
-        const evidence = await this.evidence.register(
-          request.operationId,
-          stepFilesystem.artifactsPath,
-        );
-        if (!evidence.ok) {
-          return err({
-            kind: 'evidence_persistence_failed',
-            message: `Task-step evidence registration failed: ${evidence.error.kind}`,
-          });
-        }
-        const parsed = request.outputSchema.safeParse(
-          normalizeTaskStepEvidencePaths(stream.value.finalMessage, stepFilesystem.artifactsPath),
-        );
-        if (!parsed.success) {
-          return err({
-            kind: 'invalid_output',
-            issues: parsed.error.issues.map(
-              (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-            ),
-          });
-        }
-        return ok({
-          stdout: execution.stdout,
-          stderr: execution.stderr,
-          finalMessage: parsed.data,
-          artifactIds: evidence.value,
-          usage: {
+          if (execution.exitCode !== 0) {
+            this.finishInvocation(request, recorder, {
+              invocationId,
+              references: invocationReferences,
+              startedAt,
+              prompt: stdin,
+              argv,
+              status: 'failed',
+              result: execution,
+            });
+            return err({
+              kind: 'provider_failed',
+              exitCode: execution.exitCode,
+              message: providerFailureMessage(execution.stdout, execution.stderr),
+              stdout: execution.stdout,
+              stderr: execution.stderr,
+            });
+          }
+          const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
+          if (!stream.ok) {
+            this.finishInvocation(request, recorder, {
+              invocationId,
+              references: invocationReferences,
+              startedAt,
+              prompt: stdin,
+              argv,
+              status: 'failed',
+              result: execution,
+            });
+            return err(stream.error);
+          }
+          const usage = {
             provider: profile.provider,
             profile: profile.name,
             profileSha256: profile.configurationSha256,
@@ -580,8 +657,125 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             outputTokens: stream.value.usage?.outputTokens ?? 0,
             reasoningOutputTokens: stream.value.usage?.reasoningOutputTokens ?? 0,
             apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
-          },
-        });
+          };
+          if (stream.value.skippedCount > 0) {
+            const samplesNote =
+              stream.value.skippedCount > stream.value.diagnostics.length
+                ? ' (showing first 20)'
+                : '';
+            const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.skippedCount)} non-JSON line(s)${samplesNote}:\n${stream.value.diagnostics.join('\n')}\n`;
+            const appended = request.transcriptStore.append(
+              request.operationId,
+              request.providerAttempt,
+              'stderr',
+              diagnosticsLine,
+            );
+            if (!appended.ok) {
+              this.finishInvocation(request, recorder, {
+                invocationId,
+                references: invocationReferences,
+                startedAt,
+                prompt: stdin,
+                argv,
+                status: 'failed',
+                result: execution,
+                usage,
+              });
+              return err({
+                kind: 'evidence_persistence_failed',
+                message: `Task step transcript persistence failed: ${appended.error.kind}`,
+              });
+            }
+          }
+          const evidence = await this.evidence.register(
+            request.operationId,
+            stepFilesystem.artifactsPath,
+          );
+          if (!evidence.ok) {
+            this.finishInvocation(request, recorder, {
+              invocationId,
+              references: invocationReferences,
+              startedAt,
+              prompt: stdin,
+              argv,
+              status: 'failed',
+              result: execution,
+              usage,
+            });
+            return err({
+              kind: 'evidence_persistence_failed',
+              message: `Task-step evidence registration failed: ${evidence.error.kind}`,
+            });
+          }
+          const completedInvocationReferences = AgentInvocationReferencesSchema.parse({
+            ...invocationReferences,
+            outputArtifactIds: [...invocationReferences.outputArtifactIds, ...evidence.value],
+          });
+          const parsed = request.outputSchema.safeParse(
+            normalizeTaskStepEvidencePaths(stream.value.finalMessage, stepFilesystem.artifactsPath),
+          );
+          if (!parsed.success) {
+            this.finishInvocation(request, recorder, {
+              invocationId,
+              references: completedInvocationReferences,
+              startedAt,
+              prompt: stdin,
+              argv,
+              status: 'failed',
+              result: execution,
+              usage,
+            });
+            return err({
+              kind: 'invalid_output',
+              issues: parsed.error.issues.map(
+                (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+              ),
+            });
+          }
+          this.finishInvocation(request, recorder, {
+            invocationId,
+            references: completedInvocationReferences,
+            startedAt,
+            prompt: stdin,
+            argv,
+            status: invocationStatusFromFinalMessage(parsed.data),
+            result: execution,
+            usage,
+          });
+          return ok({
+            stdout: execution.stdout,
+            stderr: execution.stderr,
+            finalMessage: parsed.data,
+            artifactIds: evidence.value,
+            usage,
+          });
+        } catch (error) {
+          this.finishInvocation(
+            request,
+            recorder,
+            execution === null
+              ? {
+                  invocationId,
+                  references: invocationReferences,
+                  startedAt,
+                  prompt: stdin,
+                  argv,
+                  status: 'failed',
+                  thrown: error,
+                }
+              : {
+                  invocationId,
+                  references: invocationReferences,
+                  startedAt,
+                  prompt: stdin,
+                  argv,
+                  status: 'failed',
+                  result: execution,
+                  thrown: error,
+                },
+          );
+          throw error;
+        }
       } finally {
         await this.filesystems.cleanupScratch(stepFilesystem);
         await removeWorkspaceScratchMountPoint(workspaceScratchPath);
@@ -603,7 +797,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
       onOutput: (stream, chunk) => {
         const appended = request.transcriptStore.append(
           request.operationId,
-          request.runtime.attempt,
+          request.providerAttempt,
           stream,
           chunk,
         );
@@ -615,6 +809,135 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
     });
     request.runtime.cancellationSignal.throwIfAborted();
     return result;
+  }
+
+  private invocationArtifact(input: {
+    readonly request: TaskStepAgentRequest;
+    readonly invocationId: string;
+    readonly references: AgentInvocationReferences;
+    readonly startedAt: string;
+    readonly finishedAt: string;
+    readonly durationMs: number;
+    readonly prompt: string;
+    readonly argv: readonly string[];
+    readonly status: AgentInvocationArtifact['status'];
+    readonly exitStatus: AgentInvocationArtifact['exitStatus'];
+    readonly usage?: AgentInvocationUsage;
+  }): AgentInvocationArtifact {
+    return {
+      schemaVersion: 1,
+      invocationId: input.invocationId,
+      taskReference: input.request.taskReference,
+      prompt: input.prompt,
+      promptBytes: Buffer.byteLength(input.prompt, 'utf8'),
+      provider: input.request.profile.provider,
+      profile: input.request.profile.name,
+      profileSha256: input.request.profile.configurationSha256,
+      model: input.request.profile.model,
+      effort: input.request.profile.effort,
+      serviceTier:
+        input.request.profile.provider === 'codex' ? input.request.profile.serviceTier : null,
+      argv: [...input.argv],
+      skills: [...input.request.skills],
+      inputEvidenceArtifactIds: [...input.request.inputArtifactIds],
+      startedAt: input.startedAt,
+      finishedAt: input.finishedAt,
+      durationMs: input.durationMs,
+      status: input.status,
+      exitStatus: input.exitStatus,
+      usage: invocationUsageTokens(input.usage),
+      cost: invocationCost(input.usage),
+      references: input.references,
+    };
+  }
+
+  private recordInvocationStart(
+    request: TaskStepAgentRequest,
+    recorder: AgentInvocationRecorder,
+    invocationId: string,
+    references: AgentInvocationReferences,
+    startedAt: string,
+  ): void {
+    try {
+      const started = recorder.start({
+        invocationId,
+        taskReference: request.taskReference,
+        references,
+        startedAt,
+      });
+      if (started.ok) return;
+      this.appendObservabilityFailure(
+        request,
+        `agent invocation start persistence failed for ${invocationId}: ${started.error.kind}`,
+      );
+    } catch (error) {
+      this.appendObservabilityFailure(
+        request,
+        `agent invocation start persistence threw for ${invocationId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private finishInvocation(
+    request: TaskStepAgentRequest,
+    recorder: AgentInvocationRecorder,
+    input: {
+      readonly invocationId: string;
+      readonly references: AgentInvocationReferences;
+      readonly startedAt: string;
+      readonly prompt: string;
+      readonly argv: readonly string[];
+      readonly status: AgentInvocationArtifact['status'];
+      readonly result?: CommandResult;
+      readonly usage?: AgentInvocationUsage;
+      readonly thrown?: unknown;
+    },
+  ): void {
+    try {
+      const finishedAt = recorder.now();
+      const artifact = this.invocationArtifact({
+        request,
+        invocationId: input.invocationId,
+        references: input.references,
+        startedAt: input.startedAt,
+        finishedAt,
+        durationMs:
+          input.result?.durationMs ??
+          Math.max(0, Date.parse(finishedAt) - Date.parse(input.startedAt)),
+        prompt: input.prompt,
+        argv: input.argv,
+        status: input.status,
+        exitStatus:
+          input.result === undefined
+            ? thrownExitStatus(input.thrown)
+            : commandExitStatus(input.result),
+        ...(input.usage === undefined ? {} : { usage: input.usage }),
+      });
+      const finished = recorder.finish(artifact);
+      if (finished.ok) return;
+      this.appendObservabilityFailure(
+        request,
+        `agent invocation finish persistence failed for ${artifact.invocationId}: ${finished.error.kind}`,
+      );
+    } catch (error) {
+      this.appendObservabilityFailure(
+        request,
+        `agent invocation finish persistence threw for ${input.invocationId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private appendObservabilityFailure(request: TaskStepAgentRequest, message: string): void {
+    try {
+      request.transcriptStore.append(
+        request.operationId,
+        request.providerAttempt,
+        'stderr',
+        `\n[tasker observability] ${message}\n`,
+      );
+    } catch {
+      return;
+    }
   }
 }
 
@@ -687,6 +1010,10 @@ export class TemporalTaskStepTraceStore {
 
   public outputArtifactIdFor(operationId: string): string {
     return `task-step-output:${operationId}:artifact`;
+  }
+
+  public agentInvocationRecorder(): AgentInvocationRecorder {
+    return new LedgerAgentInvocationRecorder(this.ledger, this.clock);
   }
 
   public readOutputArtifact(
@@ -1632,6 +1959,7 @@ export const executeRegisteredTaskStep = async (
       historyIndex: runHistoryIndex(evidence.completedSteps),
     });
     const provider = await dependencies.agentRunner.run({
+      taskReference: input.taskReference,
       inputArtifactIds: [
         ...agentEvidence.completedSteps.flatMap(({ artifactIds }) => artifactIds),
         ...evidence.completedSteps.map(({ operationId }) =>
@@ -1639,6 +1967,11 @@ export const executeRegisteredTaskStep = async (
         ),
       ],
       operationId: executionOperationId(input),
+      workflowId: input.workflowId,
+      workflowRunId: input.workflowRunId,
+      nodeId: input.nodeId,
+      blockRun: input.stepAttempt,
+      providerAttempt: runtime.attempt,
       stepReference: input.uses,
       profile: executionProfile,
       prompt,

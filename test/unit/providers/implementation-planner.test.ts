@@ -11,6 +11,14 @@ import {
 } from '../../../src/providers/index.js';
 import { getHarnessPack } from '../../../src/harness/index.js';
 import {
+  AgentInvocationArtifactSchema,
+  LedgerAgentInvocationRecorder,
+  planningAgentInvocationId,
+} from '../../../src/observability/agent-invocation.js';
+import { openSqliteLedger } from '../../../src/ledger/index.js';
+import { makeAdjustableClock } from '../../../src/shared/clock.js';
+import { err, ok } from '../../../src/shared/outcome.js';
+import {
   SemanticWorkflowSourceSchema,
   type SemanticNodeSource,
 } from '../../../src/workflow/index.js';
@@ -264,6 +272,20 @@ class ClaudeRecordingRunner implements WorkspaceCommandRunner {
 
 const request = (strategy: 'fast' | 'ralplan') => ({
   operationId: 'tasker:test:planning:1',
+  taskReference: 'jira:AVIA-13235',
+  planningEpisodeId: 'tasker:test:planning',
+  planningAttempt: 1,
+  invocationNumber: 1,
+  inputEvidenceArtifactIds: ['planning-snapshot:test', 'evidence-bundle:test'],
+  outputReferences: {
+    completedArtifactId: 'implementation-plan:tasker:test:planning:attempt-1',
+    validatedCandidateArtifactId:
+      'implementation-plan:tasker:test:planning:attempt-1:validated-candidate',
+    evidenceRequestArtifactId:
+      'implementation-plan:tasker:test:planning:attempt-1:evidence-round-1',
+    failedArtifactId: 'implementation-plan:tasker:test:planning:attempt-1:failed-provider-output',
+    receiptArtifactId: null,
+  },
   repositoryPath: plannerRepositoryPath,
   strategy,
   profile: {
@@ -507,5 +529,89 @@ describe('Codex CLI implementation planner', () => {
     const result = await planner.plan(request('fast'));
 
     expect(result).toMatchObject({ ok: true, value: { decision } });
+  });
+
+  it('persists a terminal planner agent invocation artifact with exact prompt and argv', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tasker-planner-artifact-'));
+    const clock = makeAdjustableClock('2026-08-30T12:00:00.000Z');
+    const ledger = openSqliteLedger({ filename: join(directory, 'ledger.sqlite'), clock });
+    const runner = new RecordingRunner(
+      JSON.stringify({ decision: providerReadyDecision, evidenceRequests: [] }),
+    );
+    const planner = new SubscriptionCliImplementationPlanner(
+      runner,
+      new LedgerAgentInvocationRecorder(ledger.repository, clock),
+    );
+
+    try {
+      const result = await planner.plan(request('fast'));
+
+      expect(result).toMatchObject({ ok: true, value: { decision: readyDecision } });
+      const artifactId = planningAgentInvocationId('tasker:test:planning', 1, 1);
+      const persisted = ledger.repository.readArtifact(artifactId);
+      expect(persisted).not.toBeNull();
+      const artifact = AgentInvocationArtifactSchema.parse(persisted?.payload);
+      expect(artifact).toMatchObject({
+        invocationId: artifactId,
+        taskReference: 'jira:AVIA-13235',
+        provider: 'codex',
+        profile: 'test-fast',
+        model: TEST_CODEX_PROFILE.model,
+        effort: 'low',
+        status: 'completed',
+        exitStatus: { kind: 'exited', exitCode: 0 },
+        inputEvidenceArtifactIds: ['planning-snapshot:test', 'evidence-bundle:test'],
+        references: {
+          kind: 'planning',
+          transcriptId: 'planning-transcript:tasker:test:planning:1',
+          outputArtifactIds: [
+            'implementation-plan:tasker:test:planning:attempt-1:validated-candidate',
+            'implementation-plan:tasker:test:planning:attempt-1',
+          ],
+          planningEpisodeId: 'tasker:test:planning',
+          planningAttempt: 1,
+          invocationNumber: 1,
+          operationId: 'tasker:test:planning:1',
+        },
+      });
+      expect(artifact.prompt).toContain('Use one bounded planning pass');
+      const providerRequest = runner.requests[1];
+      if (providerRequest === undefined) throw new Error('Planner provider request is missing');
+      expect(artifact.argv).toEqual([TEST_CODEX_PROFILE.command, ...providerRequest.args]);
+      expect(artifact.promptBytes).toBe(Buffer.byteLength(artifact.prompt, 'utf8'));
+      expect(artifact.durationMs).toBe(1750);
+      expect(artifact.cost).toEqual(
+        result.ok ? result.value.receipt.apiCost : { source: 'unrated' },
+      );
+    } finally {
+      ledger.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reports agent invocation persistence degradation without failing planning', async () => {
+    const runner = new RecordingRunner(
+      JSON.stringify({ decision: providerReadyDecision, evidenceRequests: [] }),
+    );
+    const degradations: string[] = [];
+    const planner = new SubscriptionCliImplementationPlanner(runner, {
+      now: () => '2026-08-30T12:00:00.000Z',
+      start: () => ok(undefined),
+      finish: () => err({ kind: 'ledger_conflict' }),
+    });
+
+    const result = await planner.plan({
+      ...request('fast'),
+      onTranscriptDegradation: (message) => {
+        degradations.push(message);
+      },
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { decision: readyDecision } });
+    expect(degradations).toEqual([
+      expect.stringContaining(
+        '[OBSERVABILITY FAILURE] planner invocation artifact persistence failed',
+      ),
+    ]);
   });
 });

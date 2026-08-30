@@ -29,6 +29,7 @@ import {
   UnconfiguredBitbucketRepositorySource,
 } from '../repositories/index.js';
 import { systemClock } from '../shared/clock.js';
+import { LedgerAgentInvocationRecorder } from '../observability/index.js';
 import { RetrospectiveStore } from '../retrospective/index.js';
 import { CompletedRunLifecycleReader } from './completed-run-lifecycle.js';
 import { TaskPresenceStore } from './task-presence.js';
@@ -42,6 +43,7 @@ import {
   type TemporalClientConfiguration,
 } from '../temporal/index.js';
 import { buildOperatorApi } from './operator-api.js';
+import { LedgerAgentInvocationReader } from './agent-invocation-reader.js';
 import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
 import { createImplementationPlanningCoordinator } from './implementation-planning.js';
@@ -146,7 +148,10 @@ export const startOperatorServer = async (): Promise<void> => {
     subjects,
     evidenceBundles,
     evidenceReaders,
-    planner: new SubscriptionCliImplementationPlanner(dockerCommands),
+    planner: new SubscriptionCliImplementationPlanner(
+      dockerCommands,
+      new LedgerAgentInvocationRecorder(ledger.repository, systemClock),
+    ),
     harnessPack,
   });
   const workflowFreezes = new WorkflowFreezeStore(ledger.repository, systemClock);
@@ -189,6 +194,7 @@ export const startOperatorServer = async (): Promise<void> => {
     logger: true,
     implementationPlanning,
     executionActivity: new LedgerExecutionActivityReader(ledger.repository),
+    agentInvocations: new LedgerAgentInvocationReader(ledger.repository),
     ...(bitbucketReview === undefined ? {} : { bitbucketReview }),
     dependencyOperator,
     dependencyDeclarations,

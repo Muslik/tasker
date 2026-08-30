@@ -12,6 +12,7 @@ import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import { checksumString } from '../ledger/checksum.js';
+import { AgentInvocationReferencesSchema } from '../observability/agent-invocation.js';
 import {
   ImplementationPlanLinkSchema,
   PlanningClarificationAnswerCommandSchema,
@@ -192,6 +193,31 @@ export class ImplementationPlanningStore {
           .listEvents()
           .filter((event) => event.aggregateId.startsWith('implementation-plan:'))
       : this.ledger.listEvents(aggregateIdFor(planningEpisodeId));
+  }
+
+  public nextAgentInvocationNumber(planningEpisodeId: string, planningAttempt: number): number {
+    let highest = 0;
+    for (const event of this.ledger.listEvents()) {
+      if (
+        event.eventType !== 'AgentInvocationStarted' &&
+        event.eventType !== 'AgentInvocationFinished'
+      ) {
+        continue;
+      }
+      const payload = z
+        .looseObject({ references: AgentInvocationReferencesSchema })
+        .safeParse(event.payload);
+      if (
+        !payload.success ||
+        payload.data.references.kind !== 'planning' ||
+        payload.data.references.planningEpisodeId !== planningEpisodeId ||
+        payload.data.references.planningAttempt !== planningAttempt
+      ) {
+        continue;
+      }
+      highest = Math.max(highest, payload.data.references.invocationNumber);
+    }
+    return highest + 1;
   }
 
   public persistRunSnapshot(
@@ -946,6 +972,34 @@ export type ImplementationPlanningError =
 
 const MAX_PLANNING_EVIDENCE_ROUNDS = 3;
 
+const planningInvocationNumberFor = (
+  planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
+  nextPersistedInvocationNumber: number,
+): number =>
+  Math.max(
+    planning.evidenceRounds.length + planning.validationRevision + 1,
+    nextPersistedInvocationNumber,
+  );
+
+const planningOutputReferencesFor = (
+  planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
+) => {
+  const attemptId = `implementation-plan:${planning.planningEpisodeId}:attempt-${String(planning.attempt)}`;
+  const nextEvidenceRound = planning.evidenceRounds.length + 1;
+  return {
+    completedArtifactId: attemptId,
+    validatedCandidateArtifactId: `${attemptId}:validated-candidate`,
+    evidenceRequestArtifactId: `${attemptId}:evidence-round-${String(nextEvidenceRound)}`,
+    failedArtifactId: `${attemptId}:failed-provider-output`,
+    receiptArtifactId: null,
+  };
+};
+
+const plannerFailureReceipt = (
+  failure: ImplementationPlannerFailure,
+): ImplementationPlannerDecisionSuccess['receipt'] | null =>
+  failure.kind === 'invalid_planner_output' ? (failure.receipt ?? null) : null;
+
 const snapshotPrompt = (prompt: LoadedPrompt) => ({
   relativePath: prompt.relativePath,
   content: prompt.content,
@@ -1686,6 +1740,22 @@ export class ImplementationPlanningCoordinator {
 
       const result = await this.planner.plan({
         operationId: commandId,
+        taskReference,
+        planningEpisodeId,
+        planningAttempt: planning.attempt,
+        invocationNumber: planningInvocationNumberFor(
+          planning,
+          this.store.nextAgentInvocationNumber(planningEpisodeId, planning.attempt),
+        ),
+        inputEvidenceArtifactIds: [
+          snapshotReference.artifactId,
+          planning.evidenceBundle.artifactId,
+        ],
+        outputReferences: planningOutputReferencesFor(planning),
+        onTranscriptDegradation: (message) => {
+          const appended = this.transcripts.append(commandId, planning.attempt, 'stderr', message);
+          void appended;
+        },
         repositoryPath: planningInput.subject.repositoryPath,
         strategy: selection.strategy,
         profile: planningInput.plannerProfiles[selection.strategy],
@@ -1705,7 +1775,7 @@ export class ImplementationPlanningCoordinator {
         promptTemplate: planningInput.promptTemplate,
       });
       if (!result.ok) {
-        const failed = this.store.fail(planning, result.error);
+        const failed = this.store.fail(planning, result.error, plannerFailureReceipt(result.error));
         return failed.ok ? failed : err({ kind: 'store', error: failed.error });
       }
       if (result.value.decision !== null && (result.value.evidenceRequests?.length ?? 0) > 0) {
