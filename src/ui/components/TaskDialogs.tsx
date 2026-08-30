@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { JiraIssueSnapshot } from '../../integrations/jira/contracts.js';
 import type { RunStartCommand } from '../../server/operator-contracts.js';
 import type { RepositoryCatalogEntry } from '../../workspace/contracts.js';
+import type { JiraProductResolution } from '../../shared/product.js';
 import { taskBranchName, taskBranchNameMatches } from '../../shared/git-branch.js';
 import { Button } from './ui/button.js';
 
@@ -29,8 +30,18 @@ export type JiraTaskLaunchDialogProps = {
   readonly error: string | null;
   readonly onClose: () => void;
   readonly onResolveIssue: (issueKey: string) => Promise<JiraIssueSnapshot>;
+  readonly onResolveProduct: (issueKey: string) => Promise<JiraProductResolution>;
   readonly onSubmit: (input: JiraTaskLaunchInput) => Promise<void>;
 };
+
+export const repositorySelectionForProduct = (
+  current: string,
+  primaryRepository: string,
+  autoSelected: boolean,
+): { readonly repository: string; readonly autoSelected: boolean } =>
+  current.length === 0 || autoSelected
+    ? { repository: primaryRepository, autoSelected: true }
+    : { repository: current, autoSelected: false };
 
 export const JiraTaskLaunchDialog = ({
   open,
@@ -42,6 +53,7 @@ export const JiraTaskLaunchDialog = ({
   error,
   onClose,
   onResolveIssue,
+  onResolveProduct,
   onSubmit,
 }: JiraTaskLaunchDialogProps) => {
   const [issueKey, setIssueKey] = useState(initialIssue?.issueKey ?? '');
@@ -49,6 +61,8 @@ export const JiraTaskLaunchDialog = ({
     initialIssue === undefined ? { status: 'idle' } : { status: 'ready', issue: initialIssue },
   );
   const [repository, setRepository] = useState(initialRepository);
+  const [product, setProduct] = useState<JiraProductResolution['product']>(null);
+  const repositoryAutoSelected = useRef(false);
   const [branchName, setBranchName] = useState(
     initialIssue === undefined ? '' : taskBranchName(initialIssue.issueKey, initialIssue.summary),
   );
@@ -81,6 +95,24 @@ export const JiraTaskLaunchDialog = ({
         .then((issue) => {
           setPreview({ status: 'ready', issue });
           setBranchName(taskBranchName(issue.issueKey, issue.summary));
+          void onResolveProduct(issue.issueKey)
+            .then((resolved) => {
+              setProduct(resolved.product);
+              if (resolved.product !== null) {
+                setRepository((current) => {
+                  const selection = repositorySelectionForProduct(
+                    current,
+                    resolved.product?.primaryRepository ?? '',
+                    repositoryAutoSelected.current,
+                  );
+                  repositoryAutoSelected.current = selection.autoSelected;
+                  return selection.repository;
+                });
+              }
+            })
+            .catch(() => {
+              setProduct(null);
+            });
         })
         .catch((cause: unknown) => {
           setPreview({
@@ -92,7 +124,7 @@ export const JiraTaskLaunchDialog = ({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [issueKey, mode, onResolveIssue, open]);
+  }, [issueKey, mode, onResolveIssue, onResolveProduct, open]);
 
   if (!open) return null;
   const normalized = issueKey.trim().toUpperCase();
@@ -171,6 +203,7 @@ export const JiraTaskLaunchDialog = ({
               disabled={pending}
               onChange={(event) => {
                 setRepository(event.target.value);
+                repositoryAutoSelected.current = false;
               }}
             >
               <option value="">Select a repository</option>
@@ -180,6 +213,11 @@ export const JiraTaskLaunchDialog = ({
                 </option>
               ))}
             </select>
+            {product !== null ? (
+              <span className="block text-muted-foreground">
+                Determined by product: {product.title}
+              </span>
+            ) : null}
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input

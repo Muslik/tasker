@@ -19,6 +19,7 @@ import {
   RepositoryCatalogResponseSchema,
   RepositoryReferenceSchema,
 } from '../workspace/contracts.js';
+import { JiraProductResolutionSchema } from '../shared/product.js';
 import {
   ApiErrorResponseSchema,
   CodeReviewSyncResponseSchema,
@@ -893,6 +894,21 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     return result.ok
       ? reply.send(JiraIssueSnapshotSchema.parse(result.value))
       : sendJiraServiceError(reply, result.error);
+  });
+
+  api.get('/api/jira/issues/:issueKey/product', (request, reply) => {
+    if (options.jiraIssueService === undefined) {
+      return reply.code(503).send(apiError('jira_not_configured', 'Jira integration is disabled'));
+    }
+    const params = JiraIssueParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'issueKey is required'));
+    }
+    return reply.send(
+      JiraProductResolutionSchema.parse(
+        options.jiraIssueService.resolveProduct(params.data.issueKey),
+      ),
+    );
   });
 
   api.get('/api/jira/issues/:issueKey/attachments/:attachmentId', async (request, reply) => {

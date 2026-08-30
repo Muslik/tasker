@@ -27,6 +27,8 @@ import {
   type JiraRepositoryReferenceSource,
 } from './repository-reference.js';
 import { JiraIssueStore, type JiraIssueStoreError } from './store.js';
+import { resolveHarnessProductByJiraProject } from '../../harness/index.js';
+import type { HarnessProductManifest } from '../../shared/product.js';
 
 export type JiraIssueServiceError =
   | {
@@ -150,6 +152,7 @@ export class JiraIssueService {
     private readonly port: JiraIssuePort,
     private readonly repositoryCatalog: RepositoryCatalog,
     private readonly repositoryReferenceSource: JiraRepositoryReferenceSource,
+    private readonly products: readonly HarnessProductManifest[],
   ) {}
 
   public listOperatorTasks(): Outcome<readonly OperatorTaskSummary[], JiraIssueServiceError> {
@@ -166,6 +169,20 @@ export class JiraIssueService {
 
   public listRepositories(): readonly RepositoryCatalogEntry[] {
     return this.repositoryCatalog.list();
+  }
+
+  public resolveProduct(issueKeyInput: string) {
+    const product = resolveHarnessProductByJiraProject(this.products, issueKeyInput);
+    return product === null
+      ? { product: null }
+      : {
+          product: {
+            id: product.id,
+            title: product.title,
+            primaryRepository: product.repositories.primary,
+            linkedRepositories: product.repositories.linked,
+          },
+        };
   }
 
   private currentBinding(
@@ -370,6 +387,7 @@ export class JiraIssueService {
 export interface CreateJiraIssueServiceOptions {
   readonly repositoryCatalog?: RepositoryCatalog | undefined;
   readonly repositoryReferenceSource?: JiraRepositoryReferenceSource | undefined;
+  readonly products?: readonly HarnessProductManifest[] | undefined;
 }
 
 export const createJiraIssueService = (
@@ -384,4 +402,5 @@ export const createJiraIssueService = (
     port,
     options.repositoryCatalog ?? new StaticRepositoryCatalog([]),
     options.repositoryReferenceSource ?? new JiraDescriptionRepositoryReferenceSource(),
+    options.products ?? [],
   );

@@ -1303,6 +1303,7 @@ export class ImplementationPlanningCoordinator {
         attempt: planning.attempt,
         selectedStrategy: planning.selectedStrategy,
         executionStrategy: candidate.decision.executionStrategy,
+        archetype: candidate.decision.archetype,
         plan: candidate.decision.plan,
       }),
       candidate.decision.executionStrategy,

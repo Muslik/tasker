@@ -28,6 +28,7 @@ if (jiraPolicy === undefined) throw new Error('Missing Jira lifecycle policy');
 const requestFor = (
   operationId: string,
   trackerStatusUpdates: IntegrationStepExecutionRequest['trackerStatusUpdates'] = 'enabled',
+  acceptedPlan: IntegrationStepExecutionRequest['evidence']['acceptedPlan'] = null,
 ): IntegrationStepExecutionRequest => ({
   operationId,
   nodeId: 'admission',
@@ -58,7 +59,7 @@ const requestFor = (
   },
   operatorGuidance: null,
   waitResolution: null,
-  evidence: { acceptedPlan: null, completedSteps: [], reviewInputs: [] },
+  evidence: { acceptedPlan, completedSteps: [], reviewInputs: [] },
   policies: [jiraPolicy],
   project: null,
   trackerStatusUpdates,
@@ -191,6 +192,33 @@ const adapterFor = (jira: JiraLifecyclePort): JiraStartWorkAdapter => {
 };
 
 describe('Jira start-work effect adapter', () => {
+  it('records a receipt and skips all Jira lifecycle mutations for research', async () => {
+    const jira = new StatefulJiraLifecyclePort();
+    const adapter = adapterFor(jira);
+
+    const result = await adapter.execute(
+      requestFor('workflow:jira:research-1', 'enabled', {
+        archetype: 'research',
+        plan: { title: 'Research plan' },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      summary: 'Jira admission skipped: research archetype',
+      output: {
+        statusUpdate: { outcome: 'skipped', reason: 'skipped: research archetype' },
+      },
+    });
+    expect(jira.assignmentCalls).toEqual([]);
+    expect(jira.transitionCalls).toEqual([]);
+    if (result.status !== 'completed') throw new Error('Expected completed admission');
+    expect(result.artifactIds).toHaveLength(1);
+    expect(ledger?.repository.readArtifact(result.artifactIds[0] ?? '')?.payload).toMatchObject({
+      result: { reason: 'skipped: research archetype' },
+    });
+  });
+
   it('admits work when a status transition requires missing fields', async () => {
     const jira = new StatefulJiraLifecyclePort();
     jira.startWorkTransitionFields = [

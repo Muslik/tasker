@@ -8,6 +8,7 @@ import {
   repositoriesQueryOptions,
   restoreTask,
   previewJiraIssue,
+  resolveJiraProduct,
   removeTask,
   syncJiraIssue,
   taskListQueryOptions,
@@ -194,6 +195,7 @@ export const App = () => {
           setLaunchMode(null);
         }}
         onResolveIssue={fetchJiraIssueSnapshot}
+        onResolveProduct={resolveJiraProduct}
         onSubmit={(input) => launchMutation.mutateAsync(input).then(() => undefined)}
       />
       {selectedTask === null || !removeOpen ? null : (

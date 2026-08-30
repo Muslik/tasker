@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { JiraTaskLaunchDialog } from './TaskDialogs.js';
+import { JiraTaskLaunchDialog, repositorySelectionForProduct } from './TaskDialogs.js';
 import { RemoveTaskDialog } from './RemoveTaskDialog.js';
 
 describe('task dialogs', () => {
@@ -15,12 +15,24 @@ describe('task dialogs', () => {
         error: null,
         onClose: vi.fn(),
         onResolveIssue: vi.fn(),
+        onResolveProduct: vi.fn(),
         onSubmit: vi.fn(),
       }),
     );
     expect(html).toContain('Add Jira task');
     expect(html).toContain('Start immediately');
     expect(html).not.toContain('aria-label="Branch name"');
+  });
+
+  it('preselects a mapped product primary repository without replacing an operator override', () => {
+    expect(repositorySelectionForProduct('', 'front-railways', false)).toEqual({
+      repository: 'front-railways',
+      autoSelected: true,
+    });
+    expect(repositorySelectionForProduct('front-components', 'front-railways', false)).toEqual({
+      repository: 'front-components',
+      autoSelected: false,
+    });
   });
 
   it('requires the exact task key before removal', () => {

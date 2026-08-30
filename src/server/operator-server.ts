@@ -100,10 +100,11 @@ export const startOperatorServer = async (): Promise<void> => {
       : new BitbucketRepositoryClient(bitbucketConfiguration),
   );
   const jiraClient = new JiraServerClient(loadJiraConfiguration());
+  const harnessPack = loadHarnessPack();
   const jiraIssueService = createJiraIssueService(ledger.repository, systemClock, jiraClient, {
     repositoryCatalog,
+    products: harnessPack.products,
   });
-  const harnessPack = loadHarnessPack();
   const dockerConfiguration = loadDockerWorkspaceConfiguration();
   const dockerRuntimeStore = new DockerWorkspaceRuntimeStore(dockerConfiguration.runtimeStorePath);
   const dockerCommands = new DockerWorkspaceCommandRunner(

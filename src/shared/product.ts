@@ -30,3 +30,18 @@ export const HarnessProductManifestSchema = z
   .strict();
 
 export type HarnessProductManifest = z.infer<typeof HarnessProductManifestSchema>;
+
+export const JiraProductResolutionSchema = z
+  .object({
+    product: z
+      .object({
+        id: z.string().min(1),
+        title: z.string().min(1),
+        primaryRepository: z.string().min(1),
+        linkedRepositories: z.array(z.string().min(1)),
+      })
+      .nullable(),
+  })
+  .strict();
+
+export type JiraProductResolution = z.infer<typeof JiraProductResolutionSchema>;

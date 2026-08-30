@@ -133,6 +133,9 @@ describe('research archetype scaffold', () => {
     expect(compiled.compiled.graph.metadata.references.stepTypes).toHaveLength(
       Object.keys(RESEARCH_STEP_REFERENCES).length,
     );
+    expect(compiled.compiled.graph.metadata.references.stepTypes).not.toEqual(
+      expect.arrayContaining(['jira.start-work@1', 'jira.review-ready@1']),
+    );
     expect(compiled.compiled.graph.metadata.references.waits).toEqual(['operator_guidance@1']);
   });
 

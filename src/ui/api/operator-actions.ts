@@ -45,6 +45,7 @@ import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
 } from '../../workspace/contracts.js';
+import { JiraProductResolutionSchema, type JiraProductResolution } from '../../shared/product.js';
 import { RetrospectiveResponseSchema, type RetrospectiveResponse } from '../../server/report.js';
 import { deleteJson, getJson, getOptionalJson, postJson } from './http.js';
 import { operatorQueryKeys } from './query.js';
@@ -69,6 +70,9 @@ export const jiraIssueQueryOptions = (issueKey: string) =>
 
 export const previewJiraIssue = (issueKey: string): Promise<JiraIssueSnapshot> =>
   getJson(`/api/jira/issues/${encodeURIComponent(issueKey)}/preview`, JiraIssueSnapshotSchema);
+
+export const resolveJiraProduct = (issueKey: string): Promise<JiraProductResolution> =>
+  getJson(`/api/jira/issues/${encodeURIComponent(issueKey)}/product`, JiraProductResolutionSchema);
 
 export const syncJiraIssue = (issueKey: string, repository?: string): Promise<JiraIssueState> =>
   postJson(

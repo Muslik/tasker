@@ -47,6 +47,7 @@ export {
   fetchRetrospective,
   generateTask,
   previewJiraIssue,
+  resolveJiraProduct,
   removeTask,
   resolveDependencyAvailable,
   resolveDependencyDiscovery,
