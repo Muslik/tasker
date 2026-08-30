@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "10",
+  "version": "11",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -44,7 +44,8 @@
         "jira",
         "jira-edit",
         "jira-issue",
-        "loop"
+        "loop",
+        "delegation"
       ]
     }
   ],

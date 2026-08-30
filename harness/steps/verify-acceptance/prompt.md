@@ -12,6 +12,12 @@ process receipt in run evidence and judge it. Locate the completed `run-validati
 reference `validation.run@1`, then inspect `details.output.exitCode` and every entry in
 `details.commands`. Do not rerun the project's build, test, or validation suites here, do not choose
 selectors, and do not replace the repository's command selection with an agent-authored alternative.
+
+## Delegation
+
+Delegate repository recon spanning more than three files to `explore`, and test authoring to
+`test-writer`; make small focused edits yourself. Subagents return only artifacts (map/excerpts or
+diff summary/test results), never full transcripts.
 A missing or corrupt required validation receipt is a block. A completed validation receipt with a
 nonzero exit code is `changes_requested`, citing the failing profile, command evidence, and
 scenario-owning files.

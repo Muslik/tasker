@@ -1,0 +1,26 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -ne 2 ]; then
+  printf '%s\n' 'usage: delegate <explore|test-writer> "<task>"' >&2
+  exit 2
+fi
+
+role=$1
+task=$2
+
+case "$role" in
+  explore)
+    preamble='You are the explore subagent. Perform read-only repository reconnaissance. Return only a file:line map and concise excerpts. Do not edit files or run mutating commands.'
+    ;;
+  test-writer)
+    preamble='You are the test-writer subagent. Write or update tests for the described change, run the narrowest relevant project test command, and return only a diff summary and run result.'
+    ;;
+  *)
+    printf '%s\n' 'usage: delegate <explore|test-writer> "<task>"' >&2
+    exit 2
+    ;;
+esac
+
+printf '%s\n\nTask:\n%s\n' "$preamble" "$task" | codex exec --sandbox workspace-write --skip-git-repo-check --model "${TASKER_SUBAGENT_MODEL:-gpt-5.6-luna}" -C "$PWD" -

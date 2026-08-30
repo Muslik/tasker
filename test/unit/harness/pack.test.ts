@@ -507,7 +507,7 @@ describe('file-backed harness pack', () => {
     ).toBe(false);
     expect(verify.block.executor).toMatchObject({
       kind: 'agent',
-      skills: ['jira', 'playwright-demo', 'test-design'],
+      skills: ['jira', 'playwright-demo', 'test-design', 'delegation'],
     });
     expect(verify.block.completion).toMatchObject({
       kind: 'structured_evidence',

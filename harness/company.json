@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "4",
+  "version": "5",
   "availableCapabilities": [
     "ci.read",
     "command.run",
@@ -142,6 +142,30 @@
       "timeoutMs": 1200000,
       "serviceTier": "fast"
     },
+    "implementation-luna-medium": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "implementation-sol-medium": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "timeoutMs": 1800000,
+      "serviceTier": "fast"
+    },
+    "implementation-sol-xhigh": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "timeoutMs": 2100000,
+      "serviceTier": "fast"
+    },
     "implementation-standard": {
       "provider": "codex",
       "command": "codex",
@@ -220,6 +244,13 @@
       "model": "opus",
       "effort": "high",
       "timeoutMs": 1800000
+    },
+    "review-claude-sonnet": {
+      "provider": "claude",
+      "command": "claude",
+      "model": "sonnet",
+      "effort": "high",
+      "timeoutMs": 1200000
     }
   },
   "executionProfileRouting": {
@@ -231,21 +262,21 @@
     "taskStrategies": {
       "simple": {
         "context": "context-simple",
-        "implementation": "implementation-simple",
+        "implementation": "implementation-luna-medium",
         "verification": "verification",
-        "review": "review-simple"
+        "review": "review-claude-sonnet"
       },
       "standard": {
         "context": "workflow-analysis",
-        "implementation": "implementation-standard",
+        "implementation": "implementation-sol-medium",
         "verification": "verification",
-        "review": "review-standard"
+        "review": "review-claude-sonnet"
       },
       "complex": {
         "context": "investigation",
-        "implementation": "implementation",
+        "implementation": "implementation-sol-xhigh",
         "verification": "verification-complex",
-        "review": "review"
+        "review": "review-claude-sonnet"
       }
     }
   }
