@@ -9,7 +9,7 @@ import { PlanningTranscriptStore } from '../../src/server/planning-transcript.js
 import { BlockReceiptSchema, blockReceiptId } from '../../src/steps/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { systemClock } from '../../src/shared/clock.js';
-import { TemporalTaskStepTraceStore } from '../../src/steps/activities/block-execution.js';
+import { TemporalTaskStepTraceStore } from '../../src/steps/activities/transcript-store.js';
 import { TaskStepEvidenceStore } from '../../src/steps/activities/task-step-evidence.js';
 import { JsonValueSchema } from '../../src/graph/schema.js';
 import { TaskRunLifecycleSchema } from '../../src/steps/public-state.js';

@@ -4,10 +4,8 @@ import { BlockReceiptSchema, blockReceiptId } from '../steps/index.js';
 import type { LedgerRepository } from '../store/repository.js';
 import { TaskStepOutputArtifactSchema } from '../steps/task-step-output.js';
 import type { ExecutionWorkflowPublicState, TaskRunLifecycle } from '../kernel/index.js';
-import {
-  executionOperationIdFor,
-  TemporalTaskStepTraceStore,
-} from '../steps/activities/block-execution.js';
+import { executionOperationIdFor } from '../steps/activities/claims.js';
+import { TemporalTaskStepTraceStore } from '../steps/activities/transcript-store.js';
 import { TaskStepEvidenceStore } from '../steps/activities/task-step-evidence.js';
 import { TaskStepEvidenceArtifactSchema } from '../steps/task-step-evidence-contracts.js';
 import { systemClock } from '../shared/clock.js';

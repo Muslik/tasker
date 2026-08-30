@@ -1,4 +1,4 @@
-import type { ImplementationPlanningCoordinator } from './implementation-planning.js';
+import type { ImplementationPlanningCoordinator } from './planning-coordinator.js';
 import type { WorkflowFreezeStore } from './workflow-freeze.js';
 import type { RetrospectiveRunIndex, RetrospectiveStore } from './report.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';

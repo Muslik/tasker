@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CompletedRunLifecycleReader } from '../../src/server/completed-run-lifecycle.js';
-import { ImplementationPlanningStore } from '../../src/server/implementation-planning.js';
+import { ImplementationPlanningStore } from '../../src/server/planning-episodes.js';
 import { createOperatorWorkflowProjection } from '../../src/server/operator-workflow-projection.js';
 import { openSqliteLedger } from '../../src/store/index.js';
 import { RetrospectiveReportSchema } from '../../src/server/index.js';

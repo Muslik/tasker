@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import type { BlockReceiptStore } from '../steps/index.js';
 import type { LedgerRepository } from '../store/repository.js';
-import { type ImplementationPlanningCoordinator } from './implementation-planning.js';
+import { type ImplementationPlanningCoordinator } from './planning-coordinator.js';
 import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
 import { JiraIssueSnapshotSchema } from '../integrations/index.js';

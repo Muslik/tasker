@@ -18,15 +18,17 @@ import type { CommandRunner, WorkspaceCommandRunner } from '../../src/agents/com
 import { err, ok } from '../../src/shared/outcome.js';
 import { systemClock } from '../../src/shared/clock.js';
 import {
-  createCurrentStepRegistry,
-  createTaskExecutionActivity,
-  executeRegisteredTaskStep,
   promptForAgentStep,
   runHistoryIndex,
   selectAgentRunEvidence,
-  TemporalTaskStepTraceStore,
-  type TaskStepAgentRunner,
-} from '../../src/steps/activities/block-execution.js';
+} from '../../src/steps/activities/agent-prompt.js';
+import { type TaskStepAgentRunner } from '../../src/steps/activities/agent-runner.js';
+import { createTaskExecutionActivity } from '../../src/steps/activities/evidence.js';
+import {
+  createCurrentStepRegistry,
+  executeRegisteredTaskStep,
+} from '../../src/steps/activities/run-block.js';
+import { TemporalTaskStepTraceStore } from '../../src/steps/activities/transcript-store.js';
 import type {
   DockerWorkspaceRuntimePreparer,
   DockerWorkspaceRuntimeReceipt,

@@ -2,7 +2,7 @@ import { Context } from '@temporalio/activity';
 
 import type { BlockReceiptStore } from '../../steps/index.js';
 import type { EvidenceBundleStore } from '../../server/evidence-bundle.js';
-import type { ImplementationPlanningStore } from '../../server/implementation-planning.js';
+import type { ImplementationPlanningStore } from '../../server/planning-episodes.js';
 import type { ExecutionWorkflowActivities } from '../../kernel/execution-kernel/contracts.js';
 import type { ExecutionBlockResult } from '../../kernel/execution-kernel/contracts.js';
 import {

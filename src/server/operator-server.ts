@@ -46,7 +46,7 @@ import { buildOperatorApi } from './operator-api.js';
 import { LedgerAgentInvocationReader } from './agent-invocation-reader.js';
 import { EvidenceBundleStore } from './evidence-bundle.js';
 import { LedgerExecutionActivityReader } from './execution-activity.js';
-import { createImplementationPlanningCoordinator } from './implementation-planning.js';
+import { createImplementationPlanningCoordinator } from './planning-coordinator.js';
 import { PlanningEvidenceReaderRegistry } from './planning-evidence.js';
 import { PlanReviewStore } from './plan-review.js';
 import { WorkflowFreezeStore } from './workflow-freeze.js';
@@ -57,7 +57,7 @@ import {
 } from './persisted-generation-subject.js';
 import { VerifiedPackagePublicationStore } from './verified-package-publication.js';
 import { NexusPackageObserver } from '../integrations/nexus/index.js';
-import { TemporalTaskStepTraceStore } from '../steps/activities/block-execution.js';
+import { TemporalTaskStepTraceStore } from '../steps/activities/transcript-store.js';
 import {
   DockerWorkspaceCommandRunner,
   DockerWorkspaceRuntimeManager,

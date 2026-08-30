@@ -26,10 +26,8 @@ import type {
 } from '../../../src/agents/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
-import {
-  SubscriptionCliTaskStepAgentRunner,
-  TemporalTaskStepTraceStore,
-} from '../../../src/steps/activities/block-execution.js';
+import { SubscriptionCliTaskStepAgentRunner } from '../../../src/steps/activities/subscription-cli-agent-runner.js';
+import { TemporalTaskStepTraceStore } from '../../../src/steps/activities/transcript-store.js';
 import { agentStepOutcomeSchema } from '../../../src/steps/activities/block-execution-contracts.js';
 import { TaskStepFilesystemStore } from '../../../src/steps/activities/task-step-filesystem.js';
 import { TaskStepEvidenceStore } from '../../../src/steps/activities/task-step-evidence.js';

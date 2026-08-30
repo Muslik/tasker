@@ -2,10 +2,8 @@ import { fileURLToPath } from 'node:url';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import {
-  createImplementationPlanningCoordinator,
-  ImplementationPlanningStore,
-} from '../server/implementation-planning.js';
+import { createImplementationPlanningCoordinator } from '../server/planning-coordinator.js';
+import { ImplementationPlanningStore } from '../server/planning-episodes.js';
 import { DependencyDeclarationStore } from '../server/dependency-declaration.js';
 import { DependencyDeclarationGenerationSubjectResolver } from '../server/dependency-declaration-generation-subject.js';
 import { VerifiedPackagePublicationStore } from '../server/verified-package-publication.js';
@@ -88,13 +86,13 @@ import {
   createPlanningActivity,
   createTemporalActivityCommandRunner,
 } from '../steps/activities/planning-activity.js';
+import { SubscriptionCliTaskStepAgentRunner } from '../steps/activities/subscription-cli-agent-runner.js';
+import { createTaskExecutionActivity } from '../steps/activities/evidence.js';
 import {
-  SubscriptionCliTaskStepAgentRunner,
   createCurrentStepRegistry,
-  createTaskExecutionActivity,
   LedgerTaskRunEvidenceSource,
-  TemporalTaskStepTraceStore,
-} from '../steps/activities/block-execution.js';
+} from '../steps/activities/run-block.js';
+import { TemporalTaskStepTraceStore } from '../steps/activities/transcript-store.js';
 import { TaskStepFilesystemStore } from '../steps/activities/task-step-filesystem.js';
 import { TaskStepEvidenceStore } from '../steps/activities/task-step-evidence.js';
 import { TaskStepIntegrationEvidenceSink } from '../steps/activities/integration-evidence-sink.js';

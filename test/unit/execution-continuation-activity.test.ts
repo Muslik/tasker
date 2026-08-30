@@ -12,7 +12,7 @@ import {
   DependencyDeclarationStore,
   dependencyDeclarationIdFor,
 } from '../../src/server/dependency-declaration.js';
-import { ImplementationPlanningStore } from '../../src/server/implementation-planning.js';
+import { ImplementationPlanningStore } from '../../src/server/planning-episodes.js';
 import { loadHarnessPack, resolveImplementationPlannerProfile } from '../../src/harness/index.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import type { EvidenceBundle } from '../../src/planning/evidence-bundle.js';

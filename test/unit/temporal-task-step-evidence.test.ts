@@ -10,7 +10,7 @@ import {
   TaskStepEvidenceStore,
   normalizeTaskStepEvidencePaths,
 } from '../../src/steps/activities/task-step-evidence.js';
-import { TemporalTaskStepTraceStore } from '../../src/steps/activities/block-execution.js';
+import { TemporalTaskStepTraceStore } from '../../src/steps/activities/transcript-store.js';
 import { TaskStepEvidenceArtifactSchema } from '../../src/steps/task-step-evidence-contracts.js';
 
 describe('task step evidence store', () => {

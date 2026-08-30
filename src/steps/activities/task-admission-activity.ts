@@ -1,6 +1,6 @@
 import { Context } from '@temporalio/activity';
 
-import type { ImplementationPlanningStore } from '../../server/implementation-planning.js';
+import type { ImplementationPlanningStore } from '../../server/planning-episodes.js';
 import type { JiraStartWorkAdapter } from '../../integrations/jira/lifecycle.js';
 import type { WorkspaceStore } from '../../workspace/store.js';
 import {

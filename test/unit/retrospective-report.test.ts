@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { RetrospectiveStore } from '../../src/server/index.js';
 import { systemClock } from '../../src/shared/clock.js';
-import { TemporalTaskStepTraceStore } from '../../src/steps/activities/block-execution.js';
+import { TemporalTaskStepTraceStore } from '../../src/steps/activities/transcript-store.js';
 
 describe('execution retrospective', () => {
   let ledger: SqliteLedger;

@@ -8,7 +8,7 @@ import {
   type DependencyDeclaration,
   type DependencyDeclarationStore,
 } from '../../server/dependency-declaration.js';
-import type { ImplementationPlanningStore } from '../../server/implementation-planning.js';
+import type { ImplementationPlanningStore } from '../../server/planning-episodes.js';
 import type { WorkflowAnalyzer } from '../../server/workflow-generator.js';
 import type { LedgerRepository } from '../../store/repository.js';
 import type { JsonValue } from '../../store/types.js';
