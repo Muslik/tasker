@@ -14,6 +14,7 @@ export interface SubscriptionCliStreamResult {
   } | null;
   readonly reportedCostUsd: number | null;
   readonly diagnostics: readonly string[];
+  readonly skippedCount: number;
 }
 
 export const parseSubscriptionCliStream = (
@@ -46,5 +47,6 @@ export const parseSubscriptionCliStream = (
           },
     reportedCostUsd: null,
     diagnostics: parsed.value.diagnostics,
+    skippedCount: parsed.value.skippedCount,
   });
 };

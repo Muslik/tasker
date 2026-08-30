@@ -258,7 +258,6 @@ describe('implementation planning recovery', () => {
                 ok({
                   decision: null,
                   evidenceRequests: [],
-                  stderr: '403',
                   receipt: {
                     status: 'completed',
                     provider: 'codex_cli',

@@ -43,20 +43,55 @@ const TurnCompletedSchema = z
   })
   .loose();
 
+const TurnFailedSchema = z
+  .object({
+    type: z.literal('turn.failed'),
+    error: z
+      .object({
+        message: z.string().min(1),
+      })
+      .loose(),
+  })
+  .loose();
+
 export interface ParsedCodexStream {
   readonly sessionId: string;
   readonly finalMessage: string;
   readonly usage: z.infer<typeof CodexTokenUsageSchema> | null;
   readonly diagnostics: readonly string[];
+  readonly skippedCount: number;
 }
 
 const MAX_STREAM_DIAGNOSTICS = 20;
 const MAX_DIAGNOSTIC_LINE_LENGTH = 200;
+const MAX_STREAM_FAILURE_CONTEXT_LENGTH = 2_000;
+const MAX_PROVIDER_FAILURE_MESSAGE_LENGTH = 4_000;
 
 const truncateDiagnosticLine = (line: string): string =>
   line.length <= MAX_DIAGNOSTIC_LINE_LENGTH
     ? line
     : `${line.slice(0, MAX_DIAGNOSTIC_LINE_LENGTH)}...`;
+
+const truncateHead = (value: string, length: number): string =>
+  value.length <= length ? value : `${value.slice(0, length - 3)}...`;
+
+const truncateTail = (value: string, length: number): string =>
+  value.length <= length ? value : `...${value.slice(-(length - 3))}`;
+
+const withStreamDiagnostics = (
+  message: string,
+  diagnostics: readonly string[],
+  skippedCount: number,
+): string => {
+  if (diagnostics.length === 0) return message;
+  const samples = truncateHead(diagnostics.join('\n'), MAX_STREAM_FAILURE_CONTEXT_LENGTH);
+  return `${message}\nStream diagnostics (${String(skippedCount)} non-JSON line(s)):\n${samples}`;
+};
+
+const eventIssues = (eventType: string, issues: readonly z.core.$ZodIssue[]): string =>
+  `Invalid ${eventType} event: ${issues
+    .map((issue) => `${issue.path.map(String).join('.') || '<root>'}: ${issue.message}`)
+    .join('; ')}`;
 
 export const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -170,6 +205,7 @@ const nestedProviderFailureMessage = (message: string): string => {
 };
 
 export const providerFailureMessage = (stdout: string, stderr = ''): string => {
+  const stdoutDiagnostics: string[] = [];
   for (const line of stdout.split(/\r?\n/u).reverse()) {
     try {
       const event = JSON.parse(line) as unknown;
@@ -193,13 +229,15 @@ export const providerFailureMessage = (stdout: string, stderr = ''): string => {
         return nestedProviderFailureMessage(event.error.message);
       }
     } catch {
-      // A failed provider may mix non-JSON diagnostics into stdout; continue backwards.
+      if (line.trim().length > 0) stdoutDiagnostics.push(line);
     }
   }
 
-  const diagnostic = stderr.trim();
+  const diagnostic = [stderr.trim(), stdoutDiagnostics.reverse().join('\n').trim()]
+    .filter((value) => value.length > 0)
+    .join('\n');
   if (diagnostic.length > 0) {
-    return diagnostic.length <= 500 ? diagnostic : `${diagnostic.slice(0, 497)}...`;
+    return truncateTail(diagnostic, MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
   }
   return 'Codex CLI exited without a structured provider error';
 };
@@ -213,7 +251,9 @@ export const parseCodexStream = (
   let sessionId: string | null = null;
   let finalMessage: string | null = null;
   let usage: z.infer<typeof CodexTokenUsageSchema> | null = null;
+  let streamFailure: string | null = null;
   const diagnostics: string[] = [];
+  let skippedCount = 0;
 
   for (const line of stdout.split(/\r?\n/u)) {
     if (line.trim().length === 0) continue;
@@ -221,6 +261,7 @@ export const parseCodexStream = (
     try {
       event = JSON.parse(line) as unknown;
     } catch {
+      skippedCount += 1;
       if (diagnostics.length < MAX_STREAM_DIAGNOSTICS) {
         diagnostics.push(truncateDiagnosticLine(line));
       }
@@ -239,16 +280,48 @@ export const parseCodexStream = (
       continue;
     }
 
-    const completed = TurnCompletedSchema.safeParse(event);
-    if (completed.success) usage = completed.data.usage;
+    const eventType =
+      typeof event === 'object' && event !== null && 'type' in event ? event.type : null;
+    if (eventType === 'turn.failed') {
+      const failed = TurnFailedSchema.safeParse(event);
+      streamFailure = failed.success
+        ? `Codex turn failed: ${nestedProviderFailureMessage(failed.data.error.message)}`
+        : eventIssues('turn.failed', failed.error.issues);
+      continue;
+    }
+    if (eventType === 'turn.completed') {
+      const completed = TurnCompletedSchema.safeParse(event);
+      if (!completed.success) {
+        streamFailure = eventIssues('turn.completed', completed.error.issues);
+        continue;
+      }
+      usage = completed.data.usage;
+    }
+  }
+
+  if (streamFailure !== null) {
+    return err({
+      kind: 'invalid_event_stream',
+      message: withStreamDiagnostics(streamFailure, diagnostics, skippedCount),
+    });
   }
 
   if (finalMessage === null) {
     return err({
       kind: 'invalid_event_stream',
-      message: 'Codex stream did not contain an agent message',
+      message: withStreamDiagnostics(
+        'Codex stream did not contain an agent message',
+        diagnostics,
+        skippedCount,
+      ),
     });
   }
 
-  return ok({ sessionId: sessionId ?? sha256(stdout), finalMessage, usage, diagnostics });
+  return ok({
+    sessionId: sessionId ?? sha256(stdout),
+    finalMessage,
+    usage,
+    diagnostics,
+    skippedCount,
+  });
 };

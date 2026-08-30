@@ -493,8 +493,12 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         }
         const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
         if (!stream.ok) return err(stream.error);
-        if (stream.value.diagnostics.length > 0) {
-          const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s):\n${stream.value.diagnostics.join('\n')}\n`;
+        if (stream.value.skippedCount > 0) {
+          const samplesNote =
+            stream.value.skippedCount > stream.value.diagnostics.length
+              ? ' (showing first 20)'
+              : '';
+          const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.skippedCount)} non-JSON line(s)${samplesNote}:\n${stream.value.diagnostics.join('\n')}\n`;
           const appended = request.transcriptStore.append(
             request.operationId,
             request.runtime.attempt,
@@ -1641,7 +1645,7 @@ export const executeRegisteredTaskStep = async (
       const reason =
         'message' in provider.error
           ? provider.error.message
-              .replace(/[ \t]+/gu, ' ')
+              .replace(/[ \t\r]+/gu, ' ')
               .trim()
               .slice(0, 4_000)
           : provider.error.kind;
@@ -1660,7 +1664,7 @@ export const executeRegisteredTaskStep = async (
     if (!decodedDecision.ok) {
       const issues = decodedDecision.error.issues
         .join('; ')
-        .replace(/[ \t]+/gu, ' ')
+        .replace(/[ \t\r]+/gu, ' ')
         .slice(0, 4_000);
       throw ApplicationFailure.create({
         message: `Agent execution for ${input.uses} returned an invalid outcome: ${issues}`,

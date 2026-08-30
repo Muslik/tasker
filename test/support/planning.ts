@@ -400,7 +400,6 @@ export const makeTestImplementationPlanner = (): ImplementationPlanner => ({
       ok({
         decision: makeReadyPlanningDecision(),
         evidenceRequests: [],
-        stderr: '',
         receipt: {
           status: 'completed',
           provider: 'codex_cli',

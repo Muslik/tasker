@@ -54,7 +54,6 @@ export interface WorkflowAnalyzerRequest extends WorkflowAnalyzerContext {
 export interface WorkflowAnalyzerSuccess {
   readonly output: WorkflowAnalyzerOutput;
   readonly receipt: WorkflowAnalyzerReceipt;
-  readonly stderr: string;
 }
 
 export type WorkflowAnalyzerFailure =
@@ -227,16 +226,6 @@ export class SubscriptionCliWorkflowAnalyzer {
       if (!stream.ok) {
         return stream;
       }
-      const streamDiagnosticsStderr =
-        stream.value.diagnostics.length === 0
-          ? execution.stderr
-          : [
-              execution.stderr,
-              `[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s): ${stream.value.diagnostics.join(' | ')}`,
-            ]
-              .filter((entry) => entry.length > 0)
-              .join('\n');
-
       const providerOutput = WorkflowAnalyzerProviderOutputSchema.safeParse(
         stream.value.finalMessage,
       );
@@ -265,7 +254,6 @@ export class SubscriptionCliWorkflowAnalyzer {
 
       return ok({
         output: output.data,
-        stderr: streamDiagnosticsStderr,
         receipt: WorkflowAnalyzerReceiptSchema.parse({
           status: 'completed',
           provider: profile.provider === 'codex' ? 'codex_cli' : 'claude_cli',

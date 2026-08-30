@@ -50,10 +50,9 @@ describe('Claude CLI stream contract', () => {
     const result = parseClaudeStream(fixture('03-truncated-final-line.txt'));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toEqual({
-      kind: 'invalid_event_stream',
-      message: 'Claude emitted no result event',
-    });
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('Claude emitted no result event');
+    expect(result.error.message).toContain('Partial resu');
   });
 
   it('parses a stream using CRLF line endings', () => {
@@ -81,5 +80,33 @@ describe('Claude CLI stream contract', () => {
     expect(result.value.sessionId).toBe('claude-ansi-1');
     expect(result.value.diagnostics).toHaveLength(1);
     expect(result.value.diagnostics[0]).toContain('Claude CLI ready');
+  });
+
+  it('surfaces plain-text diagnostics when no result event is emitted', () => {
+    const result = parseClaudeStream(fixture('06-plain-text-error.txt'));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('fatal: authentication expired');
+  });
+
+  it('counts all skipped lines while retaining only the first 20 diagnostics', () => {
+    const result = parseClaudeStream(fixture('07-twenty-five-noise-lines.txt'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.skippedCount).toBe(25);
+    expect(result.value.diagnostics).toHaveLength(20);
+    expect(result.value.diagnostics[0]).toBe('claude noise 01');
+    expect(result.value.diagnostics[19]).toBe('claude noise 20');
+  });
+
+  it('includes result prose when structured JSON output is missing', () => {
+    const result = parseClaudeStream(fixture('08-unstructured-result.txt'));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('Claude result did not contain structured JSON output');
+    expect(result.error.message).toContain('Authentication expired while decoding the response');
+    expect(result.error.message).toContain('provider warning before result');
   });
 });

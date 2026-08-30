@@ -720,6 +720,72 @@ describe('temporal block execution activity', () => {
     });
   });
 
+  it('strips carriage returns from blocked provider summaries without collapsing line feeds', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        err({
+          kind: 'provider_failed',
+          exitCode: 1,
+          message: 'Provider stopped after\r\nreporting a\t controlled failure',
+          stdout: '',
+          stderr: 'controlled failure',
+        }),
+      ),
+    );
+    const input = {
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'implement-feature',
+      stepAttempt: 1,
+      uses: 'implement.change@1',
+      activityDelivery: { kind: 'workspace_reconciled' as const },
+      workspace: stubWorkspace,
+      planningSnapshot: {
+        artifactId: 'planning-snapshot:test',
+        checksum: 'd'.repeat(64),
+      },
+      operatorGuidance: null,
+      waitResolution: null,
+      input: {
+        objective: 'Normalize passenger names',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+
+    const result = await executeRegisteredTaskStep(
+      input,
+      {
+        snapshots: {
+          readRunSnapshot: () => ok(makeSnapshot('implement.change@1')),
+        },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        agentRunner: { run },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      {
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      summary:
+        'Agent execution for implement.change@1 is blocked: Provider stopped after \nreporting a controlled failure',
+      waitKind: 'implement.change.1.blocked@1',
+    });
+    expect(result.summary.includes('\r')).toBe(false);
+  });
+
   it('raises a retryable activity failure for malformed completion output', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
 

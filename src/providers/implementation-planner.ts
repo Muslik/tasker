@@ -102,7 +102,6 @@ export interface ImplementationPlannerSuccess {
   readonly decision: ImplementationPlanningDecision | null;
   readonly evidenceRequests?: readonly PlanningEvidenceRequest[];
   readonly receipt: ImplementationPlannerReceipt;
-  readonly stderr: string;
 }
 
 export type ImplementationPlannerDecisionSuccess = ImplementationPlannerSuccess & {
@@ -315,15 +314,6 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
 
       const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) return stream;
-      const streamDiagnosticsStderr =
-        stream.value.diagnostics.length === 0
-          ? execution.stderr
-          : [
-              execution.stderr,
-              `[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s): ${stream.value.diagnostics.join(' | ')}`,
-            ]
-              .filter((entry) => entry.length > 0)
-              .join('\n');
       const providerOutput = ImplementationPlannerProviderOutputSchema.safeParse(
         stream.value.finalMessage,
       );
@@ -367,7 +357,6 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         return ok({
           decision: null,
           evidenceRequests,
-          stderr: streamDiagnosticsStderr,
           receipt,
         });
       }
@@ -384,7 +373,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         );
       }
 
-      return ok({ decision: decision.data, stderr: streamDiagnosticsStderr, receipt });
+      return ok({ decision: decision.data, receipt });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

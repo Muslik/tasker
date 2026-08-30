@@ -45,4 +45,8 @@ describe('API-equivalent cost estimation', () => {
       ),
     ).toEqual({ source: 'price_table', amountUsd: 1.56, pricingVersion: 'test-v1' });
   });
+
+  it('returns unrated when priced usage is unavailable and the provider reports no usd value', () => {
+    expect(estimateApiCost(profile, null, null)).toEqual({ source: 'unrated' });
+  });
 });

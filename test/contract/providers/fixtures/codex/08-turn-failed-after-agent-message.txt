@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"thread-failed-1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"Partial output must not advance the workflow."}}
+{"type":"turn.failed","error":{"message":"Provider quota exhausted"}}
+fatal: quota window remains closed

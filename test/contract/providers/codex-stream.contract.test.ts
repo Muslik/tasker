@@ -71,10 +71,9 @@ describe('Codex CLI stream contract', () => {
     const result = parseCodexStream(fixture('05-truncated-final-line.txt'));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toEqual({
-      kind: 'invalid_event_stream',
-      message: 'Codex stream did not contain an agent message',
-    });
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('Codex stream did not contain an agent message');
+    expect(result.error.message).toContain('Partial ou');
   });
 
   it('parses a stream using CRLF line endings', () => {
@@ -99,5 +98,40 @@ describe('Codex CLI stream contract', () => {
     expect(result.value.finalMessage).toBe('ANSI noise ignored.');
     expect(result.value.diagnostics).toHaveLength(1);
     expect(result.value.diagnostics[0]).toContain('codex');
+  });
+
+  it('fails when a terminal turn failure follows an agent message', () => {
+    const result = parseCodexStream(fixture('08-turn-failed-after-agent-message.txt'));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('Provider quota exhausted');
+    expect(result.error.message).toContain('fatal: quota window remains closed');
+  });
+
+  it('fails when a turn.completed event contains malformed usage', () => {
+    const result = parseCodexStream(fixture('09-malformed-usage.txt'));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('usage.input_tokens');
+  });
+
+  it('counts all skipped lines while retaining only the first 20 diagnostics', () => {
+    const result = parseCodexStream(fixture('10-twenty-five-noise-lines.txt'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.skippedCount).toBe(25);
+    expect(result.value.diagnostics).toHaveLength(20);
+    expect(result.value.diagnostics[0]).toBe('codex noise 01');
+    expect(result.value.diagnostics[19]).toBe('codex noise 20');
+  });
+
+  it('surfaces plain-text diagnostics when no agent message is emitted', () => {
+    const result = parseCodexStream(fixture('11-plain-text-error.txt'));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('invalid_event_stream');
+    expect(result.error.message).toContain('fatal: model access is unavailable');
   });
 });

@@ -81,6 +81,7 @@ import type {
   PlanningEvidenceReaderRegistry,
   PlanningEvidenceReadError,
 } from './planning-evidence.js';
+import { providerFailureSummary } from './workflow-generator.js';
 
 export const IMPLEMENTATION_PLAN_PROJECTION = 'implementation_plan_by_episode';
 export { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
@@ -874,23 +875,47 @@ const planningFailureView = (
   }
 };
 
+const ledgerConflictDetail = (conflict: LedgerConflict): string => {
+  switch (conflict.kind) {
+    case 'version_conflict':
+      return `aggregate ${conflict.aggregateId} expected version ${String(conflict.expectedVersion)} but found ${String(conflict.actualVersion)}`;
+    case 'duplicate_event_id':
+      return `duplicate event id ${conflict.eventId}`;
+    case 'unsupported_schema_version':
+      return `${conflict.schemaKind} schema version ${String(conflict.receivedVersion)} is unsupported; supported version is ${String(conflict.supportedVersion)} (${conflict.recovery})`;
+  }
+};
+
+const operatorStoreErrorDetail = (
+  error: Extract<OperatorServiceError, { readonly kind: 'store_failure' }>['error'],
+): string => {
+  switch (error.kind) {
+    case 'ledger_conflict':
+      return `operator store conflict: ${ledgerConflictDetail(error.conflict)}`;
+    case 'projection_corrupt':
+      return `operator store projection for task ${error.taskReference} is corrupt: ${error.issues.join('; ')}`;
+    case 'generation_subject_conflict':
+      return `operator store already recorded a different generation subject for task ${error.taskReference}`;
+  }
+};
+
 const operatorServiceErrorDetail = (error: OperatorServiceError): string => {
-  const parts: string[] = [];
-  const collect = (value: unknown): void => {
-    if (value === null || typeof value !== 'object') return;
-    const record = value as Record<string, unknown>;
-    if (typeof record.message === 'string') parts.push(record.message);
-    if (typeof record.reason === 'string') parts.push(record.reason);
-    if (Array.isArray(record.issues)) {
-      for (const issue of record.issues) {
-        if (typeof issue === 'string') parts.push(issue);
-      }
-    }
-    if (typeof record.error === 'object') collect(record.error);
-    if (typeof record.failure === 'object') collect(record.failure);
-  };
-  collect(error);
-  return parts.join('; ');
+  switch (error.kind) {
+    case 'task_not_found':
+      return `task ${error.taskReference} was not found`;
+    case 'generation_blocked':
+      return `task ${error.taskReference} is blocked: ${error.reason}`;
+    case 'planner_contract_failure':
+      return `planner contract failed at ${error.stage}`;
+    case 'non_json_artifact':
+      return `artifact ${error.artifact} is not valid JSON`;
+    case 'store_failure':
+      return operatorStoreErrorDetail(error.error);
+    case 'provider_failure':
+      return providerFailureSummary(error.failure);
+    case 'generation_runtime_unavailable':
+      return error.message;
+  }
 };
 
 export type ImplementationPlanningError =

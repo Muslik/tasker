@@ -32,4 +32,24 @@ describe('Codex CLI support', () => {
       'No prompt provided via stdin.',
     );
   });
+
+  it('surfaces plain-text stdout when the provider exits without a structured error', () => {
+    expect(
+      providerFailureMessage('provider startup failed\nfatal: model access denied\n'),
+    ).toContain('fatal: model access denied');
+  });
+
+  it('retains the tail of long plain-text stdout within the failure reason limit', () => {
+    const message = providerFailureMessage(`${'x'.repeat(4_500)}actionable stdout tail`);
+    expect(message).toHaveLength(4_000);
+    expect(message).toMatch(/^\.\.\./u);
+    expect(message).toMatch(/actionable stdout tail$/u);
+  });
+
+  it('retains the tail of long stderr within the failure reason limit', () => {
+    const message = providerFailureMessage('', `${'x'.repeat(4_500)}actionable stderr tail`);
+    expect(message).toHaveLength(4_000);
+    expect(message).toMatch(/^\.\.\./u);
+    expect(message).toMatch(/actionable stderr tail$/u);
+  });
 });

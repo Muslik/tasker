@@ -440,7 +440,6 @@ describe('execution continuation activity', () => {
             declared.value.packages,
           ),
           receipt: analyzerReceipt,
-          stderr: '',
         }),
       ),
     );
