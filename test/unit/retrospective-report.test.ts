@@ -62,6 +62,8 @@ describe('execution retrospective', () => {
                 artifactIds: [],
                 transcriptId: null,
                 waitKind: 'verify.blocked@1',
+                category: 'infrastructure',
+                retryable: true,
               }
             : { status, summary: status, artifactIds: [], transcriptId: null },
       });

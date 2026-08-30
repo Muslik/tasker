@@ -76,6 +76,8 @@ const waiting = (
   status: 'waiting',
   waitKind: 'dependency.available@1',
   summary: `Dependency publication for ${input.channel} channel is waiting for verification`,
+  category: 'dependency',
+  retryable: false,
   details: asJson({
     declarationId: declaration.declarationId,
     declarationRevision: declaration.revision,

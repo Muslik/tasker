@@ -208,7 +208,7 @@ describe('dependency operator projection', () => {
         readPublication: () => null,
         readArtifact: () => ({
           payload: {
-            schemaVersion: 3,
+            schemaVersion: 4,
             operationId: 'tasker:execution:workflow-change:1',
             workflowId: 'workflow-1',
             workflowRunId: 'run-1',
@@ -368,7 +368,7 @@ describe('dependency operator projection', () => {
           ok(
             candidateReceiptId === receiptId
               ? {
-                  schemaVersion: 6,
+                  schemaVersion: 7,
                   receiptId,
                   blockReference: 'implement.change@1',
                   blockDefinitionHash: 'f'.repeat(64),
@@ -382,7 +382,7 @@ describe('dependency operator projection', () => {
                     status: 'blocked',
                     summary: 'Waiting for review approval',
                     waitKind: 'code_review@1',
-                    category: 'remote_conflict',
+                    category: 'dependency',
                     retryable: true,
                   },
                   verdict: {
@@ -421,7 +421,7 @@ describe('dependency operator projection', () => {
         {
           receiptId,
           claimStatus: 'blocked',
-          category: 'remote_conflict',
+          category: 'dependency',
           retryable: true,
         },
       ],

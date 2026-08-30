@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"claude-envelope-failed-1"}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"failed","category":"agent_contract","detail":"The step output contract could not be satisfied from the observed state.","retryable":false},"session_id":"claude-envelope-failed-1","usage":{"input_tokens":83,"cache_creation_input_tokens":2,"cache_read_input_tokens":1,"output_tokens":15}}

@@ -95,15 +95,12 @@ export const AgentQuestionSchema = z
   .strict()
   .readonly();
 
-export const BlockedClaimCategorySchema = z.enum([
-  'infrastructure',
+export const AgentClaimCategorySchema = z.enum([
   'authorization',
+  'infrastructure',
   'task_ambiguity',
-  'configuration',
-  'invalid_request',
-  'remote_conflict',
-  'verification',
-  'unknown_outcome',
+  'dependency',
+  'agent_contract',
 ]);
 
 export const AgentClaimSchema = z.discriminatedUnion('status', [
@@ -138,7 +135,7 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
       status: z.literal('blocked'),
       summary: z.string().min(1),
       waitKind: z.string().min(1),
-      category: BlockedClaimCategorySchema.optional(),
+      category: AgentClaimCategorySchema,
       retryable: z.boolean(),
     })
     .strict()
@@ -147,7 +144,8 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
     .object({
       status: z.literal('failed'),
       summary: z.string().min(1),
-      category: z.enum(['provider', 'contract', 'permanent']),
+      category: AgentClaimCategorySchema,
+      retryable: z.boolean(),
     })
     .strict()
     .readonly(),
@@ -232,7 +230,7 @@ export const CompletionVerdictSchema = z.discriminatedUnion('status', [
 
 export const BlockReceiptSchema = z
   .object({
-    schemaVersion: z.literal(6),
+    schemaVersion: z.literal(7),
     receiptId: z.string().min(1),
     blockReference: VersionedReferenceSchema,
     blockDefinitionHash: z.string().min(1),
@@ -267,7 +265,7 @@ export type CompletionEvaluator =
 
 export type BlockDefinition = z.infer<typeof BlockDefinitionSchema>;
 export type AgentClaim = z.infer<typeof AgentClaimSchema>;
-export type BlockedClaimCategory = z.infer<typeof BlockedClaimCategorySchema>;
+export type AgentClaimCategory = z.infer<typeof AgentClaimCategorySchema>;
 export type CompletionEvidence = z.infer<typeof CompletionEvidenceSchema>;
 export type CompletionVerdict = z.infer<typeof CompletionVerdictSchema>;
 export type BlockReceipt = z.infer<typeof BlockReceiptSchema>;

@@ -1,0 +1,4 @@
+Codex CLI v0.12.0 initializing...
+{"type":"thread.started","thread_id":"thread-envelope-waiting-1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"{\"status\":\"waiting\",\"waitKind\":\"dependency.available@1\",\"reason\":\"Waiting for the exact dependency publication receipt\",\"resumeHint\":\"Re-run this step after the producer verifies the publication.\",\"category\":\"dependency\",\"retryable\":false}"}}
+{"type":"turn.completed","usage":{"input_tokens":96,"cached_input_tokens":0,"output_tokens":21}}

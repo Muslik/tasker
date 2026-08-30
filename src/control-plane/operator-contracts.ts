@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { BlockedClaimCategorySchema, CompletionEvidenceSchema } from '../blocks/contracts.js';
+import { AgentClaimCategorySchema, CompletionEvidenceSchema } from '../blocks/contracts.js';
 import { JiraIssueKeySchema } from '../integrations/jira/contracts.js';
 import { AgentApiCostSchema, AgentInvocationUsageSchema } from '../observability/agent-usage.js';
 import {
@@ -61,11 +61,6 @@ export const WorkflowNodeStatusSchema = z.enum([
   'failed',
 ]);
 
-const BlockReceiptSummaryCategorySchema = z.union([
-  BlockedClaimCategorySchema,
-  z.enum(['provider', 'contract', 'permanent']),
-]);
-
 export const BlockReceiptSummarySchema = z
   .object({
     receiptId: z.string().min(1),
@@ -79,7 +74,7 @@ export const BlockReceiptSummarySchema = z
     ]),
     verdict: z.enum(['accepted', 'rejected', 'waiting']),
     summary: z.string().min(1),
-    category: BlockReceiptSummaryCategorySchema.optional(),
+    category: AgentClaimCategorySchema.optional(),
     retryable: z.boolean().optional(),
     evidence: z.array(CompletionEvidenceSchema),
     transcriptReference: z.string().min(1).nullable(),

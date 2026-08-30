@@ -5,12 +5,13 @@ import type { WorkspaceLocator } from '../workspaces/contracts.js';
 import type { PullRequestReviewEvidence } from './bitbucket/review.js';
 import type { WorkflowChangeRequest } from '../workflow/execution-result.js';
 import type { TrackerStatusUpdates } from '../shared/task-run-settings.js';
+import type { AgentClaimCategory } from '../blocks/contracts.js';
 
 export interface TaskRunStepEvidence {
   readonly operationId: string;
   readonly nodeId: string;
   readonly stepReference: string;
-  readonly status: 'blocked' | 'completed' | 'workflow_change_required';
+  readonly status: 'blocked' | 'completed' | 'failed' | 'workflow_change_required';
   readonly summary: string | null;
   readonly artifactIds: readonly string[];
   readonly details: JsonValue;
@@ -105,6 +106,8 @@ export type IntegrationStepExecutionResult =
       readonly status: 'waiting';
       readonly waitKind: string;
       readonly summary: string;
+      readonly category: AgentClaimCategory;
+      readonly retryable: boolean;
       readonly details: JsonValue;
       readonly artifactIds: readonly string[];
     }

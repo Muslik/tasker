@@ -387,6 +387,14 @@ describe('temporal block execution activity', () => {
 
     expect(context.runEvidence.reviewInputs.entries).toHaveLength(5);
     expect(context.runEvidence.reviewInputs.omittedCount).toBe(10);
+    expect(prompt).toContain('{"status":"completed","output":{...}}');
+    expect(prompt).toContain('{"status":"waiting","waitKind":"..."');
+    expect(prompt).toContain('{"status":"failed","category":"..."');
+    expect(prompt).toContain('{"status":"workflow_change","request":{...}}');
+    expect(prompt).toContain('output must be a real JSON object');
+    expect(prompt).not.toContain('outputJson');
+    expect(prompt).not.toContain('requestJson');
+    expect(prompt).not.toContain('blockingReason');
   });
 
   it('uses the snapshotted prompt and base step binding for an agent attempt', async () => {
@@ -414,13 +422,11 @@ describe('temporal block execution activity', () => {
             usage: TEST_AGENT_USAGE,
             finalMessage: {
               status: 'completed',
-              outputJson: JSON.stringify({
+              output: {
                 decision: 'accepted',
                 summary: 'Independent review accepted',
                 findings: [],
-              }),
-              requestJson: null,
-              blockingReason: null,
+              },
             },
           }),
         );
@@ -492,12 +498,10 @@ describe('temporal block execution activity', () => {
           usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
-            outputJson: JSON.stringify({
+            output: {
               summary: 'Implementation completed',
               artifacts: [],
-            }),
-            requestJson: null,
-            blockingReason: null,
+            },
           },
         }),
       ),
@@ -603,7 +607,7 @@ describe('temporal block execution activity', () => {
                 usage: TEST_AGENT_USAGE,
                 finalMessage: {
                   status: 'completed',
-                  outputJson: JSON.stringify({
+                  output: {
                     summary: 'Runtime claim observed',
                     claim: 'The reported layout failure is observable in the prepared scenario.',
                     scenario: 'Open the reported state and inspect the affected layout.',
@@ -616,9 +620,7 @@ describe('temporal block execution activity', () => {
                         mimeType: 'image/png',
                       },
                     ],
-                  }),
-                  requestJson: null,
-                  blockingReason: null,
+                  },
                 },
               }),
             ),
@@ -634,9 +636,11 @@ describe('temporal block execution activity', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'blocked',
+      status: 'failed',
+      category: 'agent_contract',
+      retryable: false,
       summary:
-        'Agent execution for runtime.observe@1 returned invalid output: evidence.0.path: Expected a path relative to the Tasker artifact root',
+        'Agent execution for runtime.observe@1 returned an invalid outcome: output.evidence.0.path: Expected a path relative to the Tasker artifact root',
     });
     expect(result.artifactIds).toContain(`task-step-evidence:${'a'.repeat(64)}`);
   });
@@ -653,10 +657,12 @@ describe('temporal block execution activity', () => {
           stderr: '',
           usage: TEST_AGENT_USAGE,
           finalMessage: {
-            status: 'blocked',
-            outputJson: JSON.stringify({ command: 'pnpm start', exitCode: 127 }),
-            requestJson: null,
-            blockingReason: reason,
+            status: 'waiting',
+            waitKind: 'runtime_dependency@1',
+            reason,
+            resumeHint: 'Restore Node.js in the prepared environment and resume.',
+            category: 'infrastructure',
+            retryable: true,
           },
         }),
       ),
@@ -705,7 +711,9 @@ describe('temporal block execution activity', () => {
     expect(result).toMatchObject({
       status: 'blocked',
       summary: `Agent execution for verify.acceptance@1 is blocked: ${reason}`,
-      waitKind: 'verify.acceptance.1.blocked@1',
+      waitKind: 'runtime_dependency@1',
+      category: 'infrastructure',
+      retryable: true,
     });
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -719,19 +727,69 @@ describe('temporal block execution activity', () => {
     );
   });
 
-  it('keeps a valid blocking reason when optional diagnostic JSON is malformed', async () => {
+  it('preserves an agent-declared wait classification verbatim', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const result = await executeVerifyOutcome(ledger, {
-      status: 'blocked',
-      outputJson: '{',
-      requestJson: null,
-      blockingReason: 'The exact source fixture is unavailable',
+      status: 'waiting',
+      waitKind: 'source_fixture@1',
+      reason: 'The exact source fixture is unavailable',
+      category: 'dependency',
+      retryable: false,
     });
 
     expect(result).toMatchObject({
       status: 'blocked',
       summary:
         'Agent execution for verify.acceptance@1 is blocked: The exact source fixture is unavailable',
+      waitKind: 'source_fixture@1',
+      category: 'dependency',
+      retryable: false,
+    });
+  });
+
+  it('preserves an agent-declared failure classification verbatim', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+
+    const result = await executeVerifyOutcome(ledger, {
+      status: 'failed',
+      category: 'authorization',
+      detail: 'The verification account cannot read the protected build log',
+      retryable: false,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      summary:
+        'Agent execution for verify.acceptance@1 failed: The verification account cannot read the protected build log',
+      category: 'authorization',
+      retryable: false,
+    });
+  });
+
+  it('validates a typed workflow-change request against the step declaration', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const request = {
+      schemaVersion: 1 as const,
+      discoveredAtNodeId: 'validate-bug-fix',
+      summary: 'A protected external test process must run before acceptance can be decided',
+      evidenceArtifactIds: ['task-step-evidence:external-process'],
+      changes: [
+        {
+          kind: 'external_process_required' as const,
+          process: 'protected acceptance suite',
+          expectedResult: 'A successful protected-suite receipt',
+        },
+      ],
+    };
+
+    const result = await executeVerifyOutcome(ledger, {
+      status: 'workflow_change',
+      request,
+    });
+
+    expect(result).toMatchObject({
+      status: 'workflow_change_required',
+      request,
     });
   });
 
@@ -801,22 +859,112 @@ describe('temporal block execution activity', () => {
     expect(result.summary.includes('\r')).toBe(false);
   });
 
-  it('raises a retryable activity failure for malformed completion output', async () => {
+  it('turns a malformed envelope into a non-retryable agent-contract failure', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
 
-    await expect(
-      executeVerifyOutcome(ledger, {
-        status: 'completed',
-        outputJson: '{',
-        requestJson: null,
-        blockingReason: null,
-      }),
-    ).rejects.toThrow(
-      'Agent execution for verify.acceptance@1 returned an invalid outcome: outputJson is not valid JSON',
-    );
+    const result = await executeVerifyOutcome(ledger, {
+      status: 'waiting',
+      waitKind: 'source_fixture@1',
+      reason: 'The exact source fixture is unavailable',
+      retryable: false,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      category: 'agent_contract',
+      retryable: false,
+    });
+    expect(result.summary).toContain('returned an invalid outcome');
+    expect(result.summary).toContain('category');
   });
 
-  it('passes runtime retry metadata to the agent runner before a thrown invalid outcome', async () => {
+  it('surfaces malformed envelope issues through a failed receipt and operator wait', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const run = vi.fn<TaskStepAgentRunner['run']>(() =>
+      Promise.resolve(
+        err({
+          kind: 'invalid_output',
+          issues: ['output: Expected object, received string'],
+        }),
+      ),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('verify.acceptance@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        runtimes: readyRuntime(),
+        agentRunner: { run },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+
+    const result = await activity.runExecutionBlock({
+      schemaVersion: 2,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'validate-bug-fix',
+      blockRun: 1,
+      uses: 'verify.acceptance@1',
+      activityDelivery: { kind: 'read_only' },
+      contextReferences: [
+        { kind: 'workspace', reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot',
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+      ],
+      operatorGuidance: null,
+      waitResolution: null,
+      input: {
+        objective: 'Repeat the investigated scenario and prove the fix',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    });
+    const receipt = receipts.read(
+      blockReceiptId({
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        nodeId: 'validate-bug-fix',
+        blockRun: 1,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'needs_input',
+      waitKind: 'verify.acceptance@1.failed@1',
+    });
+    expect(result.summary).toContain('returned an invalid outcome');
+    expect(result.summary).toContain('output');
+    expect(receipt).toMatchObject({
+      ok: true,
+      value: {
+        claim: {
+          status: 'failed',
+          category: 'agent_contract',
+          retryable: false,
+        },
+        verdict: { status: 'rejected' },
+      },
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes runtime metadata to the single agent run before persisting a malformed outcome', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
     const run = vi.fn<TaskStepAgentRunner['run']>(() =>
@@ -828,58 +976,57 @@ describe('temporal block execution activity', () => {
           usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
-            outputJson: '{',
-            requestJson: null,
-            blockingReason: null,
+            output: { invalid: true },
           },
         }),
       ),
     );
 
-    await expect(
-      executeRegisteredTaskStep(
-        {
-          taskReference: 'task-ref',
-          workflowId: stubWorkspace.workflowId,
-          workflowRunId: stubWorkspace.workflowRunId,
-          workflowHash: WORKFLOW_HASH,
-          nodeId: 'validate-bug-fix',
-          stepAttempt: 1,
-          uses: 'verify.acceptance@1',
-          activityDelivery: { kind: 'read_only' },
-          workspace: stubWorkspace,
-          planningSnapshot: {
-            artifactId: 'planning-snapshot:test',
-            checksum: 'd'.repeat(64),
-          },
-          operatorGuidance: null,
-          waitResolution: null,
-          input: {
-            objective: 'Repeat the investigated scenario and prove the fix',
-            repository: fixture.repository,
-            taskId: fixture.taskId,
-          },
+    const result = await executeRegisteredTaskStep(
+      {
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        workflowHash: WORKFLOW_HASH,
+        nodeId: 'validate-bug-fix',
+        stepAttempt: 1,
+        uses: 'verify.acceptance@1',
+        activityDelivery: { kind: 'read_only' },
+        workspace: stubWorkspace,
+        planningSnapshot: {
+          artifactId: 'planning-snapshot:test',
+          checksum: 'd'.repeat(64),
         },
-        {
-          snapshots: {
-            readRunSnapshot: () => ok(makeSnapshot('verify.acceptance@1')),
-          },
-          currentSteps: createCurrentStepRegistry(pack),
-          traces,
-          mutationRecovery,
-          agentRunner: { run },
-          commands: workspaceCommands(),
-          workspaces: stubWorkspaceStore,
+        operatorGuidance: null,
+        waitResolution: null,
+        input: {
+          objective: 'Repeat the investigated scenario and prove the fix',
+          repository: fixture.repository,
+          taskId: fixture.taskId,
         },
-        {
-          attempt: 2,
-          cancellationSignal: new AbortController().signal,
-          heartbeat: () => {},
+      },
+      {
+        snapshots: {
+          readRunSnapshot: () => ok(makeSnapshot('verify.acceptance@1')),
         },
-      ),
-    ).rejects.toThrow(
-      'Agent execution for verify.acceptance@1 returned an invalid outcome: outputJson is not valid JSON',
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        agentRunner: { run },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+      },
+      {
+        attempt: 2,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      },
     );
+    expect(result).toMatchObject({
+      status: 'failed',
+      category: 'agent_contract',
+      retryable: false,
+    });
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
         taskReference: 'task-ref',
@@ -1244,7 +1391,7 @@ describe('temporal block execution activity', () => {
           blockRun: 1,
         }),
       ),
-    ).toMatchObject({ ok: true, value: { claim: { category: 'verification' } } });
+    ).toMatchObject({ ok: true, value: { claim: { category: 'dependency' } } });
   });
 
   it('restores the exact semantic integration wait from its durable receipt', async () => {
@@ -1256,6 +1403,8 @@ describe('temporal block execution activity', () => {
         status: 'waiting' as const,
         waitKind: 'code_review@1',
         summary: 'Pull request passed CI and is waiting for human review',
+        category: 'dependency' as const,
+        retryable: true,
         details: { phase: 'human_review' },
         artifactIds: ['pull-request:42'],
       }),
@@ -1354,6 +1503,8 @@ describe('temporal block execution activity', () => {
               status: 'waiting' as const,
               waitKind: 'code_review@1',
               summary: 'Pull request 495 passed CI and is waiting for human review',
+              category: 'dependency' as const,
+              retryable: true,
               details: { phase: 'human_review' },
               artifactIds: ['pull-request:495'],
             }
@@ -1438,7 +1589,12 @@ describe('temporal block execution activity', () => {
     expect(receiptFor(1)).toMatchObject({
       ok: true,
       value: {
-        claim: { status: 'blocked', waitKind: 'code_review@1', retryable: true },
+        claim: {
+          status: 'blocked',
+          waitKind: 'code_review@1',
+          category: 'dependency',
+          retryable: true,
+        },
         verdict: {
           status: 'waiting',
           waitKind: 'code_review@1',
@@ -1446,7 +1602,6 @@ describe('temporal block execution activity', () => {
         },
       },
     });
-    expect(receiptFor(1)).not.toHaveProperty('value.claim.category');
     expect(resumed).toMatchObject({
       status: 'completed',
       summary: 'Pull request 495 passed CI and human review',
@@ -1477,9 +1632,7 @@ describe('temporal block execution activity', () => {
           usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
-            outputJson: JSON.stringify({ summary: 'Test operations plan ready', artifacts: [] }),
-            requestJson: null,
-            blockingReason: null,
+            output: { summary: 'Test operations plan ready', artifacts: [] },
           },
         }),
       );
@@ -1588,9 +1741,7 @@ describe('temporal block execution activity', () => {
           usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
-            outputJson: JSON.stringify({ summary: 'Test operations plan ready', artifacts: [] }),
-            requestJson: null,
-            blockingReason: null,
+            output: { summary: 'Test operations plan ready', artifacts: [] },
           },
         }),
       ),
@@ -1724,7 +1875,7 @@ describe('temporal block execution activity', () => {
           usage: TEST_AGENT_USAGE,
           finalMessage: {
             status: 'completed',
-            outputJson: JSON.stringify({
+            output: {
               decision: 'changes_requested',
               summary: 'Repair the fallback before publication',
               findings: [
@@ -1735,9 +1886,7 @@ describe('temporal block execution activity', () => {
                   files: ['src/example.ts'],
                 },
               ],
-            }),
-            requestJson: null,
-            blockingReason: null,
+            },
           },
         }),
       ),
@@ -1833,12 +1982,10 @@ describe('temporal block execution activity', () => {
                 usage: TEST_AGENT_USAGE,
                 finalMessage: {
                   status: 'completed',
-                  outputJson: JSON.stringify({
+                  output: {
                     summary: 'Implementation claimed complete',
                     artifacts: [],
-                  }),
-                  requestJson: null,
-                  blockingReason: null,
+                  },
                 },
               }),
             ),

@@ -132,7 +132,7 @@ const persistRequestArtifact = (
         artifactKind: 'task_step_output',
         storageUri: `ledger://artifacts/${requestReference}`,
         payload: {
-          schemaVersion: 3,
+          schemaVersion: 4,
           operationId: 'tasker:execution:workflow-change:1',
           workflowId: 'workflow-1',
           workflowRunId: 'run-1',

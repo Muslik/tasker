@@ -186,6 +186,8 @@ describe('execution activity', () => {
         status: 'blocked',
         summary: 'Jenkins build #74 requires attention: likely caused by change',
         waitKind: 'ci.observe.1.blocked@1',
+        category: 'dependency',
+        retryable: true,
         artifactIds: [],
         transcriptId: null,
       },
@@ -296,7 +298,7 @@ describe('execution activity', () => {
           storageUri: `ledger://artifacts/${receiptId}`,
           payload: JsonValueSchema.parse(
             BlockReceiptSchema.parse({
-              schemaVersion: 6,
+              schemaVersion: 7,
               receiptId,
               blockReference: 'implement.change@1',
               blockDefinitionHash: 'definition-hash',

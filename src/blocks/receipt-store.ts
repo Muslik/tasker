@@ -124,7 +124,7 @@ export class BlockReceiptStore {
 
     const completedAt = this.clock.now();
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 6,
+      schemaVersion: 7,
       receiptId,
       ...comparableInput(input),
       completedAt,

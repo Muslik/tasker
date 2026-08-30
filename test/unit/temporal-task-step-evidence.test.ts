@@ -18,21 +18,21 @@ describe('task step evidence store', () => {
     const normalized = normalizeTaskStepEvidencePaths(
       {
         status: 'completed',
-        outputJson: JSON.stringify({
+        output: {
           evidence: [
             { path: '/tasker/artifacts/run-1/screenshots/before.png' },
             { path: '/workspace/product.png' },
           ],
-        }),
+        },
       },
       '/tasker/artifacts/run-1',
     );
 
     expect(normalized).toEqual({
       status: 'completed',
-      outputJson: JSON.stringify({
+      output: {
         evidence: [{ path: 'screenshots/before.png' }, { path: '/workspace/product.png' }],
-      }),
+      },
     });
   });
 

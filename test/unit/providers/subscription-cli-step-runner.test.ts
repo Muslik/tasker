@@ -30,6 +30,7 @@ import {
   SubscriptionCliTaskStepAgentRunner,
   TemporalTaskStepTraceStore,
 } from '../../../src/temporal/activities/block-execution.js';
+import { agentStepOutcomeSchema } from '../../../src/temporal/activities/block-execution-contracts.js';
 import { TaskStepFilesystemStore } from '../../../src/temporal/activities/task-step-filesystem.js';
 import { TaskStepEvidenceStore } from '../../../src/temporal/activities/task-step-evidence.js';
 
@@ -537,10 +538,11 @@ describe('subscription CLI task-step runner', () => {
                 exitCode: 0,
                 stdout: codexStream(
                   JSON.stringify({
-                    status: 'blocked',
-                    outputJson: '{}',
-                    requestJson: null,
-                    blockingReason: 'Awaiting operator input',
+                    status: 'waiting',
+                    waitKind: 'operator_input@1',
+                    reason: 'Awaiting operator input',
+                    category: 'task_ambiguity',
+                    retryable: false,
                   }),
                 ),
                 stderr: '',
@@ -553,14 +555,9 @@ describe('subscription CLI task-step runner', () => {
       new TaskStepFilesystemStore(stepDataPath),
       new TaskStepEvidenceStore(ledger.repository, systemClock),
     );
-    const providerOutcomeSchema = z
-      .object({
-        status: z.enum(['completed', 'workflow_change_required', 'blocked']),
-        outputJson: z.string().nullable(),
-        requestJson: z.string().nullable(),
-        blockingReason: z.string().nullable(),
-      })
-      .strict();
+    const providerOutcomeSchema = agentStepOutcomeSchema(
+      z.object({ summary: z.string() }).strict(),
+    );
 
     try {
       const result = await runner.run({

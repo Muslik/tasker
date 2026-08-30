@@ -63,7 +63,7 @@ describe('BlockReceiptStore', () => {
     expect(first).toMatchObject({
       ok: true,
       value: {
-        schemaVersion: 6,
+        schemaVersion: 7,
         blockReference: 'fill-test-ops-plan@1',
         verdict: { status: 'accepted' },
       },

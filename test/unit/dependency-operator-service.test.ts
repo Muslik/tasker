@@ -15,7 +15,7 @@ const taskReference = 'jira:AVIA-12045';
 
 const requestArtifact = {
   payload: {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operationId: 'tasker:execution:workflow-change:1',
     workflowId: 'workflow-1',
     workflowRunId: 'run-1',

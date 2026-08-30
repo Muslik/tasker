@@ -26,6 +26,7 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
   codexOutputJsonSchema,
+  normalizeCodexStructuredOutput,
   prepareIsolatedCodexHome,
   providerFailureMessage,
   sha256,
@@ -400,12 +401,11 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         ),
       });
       if (!preparedSkills.ok) return err(preparedSkills.error);
-      await writeFile(
-        schemaPath,
-        `${JSON.stringify(codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema), null, 2)}\n`,
-        'utf8',
-      );
-      const outputSchema = codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema);
+      const outputSchema =
+        profile.provider === 'codex'
+          ? codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema)
+          : z.toJSONSchema(ImplementationPlannerProviderOutputSchema);
+      await writeFile(schemaPath, `${JSON.stringify(outputSchema, null, 2)}\n`, 'utf8');
       args =
         profile.provider === 'codex'
           ? [
@@ -546,7 +546,12 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         stream.value,
       );
       const providerOutput = ImplementationPlannerProviderOutputSchema.safeParse(
-        stream.value.finalMessage,
+        profile.provider === 'codex'
+          ? normalizeCodexStructuredOutput(
+              stream.value.finalMessage,
+              ImplementationPlannerProviderOutputSchema,
+            )
+          : stream.value.finalMessage,
       );
       if (!providerOutput.success) {
         persistExitedFailure(execution, usageFromStream(stream.value.usage), receipt.apiCost, [

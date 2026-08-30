@@ -1,11 +1,49 @@
 import { z } from 'zod';
 
-import { BlockedClaimCategorySchema } from '../../blocks/contracts.js';
+import { AgentClaimCategorySchema } from '../../blocks/contracts.js';
 import { PlanningSnapshotReferenceSchema } from '../../planning/run-planning-snapshot.js';
 import { WorkspaceLocatorSchema } from '../../workspaces/contracts.js';
 import { JsonValueSchema, StepActivityDeliverySchema } from '../../workflow/schema.js';
 import { WorkflowChangeRequestSchema } from '../../workflow/execution-result.js';
 import { TrackerStatusUpdatesSchema } from '../../shared/task-run-settings.js';
+
+export const agentStepOutcomeSchema = (outputSchema: z.ZodType) =>
+  z.discriminatedUnion('status', [
+    z
+      .object({
+        status: z.literal('completed'),
+        output: outputSchema,
+      })
+      .strict()
+      .readonly(),
+    z
+      .object({
+        status: z.literal('waiting'),
+        waitKind: z.string().min(1),
+        reason: z.string().trim().min(1).max(4_000),
+        resumeHint: z.string().trim().min(1).max(4_000).optional(),
+        category: AgentClaimCategorySchema,
+        retryable: z.boolean(),
+      })
+      .strict()
+      .readonly(),
+    z
+      .object({
+        status: z.literal('failed'),
+        category: AgentClaimCategorySchema,
+        detail: z.string().trim().min(1).max(4_000),
+        retryable: z.boolean(),
+      })
+      .strict()
+      .readonly(),
+    z
+      .object({
+        status: z.literal('workflow_change'),
+        request: WorkflowChangeRequestSchema,
+      })
+      .strict()
+      .readonly(),
+  ]);
 
 export const ExecuteTaskStepInputSchema = z
   .object({
@@ -42,8 +80,8 @@ export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
   ExecuteTaskStepResultBaseSchema.extend({
     status: z.literal('blocked'),
     waitKind: z.string().min(1),
-    category: BlockedClaimCategorySchema.nullable().optional(),
-    retryable: z.boolean().optional(),
+    category: AgentClaimCategorySchema,
+    retryable: z.boolean(),
   })
     .strict()
     .readonly(),
@@ -53,7 +91,15 @@ export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
   })
     .strict()
     .readonly(),
+  ExecuteTaskStepResultBaseSchema.extend({
+    status: z.literal('failed'),
+    category: AgentClaimCategorySchema,
+    retryable: z.boolean(),
+  })
+    .strict()
+    .readonly(),
 ]);
 
 export type ExecuteTaskStepInput = z.input<typeof ExecuteTaskStepInputSchema>;
 export type ExecuteTaskStepResult = z.infer<typeof ExecuteTaskStepResultSchema>;
+export type AgentStepOutcome = z.infer<ReturnType<typeof agentStepOutcomeSchema>>;

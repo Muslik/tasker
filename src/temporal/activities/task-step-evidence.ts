@@ -54,18 +54,11 @@ const normalizePaths = (value: unknown, root: string): unknown => {
 };
 
 export const normalizeTaskStepEvidencePaths = (value: unknown, artifactsPath: string): unknown => {
-  if (value === null || typeof value !== 'object' || !('outputJson' in value)) return value;
-  const outputJson = value.outputJson;
-  if (typeof outputJson !== 'string') return value;
-  try {
-    const parsed: unknown = JSON.parse(outputJson);
-    return {
-      ...value,
-      outputJson: JSON.stringify(normalizePaths(parsed, resolve(artifactsPath))),
-    };
-  } catch {
-    return value;
-  }
+  if (value === null || typeof value !== 'object' || !('output' in value)) return value;
+  return {
+    ...(value as Record<string, unknown>),
+    output: normalizePaths((value as { readonly output: unknown }).output, resolve(artifactsPath)),
+  };
 };
 
 const mimeTypeFor = (path: string): string => {

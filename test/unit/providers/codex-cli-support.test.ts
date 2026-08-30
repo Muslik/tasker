@@ -1,8 +1,95 @@
 import { describe, expect, it } from 'vitest';
 
-import { providerFailureMessage } from '../../../src/providers/codex-cli-support.js';
+import { agentReviewOutputSchema } from '../../../src/harness/step-contracts.js';
+import {
+  codexOutputJsonSchema,
+  normalizeCodexStructuredOutput,
+  providerFailureMessage,
+} from '../../../src/providers/codex-cli-support.js';
+import { agentStepOutcomeSchema } from '../../../src/temporal/activities/block-execution-contracts.js';
+
+const objectRequirementIssues = (value: unknown, path = '$'): string[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap((child, index) =>
+      objectRequirementIssues(child, `${path}[${String(index)}]`),
+    );
+  }
+  if (value === null || typeof value !== 'object') return [];
+  const record = value as Readonly<Record<string, unknown>>;
+  const issues: string[] = [];
+  if (
+    record.type === 'object' &&
+    record.properties !== null &&
+    typeof record.properties === 'object'
+  ) {
+    const properties = Object.keys(record.properties);
+    const required = Array.isArray(record.required) ? record.required : [];
+    if (JSON.stringify(required) !== JSON.stringify(properties)) {
+      issues.push(`${path} does not require every declared property`);
+    }
+    if (record.additionalProperties !== false) {
+      issues.push(`${path} allows additional properties`);
+    }
+  }
+  return [
+    ...issues,
+    ...Object.entries(record).flatMap(([key, child]) =>
+      objectRequirementIssues(child, `${path}.${key}`),
+    ),
+  ];
+};
 
 describe('Codex CLI support', () => {
+  it('adapts the nested agent outcome union to a strict Codex output schema', () => {
+    const outcomeSchema = agentStepOutcomeSchema(agentReviewOutputSchema);
+
+    const schema = codexOutputJsonSchema(outcomeSchema);
+    const serialized = JSON.stringify(schema);
+
+    expect(schema).toMatchObject({
+      type: 'object',
+      properties: {
+        status: {
+          enum: ['completed', 'waiting', 'failed', 'workflow_change'],
+        },
+      },
+      additionalProperties: false,
+    });
+    expect(schema).not.toHaveProperty('anyOf');
+    expect(serialized).not.toContain('"oneOf"');
+    expect(serialized).not.toContain('"propertyNames"');
+    expect(serialized).not.toContain('"not"');
+    expect(objectRequirementIssues(schema)).toEqual([]);
+  });
+
+  it('normalizes Codex null placeholders back to the canonical outcome union', () => {
+    const outcomeSchema = agentStepOutcomeSchema(agentReviewOutputSchema);
+
+    const normalized = normalizeCodexStructuredOutput(
+      {
+        status: 'waiting',
+        output: null,
+        waitKind: 'dependency.available@1',
+        reason: 'The dependency has not been published',
+        resumeHint: null,
+        category: 'dependency',
+        retryable: false,
+        detail: null,
+        request: null,
+      },
+      outcomeSchema,
+    );
+
+    expect(normalized).toEqual({
+      status: 'waiting',
+      waitKind: 'dependency.available@1',
+      reason: 'The dependency has not been published',
+      category: 'dependency',
+      retryable: false,
+    });
+    expect(outcomeSchema.safeParse(normalized).success).toBe(true);
+  });
+
   it('unwraps the actionable provider error from a failed JSONL turn', () => {
     const providerError = {
       type: 'error',

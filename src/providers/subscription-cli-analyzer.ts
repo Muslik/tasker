@@ -22,6 +22,7 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { WorkspaceCommandRunner } from './command-runner.js';
 import {
   codexOutputJsonSchema,
+  normalizeCodexStructuredOutput,
   prepareIsolatedCodexHome,
   providerFailureMessage,
   sha256,
@@ -146,12 +147,11 @@ export class SubscriptionCliWorkflowAnalyzer {
         selection: { kind: 'analyzer' },
       });
       if (!preparedSkills.ok) return err(preparedSkills.error);
-      await writeFile(
-        schemaPath,
-        `${JSON.stringify(codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema), null, 2)}\n`,
-        'utf8',
-      );
-      const outputSchema = codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema);
+      const outputSchema =
+        profile.provider === 'codex'
+          ? codexOutputJsonSchema(WorkflowAnalyzerProviderOutputSchema)
+          : z.toJSONSchema(WorkflowAnalyzerProviderOutputSchema);
+      await writeFile(schemaPath, `${JSON.stringify(outputSchema, null, 2)}\n`, 'utf8');
       const execution = await this.runner.run({
         operationId: request.operationId,
         command,
@@ -227,7 +227,12 @@ export class SubscriptionCliWorkflowAnalyzer {
         return stream;
       }
       const providerOutput = WorkflowAnalyzerProviderOutputSchema.safeParse(
-        stream.value.finalMessage,
+        profile.provider === 'codex'
+          ? normalizeCodexStructuredOutput(
+              stream.value.finalMessage,
+              WorkflowAnalyzerProviderOutputSchema,
+            )
+          : stream.value.finalMessage,
       );
       if (!providerOutput.success) {
         return err({

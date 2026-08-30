@@ -6,7 +6,7 @@ import { ExecuteTaskStepResultSchema } from './activities/block-execution-contra
 
 export const TaskStepOutputArtifactSchema = z
   .object({
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
     operationId: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
@@ -18,7 +18,7 @@ export const TaskStepOutputArtifactSchema = z
     args: z.array(z.string()),
     cwd: z.string().min(1),
     exitCode: z.number().int().nullable(),
-    status: z.enum(['completed', 'blocked', 'workflow_change_required']),
+    status: z.enum(['completed', 'blocked', 'failed', 'workflow_change_required']),
     stdout: z.string(),
     stderr: z.string(),
     details: JsonValueSchema,

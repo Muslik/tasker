@@ -95,9 +95,85 @@ const eventIssues = (eventType: string, issues: readonly z.core.$ZodIssue[]): st
 
 export const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
-const removeUnsupportedOutputSchemaKeywords = (value: unknown): void => {
+const schemaRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const permitsNull = (value: unknown): boolean => {
+  const record = schemaRecord(value);
+  if (record === null) return false;
+  if (record.type === 'null') return true;
+  if (Array.isArray(record.type) && record.type.includes('null')) return true;
+  if (Array.isArray(record.enum) && record.enum.includes(null)) return true;
+  return Array.isArray(record.anyOf) && record.anyOf.some(permitsNull);
+};
+
+const nullableSchema = (value: unknown): unknown =>
+  permitsNull(value) ? value : { anyOf: [value, { type: 'null' }] };
+
+const rootObjectUnion = (value: unknown): Record<string, unknown> | null => {
+  const record = schemaRecord(value);
+  if (record === null) return null;
+  const variants = Array.isArray(record.oneOf)
+    ? record.oneOf
+    : Array.isArray(record.anyOf)
+      ? record.anyOf
+      : null;
+  if (variants === null || variants.length === 0) return null;
+  const objects = variants.map(schemaRecord);
+  if (
+    objects.some(
+      (variant) =>
+        variant === null || variant.type !== 'object' || schemaRecord(variant.properties) === null,
+    )
+  ) {
+    return null;
+  }
+  const objectVariants = objects as Record<string, unknown>[];
+  const propertyNames = [
+    ...new Set(
+      objectVariants.flatMap((variant) =>
+        Object.keys(schemaRecord(variant.properties) as Record<string, unknown>),
+      ),
+    ),
+  ];
+  const properties = Object.fromEntries(
+    propertyNames.map((name) => {
+      const schemas = objectVariants.flatMap((variant) => {
+        const property = (schemaRecord(variant.properties) as Record<string, unknown>)[name];
+        return property === undefined ? [] : [property];
+      });
+      const unique = [
+        ...new Map(schemas.map((schema) => [JSON.stringify(schema), schema])).values(),
+      ];
+      const property =
+        name === 'status' &&
+        unique.every((schema) => typeof schemaRecord(schema)?.const === 'string')
+          ? { type: 'string', enum: unique.map((schema) => schemaRecord(schema)?.const) }
+          : unique.length === 1
+            ? unique[0]
+            : { anyOf: unique };
+      const requiredInEveryVariant = objectVariants.every(
+        (variant) => Array.isArray(variant.required) && variant.required.includes(name),
+      );
+      return [name, requiredInEveryVariant ? property : nullableSchema(property)];
+    }),
+  );
+  return {
+    ...Object.fromEntries(
+      Object.entries(record).filter(([key]) => key !== 'oneOf' && key !== 'anyOf'),
+    ),
+    type: 'object',
+    properties,
+    required: propertyNames,
+    additionalProperties: false,
+  };
+};
+
+const makeCodexOutputSchemaCompatible = (value: unknown): void => {
   if (Array.isArray(value)) {
-    value.forEach(removeUnsupportedOutputSchemaKeywords);
+    value.forEach(makeCodexOutputSchemaCompatible);
     return;
   }
   if (typeof value !== 'object' || value === null) return;
@@ -114,14 +190,71 @@ const removeUnsupportedOutputSchemaKeywords = (value: unknown): void => {
     record.anyOf = record.oneOf;
     delete record.oneOf;
   }
-  Object.values(record).forEach(removeUnsupportedOutputSchemaKeywords);
+  if (record.not !== undefined) {
+    delete record.not;
+    record.type = 'null';
+  }
+  Object.values(record).forEach(makeCodexOutputSchemaCompatible);
+  const properties = schemaRecord(record.properties);
+  if (properties === null) return;
+  const required = new Set(Array.isArray(record.required) ? record.required : []);
+  for (const [name, property] of Object.entries(properties)) {
+    if (!required.has(name)) properties[name] = nullableSchema(property);
+  }
+  record.required = Object.keys(properties);
 };
 
 export const codexOutputJsonSchema = (schema: z.ZodType): unknown => {
-  const output = z.toJSONSchema(schema);
-  removeUnsupportedOutputSchemaKeywords(output);
+  const generated = z.toJSONSchema(schema);
+  const output = rootObjectUnion(generated) ?? generated;
+  makeCodexOutputSchemaCompatible(output);
   return output;
 };
+
+const unionBranchFor = (value: unknown, schema: Record<string, unknown>): unknown => {
+  const variants = Array.isArray(schema.oneOf)
+    ? schema.oneOf
+    : Array.isArray(schema.anyOf)
+      ? schema.anyOf
+      : null;
+  if (variants === null) return schema;
+  if (value === null) return variants.find(permitsNull) ?? schema;
+  const valueRecord = schemaRecord(value);
+  if (valueRecord === null) return schema;
+  return (
+    variants.find((variant) => {
+      const properties = schemaRecord(schemaRecord(variant)?.properties);
+      if (properties === null) return false;
+      return Object.entries(properties).every(([name, property]) => {
+        const expected = schemaRecord(property)?.const;
+        return expected === undefined || valueRecord[name] === expected;
+      });
+    }) ?? schema
+  );
+};
+
+const normalizeCodexValue = (value: unknown, schema: unknown): unknown => {
+  const record = schemaRecord(unionBranchFor(value, schemaRecord(schema) ?? {}));
+  if (record === null) return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeCodexValue(item, record.items));
+  }
+  const valueRecord = schemaRecord(value);
+  const properties = schemaRecord(record.properties);
+  if (valueRecord === null || properties === null) return value;
+  const required = new Set(Array.isArray(record.required) ? record.required : []);
+  return Object.fromEntries(
+    Object.entries(valueRecord).flatMap(([name, child]) => {
+      const property = properties[name];
+      if (property === undefined) return child === null ? [] : [[name, child]];
+      if (child === null && !required.has(name)) return [];
+      return [[name, normalizeCodexValue(child, property)]];
+    }),
+  );
+};
+
+export const normalizeCodexStructuredOutput = (value: unknown, schema: z.ZodType): unknown =>
+  normalizeCodexValue(value, z.toJSONSchema(schema));
 
 const sourceCodexHome = (): string => process.env.CODEX_HOME ?? join(homedir(), '.codex');
 

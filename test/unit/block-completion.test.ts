@@ -93,6 +93,7 @@ describe('block completion', () => {
           status: 'blocked',
           summary: 'Pull request 495 passed CI and is waiting for human review',
           waitKind: 'code_review@1',
+          category: 'dependency',
           retryable: true,
         },
         [],
@@ -108,7 +109,12 @@ describe('block completion', () => {
     expect(
       evaluateBlockCompletion(
         { kind: 'workspace_mutation' },
-        { status: 'failed', summary: 'The provider crashed', category: 'provider' },
+        {
+          status: 'failed',
+          summary: 'The provider crashed',
+          category: 'infrastructure',
+          retryable: true,
+        },
         [],
       ),
     ).toEqual({

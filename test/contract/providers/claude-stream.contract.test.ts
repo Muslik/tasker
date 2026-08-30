@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { parseClaudeStream } from '../../../src/providers/claude-cli-support.js';
+import { parseSubscriptionCliStream } from '../../../src/providers/subscription-cli-stream.js';
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'claude');
 const fixture = (name: string): string => readFileSync(join(fixturesDir, name), 'utf8');
@@ -108,5 +109,56 @@ describe('Claude CLI stream contract', () => {
     expect(result.error.message).toContain('Claude result did not contain structured JSON output');
     expect(result.error.message).toContain('Authentication expired while decoding the response');
     expect(result.error.message).toContain('provider warning before result');
+  });
+
+  it('parses a completed agent envelope through the shared provider boundary', () => {
+    const result = parseSubscriptionCliStream('claude', fixture('09-agent-envelope-completed.txt'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.finalMessage).toEqual({
+      status: 'completed',
+      output: {
+        summary: 'Implementation completed',
+        artifacts: [],
+      },
+    });
+  });
+
+  it('parses a waiting agent envelope through the shared provider boundary', () => {
+    const result = parseSubscriptionCliStream('claude', fixture('10-agent-envelope-waiting.txt'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.finalMessage).toEqual({
+      status: 'waiting',
+      waitKind: 'dependency.available@1',
+      reason: 'Waiting for the exact dependency publication receipt',
+      resumeHint: 'Re-run this step after the producer verifies the publication.',
+      category: 'dependency',
+      retryable: false,
+    });
+  });
+
+  it('parses a failed agent envelope through the shared provider boundary', () => {
+    const result = parseSubscriptionCliStream('claude', fixture('11-agent-envelope-failed.txt'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.finalMessage).toEqual({
+      status: 'failed',
+      category: 'agent_contract',
+      detail: 'The step output contract could not be satisfied from the observed state.',
+      retryable: false,
+    });
+  });
+
+  it('preserves a malformed agent envelope object for downstream contract handling', () => {
+    const result = parseSubscriptionCliStream('claude', fixture('12-agent-envelope-malformed.txt'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.finalMessage).toEqual({
+      status: 'waiting',
+      waitKind: 'source_fixture@1',
+      reason: 'The exact source fixture is unavailable',
+      retryable: false,
+    });
   });
 });

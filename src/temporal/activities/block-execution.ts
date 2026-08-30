@@ -2,18 +2,17 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { ApplicationFailure, Context } from '@temporalio/activity';
+import { Context } from '@temporalio/activity';
 import { z } from 'zod';
 
 import {
   acceptsAnyProcessExit,
   AgentClaimSchema,
-  BlockedClaimCategorySchema,
   CompletionVerdictSchema,
   blockReceiptId,
   evaluateBlockCompletion,
   type AgentClaim,
-  type BlockedClaimCategory,
+  type AgentClaimCategory,
   type BlockReceipt,
   type BlockReceiptStore,
   type CompletionVerdict,
@@ -41,6 +40,7 @@ import type {
 } from '../../control-plane/implementation-planning.js';
 import {
   codexOutputJsonSchema,
+  normalizeCodexStructuredOutput,
   prepareIsolatedCodexHome,
   providerFailureMessage,
 } from '../../providers/codex-cli-support.js';
@@ -80,6 +80,8 @@ import {
 import {
   ExecuteTaskStepInputSchema,
   ExecuteTaskStepResultSchema,
+  agentStepOutcomeSchema,
+  type AgentStepOutcome,
   type ExecuteTaskStepInput,
   type ExecuteTaskStepResult,
 } from './block-execution-contracts.js';
@@ -110,108 +112,14 @@ const removeWorkspaceScratchMountPoint = async (path: string): Promise<void> => 
   }
 };
 
-const AgentStepOutcomeSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('completed'),
-      output: JsonValueSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('workflow_change_required'),
-      request: WorkflowChangeRequestSchema,
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('blocked'),
-      reason: z.string().trim().min(1).max(4_000),
-      details: JsonValueSchema,
-    })
-    .strict(),
-]);
-
-const AgentStepProviderOutcomeSchema = z
-  .object({
-    status: z.enum(['completed', 'workflow_change_required', 'blocked']),
-    outputJson: z.string().min(1).nullable(),
-    requestJson: z.string().min(1).nullable(),
-    blockingReason: z.string().trim().min(1).max(4_000).nullable(),
-  })
-  .strict();
-
-const decodeAgentStepOutcome = (
+export const decodeAgentStepOutcome = (
   envelope: unknown,
+  outputSchema: z.ZodType,
 ): Outcome<
-  z.infer<typeof AgentStepOutcomeSchema>,
+  AgentStepOutcome,
   { readonly kind: 'invalid_agent_outcome'; readonly issues: readonly string[] }
 > => {
-  const parsedEnvelope = AgentStepProviderOutcomeSchema.safeParse(envelope);
-  if (!parsedEnvelope.success) {
-    return err({
-      kind: 'invalid_agent_outcome',
-      issues: parsedEnvelope.error.issues.map(
-        (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-      ),
-    });
-  }
-  const { status, outputJson, requestJson, blockingReason } = parsedEnvelope.data;
-  if (status === 'blocked') {
-    if (requestJson !== null || blockingReason === null) {
-      return err({
-        kind: 'invalid_agent_outcome',
-        issues: ['Blocked outcomes require blockingReason and null requestJson'],
-      });
-    }
-    let details: unknown = null;
-    if (outputJson !== null) {
-      try {
-        details = JSON.parse(outputJson) as unknown;
-      } catch {
-        details = null;
-      }
-    }
-    const outcome = AgentStepOutcomeSchema.safeParse({
-      status,
-      reason: blockingReason,
-      details,
-    });
-    return outcome.success
-      ? ok(outcome.data)
-      : err({
-          kind: 'invalid_agent_outcome',
-          issues: outcome.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
-  }
-
-  const payload = status === 'completed' ? outputJson : requestJson;
-  const unusedPayload = status === 'completed' ? requestJson : outputJson;
-  if (payload === null || unusedPayload !== null || blockingReason !== null) {
-    return err({
-      kind: 'invalid_agent_outcome',
-      issues: [
-        status === 'completed'
-          ? 'Completed outcomes require outputJson, null requestJson, and null blockingReason'
-          : 'Workflow-change outcomes require requestJson, null outputJson, and null blockingReason',
-      ],
-    });
-  }
-
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(payload) as unknown;
-  } catch {
-    return err({
-      kind: 'invalid_agent_outcome',
-      issues: [`${status === 'completed' ? 'outputJson' : 'requestJson'} is not valid JSON`],
-    });
-  }
-  const outcome = AgentStepOutcomeSchema.safeParse(
-    status === 'completed' ? { status, output: decoded } : { status, request: decoded },
-  );
+  const outcome = agentStepOutcomeSchema(outputSchema).safeParse(envelope);
   return outcome.success
     ? ok(outcome.data)
     : err({
@@ -324,12 +232,14 @@ const invocationCost = (usage?: AgentInvocationUsage): AgentInvocationArtifact['
 
 const invocationStatusFromFinalMessage = (
   finalMessage: unknown,
+  outputSchema: z.ZodType,
 ): AgentInvocationArtifact['status'] => {
-  const parsed = AgentStepProviderOutcomeSchema.safeParse(finalMessage);
-  if (!parsed.success) return 'completed';
-  const decoded = decodeAgentStepOutcome(parsed.data);
-  if (!decoded.ok) return 'failed';
-  return decoded.value.status === 'blocked' ? 'waiting' : 'completed';
+  const parsed = outputSchema.safeParse(finalMessage);
+  if (!parsed.success) return 'failed';
+  if (typeof parsed.data !== 'object' || parsed.data === null) return 'completed';
+  const status = (parsed.data as Readonly<Record<string, unknown>>).status;
+  if (status === 'waiting') return 'waiting';
+  return status === 'failed' ? 'failed' : 'completed';
 };
 
 const commandExitStatus = (result: CommandResult): AgentInvocationArtifact['exitStatus'] => {
@@ -444,12 +354,11 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
           },
         });
         if (!preparedSkills.ok) return err(preparedSkills.error);
-        await writeFile(
-          schemaPath,
-          `${JSON.stringify(codexOutputJsonSchema(request.outputSchema), null, 2)}\n`,
-          'utf8',
-        );
-        const outputSchema = codexOutputJsonSchema(request.outputSchema);
+        const outputSchema =
+          profile.provider === 'codex'
+            ? codexOutputJsonSchema(request.outputSchema)
+            : z.toJSONSchema(request.outputSchema);
+        await writeFile(schemaPath, `${JSON.stringify(outputSchema, null, 2)}\n`, 'utf8');
         const harnessEnvironment = workspaceHarnessEnvironment(
           request.cwd,
           preparedSkills.value.skillsRoot,
@@ -711,8 +620,12 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             ...invocationReferences,
             outputArtifactIds: [...invocationReferences.outputArtifactIds, ...evidence.value],
           });
+          const finalMessage =
+            profile.provider === 'codex'
+              ? normalizeCodexStructuredOutput(stream.value.finalMessage, request.outputSchema)
+              : stream.value.finalMessage;
           const parsed = request.outputSchema.safeParse(
-            normalizeTaskStepEvidencePaths(stream.value.finalMessage, stepFilesystem.artifactsPath),
+            normalizeTaskStepEvidencePaths(finalMessage, stepFilesystem.artifactsPath),
           );
           if (!parsed.success) {
             this.finishInvocation(request, recorder, {
@@ -738,7 +651,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             startedAt,
             prompt: stdin,
             argv,
-            status: invocationStatusFromFinalMessage(parsed.data),
+            status: invocationStatusFromFinalMessage(parsed.data, request.outputSchema),
             result: execution,
             usage,
           });
@@ -1175,7 +1088,7 @@ export class TemporalTaskStepTraceStore {
     readonly args: readonly string[];
     readonly cwd: string;
     readonly exitCode: number | null;
-    readonly status: 'completed' | 'blocked' | 'workflow_change_required';
+    readonly status: 'completed' | 'blocked' | 'failed' | 'workflow_change_required';
     readonly stdout: string;
     readonly stderr: string;
     readonly details: unknown;
@@ -1209,7 +1122,7 @@ export class TemporalTaskStepTraceStore {
             artifactIds: [artifactId, ...new Set(input.result.artifactIds)],
           });
     const payload = TaskStepOutputArtifactSchema.parse({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operationId: input.operationId,
       workflowId: input.workflowId,
       workflowRunId: input.workflowRunId,
@@ -1347,7 +1260,7 @@ const block = (
   waitKind: string,
   artifactIds: readonly string[] = [],
   classification: {
-    readonly category?: BlockedClaimCategory | null;
+    readonly category?: AgentClaimCategory;
     readonly retryable?: boolean;
   } = {},
 ): ExecuteTaskStepResult =>
@@ -1357,8 +1270,46 @@ const block = (
     waitKind,
     artifactIds,
     transcriptId: null,
-    ...classification,
+    category: classification.category ?? 'infrastructure',
+    retryable: classification.retryable ?? true,
   });
+
+const fail = (
+  summary: string,
+  category: AgentClaimCategory,
+  retryable: boolean,
+  artifactIds: readonly string[] = [],
+): ExecuteTaskStepResult =>
+  ExecuteTaskStepResultSchema.parse({
+    status: 'failed',
+    summary,
+    category,
+    retryable,
+    artifactIds,
+    transcriptId: null,
+  });
+
+const integrationBlockedCategory = (
+  kind:
+    | 'configuration'
+    | 'infrastructure'
+    | 'invalid_request'
+    | 'remote_conflict'
+    | 'verification'
+    | 'unknown_outcome',
+): AgentClaimCategory => {
+  switch (kind) {
+    case 'configuration':
+    case 'infrastructure':
+    case 'unknown_outcome':
+      return 'infrastructure';
+    case 'remote_conflict':
+    case 'verification':
+      return 'dependency';
+    case 'invalid_request':
+      return 'task_ambiguity';
+  }
+};
 
 const withRecoveryArtifact = (
   recovery: TaskStepRecoveryContext,
@@ -1475,9 +1426,11 @@ export const promptForAgentStep = (input: {
     ),
     '',
     'Operate only inside the prepared worktree. Return one JSON object matching the provided schema.',
-    'For a completed step, set status="completed", put the serialized step output JSON in outputJson, and set requestJson=null and blockingReason=null.',
-    'For a workflow change, set status="workflow_change_required", set outputJson=null, put the serialized typed workflow-change request JSON in requestJson, and set blockingReason=null.',
-    'For a recoverable infrastructure, access, or ambiguity failure that does not change task scope, set status="blocked", requestJson=null, blockingReason to the actionable reason, and outputJson to serialized evidence details or null.',
+    'For a completed step, return {"status":"completed","output":{...}}. output must be a real JSON object matching stepOutputContract, never a JSON string.',
+    'For a wait, return {"status":"waiting","waitKind":"...","reason":"...","resumeHint":"...","category":"...","retryable":true}. resumeHint is optional.',
+    'For a terminal step failure, return {"status":"failed","category":"...","detail":"...","retryable":false}.',
+    'For a workflow change, return {"status":"workflow_change","request":{...}}. request must be a real JSON object matching workflowChangeRequestContract and a declared workflowChanges kind, never a JSON string.',
+    'category must be one of authorization, infrastructure, task_ambiguity, dependency, or agent_contract. Declare category and retryable directly; they are never inferred from prose.',
     'Do not encode infrastructure failures as workflow changes.',
     'runEvidence contains the bounded causal frontier; reviewInputs is capped to the most recent entries. runHistoryIndex lists the most recent prior attempts; older entries are counted, not listed. Full immutable receipt files are mounted for on-demand inspection.',
   ].join('\n');
@@ -1546,17 +1499,23 @@ const persistAgentBlockedResult = (
   input: ExecuteTaskStepInput,
   recovery: TaskStepRecoveryContext,
   summary: string,
+  waitKind: string,
   details: unknown,
   stdout: string,
   stderr: string,
   provider: AgentProvider,
   usage?: AgentInvocationUsage,
   artifactIds: readonly string[] = [],
+  classification: {
+    readonly category?: AgentClaimCategory;
+    readonly retryable?: boolean;
+  } = {},
 ): ExecuteTaskStepResult => {
   const result = block(
     summary,
-    blockingWaitKindFor(input.uses),
+    waitKind,
     withRecoveryArtifact(recovery, artifactIds),
+    classification,
   );
   const persisted = traces.persistOutputArtifact({
     operationId: executionOperationId(input),
@@ -1579,6 +1538,46 @@ const persistAgentBlockedResult = (
   });
   if (!persisted.ok || persisted.value.result === null) {
     throw new Error(`Blocked execution receipt persistence failed for ${input.uses}`);
+  }
+  return persisted.value.result;
+};
+
+const persistAgentFailedResult = (
+  traces: TemporalTaskStepTraceStore,
+  input: ExecuteTaskStepInput,
+  recovery: TaskStepRecoveryContext,
+  summary: string,
+  category: AgentClaimCategory,
+  retryable: boolean,
+  details: unknown,
+  stdout: string,
+  stderr: string,
+  provider: AgentProvider,
+  usage?: AgentInvocationUsage,
+  artifactIds: readonly string[] = [],
+): ExecuteTaskStepResult => {
+  const result = fail(summary, category, retryable, withRecoveryArtifact(recovery, artifactIds));
+  const persisted = traces.persistOutputArtifact({
+    operationId: executionOperationId(input),
+    workflowId: input.workflowId,
+    workflowRunId: input.workflowRunId,
+    nodeId: input.nodeId,
+    stepReference: input.uses,
+    stepAttempt: input.stepAttempt,
+    runner: 'agent',
+    command: provider,
+    args: [],
+    cwd: input.workspace.path,
+    exitCode: null,
+    status: 'failed',
+    stdout,
+    stderr,
+    details,
+    ...(usage === undefined ? {} : { usage }),
+    result,
+  });
+  if (!persisted.ok || persisted.value.result === null) {
+    throw new Error(`Failed execution receipt persistence failed for ${input.uses}`);
   }
   return persisted.value.result;
 };
@@ -1816,10 +1815,10 @@ export const executeRegisteredTaskStep = async (
         execution.status === 'waiting' ? execution.waitKind : `${input.uses}.${execution.kind}@1`,
         execution.artifactIds,
         execution.status === 'waiting'
-          ? { category: null }
+          ? { category: execution.category, retryable: execution.retryable }
           : {
-              category: execution.kind,
-              ...(execution.retryable === undefined ? {} : { retryable: execution.retryable }),
+              category: integrationBlockedCategory(execution.kind),
+              retryable: execution.retryable ?? true,
             },
       );
       const persisted = dependencies.traces.persistOutputArtifact({
@@ -1958,6 +1957,7 @@ export const executeRegisteredTaskStep = async (
       evidence: agentEvidence,
       historyIndex: runHistoryIndex(evidence.completedSteps),
     });
+    const outcomeSchema = agentStepOutcomeSchema(current.contract.outputSchema);
     const provider = await dependencies.agentRunner.run({
       taskReference: input.taskReference,
       inputArtifactIds: [
@@ -1977,7 +1977,7 @@ export const executeRegisteredTaskStep = async (
       prompt,
       skills: snapshottedStep.block.executor.skills,
       recovery,
-      outputSchema: AgentStepProviderOutcomeSchema,
+      outputSchema: outcomeSchema,
       cwd: input.workspace.path,
       workspaceAccess: current.contract.allowedEffects.includes('workspace.write')
         ? 'read_write'
@@ -1986,6 +1986,24 @@ export const executeRegisteredTaskStep = async (
       transcriptStore: dependencies.traces,
     });
     if (!provider.ok) {
+      if (provider.error.kind === 'invalid_output') {
+        const detail = provider.error.issues
+          .join('; ')
+          .replace(/[ \t\r]+/gu, ' ')
+          .slice(0, 4_000);
+        return persistAgentFailedResult(
+          dependencies.traces,
+          input,
+          recovery,
+          `Agent execution for ${input.uses} returned an invalid outcome: ${detail}`,
+          'agent_contract',
+          false,
+          { kind: 'agent_contract', issues: provider.error.issues },
+          '',
+          '',
+          executionProfile.provider,
+        );
+      }
       const reason =
         'message' in provider.error
           ? provider.error.message
@@ -1998,31 +2016,33 @@ export const executeRegisteredTaskStep = async (
         input,
         recovery,
         `Agent execution for ${input.uses} is blocked: ${reason}`,
+        blockingWaitKindFor(input.uses),
         provider.error,
         'stdout' in provider.error ? provider.error.stdout : '',
         'stderr' in provider.error ? provider.error.stderr : '',
         executionProfile.provider,
+        undefined,
+        [],
+        { category: 'infrastructure', retryable: true },
       );
     }
-    const decodedDecision = decodeAgentStepOutcome(provider.value.finalMessage);
+    const decodedDecision = decodeAgentStepOutcome(
+      provider.value.finalMessage,
+      current.contract.outputSchema,
+    );
     if (!decodedDecision.ok) {
-      const issues = decodedDecision.error.issues
+      const detail = decodedDecision.error.issues
         .join('; ')
         .replace(/[ \t\r]+/gu, ' ')
         .slice(0, 4_000);
-      throw ApplicationFailure.create({
-        message: `Agent execution for ${input.uses} returned an invalid outcome: ${issues}`,
-        type: 'agent_contract.invalid_outcome',
-      });
-    }
-    const decision = decodedDecision.value;
-    if (decision.status === 'blocked') {
-      return persistAgentBlockedResult(
+      return persistAgentFailedResult(
         dependencies.traces,
         input,
         recovery,
-        `Agent execution for ${input.uses} is blocked: ${decision.reason}`,
-        { kind: 'agent_blocked', reason: decision.reason, details: decision.details },
+        `Agent execution for ${input.uses} returned an invalid outcome: ${detail}`,
+        'agent_contract',
+        false,
+        { kind: 'agent_contract', issues: decodedDecision.error.issues },
         provider.value.stdout,
         provider.value.stderr,
         executionProfile.provider,
@@ -2030,7 +2050,51 @@ export const executeRegisteredTaskStep = async (
         provider.value.artifactIds,
       );
     }
-    if (decision.status === 'workflow_change_required') {
+    const decision = decodedDecision.value;
+    if (decision.status === 'waiting') {
+      return persistAgentBlockedResult(
+        dependencies.traces,
+        input,
+        recovery,
+        `Agent execution for ${input.uses} is blocked: ${decision.reason}`,
+        decision.waitKind,
+        {
+          kind: 'agent_waiting',
+          reason: decision.reason,
+          ...(decision.resumeHint === undefined ? {} : { resumeHint: decision.resumeHint }),
+          category: decision.category,
+          retryable: decision.retryable,
+        },
+        provider.value.stdout,
+        provider.value.stderr,
+        executionProfile.provider,
+        provider.value.usage,
+        provider.value.artifactIds,
+        { category: decision.category, retryable: decision.retryable },
+      );
+    }
+    if (decision.status === 'failed') {
+      return persistAgentFailedResult(
+        dependencies.traces,
+        input,
+        recovery,
+        `Agent execution for ${input.uses} failed: ${decision.detail}`,
+        decision.category,
+        decision.retryable,
+        {
+          kind: 'agent_failed',
+          category: decision.category,
+          detail: decision.detail,
+          retryable: decision.retryable,
+        },
+        provider.value.stdout,
+        provider.value.stderr,
+        executionProfile.provider,
+        provider.value.usage,
+        provider.value.artifactIds,
+      );
+    }
+    if (decision.status === 'workflow_change') {
       const declared = parseDeclaredWorkflowChangeRequest(
         decision.request,
         current.contract.workflowChanges,
@@ -2041,6 +2105,7 @@ export const executeRegisteredTaskStep = async (
           input,
           recovery,
           `Agent execution for ${input.uses} returned an invalid workflow change request`,
+          blockingWaitKindFor(input.uses),
           {
             kind: declared.error.kind,
             ...(declared.error.kind === 'invalid_request'
@@ -2052,6 +2117,7 @@ export const executeRegisteredTaskStep = async (
           executionProfile.provider,
           provider.value.usage,
           provider.value.artifactIds,
+          { category: 'agent_contract', retryable: false },
         );
       }
       const result = ExecuteTaskStepResultSchema.parse({
@@ -2085,31 +2151,7 @@ export const executeRegisteredTaskStep = async (
       }
       return persisted.value.result;
     }
-    const validatedOutput = current.contract.outputSchema.safeParse(decision.output);
-    if (!validatedOutput.success) {
-      const issues = validatedOutput.error.issues.map(
-        (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-      );
-      return persistAgentBlockedResult(
-        dependencies.traces,
-        input,
-        recovery,
-        `Agent execution for ${input.uses} returned invalid output: ${issues.join('; ')}`.slice(
-          0,
-          1_000,
-        ),
-        {
-          kind: 'invalid_step_output',
-          issues,
-        },
-        provider.value.stdout,
-        provider.value.stderr,
-        executionProfile.provider,
-        provider.value.usage,
-        provider.value.artifactIds,
-      );
-    }
-    const outputRecord = validatedOutput.data as {
+    const outputRecord = decision.output as {
       readonly summary?: string;
       readonly artifacts?: unknown;
     };
@@ -2138,7 +2180,7 @@ export const executeRegisteredTaskStep = async (
       stdout: provider.value.stdout,
       stderr: provider.value.stderr,
       details: {
-        output: validatedOutput.data,
+        output: decision.output,
         executionProfile: {
           provider: executionProfile.provider,
           profile: executionProfile.name,
@@ -2330,23 +2372,6 @@ const persistedOutput = (artifact: TaskStepOutputArtifact): JsonValue => {
     : {};
 };
 
-const declaredBlockedCategory = (details: unknown): BlockedClaimCategory | null => {
-  if (typeof details !== 'object' || details === null || Array.isArray(details)) return null;
-  const declared = BlockedClaimCategorySchema.safeParse(
-    (details as Readonly<Record<string, unknown>>).kind,
-  );
-  return declared.success ? declared.data : null;
-};
-
-const inferredBlockedCategory = (summary: string): BlockedClaimCategory => {
-  const normalized = summary.toLowerCase();
-  if (/auth|credential|permission|forbidden|401|403/u.test(normalized)) return 'authorization';
-  if (/ambigu|unclear|question|expected behavior|expected behaviour/u.test(normalized)) {
-    return 'task_ambiguity';
-  }
-  return 'infrastructure';
-};
-
 const claimFromResult = (
   result: ExecuteTaskStepResult,
   outputArtifact: TaskStepOutputArtifact,
@@ -2361,20 +2386,21 @@ const claimFromResult = (
         evidenceReferences: [...new Set([outputReference, ...result.artifactIds])],
       });
     case 'blocked': {
-      const category =
-        result.category === null
-          ? null
-          : (result.category ??
-            declaredBlockedCategory(outputArtifact.details) ??
-            inferredBlockedCategory(result.summary));
       return AgentClaimSchema.parse({
         status: 'blocked',
         summary: result.summary,
         waitKind: result.waitKind,
-        retryable: result.retryable ?? true,
-        ...(category === null ? {} : { category }),
+        category: result.category,
+        retryable: result.retryable,
       });
     }
+    case 'failed':
+      return AgentClaimSchema.parse({
+        status: 'failed',
+        summary: result.summary,
+        category: result.category,
+        retryable: result.retryable,
+      });
     case 'workflow_change_required':
       return AgentClaimSchema.parse({
         status: 'continuation_required',
