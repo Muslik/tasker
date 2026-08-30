@@ -63,6 +63,7 @@
   ],
   "supportFiles": "lib",
   "commands": "bin",
+  "agents": "agents",
   "profiles": [
     {
       "id": "front-avia",

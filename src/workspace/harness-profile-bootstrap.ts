@@ -19,6 +19,7 @@ import {
   WORKSPACE_HARNESS_MANIFEST_PATH,
   WORKSPACE_HARNESS_SKILLS_DIRECTORY,
   WORKSPACE_HARNESS_SUPPORT_DIRECTORY,
+  WORKSPACE_CLAUDE_AGENTS_DIRECTORY,
 } from '../harness/runtime-layout.js';
 import type { CommandResult, CommandRunner } from '../agents/command-runner.js';
 import type { Clock } from '../shared/clock.js';
@@ -56,7 +57,7 @@ type Selection = z.infer<typeof SelectionSchema>;
 
 interface MaterializedFile extends WorkspaceHarnessSourceFile {
   readonly destination: string;
-  readonly kind: 'skill' | 'support' | 'command' | 'guidance';
+  readonly kind: 'skill' | 'support' | 'command' | 'agent' | 'guidance';
   readonly override?: WorkspaceHarnessSourceFile;
   readonly overlay?: WorkspaceHarnessSourceFile;
   readonly rules?: readonly WorkspaceHarnessSourceFile[];
@@ -179,6 +180,10 @@ const buildMaterializationPlan = (
     const commandTail = tailUnder(file.relativePath, pack.manifest.commands);
     if (commandTail !== null) {
       add(file, `${WORKSPACE_HARNESS_BIN_DIRECTORY}/${commandTail}`, 'command');
+    }
+    const agentTail = tailUnder(file.relativePath, pack.manifest.agents);
+    if (agentTail !== null) {
+      add(file, `${WORKSPACE_CLAUDE_AGENTS_DIRECTORY}/${agentTail}`, 'agent');
     }
   }
 

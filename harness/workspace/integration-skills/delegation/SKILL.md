@@ -18,7 +18,5 @@ For Claude, invoke the predefined `explore` or `test-writer` agent. For Codex, i
 "${TASKER_HARNESS_BIN}/delegate" <explore|test-writer> "<task>"
 ```
 
-The pack loader currently materializes only skills, support files, commands, and guidance. It cannot
-place arbitrary root dotfiles in `.claude/agents/`; the two agent definitions are therefore also
-stored in this declared skill package under `agents/` for pack visibility, while the requested source
-copies remain in `harness/workspace/agents/`.
+The canonical role definitions live in `harness/workspace/agents/` and are materialized into the
+worktree root at `.claude/agents/`. The pack manifest declares this mapping as `agents: "agents"`.

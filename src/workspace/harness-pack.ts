@@ -79,6 +79,7 @@ export const WorkspaceHarnessManifestSchema = z
     ruleSources: z.array(ImportedDirectorySchema).default([]),
     supportFiles: RelativePathSchema,
     commands: RelativePathSchema,
+    agents: RelativePathSchema.default('agents'),
     profiles: z.array(WorkspaceHarnessProfileSchema).min(1),
   })
   .strict();
@@ -452,6 +453,8 @@ export const loadWorkspaceHarnessPack = (configuredPath: string): LoadedWorkspac
     for (const file of listFiles(resolvePackDirectory(rootPath, directory), directory))
       addFile(file);
   }
+  for (const file of listFiles(resolvePackDirectory(rootPath, manifest.agents), manifest.agents))
+    addFile(file);
 
   for (const profile of manifest.profiles) {
     validateSkillDependencies(manifest, profile, filesByPath);

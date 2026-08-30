@@ -160,6 +160,12 @@ describe('workspace harness bootstrap', () => {
     ).toContain('effector');
     expect(existsSync(join(repository.path, '.codex/skills/jira/SKILL.md'))).toBe(false);
     expect(existsSync(join(repository.path, '.claude/skills/pr-finalize/SKILL.md'))).toBe(false);
+    expect(readFileSync(join(repository.path, '.claude/agents/explore.md'), 'utf8')).toContain(
+      'name: explore',
+    );
+    expect(readFileSync(join(repository.path, '.claude/agents/models.env'), 'utf8')).toContain(
+      'TASKER_SUBAGENT_MODEL_EXPLORE=gpt-5.6-luna',
+    );
     expect(
       existsSync(join(repository.path, '.tasker/harness/skills/feature-review/SKILL.md')),
     ).toBe(true);

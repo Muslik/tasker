@@ -139,6 +139,23 @@ describe('file-backed harness pack', () => {
     expect(stepDefinition?.prompt?.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it('validates canonical subagent definitions against provider model routing', async () => {
+    const root = await createTemporaryPack();
+    const agentsRoot = join(root, 'workspace/agents');
+    await writeFile(
+      join(agentsRoot, 'explore.md'),
+      (await readFile(join(agentsRoot, 'explore.md'), 'utf8')).replace(
+        'model: claude-haiku-4-5',
+        'model: wrong-model',
+      ),
+      'utf8',
+    );
+
+    expect(() => loadHarnessPack(root)).toThrow(
+      'Subagent explore Claude frontmatter model does not match company.json',
+    );
+  });
+
   it('teaches the implementation planner the Phase 2a archetype slot contract', () => {
     const prompt = loadHarnessPack(join(process.cwd(), 'harness')).prompts.implementationPlanner;
 

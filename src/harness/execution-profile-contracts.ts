@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { SemanticExecutionRoleSchema } from '../graph/semantic-schema.js';
 
 export const ExecutionProfileNameSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
+export const SubagentRoleSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
 export const TaskExecutionStrategySchema = z.enum(['simple', 'standard', 'complex']);
 export const TaskExecutionRoleSchema = SemanticExecutionRoleSchema;
 

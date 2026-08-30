@@ -76,6 +76,52 @@ const loadPrompt = (root: string, relativePath: string): LoadedPrompt => {
   });
 };
 
+const frontmatter = (content: string): Map<string, string> => {
+  const body = /^---\r?\n(?<body>[\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(content)?.groups?.body;
+  if (body === undefined) return new Map();
+  return new Map(
+    body.split(/\r?\n/u).flatMap((line) => {
+      const separator = line.indexOf(':');
+      return separator < 1 ? [] : [[line.slice(0, separator), line.slice(separator + 1).trim()]];
+    }),
+  );
+};
+
+const validateSubagentDefinitions = (
+  root: string,
+  profiles: Readonly<Record<string, { readonly claude: string; readonly codex: string }>>,
+): void => {
+  const agentsRoot = resolvePackPath(root, 'workspace/agents', 'directory');
+  const files = readdirSync(agentsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => entry.name.slice(0, -3));
+  const profileRoles = Object.keys(profiles).sort();
+  if (files.sort().join('\0') !== profileRoles.join('\0')) {
+    throw new Error('Harness subagent profiles must match workspace/agents/*.md');
+  }
+  for (const role of profileRoles) {
+    const metadata = frontmatter(readFileSync(join(agentsRoot, `${role}.md`), 'utf8'));
+    if (metadata.get('name') !== role || metadata.get('model') !== profiles[role]?.claude) {
+      throw new Error(`Subagent ${role} Claude frontmatter model does not match company.json`);
+    }
+  }
+  const modelsPath = join(agentsRoot, 'models.env');
+  const models = new Map<string, string>();
+  for (const line of readFileSync(modelsPath, 'utf8').split(/\r?\n/u)) {
+    const match = /^TASKER_SUBAGENT_MODEL_(?<role>[A-Z0-9_]+)=(?<model>\S+)$/u.exec(line);
+    const role = match?.groups?.role;
+    const model = match?.groups?.model;
+    if (role !== undefined && model !== undefined) {
+      models.set(role.toLowerCase().replaceAll('_', '-'), model);
+    }
+  }
+  for (const role of profileRoles) {
+    if (models.get(role) !== profiles[role]?.codex) {
+      throw new Error(`Subagent ${role} Codex model does not match company.json`);
+    }
+  }
+};
+
 const loadProjects = (root: string) => {
   const projectsRoot = join(root, 'projects');
   if (!existsSync(projectsRoot)) return [];
@@ -144,6 +190,7 @@ export const resolveHarnessRoot = (configuredPath = process.env.TASKER_HARNESS_P
 export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   const rootPath = resolveHarnessRoot(configuredPath);
   const company = parseFile(HarnessCompanyManifestSchema, join(rootPath, 'company.json'));
+  validateSubagentDefinitions(rootPath, company.subagentProfiles);
   const projects = loadProjects(rootPath);
   const policies = loadPolicies(rootPath);
   const enabledPolicies = new Set(policies.map(({ id }) => id));

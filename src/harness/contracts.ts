@@ -22,6 +22,7 @@ import {
   ExecutionProfileRoutingSchema,
   ExecutionProfileSchema,
   ProjectExecutionProfileOverridesSchema,
+  SubagentRoleSchema,
 } from './execution-profile-contracts.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
@@ -421,6 +422,14 @@ export const HarnessCompanyManifestSchema = z
       .record(ExecutionProfileNameSchema, ExecutionProfileSchema)
       .refine((profiles) => Object.keys(profiles).length > 0, {
         message: 'At least one execution profile is required',
+      }),
+    subagentProfiles: z
+      .record(
+        SubagentRoleSchema,
+        z.object({ claude: z.string().trim().min(1), codex: z.string().trim().min(1) }).strict(),
+      )
+      .refine((profiles) => Object.keys(profiles).length > 0, {
+        message: 'At least one subagent profile is required',
       }),
     executionProfileRouting: ExecutionProfileRoutingSchema,
   })
