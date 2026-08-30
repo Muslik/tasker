@@ -25,6 +25,7 @@ export default defineConfig({
       project('contract', ['test/contract/**/*.test.ts']),
       project('recovery', ['test/recovery/**/*.test.ts']),
       project('operator', ['test/operator/**/*.test.ts']),
+      project('ui', ['src/ui/**/*.test.ts', 'src/ui/**/*.test.tsx']),
     ],
     coverage: {
       provider: 'v8',

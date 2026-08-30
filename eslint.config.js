@@ -50,4 +50,14 @@ export default tseslint.config(
       },
     },
   },
+  {
+    files: ['src/ui/**/*.{ts,tsx}'],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ['./tsconfig.ui.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
 );
