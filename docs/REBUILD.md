@@ -102,9 +102,12 @@ size ceiling ~400 lines.
       (tokens table with prompt-growth highlight, live attempt status, prompt viewer).
 - [x] Phase 2a — `deliver-pr` archetype scaffold owns workflow topology; planner emits
       only archetype + segments + plan slots; obligations are scaffold invariants.
-- [ ] Phase 2b — step outcome contract: single-encoded envelope, typed
-      completed/waiting/failed(+category, retryable), no regex classification.
-- [ ] Phase 2c — deterministic verify bound to `validation.*@1` process commands.
+- [x] Phase 2b — step outcome contract: single-encoded typed envelope
+      (completed/waiting/failed/workflow_change), one category enum, malformed
+      envelopes cost one run and surface zod issues instead of burning retries.
+- [x] Phase 2c — `validation.run@1` process step feeds a judging Verify agent;
+      planner picks only the validation profile; missing project validation
+      config fails assembly loudly (`project_validation_missing`).
 - [ ] Phase 3 — structure surgery: dead code removal, target layout, store rewrite,
       test relayout, docs from code, credentials out of agent containers.
 - [ ] Phase 4 — cockpit v2: TanStack Query, component decomposition, SSE realtime.
