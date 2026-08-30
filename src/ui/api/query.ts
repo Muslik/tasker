@@ -17,6 +17,16 @@ export const operatorQueryKeys = {
     [...operatorQueryKeys.task(taskReference), 'current-run'] as const,
   invocations: (taskReference: string) =>
     [...operatorQueryKeys.task(taskReference), 'invocations'] as const,
+  implementationPlan: (taskReference: string) =>
+    [...operatorQueryKeys.task(taskReference), 'implementation-plan'] as const,
+  planReviews: (taskReference: string) =>
+    [...operatorQueryKeys.task(taskReference), 'plan-reviews'] as const,
+  planningTranscript: (taskReference: string) =>
+    [...operatorQueryKeys.task(taskReference), 'planning-transcript'] as const,
+  retrospective: (taskReference: string) =>
+    [...operatorQueryKeys.task(taskReference), 'retrospective'] as const,
+  jiraIssue: (issueKey: string) => [...operatorQueryKeys.all(), 'jira', issueKey] as const,
+  repositories: () => [...operatorQueryKeys.all(), 'repositories'] as const,
   invocation: (taskReference: string, invocationId: string) =>
     ['invocation', taskReference, invocationId] as const,
 } as const;
@@ -40,6 +50,10 @@ export const invalidateTaskQueries = (
   invalidate(queryClient, operatorQueryKeys.projection(taskReference));
   invalidate(queryClient, operatorQueryKeys.activity(taskReference));
   invalidate(queryClient, operatorQueryKeys.currentRun(taskReference));
+  invalidate(queryClient, operatorQueryKeys.implementationPlan(taskReference));
+  invalidate(queryClient, operatorQueryKeys.planReviews(taskReference));
+  invalidate(queryClient, operatorQueryKeys.planningTranscript(taskReference));
+  invalidate(queryClient, operatorQueryKeys.retrospective(taskReference));
 
   if (options.includeRunLog === true) {
     invalidate(queryClient, operatorQueryKeys.runLog(taskReference));

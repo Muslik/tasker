@@ -112,6 +112,7 @@ size ceiling ~400 lines.
       config fails assembly loudly (`project_validation_missing`).
 - [ ] Phase 3 — structure surgery: dead code removal, target layout, store rewrite,
       test relayout, docs from code, credentials out of agent containers.
-- [ ] Phase 4 — cockpit v2: TanStack Query, component decomposition, SSE realtime.
+- [x] Phase 4 — operator UI v2: TanStack Query, component decomposition, SSE realtime;
+      legacy cockpit removed and the server serves `dist/ui`.
 - [ ] Phase 5 — extensions: review packet (screens + MSW mocks), figma skill, more
       archetypes, then parallelism.

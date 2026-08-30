@@ -1,5 +1,5 @@
 import type { OperatorWorkflowStage, WorkflowNodeStatus } from '../../server/operator-contracts.js';
-import { cn } from '../../cockpit/lib/utils.js';
+import { cn } from '../lib/utils.js';
 
 const statusTone = {
   planned: 'border-border bg-muted text-muted-foreground',

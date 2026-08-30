@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { implementationPlanMarkdownFrom } from '../../src/cockpit/implementation-plan-markdown.js';
+import { implementationPlanMarkdownFrom } from '../../src/ui/lib/implementation-plan-markdown.js';
 import { ImplementationPlanSchema } from '../../src/planning/implementation-plan.js';
 
 describe('implementation plan Markdown', () => {

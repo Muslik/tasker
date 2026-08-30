@@ -81,6 +81,6 @@ may point at a different Jenkins product. `JENKINS_USER` and `JENKINS_TOKEN` rem
 shared credentials. An authorization failure pauses the CI step without losing the pushed
 branch or PR.
 
-The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:cockpit` commands remain
+The `temporal:dev`, `temporal:worker`, `temporal:api`, and `dev:ui` commands remain
 available for diagnosing one process in isolation. They are components of the same
 runtime, not alternative execution paths.

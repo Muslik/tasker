@@ -107,7 +107,7 @@ const StreamQuerySchema = z
 
 export interface BuildOperatorApiOptions {
   readonly service: OperatorWorkflowService;
-  readonly cockpitDirectory?: string | undefined;
+  readonly uiDirectory?: string | undefined;
   readonly logger?: boolean | undefined;
   readonly jiraIssueService?: JiraIssueService | undefined;
   readonly implementationPlanning?: ImplementationPlanningCoordinator | undefined;
@@ -353,7 +353,7 @@ const contentType = (filename: string): string => {
   }
 };
 
-const resolveCockpitAsset = (directory: string, asset: string): string | null => {
+const resolveUiAsset = (directory: string, asset: string): string | null => {
   const root = resolve(directory);
   const filename = resolve(join(root, 'assets', asset));
   const pathFromRoot = relative(root, filename);
@@ -1680,9 +1680,9 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       .send(result.value.view.workflow.graph);
   });
 
-  if (options.cockpitDirectory !== undefined) {
+  if (options.uiDirectory !== undefined) {
     api.get('/', async (_request, reply) => {
-      const body = await readFile(join(options.cockpitDirectory as string, 'index.html'));
+      const body = await readFile(join(options.uiDirectory as string, 'index.html'));
       return reply.type('text/html; charset=utf-8').send(body);
     });
 
@@ -1692,7 +1692,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         return reply.code(404).send();
       }
 
-      const filename = resolveCockpitAsset(options.cockpitDirectory as string, params.data['*']);
+      const filename = resolveUiAsset(options.uiDirectory as string, params.data['*']);
       if (filename === null) {
         return reply.code(404).send();
       }

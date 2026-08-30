@@ -16,10 +16,13 @@ import { CurrentAttemptStatus, type InvocationSelection } from './CurrentAttempt
 import { InvocationTokens } from './InvocationTokens.js';
 import { StatusChip } from './StatusChip.js';
 import { TaskActions } from './TaskActions.js';
+import { TaskOperatorSurfaces } from './TaskOperatorSurfaces.js';
 import { WorkflowRail } from './WorkflowRail.js';
 
 export type TaskCardProps = {
   readonly task: OperatorTaskSummary;
+  readonly onStart?: () => void;
+  readonly onRemove?: () => void;
 };
 
 export const triggerTaskInvocationOpen = (
@@ -32,7 +35,7 @@ export const triggerTaskInvocationOpen = (
   return selection;
 };
 
-export const TaskCard = ({ task }: TaskCardProps) => {
+export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection | null>(null);
   const [selectedTab, setSelectedTab] = useState<AttemptDetailsTab>('log');
   const projectionQuery = useQuery(taskProjectionQueryOptions(task.id));
@@ -114,6 +117,22 @@ export const TaskCard = ({ task }: TaskCardProps) => {
             <h1 className="mt-2 text-xl font-semibold tracking-tight">{task.title}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{task.currentStage}</p>
           </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+              onClick={onStart}
+            >
+              Task settings
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
+              onClick={onRemove}
+            >
+              Remove
+            </button>
+          </div>
           <CurrentAttemptStatus projection={projection} onOpenInvocation={openInvocation} />
         </div>
       </header>
@@ -131,6 +150,11 @@ export const TaskCard = ({ task }: TaskCardProps) => {
         </div>
         <div className="space-y-4">
           <TaskActions
+            task={task}
+            projection={projection}
+            currentRun={currentRunQuery.data ?? null}
+          />
+          <TaskOperatorSurfaces
             task={task}
             projection={projection}
             currentRun={currentRunQuery.data ?? null}

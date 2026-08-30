@@ -1,5 +1,5 @@
 import type { OperatorTaskSummary } from '../../server/operator-contracts.js';
-import { cn } from '../../cockpit/lib/utils.js';
+import { cn } from '../lib/utils.js';
 import { formatElapsed } from '../lib/format.js';
 import { StatusChip } from './StatusChip.js';
 
