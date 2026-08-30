@@ -16,6 +16,11 @@ import {
   type JsonValue,
 } from '../workflow/schema.js';
 import {
+  VALIDATION_PROFILES,
+  ValidationProfileSchema,
+  type ValidationProfile,
+} from '../workflow/archetypes/index.js';
+import {
   ApiPricingTableSchema,
   ExecutionProfileNameSchema,
   ExecutionProfileRoutingSchema,
@@ -53,6 +58,47 @@ export const ProcessExecutionPlanSchema = z
   })
   .strict();
 
+export const validationProcessCommandReference = <Profile extends ValidationProfile>(
+  profile: Profile,
+): `validation.${Profile}@1` => `validation.${profile}@1`;
+
+export type ValidationProcessCommandReference = `validation.${ValidationProfile}@1`;
+
+export const VALIDATION_PROCESS_COMMAND_REFERENCES = [
+  validationProcessCommandReference(VALIDATION_PROFILES[0]),
+  validationProcessCommandReference(VALIDATION_PROFILES[1]),
+  validationProcessCommandReference(VALIDATION_PROFILES[2]),
+] as const;
+
+export const ValidationProcessExecutionPlansSchema = z.record(
+  ValidationProfileSchema,
+  ProcessExecutionPlanSchema,
+);
+
+export const ProcessExecutionBindingSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('fixed'),
+      plan: ProcessExecutionPlanSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('validation'),
+      profiles: ValidationProcessExecutionPlansSchema,
+    })
+    .strict(),
+]);
+
+export const processExecutionPlanFor = (
+  binding: ProcessExecutionBinding,
+  input: unknown,
+): ProcessExecutionPlan | null => {
+  if (binding.kind === 'fixed') return binding.plan;
+  const profile = z.object({ profile: ValidationProfileSchema }).strict().safeParse(input);
+  return profile.success ? binding.profiles[profile.data.profile] : null;
+};
+
 const ProcessCommandsSchema = z.record(VersionedReferenceSchema, ProcessExecutionPlanSchema);
 
 export const HarnessContractNameSchema = z.enum([
@@ -66,16 +112,13 @@ export const HarnessContractNameSchema = z.enum([
   'integration_output',
   'runtime_observation_input',
   'runtime_observation_output',
+  'validation_input',
   'process_input',
   'process_output',
   'pull_request_input',
   'pull_request_output',
   'reproduction_input',
   'reproduction_output',
-  'verification_targeted_input',
-  'verification_full_input',
-  'verification_build_input',
-  'verification_visual_input',
   'task_input',
 ]);
 
@@ -393,6 +436,7 @@ export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema
 export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
 export type WorkspaceRuntime = z.infer<typeof WorkspaceRuntimeSchema>;
 export type ProcessExecutionPlan = z.infer<typeof ProcessExecutionPlanSchema>;
+export type ProcessExecutionBinding = z.infer<typeof ProcessExecutionBindingSchema>;
 export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
 export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 

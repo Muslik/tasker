@@ -111,4 +111,24 @@ describe('workflow analyzer context', () => {
       'jira.start-work@1',
     );
   });
+
+  it('keeps validation in the catalog when project profiles are incomplete', () => {
+    const fixture = makePlanningTaskSnapshot('avia-13236-short-bug', {
+      repository: 'onetwotrip/front-backoffice',
+    });
+
+    const context = createWorkflowAnalyzerContext(fixture);
+    const plannerContext = z
+      .object({
+        buildingBlocks: z.object({
+          steps: z.array(z.object({ reference: z.string() }).loose()),
+        }),
+      })
+      .loose()
+      .parse(context.plannerContext);
+
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
+      'validation.run@1',
+    );
+  });
 });

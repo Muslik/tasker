@@ -148,11 +148,13 @@ describe('file-backed harness pack', () => {
     expect(prompt.content).toContain('`segments` is a closed unique array.');
     expect(prompt.content).toContain('`dependency_await`');
     expect(prompt.content).toContain('`translations`');
+    expect(prompt.content).toContain('`run-validation`');
     expect(prompt.content).toContain('`verify-change`');
     expect(prompt.content).toContain('taskSnapshot.dependencyDeclarations');
     expect(prompt.content).toContain('Every acceptance criterion has a unique kebab-case');
     expect(prompt.content).toContain('`workflowStepIds`');
-    expect(prompt.content).toContain('do not add a generic test-materialization step');
+    expect(prompt.content).toContain('Do not add a generic test-materialization step');
+    expect(prompt.content).toContain('never name or compose individual commands');
     expect(prompt.content).toContain('typed JSON values, not');
     expect(prompt.content).not.toContain('"followUps"');
     expect(prompt.content).not.toContain('"workflow"');
@@ -371,6 +373,31 @@ describe('file-backed harness pack', () => {
     expect(deliveryFor('translations.extract@1')).toEqual({ kind: 'single_attempt' });
     expect(deliveryFor('deliver.pull-request@1')).toEqual({ kind: 'remote_reconciled' });
     expect(deliveryFor('ai.assistance.initialize@1')).toBeUndefined();
+  });
+
+  it('registers deterministic validation as an any-exit process receipt', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const validation = pack.steps.find(({ reference }) => reference === 'validation.run@1');
+
+    expect(validation).toMatchObject({
+      block: {
+        stage: { id: 'development', label: 'Development' },
+        executor: { kind: 'process', executor: 'validation.run@1' },
+        completion: { kind: 'process_receipt', acceptance: 'any_exit' },
+      },
+      contract: {
+        activityDelivery: { kind: 'single_attempt' },
+        allowedEffects: ['command.run'],
+        requiredCapabilities: ['command.run'],
+      },
+    });
+    expect(validation?.contract.inputSchema.safeParse({ profile: 'targeted' }).success).toBe(true);
+    expect(validation?.contract.inputSchema.safeParse({ profile: 'full' }).success).toBe(true);
+    expect(validation?.contract.inputSchema.safeParse({ profile: 'build' }).success).toBe(true);
+    expect(validation?.contract.inputSchema.safeParse({ profile: 'visual' }).success).toBe(false);
+    expect(
+      validation?.contract.inputSchema.safeParse({ profile: 'targeted', taskId: 'AVIA-1' }).success,
+    ).toBe(false);
   });
 
   it('owns PR, CI, Jira, and human review inside one semantic Delivery block', () => {

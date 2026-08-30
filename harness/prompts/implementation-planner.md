@@ -44,7 +44,7 @@ acceptance. Never guess merely because plan review is automatic:
 
 Use `ready` only when the plan, archetype selection, optional segments, and verification plan are honest:
 
-{"status":"ready","executionStrategy":"simple|standard|complex","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"observable-outcome","expected":"...","verification":[{"kind":"process","profile":"targeted","scenario":"...","workflowStepIds":["verify-change"]}]}]},"archetype":"deliver-pr","segments":["translations"],"verification":{"checks":["Run the targeted validation profile."],"profile":"targeted","rationale":"The change is bounded and the proof is deterministic."},"rationale":"deliver-pr covers implementation, verification, review, and PR delivery; translations is required because the task changes externalized copy."}
+{"status":"ready","executionStrategy":"simple|standard|complex","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"observable-outcome","expected":"...","verification":[{"kind":"process","profile":"targeted","scenario":"...","workflowStepIds":["run-validation"]}]}]},"archetype":"deliver-pr","segments":["translations"],"verification":{"checks":["Run the targeted validation profile."],"profile":"targeted","validationProfile":"targeted","rationale":"The change is bounded and the proof is deterministic."},"rationale":"deliver-pr covers implementation, verification, review, and PR delivery; translations is required because the task changes externalized copy."}
 
 Select `simple` only for one-repository bounded low-risk work with clear acceptance and no material
 architecture or product decision. Select `standard` for ordinary multi-surface implementation or
@@ -66,14 +66,15 @@ For this phase, `archetype` must be `deliver-pr`.
 Base `deliver-pr` step ids are stable and always exist in the scaffolded semantic workflow:
 
 - `implement-change`
+- `run-validation`
 - `verify-change`
 - `review-change`
 - `prepare-delivery`
 - `deliver-change`
 
-Reference those ids in acceptance verification. Use `verify-change` for deterministic validation
-unless another selected segment truly owns the proof. Translation ids are `extract-translations`
-and `pull-translations`; dependency declaration pairs sorted by declaration id use
+Reference those ids in acceptance verification. Use `run-validation` for deterministic process
+verification and `verify-change` for receipt judgment and runtime evidence. Translation ids are
+`extract-translations` and `pull-translations`; dependency declaration pairs sorted by declaration id use
 `await-dependency-N` and `consume-dependency-N`. Do not invent alternative ids or topology.
 
 Select segments only when task evidence, declarations, or project policy require them. Omit
@@ -98,13 +99,16 @@ from plannerContext, return `needs_clarification`; do not replace them with loca
 ## Acceptance and verification
 
 Every acceptance criterion has a unique kebab-case `id`, one observable `expected` outcome, and at
-least one typed verification. Verification is designed during planning and executed by the selected
-semantic Verify block; do not add a generic test-materialization step.
+least one typed verification. Verification is designed during planning: `run-validation` executes
+the selected project profile and `verify-change` judges its receipt plus required runtime evidence;
+set `verification.validationProfile` to the profile, reuse it in process verification entries, and
+never name or compose individual commands.
+Do not add a generic test-materialization step.
 
 Use only these verification shapes:
 
 - automated_test: `{"kind":"automated_test","source":"existing|new","level":"unit|integration|e2e|visual","scenario":"...","workflowStepIds":["..."]}`
-- process: `{"kind":"process","profile":"project validation profile","scenario":"...","workflowStepIds":["..."]}`
+- process: `{"kind":"process","profile":"targeted|full|build","scenario":"...","workflowStepIds":["run-validation"]}`
 - runtime_evidence: `{"kind":"runtime_evidence","scenario":"...","evidence":["video|image|log|structured_output"],"workflowStepIds":["..."]}`
 - inspection: `{"kind":"inspection","target":"...","expectation":"...","workflowStepIds":["..."]}`
 

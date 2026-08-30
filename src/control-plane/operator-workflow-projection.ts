@@ -1,4 +1,5 @@
 import { blockReceiptId, type BlockReceipt, type BlockReceiptStore } from '../blocks/index.js';
+import { processExecutionPlanFor } from '../harness/index.js';
 import type { DependencyDeclaration } from './dependency-declaration.js';
 import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from '../planning/index.js';
 import type { RunPlanningSnapshot } from '../planning/run-planning-snapshot.js';
@@ -334,6 +335,10 @@ const createExecutionStages = (
           );
         } else if (block?.executor.kind === 'process' && showConfigurableStep) {
           const attempts = execution?.blockRuns[node.id] ?? 0;
+          const resolvedProcess =
+            snapshotted?.resolvedProcess === null || snapshotted?.resolvedProcess === undefined
+              ? null
+              : processExecutionPlanFor(snapshotted.resolvedProcess, node.with);
           stage.steps.push(
             OperatorWorkflowStepSchema.parse({
               kind: 'process',
@@ -342,7 +347,7 @@ const createExecutionStages = (
               status,
               reference: node.uses,
               executor:
-                snapshotted?.resolvedProcess?.commands
+                resolvedProcess?.commands
                   .map(({ command, args }) => [command, ...args].join(' '))
                   .join(' → ') ?? block.executor.executor,
               attempts,

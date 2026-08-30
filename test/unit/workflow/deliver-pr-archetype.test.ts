@@ -40,6 +40,9 @@ const scaffold = (segments: readonly DeliverPrSegment[], taskSnapshot: unknown =
       taskSnapshot,
       objective: 'Implement the accepted plan.',
       segments,
+      verification: {
+        validationProfile: 'targeted',
+      },
     },
     config,
   );
@@ -90,6 +93,7 @@ describe('deliver-pr archetype scaffold', () => {
       developmentLoop: DELIVER_PR_NODE_IDS.developmentLoop,
       developmentAttempt: DELIVER_PR_NODE_IDS.developmentAttempt,
       implement: DELIVER_PR_NODE_IDS.implement,
+      runValidation: DELIVER_PR_NODE_IDS.runValidation,
       verify: DELIVER_PR_NODE_IDS.verify,
       review: DELIVER_PR_NODE_IDS.review,
       prepare: DELIVER_PR_NODE_IDS.prepare,
@@ -107,6 +111,7 @@ describe('deliver-pr archetype scaffold', () => {
       developmentLoop: 'development',
       developmentAttempt: 'development-attempt',
       implement: 'implement-change',
+      runValidation: 'run-validation',
       verify: 'verify-change',
       review: 'review-change',
       prepare: 'prepare-delivery',
@@ -123,7 +128,11 @@ describe('deliver-pr archetype scaffold', () => {
       name: 'base delivery loop',
       segments: [] satisfies readonly DeliverPrSegment[],
       taskSnapshot: {},
-      expectedDevelopmentStepIds: [DELIVER_PR_NODE_IDS.implement, DELIVER_PR_NODE_IDS.verify],
+      expectedDevelopmentStepIds: [
+        DELIVER_PR_NODE_IDS.implement,
+        DELIVER_PR_NODE_IDS.runValidation,
+        DELIVER_PR_NODE_IDS.verify,
+      ],
     },
     {
       name: 'dependency await segment',
@@ -135,6 +144,7 @@ describe('deliver-pr archetype scaffold', () => {
         DELIVER_PR_NODE_IDS.dependencyConsume(1),
         DELIVER_PR_NODE_IDS.dependencyAwait(2),
         DELIVER_PR_NODE_IDS.dependencyConsume(2),
+        DELIVER_PR_NODE_IDS.runValidation,
         DELIVER_PR_NODE_IDS.verify,
       ],
     },
@@ -146,6 +156,7 @@ describe('deliver-pr archetype scaffold', () => {
         DELIVER_PR_NODE_IDS.implement,
         DELIVER_PR_NODE_IDS.translationsExtract,
         DELIVER_PR_NODE_IDS.translationsPull,
+        DELIVER_PR_NODE_IDS.runValidation,
         DELIVER_PR_NODE_IDS.verify,
       ],
     },
@@ -161,6 +172,7 @@ describe('deliver-pr archetype scaffold', () => {
         DELIVER_PR_NODE_IDS.dependencyConsume(2),
         DELIVER_PR_NODE_IDS.translationsExtract,
         DELIVER_PR_NODE_IDS.translationsPull,
+        DELIVER_PR_NODE_IDS.runValidation,
         DELIVER_PR_NODE_IDS.verify,
       ],
     },
@@ -221,6 +233,17 @@ describe('deliver-pr archetype scaffold', () => {
       expect(developmentChildrenOf(semantic).map(({ id }) => id)).toEqual(
         expectedDevelopmentStepIds,
       );
+      expect(developmentChildrenOf(semantic)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: DELIVER_PR_NODE_IDS.runValidation,
+            uses: 'validation.run@1',
+            with: {
+              profile: 'targeted',
+            },
+          }),
+        ]),
+      );
       expect(
         validateWorkflowObligations(compiled.compiled.graph, { origin: 'jira' }).issues,
       ).toEqual([]);
@@ -279,6 +302,9 @@ describe('deliver-pr archetype scaffold', () => {
           taskSnapshot,
           objective: 'Implement the accepted plan.',
           segments,
+          verification: {
+            validationProfile: 'targeted',
+          },
         },
         config,
       );

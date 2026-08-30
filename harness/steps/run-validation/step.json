@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "reference": "validation.run@1",
+  "description": "Run the selected project validation profile and record command exit codes.",
+  "stage": { "id": "development", "label": "Development" },
+  "availableDuring": ["execution"],
+  "inputContract": "validation_input",
+  "outputContract": "process_output",
+  "executor": {
+    "kind": "process",
+    "executor": "validation.run@1"
+  },
+  "outcomes": ["completed", "blocked", "failed"],
+  "completion": {
+    "kind": "process_receipt",
+    "acceptance": "any_exit"
+  },
+  "activityDelivery": "single_attempt",
+  "allowedEffects": ["command.run"],
+  "requiredCapabilities": ["command.run"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": [],
+  "requiredArtifactContracts": [],
+  "workflowChanges": ["external_process_required"],
+  "reconciliation": { "strategy": "probe" }
+}

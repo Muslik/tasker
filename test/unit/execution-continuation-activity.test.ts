@@ -177,7 +177,7 @@ const persistExecutionSnapshot = (ledger: SqliteLedger) => {
     pack.projects.find((candidate) => candidate.repository === baseTask.repository) ?? null;
   const executionProfileOverrides = project?.executionProfileOverrides ?? null;
   const snapshot = planning.persistRunSnapshot({
-    schemaVersion: 10,
+    schemaVersion: 11,
     kind: 'execution',
     taskReference: baseTask.reference,
     workflowRunId: 'execution-run-1',
@@ -308,6 +308,7 @@ const analyzerOutput = (
   verificationPlan: {
     checks: ['Wait for the exact dependency publication receipt.'],
     profile: 'targeted',
+    validationProfile: 'targeted',
     rationale: 'The continuation only waits for the declared package publication.',
   },
 });

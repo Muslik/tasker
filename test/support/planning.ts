@@ -35,6 +35,7 @@ export type TestTaskFixture = {
   readonly family: 'short_bugfix' | 'feature_with_review' | 'shared_component';
   readonly reproduction?: 'required';
   readonly verification?: 'targeted' | 'full' | 'full_with_visual';
+  readonly validationProfile?: 'targeted' | 'full' | 'build';
   readonly componentRepository?: string;
   readonly componentPath?: string;
   readonly expected: 'accepted' | 'rejected';
@@ -278,6 +279,7 @@ const verificationPlanFor = (task: TestTaskFixture): WorkflowAnalyzerOutput['ver
     ? {
         checks: ['reproduction evidence', 'targeted tests for changed behavior'],
         profile: 'targeted' as const,
+        validationProfile: task.validationProfile ?? ('targeted' as const),
         rationale:
           'A localized bug fix needs proof of reproduction and focused regression coverage.',
       }
@@ -285,6 +287,7 @@ const verificationPlanFor = (task: TestTaskFixture): WorkflowAnalyzerOutput['ver
       ? {
           checks: ['translation resources pulled', 'targeted consumer tests'],
           profile: 'translation_and_targeted' as const,
+          validationProfile: task.validationProfile ?? ('targeted' as const),
           rationale:
             'The component project uses external translation and must verify the consuming surface.',
         }
@@ -292,11 +295,13 @@ const verificationPlanFor = (task: TestTaskFixture): WorkflowAnalyzerOutput['ver
         ? {
             checks: ['full test suite', 'visual comparison of affected screens'],
             profile: 'full_with_visual' as const,
+            validationProfile: task.validationProfile ?? ('full' as const),
             rationale: 'The feature spans a booking flow and changes visible frontend behavior.',
           }
         : {
             checks: ['full test suite'],
             profile: 'full' as const,
+            validationProfile: task.validationProfile ?? ('full' as const),
             rationale: 'The feature spans multiple behaviors, so targeted checks are insufficient.',
           };
 
@@ -337,7 +342,7 @@ export const makeWorkflowProposal = (
   return proposal.value;
 };
 
-const READY_VERIFICATION_STEP_ID = 'verify-change';
+const READY_VALIDATION_STEP_ID = 'run-validation';
 
 type ReadyPlanningDecisionOptions = {
   readonly task?: TestTaskFixture;
@@ -373,9 +378,9 @@ export const makeReadyPlanningDecision = (
         verification: [
           {
             kind: 'process',
-            profile: verificationPlan.profile,
+            profile: verificationPlan.validationProfile,
             scenario: 'Run the workflow verification step.',
-            workflowStepIds: [READY_VERIFICATION_STEP_ID],
+            workflowStepIds: [READY_VALIDATION_STEP_ID],
           },
         ],
       },

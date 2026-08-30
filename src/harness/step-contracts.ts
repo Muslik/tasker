@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { HarnessStepManifest, HarnessStepSource } from './contracts.js';
+import { ValidationProfileSchema } from '../workflow/archetypes/index.js';
 
 export const taskInputSchema = z
   .object({
@@ -28,12 +29,7 @@ export const runtimeObservationInputSchema = taskInputSchema
     }
   });
 
-export const verificationInputSchema = z
-  .object({
-    profile: z.string().min(1),
-    taskId: z.string().min(1),
-  })
-  .strict();
+export const validationInputSchema = z.object({ profile: ValidationProfileSchema }).strict();
 
 export const processInputSchema = z
   .object({
@@ -351,6 +347,7 @@ const contractSchemas = {
   integration_output: integrationOutputSchema,
   runtime_observation_input: runtimeObservationInputSchema,
   runtime_observation_output: runtimeObservationOutputSchema,
+  validation_input: validationInputSchema,
   process_input: processInputSchema,
   process_output: processOutputSchema,
   pull_request_input: pullRequestInputSchema,
@@ -358,10 +355,6 @@ const contractSchemas = {
   reproduction_input: reproductionInputSchema,
   reproduction_output: reproductionOutputSchema,
   task_input: taskInputSchema,
-  verification_targeted_input: verificationInputSchema.extend({ profile: z.literal('targeted') }),
-  verification_full_input: verificationInputSchema.extend({ profile: z.literal('full') }),
-  verification_build_input: verificationInputSchema.extend({ profile: z.literal('build') }),
-  verification_visual_input: verificationInputSchema.extend({ profile: z.literal('visual') }),
 } as const satisfies Readonly<Record<HarnessStepManifest['inputContract'], z.ZodType>>;
 
 const versionedIdentity = (

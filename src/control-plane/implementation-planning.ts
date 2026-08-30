@@ -4,11 +4,19 @@ import {
   applyHarnessPolicySkills,
   harnessPolicyAppliesToTask,
   loadHarnessPack,
+  VALIDATION_PROCESS_COMMAND_REFERENCES,
+  ValidationProcessExecutionPlansSchema,
+  validationProcessCommandReference,
   resolveAgentExecutionProfile,
   resolveImplementationPlannerProfile,
   resolveTaskExecutionProfile,
 } from '../harness/index.js';
-import type { LoadedHarnessPack, LoadedPrompt } from '../harness/index.js';
+import type {
+  LoadedHarnessPack,
+  LoadedPrompt,
+  ProcessExecutionBinding,
+  ValidationProcessCommandReference,
+} from '../harness/index.js';
 import type { EventRecord, JsonValue, LedgerConflict } from '../ledger/types.js';
 import type { LedgerRepository } from '../ledger/repository.js';
 import { checksumString } from '../ledger/checksum.js';
@@ -44,7 +52,7 @@ import {
   ExecutionRunSnapshotSchema,
   RunPlanningSnapshotSchema,
 } from '../planning/run-planning-snapshot.js';
-import type { ImplementationPlanningFailureSchema } from '../planning/planning-failure.js';
+import type { ImplementationPlanningFailure } from '../planning/planning-failure.js';
 import type {
   ImplementationPlanner,
   ImplementationPlannerDecisionSuccess,
@@ -52,7 +60,12 @@ import type {
 } from '../providers/implementation-planner.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { resolveDeliverPrScaffoldConfig, scaffoldDeliverPr } from '../workflow/index.js';
+import {
+  resolveDeliverPrScaffoldConfig,
+  scaffoldDeliverPr,
+  VALIDATION_PROFILES,
+  VALIDATION_RUN_STEP_REFERENCE,
+} from '../workflow/index.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../workflow/schema.js';
 import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
 import {
@@ -116,6 +129,16 @@ export type ImplementationPlanningStoreError =
       readonly expectedChecksum: string;
       readonly actualChecksum: string;
     };
+
+interface ProjectValidationMissingFailure {
+  readonly kind: 'project_validation_missing';
+  readonly repositoryReference: string;
+  readonly expectedKeys: typeof VALIDATION_PROCESS_COMMAND_REFERENCES;
+  readonly missingKeys: readonly ValidationProcessCommandReference[];
+}
+
+type ImplementationPlanningFailureInput =
+  ImplementationPlannerFailure | ProjectValidationMissingFailure;
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const aggregateIdFor = (planningEpisodeId: string): string =>
@@ -771,7 +794,7 @@ export class ImplementationPlanningStore {
 
   public fail(
     planning: Extract<ImplementationPlanningRecord, { readonly status: 'planning' }>,
-    failure: ImplementationPlannerFailure,
+    failure: ImplementationPlanningFailureInput,
     receipt: ImplementationPlannerDecisionSuccess['receipt'] | null = null,
   ): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
     const current = this.read(planning.planningEpisodeId);
@@ -873,9 +896,17 @@ export class ImplementationPlanningStore {
 }
 
 const planningFailureView = (
-  failure: ImplementationPlannerFailure,
-): z.infer<typeof ImplementationPlanningFailureSchema> => {
+  failure: ImplementationPlanningFailureInput,
+): ImplementationPlanningFailure => {
   switch (failure.kind) {
+    case 'project_validation_missing':
+      return {
+        ...failure,
+        expectedKeys: [...failure.expectedKeys],
+        missingKeys: [...failure.missingKeys],
+        message: `Project ${failure.repositoryReference} must declare ${failure.expectedKeys.join(', ')}; missing ${failure.missingKeys.join(', ')}.`,
+        retryable: false,
+      };
     case 'invalid_skill_selection':
       return { kind: failure.kind, message: failure.issues.join('; '), retryable: false };
     case 'invalid_skill_package':
@@ -981,6 +1012,7 @@ const snapshotHarness = (
     .filter(
       (step) =>
         step.block.executor.kind !== 'process' ||
+        step.block.executor.executor === VALIDATION_RUN_STEP_REFERENCE ||
         resolveSnapshottedProcess(step.block.executor.executor, pack, project) !== null,
     )
     .map((step) => {
@@ -1019,8 +1051,22 @@ const resolveSnapshottedProcess = (
   executor: string,
   pack: LoadedHarnessPack,
   project: LoadedHarnessPack['projects'][number] | undefined,
-): LoadedHarnessPack['company']['processCommands'][string] | null =>
-  project?.processCommands[executor] ?? pack.company.processCommands[executor] ?? null;
+): ProcessExecutionBinding | null => {
+  if (executor === VALIDATION_RUN_STEP_REFERENCE) {
+    if (project === undefined) return null;
+    const profiles = ValidationProcessExecutionPlansSchema.safeParse(
+      Object.fromEntries(
+        VALIDATION_PROFILES.map((profile) => [
+          profile,
+          project.processCommands[validationProcessCommandReference(profile)],
+        ]),
+      ),
+    );
+    return profiles.success ? { kind: 'validation', profiles: profiles.data } : null;
+  }
+  const plan = project?.processCommands[executor] ?? pack.company.processCommands[executor];
+  return plan === undefined ? null : { kind: 'fixed', plan };
+};
 
 const selectStrategy = (
   requested: PlanningStrategyRequest,
@@ -1051,12 +1097,27 @@ const materializeDeliverPrScaffold = (input: {
   readonly task: WorkflowGenerationSubject['task'];
   readonly taskSnapshot: WorkflowGenerationSubject['taskSnapshot'];
   readonly blocks: readonly LoadedHarnessPack['steps'][number]['block'][];
+  readonly project: LoadedHarnessPack['projects'][number] | null;
   readonly policies: readonly LoadedHarnessPack['policies'][number][];
   readonly decision: ReadyImplementationPlanningDecision;
 }): Outcome<
   z.infer<typeof SemanticWorkflowSourceSchema>,
-  { readonly kind: 'slot_error'; readonly issues: readonly string[] }
+  | { readonly kind: 'slot_error'; readonly issues: readonly string[] }
+  | ProjectValidationMissingFailure
 > => {
+  const expectedKeys = VALIDATION_PROCESS_COMMAND_REFERENCES;
+  const missingKeys = expectedKeys.filter(
+    (reference) => input.project?.processCommands[reference] === undefined,
+  );
+  if (missingKeys.length > 0) {
+    return err({
+      kind: 'project_validation_missing',
+      repositoryReference: input.task.repository,
+      expectedKeys,
+      missingKeys,
+    });
+  }
+
   const config = resolveDeliverPrScaffoldConfig(input.policies);
   const blockByReference = new Map(input.blocks.map((block) => [block.reference, block] as const));
 
@@ -1064,6 +1125,14 @@ const materializeDeliverPrScaffold = (input: {
     const block = blockByReference.get(reference);
     if (block?.availableDuring.includes('execution') === true) continue;
     throwInternalDeliverPrInvariant(`missing required execution block ${reference}`);
+  }
+  if (
+    blockByReference.get(VALIDATION_RUN_STEP_REFERENCE)?.availableDuring.includes('execution') !==
+    true
+  ) {
+    throwInternalDeliverPrInvariant(
+      `missing required execution block ${VALIDATION_RUN_STEP_REFERENCE}`,
+    );
   }
 
   const unavailableSegments = input.decision.segments.flatMap((segment) => {
@@ -1085,6 +1154,9 @@ const materializeDeliverPrScaffold = (input: {
       taskSnapshot: input.taskSnapshot,
       objective: input.decision.plan.summary,
       segments: input.decision.segments,
+      verification: {
+        validationProfile: input.decision.verification.validationProfile,
+      },
     },
     config,
   );
@@ -1155,7 +1227,7 @@ export class ImplementationPlanningCoordinator {
       }),
     );
     const snapshot: PlanningContextSnapshot = PlanningContextSnapshotSchema.parse({
-      schemaVersion: 10,
+      schemaVersion: 11,
       kind: 'planning_context',
       taskReference,
       workflowRunId,
@@ -1223,7 +1295,7 @@ export class ImplementationPlanningCoordinator {
       CompiledWorkflowSchema.parse(graph.data).metadata.references.stepTypes,
     );
     const snapshot: ExecutionRunSnapshot = ExecutionRunSnapshotSchema.parse({
-      schemaVersion: 10,
+      schemaVersion: 11,
       kind: 'execution',
       executionStrategy,
       semanticHash,
@@ -1668,6 +1740,7 @@ export class ImplementationPlanningCoordinator {
     const planningInput = {
       subject,
       blocks: loaded.value.harness.steps.map(({ block }) => block),
+      project: loaded.value.harness.project,
       policies: loaded.value.harness.policies,
       promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
       plannerSkills: loaded.value.harness.implementationPlanner.skills,
@@ -1849,10 +1922,15 @@ export class ImplementationPlanningCoordinator {
             task: planningInput.subject.task,
             taskSnapshot: planningInput.subject.taskSnapshot,
             blocks: planningInput.blocks,
+            project: planningInput.project,
             policies: planningInput.policies,
             decision: result.value.decision,
           });
           if (!scaffold.ok) {
+            if (scaffold.error.kind === 'project_validation_missing') {
+              const failed = this.store.fail(planning, scaffold.error, result.value.receipt);
+              return failed.ok ? failed : err({ kind: 'store', error: failed.error });
+            }
             if (planning.validationRevision >= 2) {
               const failed = this.store.fail(
                 planning,

@@ -16,6 +16,12 @@ const workflowSource = SemanticWorkflowSourceSchema.parse({
     children: [
       {
         kind: 'step',
+        id: 'run-validation',
+        uses: 'validation.run@1',
+        with: { profile: 'targeted' },
+      },
+      {
+        kind: 'step',
         id: 'verify-change',
         uses: 'verify.acceptance@1',
         with: {
@@ -67,6 +73,7 @@ const decision = {
   verification: {
     checks: ['Repeat the investigated scenario.'],
     profile: 'targeted',
+    validationProfile: 'targeted',
     rationale: 'The change is bounded to the payment page.',
   },
   rationale: 'deliver-pr is sufficient because no dependency or translation segment is required.',
@@ -146,5 +153,99 @@ describe('implementation plan acceptance contract', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('defaults an omitted validation profile to targeted', () => {
+    const parsed = ReadyImplementationPlanningDecisionSchema.parse({
+      ...decision,
+      verification: {
+        checks: ['Repeat the investigated scenario.'],
+        profile: 'targeted',
+        rationale: 'The change is bounded to the payment page.',
+      },
+    });
+
+    expect(parsed.verification.validationProfile).toBe('targeted');
+  });
+
+  it('accepts each explicit validation profile', () => {
+    expect(
+      ['targeted', 'full', 'build'].map(
+        (validationProfile) =>
+          ReadyImplementationPlanningDecisionSchema.parse({
+            ...decision,
+            verification: {
+              ...decision.verification,
+              validationProfile,
+            },
+          }).verification.validationProfile,
+      ),
+    ).toEqual(['targeted', 'full', 'build']);
+  });
+
+  it('rejects an unknown validation profile', () => {
+    const result = ReadyImplementationPlanningDecisionSchema.safeParse({
+      ...decision,
+      verification: {
+        ...decision.verification,
+        validationProfile: 'smoke',
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects process verification owned by the acceptance judge', () => {
+    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+      ...decision,
+      plan: {
+        ...decision.plan,
+        acceptanceCriteria: [
+          {
+            id: 'validation-passes',
+            expected: 'The project validation profile passes.',
+            verification: [
+              {
+                kind: 'process',
+                profile: 'targeted',
+                scenario: 'Run deterministic project validation.',
+                workflowStepIds: ['verify-change'],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(validateAcceptanceVerificationLinks(candidate, workflowSource)).toContain(
+      'Acceptance criterion validation-passes process verification must reference only run-validation.',
+    );
+  });
+
+  it('rejects a process profile that differs from the verification slot', () => {
+    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+      ...decision,
+      plan: {
+        ...decision.plan,
+        acceptanceCriteria: [
+          {
+            id: 'validation-passes',
+            expected: 'The project validation profile passes.',
+            verification: [
+              {
+                kind: 'process',
+                profile: 'full',
+                scenario: 'Run deterministic project validation.',
+                workflowStepIds: ['run-validation'],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(validateAcceptanceVerificationLinks(candidate, workflowSource)).toContain(
+      'Acceptance criterion validation-passes process profile full does not match validation profile targeted.',
+    );
   });
 });

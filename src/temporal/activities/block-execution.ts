@@ -22,6 +22,7 @@ import type {
   LoadedHarnessStep,
   ResolvedExecutionProfile,
 } from '../../harness/index.js';
+import { processExecutionPlanFor } from '../../harness/index.js';
 import {
   emptyIntegrationStepAdapterRegistry,
   type IntegrationStepAdapterRegistry,
@@ -2221,6 +2222,17 @@ export const executeRegisteredTaskStep = async (
       artifactIds,
     );
   }
+  const processPlan = processExecutionPlanFor(snapshottedStep.resolvedProcess, validatedInput.data);
+  if (processPlan === null) {
+    const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
+      kind: 'process_profile_missing',
+    });
+    return block(
+      `Process profile for ${input.uses} is absent from the immutable planning snapshot`,
+      blockingWaitKindFor(input.uses),
+      artifactIds,
+    );
+  }
   const acceptsAnyExit = acceptsAnyProcessExit(snapshottedStep.block.completion);
   const commandReceipts: Array<{
     readonly command: string;
@@ -2230,15 +2242,15 @@ export const executeRegisteredTaskStep = async (
   let stdout = '';
   let stderr = '';
   let processResult: CommandResult | null = null;
-  let failedCommand: (typeof snapshottedStep.resolvedProcess.commands)[number] | null = null;
-  for (const command of snapshottedStep.resolvedProcess.commands) {
+  let failedCommand: (typeof processPlan.commands)[number] | null = null;
+  for (const command of processPlan.commands) {
     runtime.heartbeat({ phase: 'process', nodeId: input.nodeId, command: command.command });
     const result = await dependencies.commands.run({
       command: command.command,
       args: command.args,
       cwd: input.workspace.path,
       stdin: '',
-      timeoutMs: snapshottedStep.resolvedProcess.timeoutMs,
+      timeoutMs: processPlan.timeoutMs,
       cancellationSignal: runtime.cancellationSignal,
       onOutput: (stream, chunk) => {
         const appended = dependencies.traces.append(
@@ -2315,8 +2327,8 @@ export const executeRegisteredTaskStep = async (
       },
       stdout,
       stderr,
-      failedCommand?.command ?? snapshottedStep.resolvedProcess.commands[0]?.command ?? null,
-      failedCommand?.args ?? snapshottedStep.resolvedProcess.commands[0]?.args ?? [],
+      failedCommand?.command ?? processPlan.commands[0]?.command ?? null,
+      failedCommand?.args ?? processPlan.commands[0]?.args ?? [],
       processResult.exitCode,
     );
     return block(
@@ -2333,7 +2345,7 @@ export const executeRegisteredTaskStep = async (
     stepReference: input.uses,
     stepAttempt: input.stepAttempt,
     runner: 'process',
-    command: snapshottedStep.resolvedProcess.commands.map(({ command }) => command).join(' → '),
+    command: processPlan.commands.map(({ command }) => command).join(' → '),
     args: [],
     cwd: input.workspace.path,
     exitCode: processResult.exitCode,

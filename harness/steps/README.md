@@ -26,11 +26,11 @@ A semantic block declares:
 - effects, capabilities, artifacts, retry/resume, reconciliation boundaries, and any
   internal operation protocol.
 
-A Verify block resolves registered project command/runtime operations; a Delivery-preparation
-agent finalizes reviewed artifacts and the typed PR draft; deterministic Delivery resolves typed
-Git/tracker/SCM/CI adapters. Every internal operation has its own durable
-receipt and Run Inspector event, but is not a task workflow node merely because it is
-mechanically separate.
+A validation process block resolves registered project commands. The Verify agent judges its
+receipt and gathers required runtime or visual evidence. A Delivery-preparation agent finalizes
+reviewed artifacts and the typed PR draft; deterministic Delivery resolves typed
+Git/tracker/SCM/CI adapters. Every internal operation has its own durable receipt and Run Inspector
+event, but is not a task workflow node merely because it is mechanically separate.
 
 The planner produces a small Semantic Workflow Source. Deterministic compilation may
 lower a selected block to a larger executable Temporal IR. That IR is diagnostic and is

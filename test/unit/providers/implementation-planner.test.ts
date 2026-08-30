@@ -114,6 +114,7 @@ const readyDecision = {
   verification: {
     checks: proposal.verificationPlan.checks,
     profile: proposal.verificationPlan.profile,
+    validationProfile: proposal.verificationPlan.validationProfile,
     rationale: proposal.verificationPlan.rationale,
   },
   rationale:
@@ -478,6 +479,38 @@ describe('Codex CLI implementation planner', () => {
     const result = await planner.plan(request('fast'));
 
     expect(result).toMatchObject({ ok: false, error: { kind: 'invalid_planner_output' } });
+  });
+
+  it('defaults an omitted validation profile in provider output to targeted', async () => {
+    const runner = new RecordingRunner(
+      JSON.stringify({
+        decision: {
+          ...providerReadyDecision,
+          verification: {
+            checks: providerReadyDecision.verification.checks,
+            profile: providerReadyDecision.verification.profile,
+            rationale: providerReadyDecision.verification.rationale,
+          },
+        },
+        evidenceRequests: [],
+      }),
+    );
+    const planner = new SubscriptionCliImplementationPlanner(runner);
+
+    const result = await planner.plan(request('fast'));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        decision: {
+          ...readyDecision,
+          verification: {
+            ...readyDecision.verification,
+            validationProfile: 'targeted',
+          },
+        },
+      },
+    });
   });
 
   it('reports invalid segment selections on decision.segments for correction feedback', async () => {

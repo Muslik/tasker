@@ -5,7 +5,7 @@ import {
   loadHarnessPack,
   resolveAgentExecutionProfile,
   resolveImplementationPlannerProfile,
-  type ProcessExecutionPlan,
+  type ProcessExecutionBinding,
 } from '../../src/harness/index.js';
 import {
   IntegrationStepAdapterRegistry,
@@ -125,7 +125,7 @@ const makeSnapshot = (
     readonly repositoryReference?: string;
     readonly workspacePath?: string;
     readonly workspaceId?: string;
-    readonly resolvedProcess?: ProcessExecutionPlan;
+    readonly resolvedProcess?: ProcessExecutionBinding;
   } = {},
 ) => {
   const promptContent = options.promptContent ?? 'SNAPSHOT PROMPT';
@@ -154,11 +154,13 @@ const makeSnapshot = (
     activityDelivery: current.contract.activityDelivery,
     resolvedProcess:
       current.block.executor.kind === 'process'
-        ? (options.resolvedProcess ??
-          snapshotProject.processCommands[current.block.executor.executor] ??
-          pack.company.processCommands[current.block.executor.executor] ?? {
-            commands: [{ command: 'false', args: [] }],
-            timeoutMs: 35 * 60_000,
+        ? (options.resolvedProcess ?? {
+            kind: 'fixed',
+            plan: snapshotProject.processCommands[current.block.executor.executor] ??
+              pack.company.processCommands[current.block.executor.executor] ?? {
+                commands: [{ command: 'false', args: [] }],
+                timeoutMs: 35 * 60_000,
+              },
           })
         : null,
     executionProfile:
@@ -171,7 +173,7 @@ const makeSnapshot = (
         : null,
   };
   return RunPlanningSnapshotSchema.parse({
-    schemaVersion: 10,
+    schemaVersion: 11,
     kind: 'execution',
     executionStrategy: 'simple',
     semanticHash: '5'.repeat(64),
@@ -1172,8 +1174,11 @@ describe('temporal block execution activity', () => {
                 workspacePath: componentWorkspace.path,
                 workspaceId: componentWorkspace.workspaceId,
                 resolvedProcess: {
-                  commands: [{ command: 'pnpm', args: ['translations:extract'] }],
-                  timeoutMs: 35 * 60_000,
+                  kind: 'fixed',
+                  plan: {
+                    commands: [{ command: 'pnpm', args: ['translations:extract'] }],
+                    timeoutMs: 35 * 60_000,
+                  },
                 },
               }),
             ),
@@ -1202,6 +1207,123 @@ describe('temporal block execution activity', () => {
         cwd: componentWorkspace.path,
       }),
     );
+  });
+
+  it('runs the snapshotted validation profile and preserves a failing exit as evidence', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    let invocation = 0;
+    const commands: CommandRunner['run'] = vi.fn(() => {
+      invocation += 1;
+      return Promise.resolve(
+        invocation === 1
+          ? {
+              status: 'exited' as const,
+              exitCode: 0,
+              stdout: 'typecheck ok\n',
+              stderr: '',
+              durationMs: 3,
+            }
+          : {
+              status: 'exited' as const,
+              exitCode: 7,
+              stdout: '',
+              stderr: 'tests failed\n',
+              durationMs: 4,
+            },
+      );
+    });
+
+    const result = await executeRegisteredTaskStep(
+      {
+        taskReference: 'task-ref',
+        workflowId: stubWorkspace.workflowId,
+        workflowRunId: stubWorkspace.workflowRunId,
+        workflowHash: WORKFLOW_HASH,
+        nodeId: 'run-validation',
+        stepAttempt: 1,
+        uses: 'validation.run@1',
+        activityDelivery: { kind: 'single_attempt' },
+        workspace: stubWorkspace,
+        planningSnapshot: {
+          artifactId: 'planning-snapshot:test',
+          checksum: 'd'.repeat(64),
+        },
+        operatorGuidance: null,
+        waitResolution: null,
+        input: { profile: 'full' },
+      },
+      {
+        snapshots: {
+          readRunSnapshot: () =>
+            ok(
+              makeSnapshot('validation.run@1', {
+                resolvedProcess: {
+                  kind: 'validation',
+                  profiles: {
+                    targeted: {
+                      commands: [{ command: 'pnpm', args: ['typecheck'] }],
+                      timeoutMs: 35 * 60_000,
+                    },
+                    full: {
+                      commands: [
+                        { command: 'pnpm', args: ['typecheck'] },
+                        { command: 'pnpm', args: ['test'] },
+                      ],
+                      timeoutMs: 35 * 60_000,
+                    },
+                    build: {
+                      commands: [{ command: 'pnpm', args: ['build'] }],
+                      timeoutMs: 35 * 60_000,
+                    },
+                  },
+                },
+              }),
+            ),
+        },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        agentRunner: { run: vi.fn() },
+        commands: workspaceCommands(commands),
+        workspaces: stubWorkspaceStore,
+      },
+      {
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      summary: 'validation.run@1 completed with exit code 7',
+    });
+    expect(commands).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ command: 'pnpm', args: ['typecheck'] }),
+    );
+    expect(commands).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ command: 'pnpm', args: ['test'] }),
+    );
+    expect(traces.readRunStepEvidence(stubWorkspace.workflowId)).toMatchObject({
+      ok: true,
+      value: [
+        {
+          nodeId: 'run-validation',
+          stepReference: 'validation.run@1',
+          status: 'completed',
+          details: {
+            output: { exitCode: 7 },
+            commands: [
+              { command: 'pnpm', args: ['typecheck'], exitCode: 0 },
+              { command: 'pnpm', args: ['test'], exitCode: 7 },
+            ],
+          },
+        },
+      ],
+    });
   });
 
   it('persists a reconciled integration result before returning it to Temporal', async () => {

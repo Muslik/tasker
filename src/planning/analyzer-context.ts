@@ -1,4 +1,9 @@
-import { JsonValueSchema, toContractReference, type JsonValue } from '../workflow/index.js';
+import {
+  JsonValueSchema,
+  toContractReference,
+  VALIDATION_RUN_STEP_REFERENCE,
+  type JsonValue,
+} from '../workflow/index.js';
 import { z } from 'zod';
 import {
   applyHarnessPolicySkills,
@@ -68,6 +73,7 @@ export const createWorkflowAnalyzerContext = (
           if (owner === undefined || !harnessPolicyAppliesToTask(owner, task)) return false;
         }
         if (step.block.executor.kind !== 'process') return true;
+        if (step.block.executor.executor === VALIDATION_RUN_STEP_REFERENCE) return true;
         return (
           harnessProject?.processCommands[step.block.executor.executor] !== undefined ||
           pack.company.processCommands[step.block.executor.executor] !== undefined

@@ -47,9 +47,9 @@ describe('implementation plan Markdown', () => {
             },
             {
               kind: 'process',
-              profile: 'full_with_visual',
+              profile: 'full',
               scenario: 'Complete the repository validation profile.',
-              workflowStepIds: ['validate-payment'],
+              workflowStepIds: ['run-validation'],
             },
           ],
         },
@@ -74,7 +74,7 @@ describe('implementation plan Markdown', () => {
       '**Inspect pull request:** The PR contains only the payment spacing change.',
     );
     expect(markdown).toContain(
-      '**Full verification with visual comparison:** Complete the repository validation profile.',
+      '**Full verification:** Complete the repository validation profile.',
     );
     expect(markdown).not.toMatch(/\[(runtime_evidence|process|inspection|automated_test)\]/u);
     expect(markdown).not.toContain('full_with_visual');

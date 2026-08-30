@@ -110,7 +110,7 @@ describe('Jira bootstrap context assembly', () => {
     expect(snapshot.ok).toBe(true);
     if (!snapshot.ok) throw new Error(`Expected planning snapshot: ${snapshot.error.kind}`);
     expect(snapshot.value).toMatchObject({
-      schemaVersion: 10,
+      schemaVersion: 11,
       kind: 'planning_context',
       taskReference,
       repository: { path: workspacePath, reference: 'onetwotrip/front-avia' },
@@ -138,7 +138,7 @@ describe('Jira bootstrap context assembly', () => {
     expect('graph' in decision).toBe(false);
     expect('topology' in decision).toBe(false);
     expect(decision.plan.acceptanceCriteria[0]?.verification[0]?.workflowStepIds).toEqual([
-      'verify-change',
+      'run-validation',
     ]);
 
     const planned = await planning.prepare(
@@ -149,10 +149,10 @@ describe('Jira bootstrap context assembly', () => {
       assembled.value.planningSnapshot,
       assembled.value.evidenceBundle,
     );
-    expect(planned).toMatchObject({ ok: true, value: { status: 'ready' } });
     if (!planned.ok || planned.value.status !== 'ready') {
-      throw new Error('Expected ready implementation plan');
+      throw new Error(`Expected ready implementation plan: ${JSON.stringify(planned)}`);
     }
+    expect(planned).toMatchObject({ ok: true, value: { status: 'ready' } });
 
     const plannedWorkflow = workflows.readPlanningOperation(
       taskReference,
@@ -166,7 +166,9 @@ describe('Jira bootstrap context assembly', () => {
     const semanticSource = SemanticWorkflowSourceSchema.parse(
       plannedWorkflow.value.view.workflow.semanticSource,
     );
-    expect(collectStepIds(semanticSource.root)).toContain('verify-change');
+    expect(collectStepIds(semanticSource.root)).toEqual(
+      expect.arrayContaining(['run-validation', 'verify-change']),
+    );
 
     const evidence = evidenceBundles.readMaterialized(assembled.value.evidenceBundle);
     expect(evidence.ok).toBe(true);

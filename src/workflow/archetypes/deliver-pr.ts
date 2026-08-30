@@ -14,6 +14,8 @@ export const DELIVER_PR_SEGMENTS = ['dependency_await', 'translations'] as const
 export const DeliverPrSegmentSchema = z.enum(DELIVER_PR_SEGMENTS);
 export type DeliverPrSegment = z.infer<typeof DeliverPrSegmentSchema>;
 
+export const VALIDATION_RUN_STEP_REFERENCE = 'validation.run@1';
+
 export const DeliverPrSegmentsSchema = z
   .array(DeliverPrSegmentSchema)
   .max(DELIVER_PR_SEGMENTS.length)
@@ -32,6 +34,7 @@ export const DELIVER_PR_NODE_IDS = Object.freeze({
   developmentLoop: 'development',
   developmentAttempt: 'development-attempt',
   implement: 'implement-change',
+  runValidation: 'run-validation',
   verify: 'verify-change',
   review: 'review-change',
   prepare: 'prepare-delivery',
@@ -205,12 +208,21 @@ const DeliverPrTaskSnapshotSchema = z
   })
   .loose();
 
+export const VALIDATION_PROFILES = ['targeted', 'full', 'build'] as const;
+export const ValidationProfileSchema = z.enum(VALIDATION_PROFILES);
+export type ValidationProfile = z.infer<typeof ValidationProfileSchema>;
+
 const DeliverPrScaffoldInputSchema = z
   .object({
     task: DeliverPrTaskSchema,
     taskSnapshot: z.unknown(),
     objective: z.string().min(1),
     segments: DeliverPrSegmentsSchema,
+    verification: z
+      .object({
+        validationProfile: ValidationProfileSchema,
+      })
+      .strict(),
   })
   .strict();
 
@@ -287,6 +299,9 @@ export const scaffoldDeliverPr = (
     repository: task.repository,
     taskId: task.taskId,
   };
+  const validationInput = {
+    profile: input.data.verification.validationProfile,
+  } as const;
   const [implementReference, verifyReference, reviewReference, prepareReference, deliverReference] =
     config.requiredStages;
   const optional: SemanticNodeSource[] = [];
@@ -350,6 +365,11 @@ export const scaffoldDeliverPr = (
                         children: [
                           step(DELIVER_PR_NODE_IDS.implement, implementReference, taskInput),
                           ...optional,
+                          step(
+                            DELIVER_PR_NODE_IDS.runValidation,
+                            VALIDATION_RUN_STEP_REFERENCE,
+                            validationInput,
+                          ),
                           step(DELIVER_PR_NODE_IDS.verify, verifyReference, taskInput),
                         ],
                       },

@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { DeliverPrArchetypeSchema, DeliverPrSegmentsSchema } from '../workflow/archetypes/index.js';
+import {
+  DELIVER_PR_NODE_IDS,
+  DeliverPrArchetypeSchema,
+  DeliverPrSegmentsSchema,
+  ValidationProfileSchema,
+} from '../workflow/archetypes/index.js';
 import { JsonValueSchema, NodeIdSchema } from '../workflow/schema.js';
 import type { SemanticNodeSource, SemanticWorkflowSource } from '../workflow/semantic-schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
@@ -54,7 +59,7 @@ export const AcceptanceVerificationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('process'),
-      profile: z.string().min(1).max(160),
+      profile: ValidationProfileSchema,
       scenario: z.string().min(1).max(2_000),
       workflowStepIds: AcceptanceVerificationWorkflowStepsSchema,
     })
@@ -189,6 +194,23 @@ export const validateAcceptanceVerificationLinks = (
     }
     criterionIds.add(criterion.id);
     criterion.verification.forEach((verification) => {
+      if (
+        verification.kind === 'process' &&
+        (verification.workflowStepIds.length !== 1 ||
+          verification.workflowStepIds[0] !== DELIVER_PR_NODE_IDS.runValidation)
+      ) {
+        issues.push(
+          `Acceptance criterion ${criterion.id} process verification must reference only ${DELIVER_PR_NODE_IDS.runValidation}.`,
+        );
+      }
+      if (
+        verification.kind === 'process' &&
+        verification.profile !== decision.verification.validationProfile
+      ) {
+        issues.push(
+          `Acceptance criterion ${criterion.id} process profile ${verification.profile} does not match validation profile ${decision.verification.validationProfile}.`,
+        );
+      }
       verification.workflowStepIds.forEach((stepId) => {
         if (!stepIds.has(stepId)) {
           issues.push(

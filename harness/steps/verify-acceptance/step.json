@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "reference": "verify.acceptance@1",
-  "description": "Independently execute the accepted verification strategy and judge task acceptance.",
+  "description": "Judge deterministic validation receipts and gather required runtime or visual evidence.",
   "stage": { "id": "development", "label": "Development" },
   "availableDuring": ["execution"],
   "inputContract": "task_input",

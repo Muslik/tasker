@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ValidationProfileSchema } from '../workflow/archetypes/index.js';
 import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
 
 export const VerificationProfileSchema = z.enum([
@@ -13,6 +14,7 @@ export const VerificationPlanSchema = z
   .object({
     checks: z.array(z.string().min(1)).min(1),
     profile: VerificationProfileSchema,
+    validationProfile: ValidationProfileSchema.default('targeted'),
     rationale: z.string().min(1),
   })
   .strict();
