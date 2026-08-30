@@ -10,4 +10,5 @@ export * from './subscription-cli-analyzer.js';
 export * from './command-runner.js';
 export * from './contracts.js';
 export * from './implementation-planner.js';
+export * from './retrospective-analyzer.js';
 export * from './subscription-cli-stream.js';

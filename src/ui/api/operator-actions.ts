@@ -48,7 +48,12 @@ import {
   type RepositoryCatalogEntry,
 } from '../../workspace/contracts.js';
 import { JiraProductResolutionSchema, type JiraProductResolution } from '../../shared/product.js';
-import { RetrospectiveResponseSchema, type RetrospectiveResponse } from '../../server/report.js';
+import {
+  RetrospectivePatternsSchema,
+  RetrospectiveResponseSchema,
+  type RetrospectivePatterns,
+  type RetrospectiveResponse,
+} from '../../server/report.js';
 import { deleteJson, getJson, getOptionalJson, postJson } from './http.js';
 import { operatorQueryKeys } from './query.js';
 
@@ -260,6 +265,27 @@ export const retrospectiveQueryOptions = (taskReference: string) =>
     queryKey: operatorQueryKeys.retrospective(taskReference),
     queryFn: () => fetchRetrospective(taskReference),
   });
+
+export const fetchRetrospectivePatterns = (): Promise<RetrospectivePatterns> =>
+  getJson('/api/operator/retrospectives/patterns', RetrospectivePatternsSchema);
+
+export const retrospectivePatternsQueryOptions = () =>
+  queryOptions({
+    queryKey: operatorQueryKeys.retrospectivePatterns(),
+    queryFn: fetchRetrospectivePatterns,
+  });
+
+export const setRetrospectiveProposalStatus = (
+  taskReference: string,
+  proposalId: string,
+  status: 'approved' | 'dismissed',
+): Promise<RetrospectiveResponse> =>
+  postJson(
+    `/api/operator/tasks/${encodeURIComponent(taskReference)}/retrospective/proposals/${encodeURIComponent(proposalId)}`,
+    z.object({ status: z.enum(['approved', 'dismissed']) }).strict(),
+    RetrospectiveResponseSchema,
+    { status },
+  );
 
 export const restartTask = (
   taskReference: string,

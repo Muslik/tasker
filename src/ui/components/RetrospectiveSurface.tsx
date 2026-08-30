@@ -1,9 +1,13 @@
-import type { RetrospectiveResponse } from '../../server/report.js';
+import type { RetrospectivePatterns, RetrospectiveResponse } from '../../server/report.js';
 
 export const RetrospectiveSurface = ({
   response,
+  patterns,
+  onProposalStatus,
 }: {
   readonly response: RetrospectiveResponse | undefined;
+  readonly patterns?: RetrospectivePatterns;
+  readonly onProposalStatus?: (proposalId: string, status: 'approved' | 'dismissed') => void;
 }) => {
   if (response === undefined) return null;
   if (response.status === 'pending')
@@ -64,13 +68,69 @@ export const RetrospectiveSurface = ({
               Proposed improvements
             </h3>
             {report.proposals.map((proposal) => (
-              <p className="rounded-md bg-muted/50 p-3 text-sm" key={proposal.id}>
+              <div className="rounded-md bg-muted/50 p-3 text-sm" key={proposal.id}>
                 <strong>{proposal.title}</strong>
                 <span className="mt-1 block text-muted-foreground">{proposal.rationale}</span>
-              </p>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Generality: {proposal.generalityRationale}
+                </span>
+                {proposal.harnessFile === undefined ? null : (
+                  <code className="mt-1 block text-xs">{proposal.harnessFile}</code>
+                )}
+                {proposal.status === 'proposed' && onProposalStatus === undefined ? null : (
+                  <span className="mt-2 block text-xs">Status: {proposal.status}</span>
+                )}
+                {proposal.status === 'proposed' && onProposalStatus !== undefined ? (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onProposalStatus(proposal.id, 'approved');
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onProposalStatus(proposal.id, 'dismissed');
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ) : null}
+                {proposal.status === 'approved' ? (
+                  <span className="mt-2 block text-xs text-muted-foreground">
+                    Apply manually in an interactive session
+                    {proposal.harnessFile === undefined ? '' : `: ${proposal.harnessFile}`}
+                  </span>
+                ) : null}
+              </div>
             ))}
           </div>
         ) : null}
+        {patterns === undefined ? null : (
+          <div className="mt-4 text-xs text-muted-foreground">
+            <h3 className="font-semibold uppercase tracking-wider">Error diary</h3>
+            {patterns.findings.length === 0 && patterns.proposals.length === 0 ? (
+              <p className="mt-1">No repeated patterns yet.</p>
+            ) : (
+              <div className="mt-1 space-y-1">
+                {patterns.findings.map((pattern) => (
+                  <p key={`finding-${pattern.stepReference}`}>
+                    {pattern.stepReference}: {pattern.count} finding{pattern.count === 1 ? '' : 's'}
+                  </p>
+                ))}
+                {patterns.proposals.map((pattern) => (
+                  <p key={`proposal-${pattern.target}`}>
+                    {pattern.target}: {pattern.count} proposal{pattern.count === 1 ? '' : 's'}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </details>
     </section>
   );

@@ -8,7 +8,7 @@ it('summarizes completed task outcome and metrics', () => {
   const response = {
     status: 'ready',
     report: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       taskReference: 'jira:FC-1',
       workflowId: 'workflow',
       workflowRunId: 'run',
@@ -21,6 +21,13 @@ it('summarizes completed task outcome and metrics', () => {
         outputTokens: 5,
         durationMs: 100,
         estimatedCostUsd: 0.01,
+        effort: {
+          waitResolutions: { count: 0, kinds: {} },
+          guidance: { count: 0, totalChars: 0 },
+          planReviews: { rounds: 0, annotations: 0 },
+          documentReviews: { rounds: 0, annotations: 0 },
+          restarts: 0,
+        },
         byStep: [],
       },
       findings: [],

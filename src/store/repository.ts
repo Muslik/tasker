@@ -959,6 +959,35 @@ export class LedgerRepository {
       }));
   }
 
+  public listStreamEventsForTask(taskReference: string): readonly StreamEventRecord[] {
+    return this.database
+      .prepare<
+        [{ readonly taskReference: string }],
+        {
+          seq: number;
+          task_reference: string;
+          event_type: string;
+          payload_json: string;
+          occurred_at: string;
+        }
+      >(
+        `
+          SELECT seq, task_reference, event_type, payload_json, occurred_at
+          FROM stream_events
+          WHERE task_reference = @taskReference
+          ORDER BY seq ASC
+        `,
+      )
+      .all({ taskReference })
+      .map((row) => ({
+        seq: row.seq,
+        taskReference: row.task_reference,
+        eventType: row.event_type,
+        payload: parseJson(row.payload_json),
+        occurredAt: row.occurred_at,
+      }));
+  }
+
   public readLatestStreamEventSequence(): number {
     return (
       this.database

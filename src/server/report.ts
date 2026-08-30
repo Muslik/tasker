@@ -4,8 +4,19 @@ import type { LedgerRepository } from '../store/repository.js';
 import type { JsonValue } from '../store/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { TaskStepOutputArtifactSchema } from '../steps/task-step-output.js';
 import { JsonValueSchema } from '../graph/schema.js';
+import {
+  RetrospectiveFindingSchema,
+  RetrospectiveAnalyzerProposalSchema,
+  RetrospectiveProposalSchema,
+  type RetrospectiveAnalyzerOutput,
+} from '../shared/retrospective.js';
+import {
+  buildAnalyzerDigest,
+  effortFor,
+  outputArtifacts,
+  type RetrospectiveDigestStep,
+} from './retrospective-data.js';
 
 const RetrospectiveStepMetricsSchema = z
   .object({
@@ -20,28 +31,36 @@ const RetrospectiveStepMetricsSchema = z
   })
   .strict();
 
-const RetrospectiveFindingSchema = z
+const RetrospectiveEffortSchema = z
   .object({
-    kind: z.enum(['cost', 'recovery']),
-    title: z.string().min(1),
-    detail: z.string().min(1),
-    evidenceReferences: z.array(z.string().min(1)),
-  })
-  .strict();
-
-const RetrospectiveProposalSchema = z
-  .object({
-    id: z.string().min(1),
-    target: z.enum(['harness', 'infrastructure']),
-    title: z.string().min(1),
-    rationale: z.string().min(1),
-    status: z.literal('proposed'),
+    waitResolutions: z
+      .object({
+        count: z.number().int().nonnegative(),
+        kinds: z.record(z.string(), z.number().int().nonnegative()),
+      })
+      .strict(),
+    guidance: z
+      .object({ count: z.number().int().nonnegative(), totalChars: z.number().int().nonnegative() })
+      .strict(),
+    planReviews: z
+      .object({
+        rounds: z.number().int().nonnegative(),
+        annotations: z.number().int().nonnegative(),
+      })
+      .strict(),
+    documentReviews: z
+      .object({
+        rounds: z.number().int().nonnegative(),
+        annotations: z.number().int().nonnegative(),
+      })
+      .strict(),
+    restarts: z.number().int().nonnegative(),
   })
   .strict();
 
 export const RetrospectiveReportSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     taskReference: z.string().min(1),
     workflowId: z.string().min(1),
     workflowRunId: z.string().min(1),
@@ -55,6 +74,7 @@ export const RetrospectiveReportSchema = z
         outputTokens: z.number().int().nonnegative(),
         durationMs: z.number().nonnegative(),
         estimatedCostUsd: z.number().nonnegative(),
+        effort: RetrospectiveEffortSchema,
         byStep: z.array(RetrospectiveStepMetricsSchema),
       })
       .strict(),
@@ -69,31 +89,49 @@ export const RetrospectiveResponseSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ready'), report: RetrospectiveReportSchema }).strict(),
 ]);
 
-export type RetrospectiveResponse = z.infer<typeof RetrospectiveResponseSchema>;
+export const RetrospectivePatternsSchema = z
+  .object({
+    findings: z.array(
+      z.object({ stepReference: z.string().min(1), count: z.number().int().positive() }).strict(),
+    ),
+    proposals: z.array(
+      z.object({ target: z.string().min(1), count: z.number().int().positive() }).strict(),
+    ),
+  })
+  .strict();
 
+export type RetrospectiveResponse = z.infer<typeof RetrospectiveResponseSchema>;
 export type RetrospectiveReport = z.infer<typeof RetrospectiveReportSchema>;
+export type RetrospectivePatterns = z.infer<typeof RetrospectivePatternsSchema>;
 
 export interface RetrospectiveRunIndex {
   readonly report: RetrospectiveReport;
   readonly blockRuns: Readonly<Record<string, number>>;
 }
 
+export type { RetrospectiveDigestStep } from './retrospective-data.js';
+
 export type RetrospectiveStoreError =
   | { readonly kind: 'ledger_conflict' }
-  | { readonly kind: 'report_corrupt'; readonly issues: readonly string[] };
+  | { readonly kind: 'report_corrupt'; readonly issues: readonly string[] }
+  | { readonly kind: 'proposal_not_found' }
+  | { readonly kind: 'proposal_conflict' };
 
+const REPORT_DOCUMENT_KIND = 'retrospective_report';
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const reportId = (workflowId: string, workflowRunId: string): string =>
   `retrospective:${workflowId}:${workflowRunId}`;
 
-const outputArtifacts = (ledger: LedgerRepository, workflowId: string, workflowRunId: string) => {
-  return ledger.listArtifacts({ artifactKind: 'task_step_output' }).flatMap((artifact) => {
-    const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
-    if (!parsed.success) return [];
-    return parsed.data.workflowId === workflowId && parsed.data.workflowRunId === workflowRunId
-      ? [{ artifactId: artifact.artifactId, output: parsed.data }]
-      : [];
-  });
+const safeReport = (payload: unknown): Outcome<RetrospectiveReport, RetrospectiveStoreError> => {
+  const parsed = RetrospectiveReportSchema.safeParse(payload);
+  return parsed.success
+    ? ok(parsed.data)
+    : err({
+        kind: 'report_corrupt',
+        issues: parsed.error.issues.map(
+          (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+        ),
+      });
 };
 
 export class RetrospectiveStore {
@@ -106,37 +144,28 @@ export class RetrospectiveStore {
     workflowId: string,
     workflowRunId: string,
   ): Outcome<RetrospectiveReport | null, RetrospectiveStoreError> {
-    const artifact = this.ledger.readArtifact(reportId(workflowId, workflowRunId));
-    if (artifact === null) return ok(null);
-    const parsed = RetrospectiveReportSchema.safeParse(artifact.payload);
-    return parsed.success
-      ? ok(parsed.data)
-      : err({
-          kind: 'report_corrupt',
-          issues: parsed.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
+    const id = reportId(workflowId, workflowRunId);
+    const document = this.ledger.readDocument(REPORT_DOCUMENT_KIND, id);
+    if (document !== null) return safeReport(document.payload);
+    const artifact = this.ledger.readArtifact(id);
+    return artifact === null ? ok(null) : safeReport(artifact.payload);
   }
 
   public readLatest(
     taskReference: string,
   ): Outcome<RetrospectiveReport | null, RetrospectiveStoreError> {
+    const documents = this.ledger.listDocuments(REPORT_DOCUMENT_KIND).toReversed();
+    for (const document of documents) {
+      const report = safeReport(document.payload);
+      if (!report.ok) return report;
+      if (report.value.taskReference === taskReference) return report;
+    }
     for (const artifact of this.ledger
-      .listArtifacts({ artifactKind: 'retrospective_report', taskReference })
+      .listArtifacts({ artifactKind: REPORT_DOCUMENT_KIND, taskReference })
       .toReversed()) {
-      const report = RetrospectiveReportSchema.safeParse(artifact.payload);
-      if (!report.success) {
-        return err({
-          kind: 'report_corrupt',
-          issues: report.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
-      }
-      if (report.data.taskReference === taskReference) {
-        return ok(report.data);
-      }
+      const report = safeReport(artifact.payload);
+      if (!report.ok) return report;
+      if (report.value.taskReference === taskReference) return report;
     }
     return ok(null);
   }
@@ -145,8 +174,7 @@ export class RetrospectiveStore {
     taskReference: string,
   ): Outcome<RetrospectiveRunIndex | null, RetrospectiveStoreError> {
     const latest = this.readLatest(taskReference);
-    if (!latest.ok) return latest;
-    if (latest.value === null) return ok(null);
+    if (!latest.ok || latest.value === null) return latest.ok ? ok(null) : latest;
     const blockRuns: Record<string, number> = {};
     for (const { output } of outputArtifacts(
       this.ledger,
@@ -158,16 +186,18 @@ export class RetrospectiveStore {
     return ok({ report: latest.value, blockRuns });
   }
 
-  public generate(input: {
-    readonly taskReference: string;
-    readonly workflowId: string;
-    readonly workflowRunId: string;
-    readonly outcome: string;
-  }): Outcome<RetrospectiveReport, RetrospectiveStoreError> {
+  public generate(
+    input: {
+      readonly taskReference: string;
+      readonly workflowId: string;
+      readonly workflowRunId: string;
+      readonly outcome: string;
+    },
+    analyzerOutput?: RetrospectiveAnalyzerOutput,
+  ): Outcome<RetrospectiveReport, RetrospectiveStoreError> {
     const existing = this.read(input.workflowId, input.workflowRunId);
     if (!existing.ok) return existing;
     if (existing.value !== null) return ok(existing.value);
-
     const artifacts = outputArtifacts(this.ledger, input.workflowId, input.workflowRunId);
     const byStep = new Map<string, z.infer<typeof RetrospectiveStepMetricsSchema>>();
     for (const { output } of artifacts) {
@@ -188,9 +218,8 @@ export class RetrospectiveStore {
         current.cachedInputTokens += output.usage.cachedInputTokens;
         current.outputTokens += output.usage.outputTokens;
         current.durationMs += output.usage.durationMs;
-        if (output.usage.apiCost.source === 'price_table') {
+        if (output.usage.apiCost.source === 'price_table')
           current.estimatedCostUsd += output.usage.apiCost.amountUsd;
-        }
       }
       byStep.set(output.stepReference, current);
     }
@@ -218,54 +247,42 @@ export class RetrospectiveStore {
       },
     );
     const expensive = steps.toSorted((left, right) => right.inputTokens - left.inputTokens)[0];
-    const blockedReferences = artifacts
-      .filter(({ output }) => output.status === 'blocked')
-      .map(({ artifactId }) => artifactId);
-    const findings: z.infer<typeof RetrospectiveFindingSchema>[] = [];
-    if (expensive !== undefined && expensive.inputTokens > 0) {
-      findings.push({
-        kind: 'cost',
-        title: `${expensive.stepReference} dominated measured token usage`,
-        detail: `${String(expensive.attempts)} attempts used ${String(expensive.inputTokens)} measured input tokens (${String(expensive.cachedInputTokens)} cached).`,
-        evidenceReferences: artifacts
-          .filter(({ output }) => output.stepReference === expensive.stepReference)
-          .map(({ artifactId }) => artifactId),
-      });
-    }
-    if (blockedReferences.length > 0) {
-      findings.push({
-        kind: 'recovery',
-        title: `${String(blockedReferences.length)} attempts required recovery`,
-        detail: 'Review the blocked attempt reasons before changing prompts or runtime policy.',
-        evidenceReferences: blockedReferences,
-      });
-    }
-    const proposals: z.infer<typeof RetrospectiveProposalSchema>[] = [];
-    if (expensive !== undefined && expensive.attempts > 1) {
-      proposals.push({
-        id: 'compact-repeated-step-context',
-        target: 'harness',
-        title: `Reduce repeated ${expensive.stepReference} context`,
-        rationale:
-          'Later attempts should receive the latest accepted evidence and repair delta instead of replaying the full run history.',
-        status: 'proposed',
-      });
-    }
-    if (blockedReferences.length > 0) {
-      proposals.push({
-        id: 'harden-recovery-prerequisites',
-        target: 'infrastructure',
-        title: 'Harden recurring runtime and integration prerequisites',
-        rationale:
-          'Blocked attempts are retained as evidence and should be reviewed for reusable infrastructure fixes.',
-        status: 'proposed',
-      });
-    }
+    const blocked = artifacts.filter(({ output }) => output.status === 'blocked');
+    const findings = z.array(RetrospectiveFindingSchema).parse([
+      ...(expensive === undefined || expensive.inputTokens === 0
+        ? []
+        : [
+            {
+              kind: 'cost',
+              stepReference: expensive.stepReference,
+              title: `${expensive.stepReference} dominated measured token usage`,
+              detail: `${String(expensive.attempts)} attempts used ${String(expensive.inputTokens)} measured input tokens (${String(expensive.cachedInputTokens)} cached).`,
+              evidenceReferences: artifacts
+                .filter(({ output }) => output.stepReference === expensive.stepReference)
+                .map(({ artifactId }) => artifactId),
+            },
+          ]),
+      ...(blocked.length === 0
+        ? []
+        : [
+            {
+              kind: 'recovery',
+              title: `${String(blocked.length)} attempts required recovery`,
+              detail:
+                'Review the blocked attempt reasons before changing prompts or runtime policy.',
+              evidenceReferences: blocked.map(({ artifactId }) => artifactId),
+            },
+          ]),
+      ...(analyzerOutput?.findings ?? []),
+    ]);
+    const proposals = z
+      .array(RetrospectiveAnalyzerProposalSchema)
+      .parse(analyzerOutput?.proposals ?? []);
     const generatedAt = this.clock.now();
     const report = RetrospectiveReportSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       ...input,
-      metrics: { ...totals, byStep: steps },
+      metrics: { ...totals, effort: effortFor(this.ledger, input.taskReference), byStep: steps },
       findings,
       proposals,
       generatedAt,
@@ -273,21 +290,111 @@ export class RetrospectiveStore {
     const id = reportId(input.workflowId, input.workflowRunId);
     const committed = this.ledger.insertArtifact({
       artifactId: id,
-      artifactKind: 'retrospective_report',
+      artifactKind: REPORT_DOCUMENT_KIND,
+      taskReference: input.taskReference,
       storageUri: `ledger://artifacts/${id}`,
       payload: asJson(report),
-      metadata: asJson({
-        taskReference: input.taskReference,
-        workflowId: input.workflowId,
-        workflowRunId: input.workflowRunId,
-        outcome: input.outcome,
-      }),
+      metadata: asJson({ taskReference: input.taskReference }),
       createdAt: generatedAt,
     });
-    if (committed) return ok(report);
+    if (!committed) {
+      const concurrent = this.read(input.workflowId, input.workflowRunId);
+      return concurrent.ok && concurrent.value !== null
+        ? ok(concurrent.value)
+        : err({ kind: 'ledger_conflict' });
+    }
+    const documented = this.ledger.insertDocument({
+      kind: REPORT_DOCUMENT_KIND,
+      id,
+      revision: 1,
+      payload: asJson(report),
+      createdAt: generatedAt,
+      updatedAt: generatedAt,
+    });
+    if (documented) return ok(report);
     const concurrent = this.read(input.workflowId, input.workflowRunId);
     return concurrent.ok && concurrent.value !== null
       ? ok(concurrent.value)
       : err({ kind: 'ledger_conflict' });
+  }
+
+  public buildAnalyzerDigest(
+    input: {
+      readonly taskReference: string;
+      readonly workflowId: string;
+      readonly workflowRunId: string;
+    },
+    stepDefinitions: readonly RetrospectiveDigestStep[],
+  ): string {
+    return buildAnalyzerDigest(this.ledger, input, stepDefinitions);
+  }
+
+  public setProposalStatus(
+    workflowId: string,
+    workflowRunId: string,
+    proposalId: string,
+    status: 'approved' | 'dismissed',
+  ): Outcome<RetrospectiveReport, RetrospectiveStoreError> {
+    const current = this.read(workflowId, workflowRunId);
+    if (!current.ok) return current;
+    if (current.value === null) return err({ kind: 'proposal_not_found' });
+    const proposal = current.value.proposals.find((candidate) => candidate.id === proposalId);
+    if (proposal === undefined) return err({ kind: 'proposal_not_found' });
+    const updated = RetrospectiveReportSchema.parse({
+      ...current.value,
+      proposals: current.value.proposals.map((candidate) =>
+        candidate.id === proposalId ? { ...candidate, status } : candidate,
+      ),
+    });
+    const document = this.ledger.readDocument(
+      REPORT_DOCUMENT_KIND,
+      reportId(workflowId, workflowRunId),
+    );
+    if (document === null) return err({ kind: 'proposal_conflict' });
+    const saved = this.ledger.appendDocument(
+      REPORT_DOCUMENT_KIND,
+      document.id,
+      document.revision,
+      asJson(updated),
+      this.clock.now(),
+    );
+    if (saved.ok) return ok(updated);
+    const concurrent = this.read(workflowId, workflowRunId);
+    return concurrent.ok && concurrent.value !== null
+      ? ok(concurrent.value)
+      : err({ kind: 'proposal_conflict' });
+  }
+
+  public patterns(): Outcome<RetrospectivePatterns, RetrospectiveStoreError> {
+    const reports = new Map<string, RetrospectiveReport>();
+    for (const document of this.ledger.listDocuments(REPORT_DOCUMENT_KIND)) {
+      const parsed = safeReport(document.payload);
+      if (!parsed.ok) return parsed;
+      reports.set(document.id, parsed.value);
+    }
+    for (const artifact of this.ledger.listArtifacts({ artifactKind: REPORT_DOCUMENT_KIND })) {
+      if (reports.has(artifact.artifactId)) continue;
+      const parsed = safeReport(artifact.payload);
+      if (!parsed.ok) return parsed;
+      reports.set(artifact.artifactId, parsed.value);
+    }
+    const findings = new Map<string, number>();
+    const proposals = new Map<string, number>();
+    for (const report of reports.values()) {
+      for (const finding of report.findings) {
+        const step = finding.stepReference ?? finding.evidenceReferences[0] ?? 'unknown';
+        findings.set(step, (findings.get(step) ?? 0) + 1);
+      }
+      for (const proposal of report.proposals)
+        proposals.set(proposal.target, (proposals.get(proposal.target) ?? 0) + 1);
+    }
+    return ok({
+      findings: [...findings]
+        .map(([stepReference, count]) => ({ stepReference, count }))
+        .sort((a, b) => b.count - a.count || a.stepReference.localeCompare(b.stepReference)),
+      proposals: [...proposals]
+        .map(([target, count]) => ({ target, count }))
+        .sort((a, b) => b.count - a.count || a.target.localeCompare(b.target)),
+    });
   }
 }

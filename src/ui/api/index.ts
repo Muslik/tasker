@@ -45,6 +45,7 @@ export {
   fetchPlanningTranscript,
   fetchRepositories,
   fetchRetrospective,
+  fetchRetrospectivePatterns,
   generateTask,
   previewJiraIssue,
   resolveJiraProduct,
@@ -64,4 +65,6 @@ export {
   planningTranscriptQueryOptions,
   repositoriesQueryOptions,
   retrospectiveQueryOptions,
+  retrospectivePatternsQueryOptions,
+  setRetrospectiveProposalStatus,
 } from './operator-actions.js';

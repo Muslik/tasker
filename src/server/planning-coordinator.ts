@@ -205,6 +205,11 @@ const snapshotHarness = (
     .filter((step) => referencedSteps === null || referencedSteps.has(step.reference))
     .filter(
       (step) =>
+        step.block.availableDuring.includes('execution') ||
+        step.block.availableDuring.includes('bootstrap_investigation'),
+    )
+    .filter(
+      (step) =>
         step.block.executor.kind !== 'process' ||
         step.block.executor.executor === VALIDATION_RUN_STEP_REFERENCE ||
         resolveSnapshottedProcess(step.block.executor.executor, pack, project) !== null,

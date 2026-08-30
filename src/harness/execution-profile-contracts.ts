@@ -108,6 +108,7 @@ export const ResolvedExecutionProfileSchema = z.discriminatedUnion('provider', [
 export const ExecutionProfileRoutingSchema = z
   .object({
     workflowAnalyzer: ExecutionProfileNameSchema,
+    retrospective: ExecutionProfileNameSchema.optional(),
     implementationPlanner: z
       .object({
         fast: ExecutionProfileNameSchema,

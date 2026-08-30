@@ -42,7 +42,7 @@ describe('completed run lifecycle', () => {
   it('reconstructs a read-only completed projection from durable ledger indexes', () => {
     const hash = 'a'.repeat(64);
     const report = RetrospectiveReportSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       taskReference: 'jira:TEST-1',
       workflowId: 'tasker:execution:v2:jira:TEST-1:bootstrap-run',
       workflowRunId: 'execution-run',
@@ -55,6 +55,13 @@ describe('completed run lifecycle', () => {
         outputTokens: 1,
         durationMs: 1,
         estimatedCostUsd: 0,
+        effort: {
+          waitResolutions: { count: 0, kinds: {} },
+          guidance: { count: 0, totalChars: 0 },
+          planReviews: { rounds: 0, annotations: 0 },
+          documentReviews: { rounds: 0, annotations: 0 },
+          restarts: 0,
+        },
         byStep: [],
       },
       findings: [],

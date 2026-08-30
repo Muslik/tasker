@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "13",
+  "version": "14",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -54,6 +54,13 @@
         "loop",
         "delegation"
       ]
+    },
+    {
+      "id": "global-step",
+      "path": "sources/global-skills",
+      "importPath": "imports/global-skills",
+      "scope": "step_bound",
+      "skills": ["retrospective"]
     }
   ],
   "ruleSources": [

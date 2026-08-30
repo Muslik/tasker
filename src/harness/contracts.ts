@@ -127,6 +127,7 @@ export const HarnessContractNameSchema = z.enum([
   'research_task_filing_output',
   'reproduction_input',
   'reproduction_output',
+  'retrospective_analyze_output',
   'task_input',
 ]);
 
@@ -161,7 +162,9 @@ export const HarnessStepManifestSchema = z
     policy: PolicyIdSchema.optional(),
     description: z.string().min(1),
     stage: BlockStageSchema,
-    availableDuring: z.array(z.enum(['bootstrap_investigation', 'execution'])).min(1),
+    availableDuring: z
+      .array(z.enum(['bootstrap_investigation', 'execution', 'retrospective']))
+      .min(1),
     inputContract: HarnessContractNameSchema,
     outputContract: HarnessContractNameSchema,
     outputPredicates: OutputPredicateMappingSchema.optional(),

@@ -17,6 +17,8 @@ import {
   resolveDependencyAvailable,
   resolveDependencyDiscovery,
   retrospectiveQueryOptions,
+  retrospectivePatternsQueryOptions,
+  setRetrospectiveProposalStatus,
   resumeTaskWorkflow,
   syncCodeReview,
 } from '../api/index.js';
@@ -44,9 +46,23 @@ export const TaskOperatorSurfaces = ({
     ...retrospectiveQueryOptions(task.id),
     enabled: task.status === 'done',
   });
+  const retrospectivePatterns = useQuery({
+    ...retrospectivePatternsQueryOptions(),
+    enabled: task.status === 'done',
+  });
   const settle = () => {
     invalidateTaskQueries(queryClient, task.id, { includeRunLog: true, includeAttempts: true });
   };
+  const proposalMutation = useMutation({
+    mutationFn: ({
+      proposalId,
+      status,
+    }: {
+      proposalId: string;
+      status: 'approved' | 'dismissed';
+    }) => setRetrospectiveProposalStatus(task.id, proposalId, status),
+    onSettled: settle,
+  });
   const planMutation = useMutation({
     mutationFn: ({
       decision,
@@ -289,7 +305,17 @@ export const TaskOperatorSurfaces = ({
           }}
         />
       )}
-      {task.status === 'done' ? <RetrospectiveSurface response={retrospective.data} /> : null}
+      {task.status === 'done' ? (
+        <RetrospectiveSurface
+          response={retrospective.data}
+          {...(retrospectivePatterns.data === undefined
+            ? {}
+            : { patterns: retrospectivePatterns.data })}
+          onProposalStatus={(proposalId, status) => {
+            proposalMutation.mutate({ proposalId, status });
+          }}
+        />
+      ) : null}
       {error === null ? null : (
         <p className="sr-only" role="alert">
           {error}

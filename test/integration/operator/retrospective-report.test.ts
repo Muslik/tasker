@@ -99,10 +99,7 @@ describe('execution retrospective', () => {
           { kind: 'cost', title: 'verify.acceptance@1 dominated measured token usage' },
           { kind: 'recovery' },
         ],
-        proposals: [
-          { id: 'compact-repeated-step-context', status: 'proposed' },
-          { id: 'harden-recovery-prerequisites', status: 'proposed' },
-        ],
+        proposals: [],
       },
     });
     expect(repeated).toEqual(first);

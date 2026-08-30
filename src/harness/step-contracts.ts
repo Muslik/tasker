@@ -7,6 +7,7 @@ import {
 } from './contracts.js';
 import { ValidationProfileSchema } from '../graph/archetypes/index.js';
 import { ResearchDocumentReviewOutputSchema } from '../shared/research-document-review.js';
+import { RetrospectiveAnalyzerOutputSchema } from '../shared/retrospective.js';
 
 export const taskInputSchema = z
   .object({
@@ -457,6 +458,7 @@ const contractSchemas = {
   reproduction_input: reproductionInputSchema,
   reproduction_output: reproductionOutputSchema,
   task_input: taskInputSchema,
+  retrospective_analyze_output: RetrospectiveAnalyzerOutputSchema,
 } as const satisfies Readonly<Record<HarnessStepManifest['inputContract'], z.ZodType>>;
 
 const versionedIdentity = (

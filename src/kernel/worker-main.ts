@@ -18,7 +18,11 @@ import {
 import { BootstrapContextAssembler } from '../server/bootstrap-context-assembly.js';
 import { WorkflowFreezeStore } from '../server/workflow-freeze.js';
 import { PlanningEvidenceReaderRegistry } from '../server/planning-evidence.js';
-import { loadHarnessPack, resolveWorkflowAnalyzerProfile } from '../harness/index.js';
+import {
+  loadHarnessPack,
+  resolveRetrospectiveProfile,
+  resolveWorkflowAnalyzerProfile,
+} from '../harness/index.js';
 import {
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
@@ -55,6 +59,7 @@ import { openSqliteLedger } from '../store/index.js';
 import { WorkflowGenerationSubjectSource } from '../planning/index.js';
 import {
   SubscriptionCliImplementationPlanner,
+  SubscriptionCliRetrospectiveAnalyzer,
   SubscriptionCliWorkflowAnalyzer,
   nodeCommandRunner,
 } from '../agents/index.js';
@@ -275,6 +280,10 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       );
     },
   );
+  const retrospectiveAnalyzer = new SubscriptionCliRetrospectiveAnalyzer(
+    temporalCommandRunner,
+    () => resolveRetrospectiveProfile(harnessPack.company),
+  );
   const planning = createImplementationPlanningCoordinator({
     ledger: ledger.repository,
     clock: systemClock,
@@ -393,7 +402,12 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
         contextDiscovery,
         dependencyDeclarations,
       ),
-      ...createExecutionRetrospectiveActivity(retrospectives),
+      ...createExecutionRetrospectiveActivity({
+        retrospectives,
+        workspaces: workspaceStore,
+        analyzer: retrospectiveAnalyzer,
+        analyzerSteps: harnessPack.steps,
+      }),
       ...executionActivities,
     });
     try {

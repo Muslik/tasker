@@ -200,6 +200,7 @@ export const startOperatorServer = async (): Promise<void> => {
     dependencyOperator,
     dependencyDeclarations,
     artifacts: ledger.repository,
+    ledger: ledger.repository,
     verifiedPackagePublications,
     temporalRunService: temporalRuntime.service,
     blockReceipts: new BlockReceiptStore(ledger.repository, systemClock),

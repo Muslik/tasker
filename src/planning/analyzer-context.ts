@@ -71,6 +71,7 @@ export const createWorkflowAnalyzerContext = (
   const availableSteps = new Set(
     pack.steps
       .filter((step) => {
+        if (!step.block.availableDuring.includes('execution')) return false;
         if (step.policy !== undefined) {
           const owner = pack.policies.find((policy) => policy.id === step.policy);
           if (owner === undefined || !harnessPolicyAppliesToTask(owner, task)) return false;

@@ -55,6 +55,15 @@ export const resolveWorkflowAnalyzerProfile = (
     override ?? project?.workflowAnalyzer ?? company.executionProfileRouting.workflowAnalyzer,
   );
 
+export const resolveRetrospectiveProfile = (
+  company: ExecutionProfileConfiguration,
+): ResolvedExecutionProfile =>
+  resolveNamedProfile(
+    company,
+    company.executionProfileRouting.retrospective ??
+      company.executionProfileRouting.workflowAnalyzer,
+  );
+
 export const resolveImplementationPlannerProfile = (
   company: ExecutionProfileConfiguration,
   project: ProjectExecutionProfileOverrides | null,
@@ -96,6 +105,7 @@ export const validateExecutionProfileConfiguration = (
   agentProfiles: readonly string[],
 ): void => {
   resolveWorkflowAnalyzerProfile(company, null);
+  resolveRetrospectiveProfile(company);
   resolveImplementationPlannerProfile(company, null, 'fast');
   resolveImplementationPlannerProfile(company, null, 'ralplan');
   for (const strategy of ['simple', 'standard', 'complex'] as const) {
@@ -108,6 +118,7 @@ export const validateExecutionProfileConfiguration = (
   for (const project of projects) {
     const overrides = project.executionProfileOverrides ?? null;
     resolveWorkflowAnalyzerProfile(company, overrides);
+    resolveRetrospectiveProfile(company);
     resolveImplementationPlannerProfile(company, overrides, 'fast');
     resolveImplementationPlannerProfile(company, overrides, 'ralplan');
     for (const strategy of ['simple', 'standard', 'complex'] as const) {

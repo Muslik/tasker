@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import type { BlockReceiptStore } from '../steps/index.js';
 import type { LedgerRepository } from '../store/repository.js';
+import type { JsonValue } from '../store/types.js';
 import { type ImplementationPlanningCoordinator } from './planning-coordinator.js';
 import { ImplementationPlanningRecordSchema } from './implementation-planning-contracts.js';
 import { PlanningTranscriptViewSchema } from './planning-transcript.js';
@@ -64,7 +65,11 @@ import {
   readResearchDocumentReviewDetails,
 } from './research-document-review.js';
 import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
-import { RetrospectiveResponseSchema, type RetrospectiveStore } from './report.js';
+import {
+  RetrospectivePatternsSchema,
+  RetrospectiveResponseSchema,
+  type RetrospectiveStore,
+} from './report.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
 import type { AgentInvocationReader } from './agent-invocation-reader.js';
 import type { ExecutionActivityReader } from './execution-activity.js';
@@ -110,6 +115,15 @@ const RemoveTaskCommandSchema = z.object({ confirmation: z.string().min(1) }).st
 const StreamQuerySchema = z
   .object({ after: z.coerce.number().int().nonnegative().optional() })
   .strict();
+const RetrospectiveProposalActionSchema = z
+  .object({ status: z.enum(['approved', 'dismissed']) })
+  .strict();
+const RetrospectiveProposalParamsSchema = z
+  .object({ taskReference: z.string().min(1), proposalId: z.string().min(1) })
+  .strict();
+const RetrospectiveProposalActionPathSchema = RetrospectiveProposalParamsSchema.extend({
+  action: z.enum(['approve', 'dismiss']),
+}).strict();
 
 export interface BuildOperatorApiOptions {
   readonly service: OperatorWorkflowService;
@@ -126,11 +140,13 @@ export interface BuildOperatorApiOptions {
     'listLatestByConsumerTask' | 'readLatest' | 'readRevision'
   >;
   readonly artifacts?: Pick<LedgerRepository, 'readArtifact'>;
+  readonly ledger?: Pick<LedgerRepository, 'appendStreamEvent'>;
   readonly verifiedPackagePublications?: Pick<VerifiedPackagePublicationStore, 'read'>;
   readonly temporalRunService: TaskRunService;
   readonly blockReceipts: Pick<BlockReceiptStore, 'read'>;
   readonly planReviews?: PlanReviewStore | undefined;
-  readonly retrospectives?: Pick<RetrospectiveStore, 'readLatest'> | undefined;
+  readonly retrospectives?:
+    Pick<RetrospectiveStore, 'readLatest' | 'setProposalStatus' | 'patterns'> | undefined;
   readonly completedRuns?: Pick<CompletedRunLifecycleReader, 'read'> | undefined;
   readonly taskPresence?: Pick<TaskPresenceStore, 'isRemoved' | 'restore'> | undefined;
   readonly taskRemoval?: Pick<TaskRemovalService, 'remove'> | undefined;
@@ -371,6 +387,33 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
   const api = Fastify({ logger: options.logger ?? false });
   const temporalRunService = options.temporalRunService;
 
+  const recordOperatorEvent = (
+    taskReference: string,
+    eventType: 'OperatorWaitResolved' | 'OperatorDocumentReviewSubmitted' | 'OperatorRestarted',
+    payload: JsonValue,
+  ): void => {
+    options.ledger?.appendStreamEvent({ taskReference, eventType, payload });
+  };
+
+  const recordResolution = (
+    taskReference: string,
+    run: TaskRunPublicState,
+    resolution: JsonValue,
+  ): void => {
+    if (run.status !== 'waiting') return;
+    recordOperatorEvent(
+      taskReference,
+      'OperatorWaitResolved',
+      JsonValueSchema.parse({
+        workflowId: run.workflowId,
+        workflowRunId: run.runId,
+        nodeId: run.wait.nodeId,
+        waitKind: run.wait.waitKind,
+        resolution,
+      }),
+    );
+  };
+
   const readCurrentLifecycle = async (taskReference: string, reply: FastifyReply) => {
     const completed = options.completedRuns?.read(taskReference);
     if (completed?.ok === false) {
@@ -506,6 +549,94 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       ),
     );
   });
+
+  api.get('/api/operator/retrospectives/patterns', (_request, reply) => {
+    if (options.retrospectives === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('retrospective_unavailable', 'Retrospective storage is unavailable'));
+    }
+    const patterns = options.retrospectives.patterns();
+    return patterns.ok
+      ? reply.send(RetrospectivePatternsSchema.parse(patterns.value))
+      : reply
+          .code(500)
+          .send(apiError('retrospective_corrupt', 'Retrospective patterns are unavailable'));
+  });
+
+  api.post(
+    '/api/operator/tasks/:taskReference/retrospective/proposals/:proposalId',
+    async (request, reply) => {
+      if (options.retrospectives === undefined) {
+        return reply
+          .code(503)
+          .send(apiError('retrospective_unavailable', 'Retrospective storage is unavailable'));
+      }
+      const params = RetrospectiveProposalParamsSchema.safeParse(request.params);
+      const command = RetrospectiveProposalActionSchema.safeParse(request.body);
+      if (!params.success || !command.success) {
+        return reply
+          .code(400)
+          .send(
+            apiError(
+              'invalid_retrospective_proposal_action',
+              'Proposal status must be approved or dismissed',
+            ),
+          );
+      }
+      const current = options.retrospectives.readLatest(params.data.taskReference);
+      if (!current.ok || current.value === null) {
+        return reply
+          .code(404)
+          .send(apiError('retrospective_not_found', 'Retrospective report is unavailable'));
+      }
+      const updated = options.retrospectives.setProposalStatus(
+        current.value.workflowId,
+        current.value.workflowRunId,
+        params.data.proposalId,
+        command.data.status,
+      );
+      return updated.ok
+        ? reply.send(RetrospectiveResponseSchema.parse({ status: 'ready', report: updated.value }))
+        : reply
+            .code(updated.error.kind === 'proposal_not_found' ? 404 : 409)
+            .send(apiError(updated.error.kind, 'Proposal status could not be persisted'));
+    },
+  );
+
+  api.post(
+    '/api/operator/tasks/:taskReference/retrospective/proposals/:proposalId/:action',
+    async (request, reply) => {
+      if (options.retrospectives === undefined) {
+        return reply
+          .code(503)
+          .send(apiError('retrospective_unavailable', 'Retrospective storage is unavailable'));
+      }
+      const params = RetrospectiveProposalActionPathSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply
+          .code(400)
+          .send(apiError('invalid_retrospective_proposal_action', 'Proposal action is invalid'));
+      }
+      const current = options.retrospectives.readLatest(params.data.taskReference);
+      if (!current.ok || current.value === null) {
+        return reply
+          .code(404)
+          .send(apiError('retrospective_not_found', 'Retrospective report is unavailable'));
+      }
+      const updated = options.retrospectives.setProposalStatus(
+        current.value.workflowId,
+        current.value.workflowRunId,
+        params.data.proposalId,
+        params.data.action === 'approve' ? 'approved' : 'dismissed',
+      );
+      return updated.ok
+        ? reply.send(RetrospectiveResponseSchema.parse({ status: 'ready', report: updated.value }))
+        : reply
+            .code(updated.error.kind === 'proposal_not_found' ? 404 : 409)
+            .send(apiError(updated.error.kind, 'Proposal status could not be persisted'));
+    },
+  );
 
   api.get('/api/operator/tasks/:taskReference/activity', async (request, reply) => {
     const params = TaskReferenceParamsSchema.safeParse(request.params);
@@ -1182,6 +1313,10 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       },
     });
     if (!resumed.ok) return sendTemporalRunError(reply, resumed.error);
+    recordResolution(params.data.taskReference, current.value, {
+      decision: synced.value.status,
+      reviewId: synced.value.reviewId,
+    });
     return reply.send(
       CodeReviewSyncResponseSchema.parse({
         status: synced.value.status,
@@ -1221,6 +1356,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       resolution: { decision: 'approved', reviewId },
     });
     if (!completed.ok) return sendTemporalRunError(reply, completed.error);
+    recordResolution(params.data.taskReference, current.value, { decision: 'approved', reviewId });
     return reply.send(
       CodeReviewSyncResponseSchema.parse({
         status: 'approved',
@@ -1290,6 +1426,8 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       waitKind: waitingRun.wait.waitKind,
       resolution: prepared.value.resolution,
     });
+    if (resumed.ok)
+      recordResolution(params.data.taskReference, waitingRun, prepared.value.resolution);
     return resumed.ok
       ? sendTemporalState(reply, params.data.taskReference, resumed.value)
       : sendTemporalRunError(reply, resumed.error);
@@ -1356,6 +1494,8 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       waitKind: waitingRun.wait.waitKind,
       resolution: prepared.value.resolution,
     });
+    if (resumed.ok)
+      recordResolution(params.data.taskReference, waitingRun, prepared.value.resolution);
     return resumed.ok
       ? sendTemporalState(reply, params.data.taskReference, resumed.value)
       : sendTemporalRunError(reply, resumed.error);
@@ -1413,6 +1553,17 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         ...(command.data.guidance === undefined ? {} : { guidance: command.data.guidance }),
       },
     });
+    if (resumed.ok) {
+      recordResolution(
+        params.data.taskReference,
+        current.value,
+        JsonValueSchema.parse({
+          decision:
+            command.data.dismissWorkflowChange === true ? 'dismiss_workflow_change' : 'resume',
+          ...(command.data.guidance === undefined ? {} : { guidance: command.data.guidance }),
+        }),
+      );
+    }
     return resumed.ok
       ? sendTemporalState(reply, params.data.taskReference, resumed.value)
       : sendTemporalRunError(reply, resumed.error);
@@ -1465,6 +1616,21 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
               guidance: command.data.guidance,
             },
     });
+    if (reviewed.ok) {
+      recordResolution(
+        params.data.taskReference,
+        current.value,
+        JsonValueSchema.parse(
+          command.data.decision === 'accept'
+            ? { decision: 'accept', continuationId: candidate.continuationId }
+            : {
+                decision: 'reject',
+                continuationId: candidate.continuationId,
+                guidance: command.data.guidance,
+              },
+        ),
+      );
+    }
     return reviewed.ok
       ? sendTemporalState(reply, params.data.taskReference, reviewed.value)
       : sendTemporalRunError(reply, reviewed.error);
@@ -1536,6 +1702,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       resolution: planReviewResolution(command.data),
     });
     if (!reviewed.ok) return sendTemporalRunError(reply, reviewed.error);
+    recordResolution(params.data.taskReference, current.value, JsonValueSchema.parse(command.data));
     const applied = options.planReviews?.markApplied(planningEpisodeId, command.data.reviewId);
     if (applied !== undefined && !applied.ok) {
       return reply
@@ -1635,6 +1802,28 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         ),
       ),
     });
+    if (reviewed.ok) {
+      const resolution = normalizeResearchDocumentReviewResolution(
+        command.data.decision === 'approve'
+          ? { decision: 'approve' }
+          : {
+              decision: 'request_changes',
+              annotations: command.data.annotations,
+              ...(command.data.guidance === undefined ? {} : { guidance: command.data.guidance }),
+            },
+      );
+      recordResolution(params.data.taskReference, current.value, JsonValueSchema.parse(resolution));
+      recordOperatorEvent(
+        params.data.taskReference,
+        'OperatorDocumentReviewSubmitted',
+        JsonValueSchema.parse({
+          workflowId: current.value.workflowId,
+          workflowRunId: current.value.runId,
+          nodeId,
+          resolution,
+        }),
+      );
+    }
     return reviewed.ok
       ? sendTemporalState(reply, params.data.taskReference, reviewed.value)
       : sendTemporalRunError(reply, reviewed.error);
@@ -1711,6 +1900,12 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       waitKind: current.value.wait.waitKind,
       resolution: { answers: command.data.answers },
     });
+    if (answered.ok)
+      recordResolution(
+        params.data.taskReference,
+        current.value,
+        JsonValueSchema.parse({ answers: command.data.answers }),
+      );
     return answered.ok
       ? sendTemporalState(reply, params.data.taskReference, answered.value)
       : sendTemporalRunError(reply, answered.error);
@@ -1757,6 +1952,16 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       params.data.taskReference,
       command.data.expectedRunId,
     );
+    if (restarted.ok) {
+      recordOperatorEvent(
+        params.data.taskReference,
+        'OperatorRestarted',
+        JsonValueSchema.parse({
+          previousRunId: command.data.expectedRunId,
+          workflowRunId: restarted.value.runId,
+        }),
+      );
+    }
     return restarted.ok
       ? sendTemporalState(reply, params.data.taskReference, restarted.value)
       : sendTemporalRunError(reply, restarted.error);
