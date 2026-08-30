@@ -56,6 +56,7 @@ const pullRequestStep = {
   status: 'completed' as const,
   summary: 'Pull request updated',
   artifactIds: [],
+  predicateFacts: {},
   details: {
     output: {
       externalId: '73',

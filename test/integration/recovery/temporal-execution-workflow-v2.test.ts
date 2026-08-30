@@ -87,8 +87,114 @@ const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({
   } as never,
 });
 
+const queuedGuidanceWorkflowInput = (taskReference: string): ExecutionWorkflowInput => ({
+  schemaVersion: 2,
+  taskReference,
+  workflowHash: 'b'.repeat(64),
+  retrospectiveEnabled: true,
+  contextReferences: [
+    { kind: 'workspace', reference: `workspace:${taskReference}`, hash: 'c'.repeat(64) },
+    { kind: 'planning_snapshot', reference: `planning:${taskReference}`, hash: 'd'.repeat(64) },
+    { kind: 'block-snapshot', reference: `blocks:${taskReference}`, hash: 'e'.repeat(64) },
+  ],
+  graph: {
+    metadata: {
+      compilerVersion: 4,
+      irVersion: 'workflow-ir-v1',
+      references: {
+        predicates: ['review.accepted@1'],
+        stepTypes: ['fixture.approval@1', 'fixture.draft@1'],
+        waits: [],
+      },
+      workflowId: 'execution-kernel-queued-guidance',
+      workflowVersion: 1,
+    },
+    root: {
+      kind: 'sequence',
+      id: 'delivery',
+      children: [
+        {
+          kind: 'bounded_loop',
+          id: 'review-feedback',
+          maxAttempts: 3,
+          until: 'review.accepted@1',
+          body: {
+            kind: 'sequence',
+            id: 'review-attempt',
+            children: [
+              {
+                kind: 'step',
+                id: 'draft',
+                uses: 'fixture.draft@1',
+                activityDelivery: { kind: 'read_only' },
+                with: {},
+              },
+              {
+                kind: 'step',
+                id: 'approval',
+                uses: 'fixture.approval@1',
+                activityDelivery: { kind: 'read_only' },
+                with: {},
+              },
+            ],
+          },
+        },
+        { kind: 'finalize', id: 'accepted', outcome: 'accepted' },
+      ],
+    },
+  } as never,
+});
+
 const activities: ExecutionWorkflowActivities = {
   runExecutionBlock: (input) => {
+    if (
+      input.taskReference === 'fixture:queued-guidance' &&
+      input.nodeId === 'draft' &&
+      input.blockRun === 2 &&
+      input.operatorGuidance !== 'Tighten the backend decision tree.'
+    ) {
+      return Promise.resolve({
+        status: 'needs_input',
+        summary: 'Queued operator guidance did not reach the next loop iteration',
+        waitKind: 'guidance.missing@1',
+      });
+    }
+    if (
+      input.taskReference === 'fixture:queued-guidance' &&
+      input.nodeId === 'approval' &&
+      input.waitResolution === null &&
+      input.blockRun === 1
+    ) {
+      return Promise.resolve({
+        status: 'needs_input',
+        summary: 'Operator review is required by this fixture',
+        waitKind: 'review.accepted@1',
+      });
+    }
+    if (
+      input.taskReference === 'fixture:queued-guidance' &&
+      input.nodeId === 'approval' &&
+      input.blockRun === 2
+    ) {
+      return Promise.resolve({
+        status: 'completed',
+        summary: 'Operator requested changes',
+        predicateFacts: { 'review.accepted@1': false },
+        receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
+      });
+    }
+    if (
+      input.taskReference === 'fixture:queued-guidance' &&
+      input.nodeId === 'approval' &&
+      input.blockRun === 3
+    ) {
+      return Promise.resolve({
+        status: 'completed',
+        summary: 'Operator approved the revised draft',
+        predicateFacts: { 'review.accepted@1': true },
+        receiptReference: `receipt:${input.nodeId}:${String(input.blockRun)}`,
+      });
+    }
     if (
       input.taskReference === 'fixture:activity-failure' &&
       input.nodeId === 'inspect' &&
@@ -497,6 +603,41 @@ describe('Execution Workflow v2 recovery', () => {
       blockRuns: { repair: 2 },
     });
     await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
+  }, 30_000);
+
+  it('queues guidance from a resumed false predicate into the next loop iteration', async () => {
+    const taskReference = 'fixture:queued-guidance';
+    const workflowId = workflowIdFor(taskReference);
+    expect(await runs.start(workflowId, queuedGuidanceWorkflowInput(taskReference))).toMatchObject({
+      ok: true,
+    });
+
+    const waiting = await waitFor(taskReference, 'review.accepted@1', workflowId);
+    expect(
+      await runs.resolveWait(workflowId, {
+        runId: waiting.runId,
+        nodeId: 'approval',
+        waitKind: 'review.accepted@1',
+        resolution: {
+          decision: 'request_changes',
+          guidance: 'Tighten the backend decision tree.',
+        },
+      }),
+    ).toMatchObject({ ok: true });
+
+    await expect(environment.client.workflow.getHandle(workflowId).result()).resolves.toEqual({
+      taskReference,
+      workflowHash: 'b'.repeat(64),
+      outcome: 'accepted',
+    });
+    expect(await runs.read(workflowId)).toMatchObject({
+      ok: true,
+      value: {
+        status: 'completed',
+        blockRuns: { draft: 2, approval: 3 },
+        loopIterations: { 'review-feedback': 2 },
+      },
+    });
   }, 30_000);
 
   it('replans and accepts a continuation in the same durable run without replaying its parent', async () => {

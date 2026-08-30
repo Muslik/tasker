@@ -24,6 +24,7 @@ import {
   BitbucketPullRequestClient,
   ConfluencePlanningEvidenceReader,
   ConfluenceResearchPublishAdapter,
+  ResearchDocumentReviewAdapter,
   ConfluenceServerClient,
   DependencyAwaitPackagesAdapter,
   PullRequestReviewEvidenceStore,
@@ -211,6 +212,7 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
       : new ConfluenceResearchPublishAdapter(confluenceClient, externalEffects);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
     new DependencyAwaitPackagesAdapter(dependencyDeclarations, verifiedPackagePublications),
+    new ResearchDocumentReviewAdapter(),
     ...(confluenceResearchPublish === null
       ? []
       : [authorizeExternalEffect(confluenceResearchPublish)]),

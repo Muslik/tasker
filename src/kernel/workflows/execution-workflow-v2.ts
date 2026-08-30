@@ -67,6 +67,9 @@ const guidanceFrom = (resolution: JsonValue): string | null =>
 const dismissesWorkflowChange = (resolution: JsonValue): boolean =>
   isRecord(resolution) && resolution.decision === 'dismiss_workflow_change';
 
+const hasFalsePredicateFact = (facts: Readonly<Record<string, boolean>>): boolean =>
+  Object.values(facts).some((value) => !value);
+
 const continuationReviewFrom = (
   resolution: JsonValue,
   continuationId: string,
@@ -238,6 +241,13 @@ export async function executionWorkflowV2(
           const result = await runBlock(node, operatorGuidance, waitResolution);
           if (result.status === 'completed') {
             Object.assign(predicateFacts, result.predicateFacts);
+            if (
+              operatorGuidance !== null &&
+              waitResolution !== null &&
+              hasFalsePredicateFact(result.predicateFacts)
+            ) {
+              queuedGuidance = operatorGuidance;
+            }
             nodeStates[node.id] = 'succeeded';
             return { kind: 'continue' };
           }

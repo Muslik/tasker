@@ -24,6 +24,7 @@ import { CodeReviewControls, codeReviewNotice } from './CodeReviewControls.js';
 import { DependencyWaitSurface, parsePackageNames } from './DependencyWaitSurface.js';
 import { PlanReviewSurface } from './PlanReviewSurface.js';
 import { PlanningClarificationSurface } from './PlanningClarificationSurface.js';
+import { ResearchDocumentReviewSurface } from './ResearchDocumentReviewSurface.js';
 import { RetrospectiveSurface } from './RetrospectiveSurface.js';
 import { WorkflowChangeReview } from './WorkflowChangeReview.js';
 
@@ -250,6 +251,13 @@ export const TaskOperatorSurfaces = ({
               ...(guidance === undefined ? {} : { guidance }),
             });
           }}
+        />
+      )}
+      {currentRun === null ? null : (
+        <ResearchDocumentReviewSurface
+          task={task}
+          projection={projection}
+          currentRun={currentRun}
         />
       )}
       {currentRun === null ? null : (

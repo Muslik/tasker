@@ -74,6 +74,7 @@ const TYPED_RESOLUTION_WAITS = new Set([
   'dependency.discovery@1',
   'human_clarification',
   'plan.approved@1',
+  'research.document-review@1',
   'workflow_change.review@1',
 ]);
 

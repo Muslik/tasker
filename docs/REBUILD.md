@@ -85,8 +85,9 @@ size ceiling ~400 lines.
 - Scope during rebuild: `front-avia` only; other repos onboarded one by one after.
 - `.tasker` run history is disposable; one breaking-change window for the store rewrite.
 - Corpus priority: codex first, claude second.
-- Research archetype terminal artifacts: a storage-format СА page reconciled under the
-  product's configured Confluence root, followed by approval-gated Jira task filing.
+- Research archetype terminal artifacts: an operator-approved storage-format СА page
+  reconciled under the product's configured Confluence root, followed immediately by
+  Jira task filing under that same approval.
 - SQLite: both processes keep writing under WAL (revised from "worker single writer" —
   the measured problem was unindexed full scans, not write contention; routing operator
   actions through the worker would add IPC for no gain). Revisit only if contention shows.

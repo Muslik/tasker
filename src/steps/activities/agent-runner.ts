@@ -16,7 +16,7 @@ import {
 } from './block-execution-contracts.js';
 import type { ExecuteTaskStepInputSchema } from './block-execution-contracts.js';
 import { promptForAgentStep, runHistoryIndex, selectAgentRunEvidence } from './agent-prompt.js';
-import { resolveResearchFileTasksApproval } from './research-file-tasks-approval.js';
+import { authorizeResearchFileTasksExecution } from './research-file-tasks-approval.js';
 import {
   block,
   blockingWaitKindFor,
@@ -154,20 +154,20 @@ export const runAgentStep = async (
       artifactIds,
     );
   }
-  const researchApproval = resolveResearchFileTasksApproval(
-    input.uses,
-    input.waitResolution,
-    evidence,
-  );
-  if (researchApproval.status === 'waiting') {
+  const researchAuthorization = authorizeResearchFileTasksExecution(input.uses, evidence);
+  if (researchAuthorization.status === 'missing_document_approval') {
     const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
-      kind: 'research_approval_required',
-      pageUrl: researchApproval.pageUrl,
+      kind: 'research_document_approval_required',
     });
-    return block(researchApproval.reason, 'research.approval@1', artifactIds, {
-      category: 'authorization',
-      retryable: false,
-    });
+    return block(
+      'Research task filing requires the earlier research.document_approved@1 predicate',
+      blockingWaitKindFor(input.uses),
+      artifactIds,
+      {
+        category: 'authorization',
+        retryable: false,
+      },
+    );
   }
   let recovery: TaskStepRecoveryContext = TaskStepRecoveryContextSchema.parse({
     kind: 'single_attempt',

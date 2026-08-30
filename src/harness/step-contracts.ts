@@ -6,6 +6,7 @@ import {
   type HarnessStepSource,
 } from './contracts.js';
 import { ValidationProfileSchema } from '../graph/archetypes/index.js';
+import { ResearchDocumentReviewOutputSchema } from '../shared/research-document-review.js';
 
 export const taskInputSchema = z
   .object({
@@ -245,6 +246,8 @@ export const researchReviewOutputSchema = z.discriminatedUnion('decision', [
     .strict(),
 ]);
 
+export const researchDocumentReviewOutputSchema = ResearchDocumentReviewOutputSchema;
+
 export const researchPublicationOutputSchema = z
   .object({
     pageId: z.string().min(1),
@@ -445,6 +448,7 @@ const contractSchemas = {
   pull_request_input: pullRequestInputSchema,
   pull_request_output: pullRequestOutputSchema,
   research_draft_output: researchDraftOutputSchema,
+  research_document_review_output: researchDocumentReviewOutputSchema,
   research_input: researchInputSchema,
   research_investigation_output: researchInvestigationOutputSchema,
   research_publication_output: researchPublicationOutputSchema,

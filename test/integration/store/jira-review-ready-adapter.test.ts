@@ -75,6 +75,7 @@ const requestFor = (
         status: 'completed',
         summary: 'Pull request ready',
         artifactIds: ['pull-request:73'],
+        predicateFacts: {},
         details: {
           output: {
             externalId: '73',
@@ -329,6 +330,7 @@ describe('Jira review-ready effect adapter', () => {
             status: 'completed',
             summary: 'Superseded bug verification',
             artifactIds: ['evidence:old-after-image'],
+            predicateFacts: {},
             details: { output: { decision: 'accepted' } },
             recordedAt: '2026-08-04T00:00:20.000Z',
           },
@@ -339,6 +341,7 @@ describe('Jira review-ready effect adapter', () => {
             status: 'blocked',
             summary: 'Runtime evidence passed before another verification prerequisite blocked',
             artifactIds: ['evidence:after-video'],
+            predicateFacts: {},
             details: { output: { decision: 'accepted' } },
             recordedAt: '2026-08-04T00:00:30.000Z',
           },
@@ -349,6 +352,7 @@ describe('Jira review-ready effect adapter', () => {
             status: 'completed',
             summary: 'Accepted repair delta reusing runtime evidence',
             artifactIds: [],
+            predicateFacts: {},
             details: { output: { decision: 'accepted' } },
             recordedAt: '2026-08-04T00:00:40.000Z',
           },

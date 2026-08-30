@@ -6,17 +6,6 @@
   "availableDuring": ["execution"],
   "inputContract": "research_input",
   "outputContract": "research_review_output",
-  "outputPredicates": {
-    "discriminator": "decision",
-    "cases": {
-      "accepted": {
-        "research.review_accepted@1": true
-      },
-      "changes_requested": {
-        "research.review_accepted@1": false
-      }
-    }
-  },
   "executor": {
     "kind": "agent",
     "profile": "review",

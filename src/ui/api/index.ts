@@ -54,6 +54,7 @@ export {
   restartTask,
   restoreTask,
   reviewPlan,
+  reviewResearchDocument,
   reviewWorkflowChange,
   syncCodeReview,
   syncJiraIssue,

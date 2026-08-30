@@ -14,6 +14,7 @@ export interface TaskRunStepEvidence {
   readonly status: 'blocked' | 'completed' | 'failed' | 'workflow_change_required';
   readonly summary: string | null;
   readonly artifactIds: readonly string[];
+  readonly predicateFacts: Readonly<Record<string, boolean>>;
   readonly details: JsonValue;
   readonly recordedAt: string;
 }

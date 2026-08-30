@@ -115,6 +115,81 @@
   pre {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+
+  .research-document h1,
+  .research-document h2,
+  .research-document h3,
+  .research-document h4,
+  .research-document h5,
+  .research-document h6 {
+    @apply mt-6 mb-2 font-semibold tracking-tight text-foreground;
+  }
+
+  .research-document h1 {
+    @apply text-2xl;
+  }
+
+  .research-document h2 {
+    @apply text-xl;
+  }
+
+  .research-document h3 {
+    @apply text-lg;
+  }
+
+  .research-document p,
+  .research-document ul,
+  .research-document ol,
+  .research-document pre,
+  .research-document blockquote,
+  .research-document table {
+    @apply my-3;
+  }
+
+  .research-document ul {
+    @apply list-disc pl-6;
+  }
+
+  .research-document ol {
+    @apply list-decimal pl-6;
+  }
+
+  .research-document li {
+    @apply my-1;
+  }
+
+  .research-document a {
+    @apply text-primary underline underline-offset-2;
+  }
+
+  .research-document blockquote {
+    @apply border-l-2 border-border pl-4 italic text-muted-foreground;
+  }
+
+  .research-document code {
+    @apply rounded bg-muted px-1.5 py-0.5 text-[0.9em];
+  }
+
+  .research-document pre {
+    @apply overflow-x-auto rounded-lg border bg-muted/50 p-3;
+  }
+
+  .research-document pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .research-document table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .research-document th,
+  .research-document td {
+    @apply border border-border px-3 py-2 align-top;
+  }
+
+  .research-document th {
+    @apply bg-muted/70 text-left font-semibold;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

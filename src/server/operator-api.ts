@@ -32,6 +32,7 @@ import {
   OperatorActivityResponseSchema,
   OperatorExecutionAttemptSchema,
   OperatorRunLogResponseSchema,
+  ResearchDocumentReviewCommandSchema,
   OperatorTaskInvocationDetailSchema,
   OperatorTaskInvocationListResponseSchema,
   PlanningClarificationSubmissionSchema,
@@ -58,6 +59,10 @@ import {
   planReviewResolution,
   type PlanReviewStore,
 } from './plan-review.js';
+import {
+  normalizeResearchDocumentReviewResolution,
+  readResearchDocumentReviewDetails,
+} from './research-document-review.js';
 import type { OperatorServiceError, OperatorWorkflowService } from './operator-service.js';
 import { RetrospectiveResponseSchema, type RetrospectiveStore } from './report.js';
 import { createOperatorWorkflowProjection } from './operator-workflow-projection.js';
@@ -1385,6 +1390,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
       current.value.wait.waitKind === 'dependency.available@1' ||
       current.value.wait.waitKind === 'dependency.discovery@1' ||
       current.value.wait.waitKind === 'plan.approved@1' ||
+      current.value.wait.waitKind === 'research.document-review@1' ||
       current.value.wait.waitKind === 'workflow_change.review@1' ||
       current.value.wait.waitKind === 'code_review@1'
     ) {
@@ -1537,6 +1543,101 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         .send(apiError('plan_review_store_failed', 'Plan review was accepted but not projected'));
     }
     return sendTemporalState(reply, params.data.taskReference, reviewed.value);
+  });
+
+  api.post('/api/workflows/:taskReference/research-document-review', async (request, reply) => {
+    const params = TaskReferenceParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(apiError('invalid_request', 'taskReference is required'));
+    }
+    const command = ResearchDocumentReviewCommandSchema.safeParse(request.body);
+    if (!command.success) {
+      return reply
+        .code(400)
+        .send(
+          apiError(
+            'invalid_research_document_review',
+            'Approve or provide non-empty research document feedback',
+          ),
+        );
+    }
+    if (options.executionActivity === undefined) {
+      return reply
+        .code(503)
+        .send(apiError('execution_activity_unavailable', 'Execution activity is unavailable'));
+    }
+    const current = await temporalRunService.read(params.data.taskReference);
+    if (!current.ok) return sendTemporalRunError(reply, current.error);
+    if (
+      current.value === null ||
+      current.value.runtime !== 'execution' ||
+      current.value.status !== 'waiting' ||
+      current.value.wait.waitKind !== 'research.document-review@1'
+    ) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'run_not_at_research_document_review',
+            'The run is not waiting for research document review',
+          ),
+        );
+    }
+    if (command.data.expectedRunId !== current.value.runId) {
+      return reply
+        .code(409)
+        .send(apiError('stale_run', 'Refresh before reviewing the research document'));
+    }
+    const nodeId = current.value.wait.nodeId;
+    const currentBlockRun = current.value.blockRuns[nodeId] ?? 0;
+    if (command.data.blockRun !== currentBlockRun || currentBlockRun < 1) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'stale_research_document_review',
+            'Refresh and review the current research document draft',
+          ),
+        );
+    }
+    const attempt = options.executionActivity.readAttempt(current.value, nodeId, currentBlockRun);
+    const waitDetails =
+      attempt === null || attempt.output === null
+        ? null
+        : readResearchDocumentReviewDetails(attempt.output.details);
+    if (
+      attempt === null ||
+      waitDetails === null ||
+      waitDetails.documentArtifactId !== command.data.documentArtifactId
+    ) {
+      return reply
+        .code(409)
+        .send(
+          apiError(
+            'stale_research_document_review',
+            'Refresh and review the current research document draft',
+          ),
+        );
+    }
+    const reviewed = await temporalRunService.resolveWait(params.data.taskReference, {
+      runId: command.data.expectedRunId,
+      nodeId,
+      waitKind: current.value.wait.waitKind,
+      resolution: JsonValueSchema.parse(
+        normalizeResearchDocumentReviewResolution(
+          command.data.decision === 'approve'
+            ? { decision: 'approve' }
+            : {
+                decision: 'request_changes',
+                annotations: command.data.annotations,
+                ...(command.data.guidance === undefined ? {} : { guidance: command.data.guidance }),
+              },
+        ),
+      ),
+    });
+    return reviewed.ok
+      ? sendTemporalState(reply, params.data.taskReference, reviewed.value)
+      : sendTemporalRunError(reply, reviewed.error);
   });
 
   api.get('/api/workflows/:taskReference/plan-reviews', async (request, reply) => {

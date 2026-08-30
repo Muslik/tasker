@@ -12,7 +12,9 @@ import {
   type AgentInvocationRecorder,
 } from '../../steps/agent-invocation.js';
 import type { AgentInvocationUsage } from '../../steps/agent-usage.js';
+import { BlockReceiptSchema } from '../../steps/contracts.js';
 import { TaskStepOutputArtifactSchema, type TaskStepOutputArtifact } from '../task-step-output.js';
+import { blockReceiptId } from '../receipt-store.js';
 import {
   ExecuteTaskStepResultSchema,
   type ExecuteTaskStepResult,
@@ -42,6 +44,23 @@ type TemporalTaskStepTraceStoreError =
   | { readonly kind: 'transcript_corrupt'; readonly issues: readonly string[] };
 
 const asJson = (value: unknown) => JsonValueSchema.parse(value);
+
+const predicateFactsFromReceipt = (
+  ledger: LedgerRepository,
+  output: TaskStepOutputArtifact,
+): Readonly<Record<string, boolean>> => {
+  const receipt = ledger.readReceipt(
+    blockReceiptId({
+      workflowId: output.workflowId,
+      workflowRunId: output.workflowRunId,
+      nodeId: output.nodeId,
+      blockRun: output.stepAttempt,
+    }),
+  );
+  if (receipt === null) return {};
+  const parsed = BlockReceiptSchema.safeParse(receipt.payload);
+  return parsed.success ? parsed.data.predicateFacts : {};
+};
 
 const providerAttemptFrom = (row: TranscriptRecord): number | null => {
   const match = /:provider-attempt-(\d+):seq-\d+$/u.exec(row.id);
@@ -171,6 +190,7 @@ export class TemporalTaskStepTraceStore {
         status: parsed.data.status,
         summary: parsed.data.result?.summary ?? null,
         artifactIds: parsed.data.result?.artifactIds ?? [],
+        predicateFacts: predicateFactsFromReceipt(this.ledger, parsed.data),
         details: parsed.data.details,
         recordedAt: parsed.data.recordedAt,
       });

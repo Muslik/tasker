@@ -231,6 +231,7 @@ describe('pull-request semantic delivery', () => {
             status: 'blocked',
             summary: 'Waiting for human review',
             artifactIds: ['jira-review-ready'],
+            predicateFacts: {},
             details: { phase: 'human_review', output: pullRequestOutput },
             recordedAt: '2026-08-24T00:00:00.000Z',
           },

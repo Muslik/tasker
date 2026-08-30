@@ -6,6 +6,7 @@ export * from './planning-streams.js';
 export * from './planning-transcript.js';
 export * from './planning-evidence.js';
 export * from './plan-review.js';
+export * from './research-document-review.js';
 export * from './operator-activity-projection.js';
 export * from './operator-api.js';
 export * from './operator-service.js';

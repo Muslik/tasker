@@ -24,7 +24,7 @@
   "idempotency": "probe",
   "waitKinds": [],
   "artifactContracts": ["research-publication"],
-  "requiredArtifactContracts": ["research-draft", "research-review"],
+  "requiredArtifactContracts": ["research-draft", "research-review", "research-document-review"],
   "workflowChanges": [],
   "reconciliation": { "strategy": "probe" }
 }

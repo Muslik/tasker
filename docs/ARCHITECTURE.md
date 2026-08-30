@@ -25,9 +25,10 @@ that workflow through Temporal, and preserves the evidence an operator needs to 
    independently persisted proof used before a graph transition. `waiting` is durable
    state, not a failed attempt.
 5. **Delivery.** `deliver-pr` runs validation, verification, review, preparation, and
-   pull-request delivery. `research` reviews and reconciles a Confluence СА publication,
-   then waits for approval before filing its proposed Jira tasks. External adapters return
-   typed completion, wait, or failure results.
+   pull-request delivery. `research` drafts and agent-reviews the СА, waits for operator
+   document approval before publication, then reconciles the Confluence page and files its
+   proposed Jira tasks under that same approval. External adapters return typed completion,
+   wait, or failure results.
 6. **Retrospective.** The execution retrospective activity computes per-step attempts,
    waits, tokens, duration, cost, findings, and proposed follow-up changes; the report
    is stored and surfaced by the operator API.

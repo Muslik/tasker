@@ -45,20 +45,20 @@ const researchWorkflowSource = SemanticWorkflowSourceSchema.parse({
     id: 'task-work',
     children: [
       {
+        kind: 'step',
+        id: 'investigate-research',
+        uses: 'research.investigate@1',
+        with: {},
+      },
+      {
         kind: 'bounded_loop',
         id: 'review-feedback',
         maxAttempts: 3,
-        until: 'research.review_accepted@1',
+        until: 'research.document_approved@1',
         body: {
           kind: 'sequence',
           id: 'review-attempt',
           children: [
-            {
-              kind: 'step',
-              id: 'investigate-research',
-              uses: 'research.investigate@1',
-              with: {},
-            },
             {
               kind: 'step',
               id: 'draft-research',
@@ -69,6 +69,12 @@ const researchWorkflowSource = SemanticWorkflowSourceSchema.parse({
               kind: 'step',
               id: 'review-research',
               uses: 'research.review@1',
+              with: {},
+            },
+            {
+              kind: 'step',
+              id: 'document-review-research',
+              uses: 'research.document-review@1',
               with: {},
             },
           ],

@@ -17,6 +17,10 @@ import { TaskStepEvidenceArtifactSchema } from '../steps/task-step-evidence-cont
 import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
 import { JsonValueSchema } from '../graph/schema.js';
 import {
+  ApproveResearchDocumentReviewResolutionSchema,
+  RequestResearchDocumentChangesResolutionSchema,
+} from '../shared/research-document-review.js';
+import {
   DependencyDeclarationModeSchema,
   DependencyPackageNameSchema,
 } from './dependency-contracts.js';
@@ -717,6 +721,34 @@ export const WorkflowChangeReviewCommandSchema = z.discriminatedUnion('decision'
     .strict(),
 ]);
 
+const ResearchDocumentReviewCommandContextSchema = z
+  .object({
+    expectedRunId: z.string().min(1),
+    blockRun: z.number().int().positive(),
+    documentArtifactId: z.string().min(1),
+  })
+  .strict();
+
+export const ApproveResearchDocumentReviewCommandSchema =
+  ResearchDocumentReviewCommandContextSchema.extend(
+    ApproveResearchDocumentReviewResolutionSchema.shape,
+  ).strict();
+
+export const RequestResearchDocumentChangesCommandSchema =
+  ResearchDocumentReviewCommandContextSchema.extend(
+    RequestResearchDocumentChangesResolutionSchema.shape,
+  )
+    .strict()
+    .refine(
+      (command) => command.guidance !== undefined || command.annotations.length > 0,
+      'Research document review requires guidance or at least one annotation',
+    );
+
+export const ResearchDocumentReviewCommandSchema = z.discriminatedUnion('decision', [
+  ApproveResearchDocumentReviewCommandSchema,
+  RequestResearchDocumentChangesCommandSchema,
+]);
+
 export const RestartRunCommandSchema = z
   .object({
     expectedRunId: z.string().min(1),
@@ -858,6 +890,7 @@ export type ResumeRunCommand = z.infer<typeof ResumeRunCommandSchema>;
 export type ConfigureTaskDependencyCommand = z.infer<typeof ConfigureTaskDependencyCommandSchema>;
 export type DependencyAvailableCommand = z.infer<typeof DependencyAvailableCommandSchema>;
 export type DependencyDiscoveryCommand = z.infer<typeof DependencyDiscoveryCommandSchema>;
+export type ResearchDocumentReviewCommand = z.infer<typeof ResearchDocumentReviewCommandSchema>;
 export type WorkflowChangeReviewCommand = z.infer<typeof WorkflowChangeReviewCommandSchema>;
 export type RestartRunCommand = z.infer<typeof RestartRunCommandSchema>;
 export type ExpectedRunCommand = z.infer<typeof ExpectedRunCommandSchema>;

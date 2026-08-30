@@ -1,43 +1,31 @@
 import type { TaskRunEvidence } from '../../integrations/index.js';
 
-export type ResearchFileTasksApproval =
-  | { readonly status: 'approved' }
-  | { readonly status: 'waiting'; readonly pageUrl: string | null; readonly reason: string };
+export type ResearchFileTasksAuthorization =
+  { readonly status: 'authorized' } | { readonly status: 'missing_document_approval' };
 
-const publishedPageUrl = (evidence: TaskRunEvidence): string | null => {
-  const publication = evidence.completedSteps
-    .filter(
-      ({ status, stepReference }) =>
-        status === 'completed' && stepReference === 'research.publish@1',
-    )
-    .toSorted((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
-  const details = publication?.details;
-  if (details === null || Array.isArray(details) || typeof details !== 'object') return null;
-  const output = details.output;
-  if (output === null || Array.isArray(output) || typeof output !== 'object') return null;
-  return typeof output.pageUrl === 'string' && output.pageUrl.length > 0 ? output.pageUrl : null;
+const latestDocumentApprovalFact = (evidence: TaskRunEvidence): boolean | undefined => {
+  let latest: boolean | undefined;
+  let latestRecordedAt: string | null = null;
+  for (const step of evidence.completedSteps) {
+    if (step.status !== 'completed' || step.stepReference !== 'research.document-review@1') {
+      continue;
+    }
+    const fact = step.predicateFacts['research.document_approved@1'];
+    if (fact === undefined) continue;
+    if (latestRecordedAt === null || step.recordedAt >= latestRecordedAt) {
+      latestRecordedAt = step.recordedAt;
+      latest = fact;
+    }
+  }
+  return latest;
 };
 
-export const resolveResearchFileTasksApproval = (
+export const authorizeResearchFileTasksExecution = (
   stepReference: string,
-  waitResolution: unknown,
   evidence: TaskRunEvidence,
-): ResearchFileTasksApproval => {
-  if (stepReference !== 'research.file-tasks@1') return { status: 'approved' };
-  if (
-    waitResolution !== null &&
-    typeof waitResolution === 'object' &&
-    !Array.isArray(waitResolution) &&
-    'decision' in waitResolution &&
-    waitResolution.decision === 'approve'
-  ) {
-    return { status: 'approved' };
-  }
-
-  const pageUrl = publishedPageUrl(evidence);
-  return {
-    status: 'waiting',
-    pageUrl,
-    reason: `${pageUrl ?? 'Ссылка на СА недоступна'} — прочитайте СА и подтвердите заведение задач`,
-  };
+): ResearchFileTasksAuthorization => {
+  if (stepReference !== 'research.file-tasks@1') return { status: 'authorized' };
+  return latestDocumentApprovalFact(evidence) === true
+    ? { status: 'authorized' }
+    : { status: 'missing_document_approval' };
 };

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "reference": "research.file-tasks@1",
-  "description": "After approval of the published SA page, file only the missing Jira tasks from the approved breakdown.",
+  "description": "After the approved SA page is published, file only the missing Jira tasks from the approved breakdown.",
   "stage": { "id": "delivery", "label": "Publish" },
   "availableDuring": ["execution"],
   "inputContract": "research_input",
@@ -29,9 +29,13 @@
   "requiredCapabilities": ["repository.read", "tracker.write"],
   "resumeBoundary": "step",
   "idempotency": "key",
-  "waitKinds": ["research.approval@1"],
+  "waitKinds": [],
   "artifactContracts": ["research-tasks"],
-  "requiredArtifactContracts": ["research-draft", "research-publication"],
+  "requiredArtifactContracts": [
+    "research-draft",
+    "research-document-review",
+    "research-publication"
+  ],
   "workflowChanges": [],
   "reconciliation": { "strategy": "receipt" }
 }

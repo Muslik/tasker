@@ -107,3 +107,7 @@ untouched at draft time; an unresolvable JQL macro renders as an error box. Use
 
 СА — это CONCLUSION, а не обзор. СА устанавливает, что возможно и сколько это стоит; что
 продукт должен делать, относится к продукту и дизайну — это «не твоё решение».
+
+If `operatorGuidance` is present in the execution context, treat it as mandatory
+revision input for this draft attempt. Resolve every cited annotation or instruction
+in the updated document and task list instead of paraphrasing it back.

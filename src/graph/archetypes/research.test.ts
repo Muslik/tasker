@@ -6,9 +6,9 @@ import {
   createPredicateRegistry,
   createStepTypeRegistry,
   createWaitRegistry,
+  RESEARCH_DOCUMENT_APPROVED_PREDICATE,
   scaffoldResearch,
   RESEARCH_NODE_IDS,
-  RESEARCH_REVIEW_ACCEPTED_PREDICATE,
   RESEARCH_STEP_REFERENCES,
 } from '../index.js';
 
@@ -45,7 +45,7 @@ const compileScaffold = () => {
     contracts: {
       predicates: createPredicateRegistry([
         {
-          id: 'research.review_accepted',
+          id: 'research.document_approved',
           version: '1',
           inputSchema: z.unknown(),
         },
@@ -96,17 +96,31 @@ describe('research archetype scaffold', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const loop = result.value.root.children[0];
+    const investigate = result.value.root.children[0];
+    const loop = result.value.root.children[1];
+    if (investigate === undefined || investigate.kind !== 'step') {
+      throw new Error('Research investigate step is missing');
+    }
     if (loop === undefined || loop.kind !== 'bounded_loop') {
       throw new Error('Research loop is missing');
     }
     expect(loop.body.children.every((child) => child.kind === 'step')).toBe(true);
     expect(
-      loop.body.children.map((child) => {
-        if (child.kind !== 'step' || child.with === null || Array.isArray(child.with)) return null;
-        return typeof child.with === 'object' ? child.with.operatorBrief : null;
-      }),
-    ).toEqual([brief, brief, brief]);
+      [
+        investigate,
+        ...loop.body.children.filter(
+          (
+            child,
+          ): child is (typeof loop.body.children)[number] & {
+            readonly kind: 'step';
+          } => child.kind === 'step',
+        ),
+      ].map((child) =>
+        child.with !== null && !Array.isArray(child.with) && typeof child.with === 'object'
+          ? child.with.operatorBrief
+          : null,
+      ),
+    ).toEqual([brief, brief, brief, brief]);
   });
 
   it('keeps the public node-id scheme stable', () => {
@@ -117,6 +131,7 @@ describe('research archetype scaffold', () => {
       investigate: 'investigate-research',
       draft: 'draft-research',
       review: 'review-research',
+      documentReview: 'document-review-research',
       publish: 'publish-research',
       fileTasks: 'file-research-tasks',
     });
@@ -131,18 +146,19 @@ describe('research archetype scaffold', () => {
         kind: 'sequence',
         id: RESEARCH_NODE_IDS.root,
         children: [
+          { kind: 'step', id: RESEARCH_NODE_IDS.investigate },
           {
             kind: 'bounded_loop',
             id: RESEARCH_NODE_IDS.reviewLoop,
             maxAttempts: 3,
-            until: RESEARCH_REVIEW_ACCEPTED_PREDICATE,
+            until: RESEARCH_DOCUMENT_APPROVED_PREDICATE,
             body: {
               kind: 'sequence',
               id: RESEARCH_NODE_IDS.reviewAttempt,
               children: [
-                { kind: 'step', id: RESEARCH_NODE_IDS.investigate },
                 { kind: 'step', id: RESEARCH_NODE_IDS.draft },
                 { kind: 'step', id: RESEARCH_NODE_IDS.review },
+                { kind: 'step', id: RESEARCH_NODE_IDS.documentReview },
               ],
             },
           },
@@ -152,7 +168,7 @@ describe('research archetype scaffold', () => {
       },
     });
     expect(compiled.compiled.graph.metadata.references.predicates).toEqual([
-      RESEARCH_REVIEW_ACCEPTED_PREDICATE,
+      RESEARCH_DOCUMENT_APPROVED_PREDICATE,
     ]);
     expect(compiled.compiled.graph.metadata.references.stepTypes).toEqual(
       expect.arrayContaining(Object.values(RESEARCH_STEP_REFERENCES)),

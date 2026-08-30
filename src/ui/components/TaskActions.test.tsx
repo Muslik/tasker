@@ -115,4 +115,38 @@ describe('TaskActions', () => {
     expect(callbacks.resume).toHaveBeenCalledOnce();
     expect(callbacks.approve).not.toHaveBeenCalled();
   });
+
+  it('hides the generic resume action for the dedicated research review wait', () => {
+    const client = new QueryClient();
+    if (projection.current === null || projection.current.status !== 'waiting') {
+      throw new Error('Expected a waiting projection for the research review test.');
+    }
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(TaskActions, {
+          task,
+          projection: {
+            ...projection,
+            current: {
+              ...projection.current,
+              status: 'waiting',
+              waitKind: 'research.document-review@1',
+            },
+          },
+          currentRun: {
+            ...currentRun,
+            wait: {
+              ...currentRun.wait,
+              waitKind: 'research.document-review@1',
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(html).not.toContain('Resume');
+    expect(html).toContain('Restart');
+  });
 });

@@ -305,6 +305,7 @@ describe('Bitbucket review intake', () => {
       status: 'completed',
       summary: 'PR ready',
       artifactIds: [],
+      predicateFacts: {},
       details: { output: prOutput },
       recordedAt: '2026-08-04T10:02:00.000Z',
     };

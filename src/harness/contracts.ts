@@ -119,6 +119,7 @@ export const HarnessContractNameSchema = z.enum([
   'pull_request_input',
   'pull_request_output',
   'research_draft_output',
+  'research_document_review_output',
   'research_input',
   'research_investigation_output',
   'research_publication_output',

@@ -8,6 +8,7 @@ import {
   ExecutionRunViewSchema,
   ExpectedRunCommandSchema,
   PlanningClarificationSubmissionSchema,
+  ResearchDocumentReviewCommandSchema,
   RestartRunCommandSchema,
   RunStartCommandSchema,
   WorkflowChangeReviewCommandSchema,
@@ -17,6 +18,7 @@ import {
   type ExecutionRunView,
   type ExpectedRunCommand,
   type PlanningClarificationSubmission,
+  type ResearchDocumentReviewCommand,
   type RestartRunCommand,
   type RunStartCommand,
   type WorkflowChangeReviewCommand,
@@ -188,6 +190,17 @@ export const reviewPlan = (
   postJson(
     `/api/workflows/${encodeURIComponent(taskReference)}/plan-review`,
     PlanReviewCommandSchema,
+    ExecutionRunViewSchema,
+    input,
+  );
+
+export const reviewResearchDocument = (
+  taskReference: string,
+  input: ResearchDocumentReviewCommand,
+): Promise<ExecutionRunView> =>
+  postJson(
+    `/api/workflows/${encodeURIComponent(taskReference)}/research-document-review`,
+    ResearchDocumentReviewCommandSchema,
     ExecutionRunViewSchema,
     input,
   );

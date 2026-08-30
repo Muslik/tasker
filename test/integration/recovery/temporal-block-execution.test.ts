@@ -307,6 +307,7 @@ describe('temporal block execution activity', () => {
       status,
       summary: operationId,
       artifactIds: [],
+      predicateFacts: {},
       details: { operationId },
       recordedAt: `2026-08-25T00:00:0${operationId.at(-1) ?? '0'}.000Z`,
     });
@@ -335,6 +336,7 @@ describe('temporal block execution activity', () => {
       status: 'completed',
       summary: operationId,
       artifactIds: [],
+      predicateFacts: {},
       details: { operationId },
       recordedAt: '2026-08-25T00:00:00.000Z',
     });

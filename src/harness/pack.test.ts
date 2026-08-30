@@ -124,10 +124,11 @@ describe('file-backed harness pack', () => {
     expect(contracts.predicates.has('company.accepted@1')).toBe(true);
   });
 
-  it('registers static predicates declared by research publish and filing blocks', () => {
+  it('registers static predicates declared by research review, publish, and filing blocks', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const contracts = createHarnessWorkflowContracts(pack.steps);
 
+    expect(contracts.predicates.has('research.document_approved@1')).toBe(true);
     expect(contracts.predicates.has('research.published@1')).toBe(true);
     expect(contracts.predicates.has('research.tasks_filed@1')).toBe(true);
   });
@@ -322,11 +323,14 @@ describe('file-backed harness pack', () => {
     expect(sharedStep?.skills).toEqual(expect.arrayContaining(['figma-inspector', 'figma-parity']));
   });
 
-  it('ships the research step catalog with typed outputs and approval-gated filing', () => {
+  it('ships the research step catalog with agent review and operator document approval', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const investigate = pack.steps.find(({ reference }) => reference === 'research.investigate@1');
     const draft = pack.steps.find(({ reference }) => reference === 'research.draft@1');
     const review = pack.steps.find(({ reference }) => reference === 'research.review@1');
+    const documentReview = pack.steps.find(
+      ({ reference }) => reference === 'research.document-review@1',
+    );
     const publish = pack.steps.find(({ reference }) => reference === 'research.publish@1');
     const fileTasks = pack.steps.find(({ reference }) => reference === 'research.file-tasks@1');
 
@@ -371,13 +375,6 @@ describe('file-backed harness pack', () => {
           'figma-parity',
         ],
       },
-      outputPredicates: {
-        discriminator: 'decision',
-        cases: {
-          accepted: { 'research.review_accepted@1': true },
-          changes_requested: { 'research.review_accepted@1': false },
-        },
-      },
     });
     for (const strategy of ['simple', 'standard', 'complex'] as const) {
       expect(resolveTaskExecutionProfile(pack.company, null, strategy, 'review')).toMatchObject({
@@ -385,6 +382,18 @@ describe('file-backed harness pack', () => {
         provider: 'claude',
       });
     }
+    expect(documentReview?.block).toMatchObject({
+      executor: { kind: 'effect', adapter: 'research.document-review@1' },
+      completion: { kind: 'structured_evidence', source: 'task_output' },
+      outputPredicates: {
+        discriminator: 'decision',
+        cases: {
+          approved: { 'research.document_approved@1': true },
+          changes_requested: { 'research.document_approved@1': false },
+        },
+      },
+    });
+    expect(documentReview?.contract.waitKinds).toEqual(['research.document-review@1']);
     expect(publish?.block).toMatchObject({
       executor: { kind: 'effect', adapter: 'research.publish@1' },
       completion: { kind: 'reconciled_effect' },
@@ -403,7 +412,7 @@ describe('file-backed harness pack', () => {
         facts: { 'research.tasks_filed@1': true },
       },
     });
-    expect(fileTasks?.contract.waitKinds).toEqual(['research.approval@1']);
+    expect(fileTasks?.contract.waitKinds).toEqual([]);
     expect(
       investigate?.contract.inputSchema.safeParse({
         objective: 'Prepare SA',
@@ -455,6 +464,12 @@ describe('file-backed harness pack', () => {
         concreteEdits: [
           { section: 'Как сейчас', change: 'Добавить measured screenshot and source.' },
         ],
+      }).success,
+    ).toBe(true);
+    expect(
+      documentReview?.contract.outputSchema.safeParse({
+        decision: 'approved',
+        documentArtifactId: 'task-step-output:workflow:research:draft:2:artifact',
       }).success,
     ).toBe(true);
     expect(

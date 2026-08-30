@@ -49,7 +49,9 @@ export const createHarnessWorkflowContracts = (
   }
   for (const wait of harnessWaitContracts) {
     if (wait.resolutionMapping === undefined) continue;
-    for (const facts of Object.values(wait.resolutionMapping.cases)) {
+    const cases: Readonly<Record<string, Readonly<Record<string, boolean>>>> =
+      wait.resolutionMapping.cases;
+    for (const facts of Object.values(cases)) {
       for (const reference of Object.keys(facts)) predicateReferences.add(reference);
     }
   }

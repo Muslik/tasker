@@ -99,6 +99,7 @@ describe('workflow analyzer context', () => {
         'research.investigate@1',
         'research.draft@1',
         'research.review@1',
+        'research.document-review@1',
         'research.publish@1',
         'research.file-tasks@1',
       ]),

@@ -15,6 +15,7 @@ export const RESEARCH_NODE_IDS = Object.freeze({
   investigate: 'investigate-research',
   draft: 'draft-research',
   review: 'review-research',
+  documentReview: 'document-review-research',
   publish: 'publish-research',
   fileTasks: 'file-research-tasks',
 });
@@ -23,11 +24,12 @@ export const RESEARCH_STEP_REFERENCES = Object.freeze({
   investigate: 'research.investigate@1',
   draft: 'research.draft@1',
   review: 'research.review@1',
+  documentReview: 'research.document-review@1',
   publish: 'research.publish@1',
   fileTasks: 'research.file-tasks@1',
 });
 
-export const RESEARCH_REVIEW_ACCEPTED_PREDICATE = 'research.review_accepted@1';
+export const RESEARCH_DOCUMENT_APPROVED_PREDICATE = 'research.document_approved@1';
 
 const ResearchTaskSchema = z
   .object({
@@ -112,18 +114,23 @@ export const scaffoldResearch = (
       kind: 'sequence',
       id: RESEARCH_NODE_IDS.root,
       children: [
+        step(RESEARCH_NODE_IDS.investigate, RESEARCH_STEP_REFERENCES.investigate, stepInput),
         {
           kind: 'bounded_loop',
           id: RESEARCH_NODE_IDS.reviewLoop,
           maxAttempts: 3,
-          until: RESEARCH_REVIEW_ACCEPTED_PREDICATE,
+          until: RESEARCH_DOCUMENT_APPROVED_PREDICATE,
           body: {
             kind: 'sequence',
             id: RESEARCH_NODE_IDS.reviewAttempt,
             children: [
-              step(RESEARCH_NODE_IDS.investigate, RESEARCH_STEP_REFERENCES.investigate, stepInput),
               step(RESEARCH_NODE_IDS.draft, RESEARCH_STEP_REFERENCES.draft, stepInput),
               step(RESEARCH_NODE_IDS.review, RESEARCH_STEP_REFERENCES.review, stepInput),
+              step(
+                RESEARCH_NODE_IDS.documentReview,
+                RESEARCH_STEP_REFERENCES.documentReview,
+                stepInput,
+              ),
             ],
           },
         },

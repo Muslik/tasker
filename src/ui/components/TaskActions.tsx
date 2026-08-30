@@ -21,6 +21,7 @@ const dedicatedWaitKinds = new Set([
   'code_review@1',
   'dependency.available@1',
   'dependency.discovery@1',
+  'research.document-review@1',
 ]);
 
 export type TaskActionAvailability = {
