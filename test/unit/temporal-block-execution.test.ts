@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { blockReceiptId, BlockReceiptStore } from '../../src/blocks/index.js';
+import { blockReceiptId, BlockReceiptStore } from '../../src/steps/index.js';
 import {
   loadHarnessPack,
   resolveAgentExecutionProfile,
@@ -12,9 +12,9 @@ import {
   type TaskRunEvidence,
 } from '../../src/integrations/index.js';
 import type { PullRequestReviewEvidence } from '../../src/integrations/bitbucket/review.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
-import type { CommandRunner, WorkspaceCommandRunner } from '../../src/providers/command-runner.js';
+import type { CommandRunner, WorkspaceCommandRunner } from '../../src/agents/command-runner.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { systemClock } from '../../src/shared/clock.js';
 import {
@@ -26,11 +26,11 @@ import {
   selectAgentRunEvidence,
   TemporalTaskStepTraceStore,
   type TaskStepAgentRunner,
-} from '../../src/temporal/activities/block-execution.js';
+} from '../../src/steps/activities/block-execution.js';
 import type {
   DockerWorkspaceRuntimePreparer,
   DockerWorkspaceRuntimeReceipt,
-} from '../../src/workspaces/index.js';
+} from '../../src/workspace/index.js';
 import { makePlanningTaskSnapshot } from '../support/planning.js';
 
 const workspaceCommands = (run: CommandRunner['run'] = vi.fn()): WorkspaceCommandRunner => ({

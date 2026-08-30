@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { z } from 'zod';
 
-import type { LedgerRepository } from '../../ledger/repository.js';
+import type { LedgerRepository } from '../../store/repository.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
-import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
+import type { BitbucketRepositoryConfiguration } from '../../workspace/bitbucket.js';
 import type { TaskRunStepEvidence } from '../execution.js';
 import { pullRequestOutputSchema } from '../../harness/step-contracts.js';
 

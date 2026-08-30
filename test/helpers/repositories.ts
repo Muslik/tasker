@@ -1,5 +1,5 @@
-import { StaticRepositoryCatalog } from '../../src/repositories/catalog.js';
-import { RepositoryCatalogEntrySchema } from '../../src/repositories/contracts.js';
+import { StaticRepositoryCatalog } from '../../src/workspace/catalog.js';
+import { RepositoryCatalogEntrySchema } from '../../src/workspace/contracts.js';
 
 export const makeRepositoryCatalog = () =>
   new StaticRepositoryCatalog([

@@ -4,8 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
 
-import type { WorkspaceCommandRunner } from '../../providers/command-runner.js';
-import { JsonValueSchema } from '../../workflow/schema.js';
+import type { WorkspaceCommandRunner } from '../../agents/command-runner.js';
+import { JsonValueSchema } from '../../graph/schema.js';
 import type {
   IntegrationEvidenceFile,
   IntegrationEvidenceSink,

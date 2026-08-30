@@ -8,7 +8,7 @@ import {
   deliveryOutputSchema,
   pullRequestOutputSchema,
 } from '../../harness/step-contracts.js';
-import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../../graph/schema.js';
 import type { BitbucketPullRequestAdapter } from '../bitbucket/pull-request-adapter.js';
 import type { PullRequestReviewEvidence } from '../bitbucket/review.js';
 import type {

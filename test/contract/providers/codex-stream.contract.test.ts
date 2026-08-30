@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { parseCodexStream, sha256 } from '../../../src/providers/codex-cli-support.js';
-import { parseSubscriptionCliStream } from '../../../src/providers/subscription-cli-stream.js';
+import { parseCodexStream, sha256 } from '../../../src/agents/codex-cli-support.js';
+import { parseSubscriptionCliStream } from '../../../src/agents/subscription-cli-stream.js';
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'codex');
 const fixture = (name: string): string => readFileSync(join(fixturesDir, name), 'utf8');

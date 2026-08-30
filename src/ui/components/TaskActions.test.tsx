@@ -7,7 +7,7 @@ import type {
   ExecutionRunView,
   OperatorTaskSummary,
   OperatorWorkflowProjection,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { TaskActions, invokeTaskAction } from './TaskActions.js';
 
 const task: OperatorTaskSummary = {

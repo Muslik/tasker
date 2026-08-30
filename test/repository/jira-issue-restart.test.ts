@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { JiraIssuePort } from '../../src/integrations/jira/client.js';
 import { createJiraIssueService } from '../../src/integrations/jira/service.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { StaticRepositoryCatalog } from '../../src/repositories/catalog.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
+import { StaticRepositoryCatalog } from '../../src/workspace/catalog.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';

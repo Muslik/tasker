@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { blockReceiptId } from '../../src/blocks/index.js';
-import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
+import { blockReceiptId } from '../../src/steps/index.js';
+import { createOperatorWorkflowProjection } from '../../src/server/operator-workflow-projection.js';
 import { ok } from '../../src/shared/outcome.js';
-import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
+import { TaskRunLifecycleSchema } from '../../src/steps/public-state.js';
 
 const availableLifecycle = TaskRunLifecycleSchema.parse({
   bootstrap: {

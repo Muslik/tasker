@@ -8,19 +8,19 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
   BootstrapWorkflowActivities,
   BootstrapWorkflowInput,
-} from '../../src/temporal/bootstrap-kernel/contracts.js';
-import { ImplementationPlanningRecordSchema } from '../../src/control-plane/implementation-planning-contracts.js';
+} from '../../src/kernel/bootstrap-kernel/contracts.js';
+import { ImplementationPlanningRecordSchema } from '../../src/server/implementation-planning-contracts.js';
 import {
   createPlanningActivity,
   type TemporalImplementationPlanningCoordinator,
-} from '../../src/temporal/activities/planning-activity.js';
-import { TemporalTaskRunService } from '../../src/temporal/client.js';
-import type { TaskRunPublicState } from '../../src/temporal/public-state.js';
+} from '../../src/steps/activities/planning-activity.js';
+import { TemporalTaskRunService } from '../../src/kernel/client.js';
+import type { TaskRunPublicState } from '../../src/steps/public-state.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { testTemporalActivities } from '../helpers/temporal-activities.js';
 
 const workflowsPath = fileURLToPath(
-  new URL('../../src/temporal/workflows/index.ts', import.meta.url),
+  new URL('../../src/kernel/workflows/index.ts', import.meta.url),
 );
 
 const inputFor = (

@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 
-import { ApiErrorResponseSchema } from '../../control-plane/operator-contracts.js';
+import { ApiErrorResponseSchema } from '../../server/operator-contracts.js';
 
 type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;
 

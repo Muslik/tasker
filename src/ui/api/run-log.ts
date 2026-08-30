@@ -5,7 +5,7 @@ import {
   OperatorRunLogResponseSchema,
   type OperatorExecutionAttempt,
   type OperatorRunLogResponse,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { getOptionalJson } from './http.js';
 import { operatorQueryKeys } from './query.js';
 

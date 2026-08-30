@@ -234,13 +234,11 @@ try {
   const workerChild = startChild(
     'Tasker worker',
     process.execPath,
-    ['dist/temporal/worker-main.js'],
+    ['dist/kernel/worker-main.js'],
     { ipc: true },
   );
   await waitForWorkerReady(workerChild);
-  const apiChild = startChild('Tasker API', process.execPath, [
-    'dist/control-plane/operator-server.js',
-  ]);
+  const apiChild = startChild('Tasker API', process.execPath, ['dist/server/operator-server.js']);
   await waitUntil('Tasker API', () => taskerHealthy(taskerUrl), apiChild);
 
   console.log(`[tasker] Operator console: ${taskerUrl}`);

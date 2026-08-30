@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import type { BootstrapWorkflowActivities } from '../../src/temporal/bootstrap-kernel/contracts.js';
-import type { ExecutionWorkflowActivities } from '../../src/temporal/execution-kernel/contracts.js';
+import type { BootstrapWorkflowActivities } from '../../src/kernel/bootstrap-kernel/contracts.js';
+import type { ExecutionWorkflowActivities } from '../../src/kernel/execution-kernel/contracts.js';
 
 const HASH = '0'.repeat(64);
 

@@ -9,12 +9,12 @@ import {
   EvidenceBundleStore,
   ImplementationPlanningStore,
   type ImplementationPlanningCoordinator,
-} from '../../src/control-plane/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+} from '../../src/server/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import {
   LedgerAgentInvocationRecorder,
   planningAgentInvocationId,
-} from '../../src/observability/agent-invocation.js';
+} from '../../src/steps/agent-invocation.js';
 import {
   ImplementationPlanningDecisionSchema,
   WorkflowGenerationSubjectSource,
@@ -22,7 +22,7 @@ import {
   type PlanningSnapshotReference,
   type WorkflowGenerationSubjectRunStore,
 } from '../../src/planning/index.js';
-import { type ImplementationPlanner } from '../../src/providers/index.js';
+import { type ImplementationPlanner } from '../../src/agents/index.js';
 import { makeAdjustableClock, type Clock } from '../../src/shared/clock.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';

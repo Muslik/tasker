@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { LedgerAgentInvocationReader } from '../../src/control-plane/agent-invocation-reader.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { LedgerAgentInvocationRecorder } from '../../src/observability/agent-invocation.js';
+import { LedgerAgentInvocationReader } from '../../src/server/agent-invocation-reader.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
+import { LedgerAgentInvocationRecorder } from '../../src/steps/agent-invocation.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const resources: SqliteLedger[] = [];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toBootstrapInvestigationResult } from '../../src/temporal/activities/bootstrap-investigation-activity.js';
+import { toBootstrapInvestigationResult } from '../../src/steps/activities/bootstrap-investigation-activity.js';
 
 const evidenceBundle = {
   artifactId: 'evidence-bundle:jira:AVIA-12045:r2:investigation',

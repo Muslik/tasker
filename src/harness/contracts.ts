@@ -6,20 +6,16 @@ import {
   CompletionEvaluatorSchema,
   type BlockDefinition,
   type CompletionEvaluator,
-} from '../blocks/contracts.js';
-import type { StepTypeContract } from '../workflow/contracts.js';
-import { SemanticExecutionRoleSchema } from '../workflow/semantic-schema.js';
-import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
-import {
-  JsonValueSchema,
-  OutputPredicateMappingSchema,
-  type JsonValue,
-} from '../workflow/schema.js';
+} from '../steps/contracts.js';
+import type { StepTypeContract } from '../graph/contracts.js';
+import { SemanticExecutionRoleSchema } from '../graph/semantic-schema.js';
+import { WorkflowChangeKindSchema } from '../graph/execution-result.js';
+import { JsonValueSchema, OutputPredicateMappingSchema, type JsonValue } from '../graph/schema.js';
 import {
   VALIDATION_PROFILES,
   ValidationProfileSchema,
   type ValidationProfile,
-} from '../workflow/archetypes/index.js';
+} from '../graph/archetypes/index.js';
 import {
   ApiPricingTableSchema,
   ExecutionProfileNameSchema,

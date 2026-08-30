@@ -4,14 +4,14 @@ import {
   type DependencyDeclaration,
   type DependencyDeclarationStore,
   type DependencyDeclarationStoreError,
-} from '../../control-plane/dependency-declaration.js';
+} from '../../server/dependency-declaration.js';
 import {
   type VerifiedPackagePublication,
   type VerifiedPackagePublicationStore,
   type VerifiedPackagePublicationStoreError,
-} from '../../control-plane/verified-package-publication.js';
+} from '../../server/verified-package-publication.js';
 import { dependencyWaitInputSchema } from '../../harness/step-contracts.js';
-import { JsonValueSchema } from '../../workflow/schema.js';
+import { JsonValueSchema } from '../../graph/schema.js';
 import type {
   IntegrationStepAdapter,
   IntegrationStepExecutionRequest,

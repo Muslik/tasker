@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { OperatorWorkflowProjection } from '../../control-plane/operator-contracts.js';
+import type { OperatorWorkflowProjection } from '../../server/operator-contracts.js';
 import {
   buildCurrentAttemptStatusView,
   CurrentAttemptStatus,

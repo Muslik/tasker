@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseDeclaredWorkflowChangeRequest } from '../../../src/workflow/index.js';
+import { parseDeclaredWorkflowChangeRequest } from '../../../src/graph/index.js';
 
 const crossRepositoryDiscovery = () => ({
   schemaVersion: 1 as const,

@@ -1,9 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import {
-  ExecutionRunViewSchema,
-  type ExecutionRunView,
-} from '../../control-plane/operator-contracts.js';
+import { ExecutionRunViewSchema, type ExecutionRunView } from '../../server/operator-contracts.js';
 import { getOptionalJson } from './http.js';
 import { operatorQueryKeys } from './query.js';
 

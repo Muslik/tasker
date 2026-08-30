@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ResolvedExecutionProfileSchema } from '../../../src/harness/index.js';
-import { estimateApiCost } from '../../../src/providers/api-cost.js';
+import { estimateApiCost } from '../../../src/agents/api-cost.js';
 
 const profile = ResolvedExecutionProfileSchema.parse({
   name: 'priced',

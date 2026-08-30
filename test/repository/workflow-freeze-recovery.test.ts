@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { WorkflowFreezeStore } from '../../src/control-plane/index.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
+import { WorkflowFreezeStore } from '../../src/server/index.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const freezeInput = {

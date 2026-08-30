@@ -14,7 +14,7 @@ import {
   type JiraTransitionObservation,
 } from '../../../src/integrations/index.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
-import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../../src/store/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
@@ -47,7 +47,7 @@ const requestFor = (
     workflowRunId: 'run-1',
     repository: {
       reference: task.repository,
-      sourcePath: '/repositories/front-avia',
+      sourcePath: '/workspace/front-avia',
       baseBranch: 'master',
       baseCommit: 'c'.repeat(40),
     },

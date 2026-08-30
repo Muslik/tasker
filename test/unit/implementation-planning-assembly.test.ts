@@ -4,9 +4,9 @@ import {
   createImplementationPlanningCoordinator,
   createOperatorWorkflowService,
   EvidenceBundleStore,
-} from '../../src/control-plane/index.js';
+} from '../../src/server/index.js';
 import { loadHarnessPack } from '../../src/harness/index.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { recordTestEvidenceBundle } from '../helpers/evidence.js';
 import {

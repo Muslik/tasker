@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { openSqliteLedger } from '../../src/ledger/index.js';
-import { PlanningTranscriptStore } from '../../src/control-plane/planning-transcript.js';
+import { openSqliteLedger } from '../../src/store/index.js';
+import { PlanningTranscriptStore } from '../../src/server/planning-transcript.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 describe('planning transcript recovery', () => {

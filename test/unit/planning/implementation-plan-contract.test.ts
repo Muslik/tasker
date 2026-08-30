@@ -4,7 +4,7 @@ import {
   ReadyImplementationPlanningDecisionSchema,
   validateAcceptanceVerificationLinks,
 } from '../../../src/planning/index.js';
-import { SemanticWorkflowSourceSchema } from '../../../src/workflow/index.js';
+import { SemanticWorkflowSourceSchema } from '../../../src/graph/index.js';
 
 const workflowSource = SemanticWorkflowSourceSchema.parse({
   schemaVersion: 1,

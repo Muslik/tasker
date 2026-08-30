@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HARNESS_WORKFLOW_CONTRACTS } from '../../../src/planning/contracts.js';
 import { validateWorkflowObligations } from '../../../src/planning/obligations.js';
-import { compileSemanticWorkflow } from '../../../src/workflow/index.js';
+import { compileSemanticWorkflow } from '../../../src/graph/index.js';
 
 describe('semantic workflow harness', () => {
   it('compiles one visible development loop from the registered semantic agent blocks', () => {

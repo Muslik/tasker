@@ -5,12 +5,12 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { RepositoryRemoteSource } from '../../src/repositories/bitbucket.js';
+import type { RepositoryRemoteSource } from '../../src/workspace/bitbucket.js';
 import {
   GitRepositoryCloner,
   ManagedRepositoryStore,
   type RepositoryCloner,
-} from '../../src/repositories/managed-store.js';
+} from '../../src/workspace/managed-store.js';
 
 const directories: string[] = [];
 

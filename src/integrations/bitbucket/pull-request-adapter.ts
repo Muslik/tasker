@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import type { HarnessGitPolicy } from '../../harness/contracts.js';
-import type { CommandResult, WorkspaceCommandRunner } from '../../providers/command-runner.js';
-import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
-import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import type { CommandResult, WorkspaceCommandRunner } from '../../agents/command-runner.js';
+import type { BitbucketRepositoryConfiguration } from '../../workspace/bitbucket.js';
+import { JsonValueSchema, type JsonValue } from '../../graph/schema.js';
 import type {
   IntegrationStepExecutionRequest,
   IntegrationStepExecutionResult,

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { ExecutionWorkflowInputSchema } from '../../src/temporal/execution-kernel/contracts.js';
+import { ExecutionWorkflowInputSchema } from '../../src/kernel/execution-kernel/contracts.js';
 
 const graph = {
   metadata: {
@@ -33,9 +33,9 @@ describe('Execution Workflow v2 boundary', () => {
 
   it('keeps bootstrap, vendor, provider, and project concepts outside the kernel source', () => {
     const source = [
-      'src/temporal/workflows/execution-workflow-v2.ts',
-      'src/temporal/execution-kernel/contracts.ts',
-      'src/temporal/execution-kernel/graph-state.ts',
+      'src/kernel/workflows/execution-workflow-v2.ts',
+      'src/kernel/execution-kernel/contracts.ts',
+      'src/kernel/execution-kernel/graph-state.ts',
     ]
       .map((path) => readFileSync(resolve(path), 'utf8'))
       .join('\n');

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../../graph/schema.js';
 import type {
   IntegrationStepAdapter,
   IntegrationStepExecutionRequest,

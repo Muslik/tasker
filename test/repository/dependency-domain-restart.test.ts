@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { DependencyDeclarationStore } from '../../src/control-plane/dependency-declaration.js';
-import { VerifiedPackagePublicationStore } from '../../src/control-plane/verified-package-publication.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { DependencyDeclarationStore } from '../../src/server/dependency-declaration.js';
+import { VerifiedPackagePublicationStore } from '../../src/server/verified-package-publication.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseSubscriptionCliStream } from '../../../src/providers/subscription-cli-stream.js';
+import { parseSubscriptionCliStream } from '../../../src/agents/subscription-cli-stream.js';
 
 describe('subscription CLI stream parsing', () => {
   it('normalizes Codex output and usage', () => {

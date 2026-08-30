@@ -8,7 +8,7 @@ import {
   type CommandRequest,
   type CommandResult,
   type WorkspaceCommandRunner,
-} from '../../../src/providers/index.js';
+} from '../../../src/agents/index.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 import {

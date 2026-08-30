@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { ValidationProfileSchema } from '../workflow/archetypes/index.js';
-import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
+import { ValidationProfileSchema } from '../graph/archetypes/index.js';
+import { SemanticWorkflowSourceSchema } from '../graph/semantic-schema.js';
 
 export const VerificationProfileSchema = z.enum([
   'full',

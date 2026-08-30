@@ -9,7 +9,7 @@ import {
   defaultRepositoryStorePath,
   discoverRepositoryCatalog,
   loadRepositoryCatalogConfiguration,
-} from '../../src/repositories/catalog.js';
+} from '../../src/workspace/catalog.js';
 
 const directories: string[] = [];
 

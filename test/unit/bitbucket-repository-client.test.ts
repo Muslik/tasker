@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitbucketRepositoryClient } from '../../src/repositories/bitbucket.js';
+import { BitbucketRepositoryClient } from '../../src/workspace/bitbucket.js';
 
 const configuration = {
   baseUrl: 'https://bitbucket.twiket.com',

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { TaskStepFilesystemStore } from '../../../src/temporal/activities/task-step-filesystem.js';
+import { TaskStepFilesystemStore } from '../../../src/steps/activities/task-step-filesystem.js';
 
 describe('task step filesystem store', () => {
   it('reuses durable artifacts and clears only owned scratch on redelivery', async () => {

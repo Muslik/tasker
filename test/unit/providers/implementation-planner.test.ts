@@ -8,14 +8,14 @@ import {
   type CommandRequest,
   type CommandResult,
   type WorkspaceCommandRunner,
-} from '../../../src/providers/index.js';
+} from '../../../src/agents/index.js';
 import { getHarnessPack } from '../../../src/harness/index.js';
 import {
   AgentInvocationArtifactSchema,
   LedgerAgentInvocationRecorder,
   planningAgentInvocationId,
-} from '../../../src/observability/agent-invocation.js';
-import { openSqliteLedger } from '../../../src/ledger/index.js';
+} from '../../../src/steps/agent-invocation.js';
+import { openSqliteLedger } from '../../../src/store/index.js';
 import { makeAdjustableClock } from '../../../src/shared/clock.js';
 import { err, ok } from '../../../src/shared/outcome.js';
 import { makeEvidenceBundle } from '../../helpers/evidence.js';

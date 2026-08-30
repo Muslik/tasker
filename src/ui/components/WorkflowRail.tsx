@@ -1,7 +1,4 @@
-import type {
-  OperatorWorkflowStage,
-  WorkflowNodeStatus,
-} from '../../control-plane/operator-contracts.js';
+import type { OperatorWorkflowStage, WorkflowNodeStatus } from '../../server/operator-contracts.js';
 import { cn } from '../../cockpit/lib/utils.js';
 
 const statusTone = {

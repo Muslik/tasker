@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openSqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 
 const FIXED_NOW = '2026-08-01T12:00:00.000Z';
 const directories: string[] = [];

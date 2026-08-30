@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { HarnessStepManifest, HarnessStepSource } from './contracts.js';
-import { ValidationProfileSchema } from '../workflow/archetypes/index.js';
+import { ValidationProfileSchema } from '../graph/archetypes/index.js';
 
 export const taskInputSchema = z
   .object({

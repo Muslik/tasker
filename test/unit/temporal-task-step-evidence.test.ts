@@ -4,14 +4,14 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { openSqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import {
   TaskStepEvidenceStore,
   normalizeTaskStepEvidencePaths,
-} from '../../src/temporal/activities/task-step-evidence.js';
-import { TemporalTaskStepTraceStore } from '../../src/temporal/activities/block-execution.js';
-import { TaskStepEvidenceArtifactSchema } from '../../src/temporal/task-step-evidence-contracts.js';
+} from '../../src/steps/activities/task-step-evidence.js';
+import { TemporalTaskStepTraceStore } from '../../src/steps/activities/block-execution.js';
+import { TaskStepEvidenceArtifactSchema } from '../../src/steps/task-step-evidence-contracts.js';
 
 describe('task step evidence store', () => {
   it('normalizes only absolute evidence paths inside the owned artifact root', () => {

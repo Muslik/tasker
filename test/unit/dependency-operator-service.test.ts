@@ -4,12 +4,12 @@ import {
   DependencyDeclarationStore,
   DependencyOperatorService,
   VerifiedPackagePublicationStore,
-} from '../../src/control-plane/index.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
-import type { JsonValue } from '../../src/ledger/types.js';
+} from '../../src/server/index.js';
+import { openSqliteLedger } from '../../src/store/index.js';
+import type { JsonValue } from '../../src/store/types.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
-import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
+import { TaskRunLifecycleSchema } from '../../src/steps/public-state.js';
 
 const taskReference = 'jira:AVIA-12045';
 

@@ -16,8 +16,8 @@ import {
   type GitCommitIdentity,
   loadGitCommitIdentity,
 } from '../../../src/integrations/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
-import { nodeCommandRunner, type WorkspaceCommandRunner } from '../../../src/providers/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../../src/store/index.js';
+import { nodeCommandRunner, type WorkspaceCommandRunner } from '../../../src/agents/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import type { IntegrationStepExecutionRequest } from '../../../src/integrations/execution.js';
 import { makePlanningTaskSnapshot } from '../../support/planning.js';

@@ -3,7 +3,7 @@ import { type QueryClient } from '@tanstack/react-query';
 import {
   OperatorStreamEventSchema,
   type OperatorStreamEvent,
-} from '../control-plane/operator-contracts.js';
+} from '../server/operator-contracts.js';
 import { invalidateTaskQueries } from './api/query.js';
 
 export interface OperatorRealtimeEventSource {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { CompletedRunLifecycleReader } from '../../src/control-plane/completed-run-lifecycle.js';
-import { ImplementationPlanningStore } from '../../src/control-plane/implementation-planning.js';
-import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
-import { RetrospectiveReportSchema } from '../../src/retrospective/index.js';
+import { CompletedRunLifecycleReader } from '../../src/server/completed-run-lifecycle.js';
+import { ImplementationPlanningStore } from '../../src/server/implementation-planning.js';
+import { createOperatorWorkflowProjection } from '../../src/server/operator-workflow-projection.js';
+import { openSqliteLedger } from '../../src/store/index.js';
+import { RetrospectiveReportSchema } from '../../src/server/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
-import { WorkflowFreezeReceiptSchema } from '../../src/temporal/index.js';
-import { CompiledWorkflowSchema, JsonValueSchema } from '../../src/workflow/index.js';
+import { WorkflowFreezeReceiptSchema } from '../../src/kernel/index.js';
+import { CompiledWorkflowSchema, JsonValueSchema } from '../../src/graph/index.js';
 
 const graph = CompiledWorkflowSchema.parse({
   metadata: {

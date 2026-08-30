@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   DependencyDeclarationStore,
   dependencyDeclarationIdFor,
-} from '../../src/control-plane/dependency-declaration.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
+} from '../../src/server/dependency-declaration.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const baseInput = {

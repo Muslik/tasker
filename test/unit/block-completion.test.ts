@@ -4,8 +4,8 @@ import {
   acceptsAnyProcessExit,
   evaluateBlockCompletion,
   type AgentClaim,
-} from '../../src/blocks/index.js';
-import { OutputPredicateMappingSchema } from '../../src/workflow/index.js';
+} from '../../src/steps/index.js';
+import { OutputPredicateMappingSchema } from '../../src/graph/index.js';
 
 const claim: AgentClaim = {
   status: 'candidate_complete',

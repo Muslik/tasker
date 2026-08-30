@@ -1,7 +1,7 @@
 import type {
   OperatorRunLogEntry,
   OperatorTaskInvocationDetail,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { cn } from '../../cockpit/lib/utils.js';
 import { formatDuration } from '../lib/format.js';
 

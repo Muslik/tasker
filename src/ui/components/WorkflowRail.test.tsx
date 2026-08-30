@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { OperatorWorkflowStage } from '../../control-plane/operator-contracts.js';
+import type { OperatorWorkflowStage } from '../../server/operator-contracts.js';
 import { WorkflowRail } from './WorkflowRail.js';
 
 const stages: readonly OperatorWorkflowStage[] = [

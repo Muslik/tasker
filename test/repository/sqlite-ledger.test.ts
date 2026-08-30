@@ -8,7 +8,7 @@ import {
   openSqliteLedger,
   readLedgerMigrations,
   defaultMigrationsDirectory,
-} from '../../src/ledger/index.js';
+} from '../../src/store/index.js';
 
 const FIXED_NOW = '2026-08-01T12:00:00.000Z';
 

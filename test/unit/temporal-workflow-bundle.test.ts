@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 describe('Temporal workflow bundle', () => {
   it('bundles the workflow module without leaking non-deterministic dependencies', async () => {
     const bundle = await bundleWorkflowCode({
-      workflowsPath: resolve('src/temporal/workflows/index.ts'),
+      workflowsPath: resolve('src/kernel/workflows/index.ts'),
     });
 
     expect(bundle.code.length).toBeGreaterThan(0);

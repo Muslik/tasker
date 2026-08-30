@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 
-import type { OperatorTaskListResponse } from '../../control-plane/operator-contracts.js';
+import type { OperatorTaskListResponse } from '../../server/operator-contracts.js';
 import {
   captureTaskListSnapshot,
   restoreTaskListSnapshot,

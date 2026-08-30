@@ -13,15 +13,15 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
-import { nodeCommandRunner } from '../../../src/providers/command-runner.js';
+import { openSqliteLedger, type SqliteLedger } from '../../../src/store/index.js';
+import { nodeCommandRunner } from '../../../src/agents/command-runner.js';
 import { makeAdjustableClock } from '../../../src/shared/clock.js';
 import {
   ManagedWorkspaceManager,
   WorkspaceStore,
   type PrepareWorkspaceRequest,
   type WorkspaceConfiguration,
-} from '../../../src/workspaces/index.js';
+} from '../../../src/workspace/index.js';
 
 const resources: { readonly root: string; ledger: SqliteLedger | null }[] = [];
 

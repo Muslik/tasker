@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DependencyDeclarationGenerationSubjectResolver } from '../../src/control-plane/dependency-declaration-generation-subject.js';
+import { DependencyDeclarationGenerationSubjectResolver } from '../../src/server/dependency-declaration-generation-subject.js';
 import { err, ok } from '../../src/shared/outcome.js';
 import { makePlanningTaskSnapshot } from '../support/planning.js';
 

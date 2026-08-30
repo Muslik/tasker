@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   CommandRequest,
   HostControlPlaneCommandRunner,
-} from '../../../src/providers/command-runner.js';
+} from '../../../src/agents/command-runner.js';
 import { makeAdjustableClock } from '../../../src/shared/clock.js';
 import {
   DockerWorkspaceCommandRunner,
@@ -16,7 +16,7 @@ import {
   type DockerWorkspaceConfiguration,
   type ResolvedWorkspaceRuntimePolicy,
   type WorkspaceLocator,
-} from '../../../src/workspaces/index.js';
+} from '../../../src/workspace/index.js';
 
 const roots: string[] = [];
 

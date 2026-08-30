@@ -16,7 +16,7 @@ import {
   OperatorStreamEventSchema,
   OperatorTaskListResponseSchema,
   WorkflowResponseSchema,
-} from '../control-plane/operator-contracts.js';
+} from '../server/operator-contracts.js';
 import type {
   RunStartCommand,
   RestartRunCommand,
@@ -34,21 +34,21 @@ import type {
   CodeReviewSyncResponse,
   ExpectedRunCommand,
   PlanningClarificationSubmission,
-} from '../control-plane/operator-contracts.js';
+} from '../server/operator-contracts.js';
 import {
   PlanReviewCommandSchema,
   PlanReviewHistoryResponseSchema,
   type PlanReviewCommand,
   type PlanReviewRound,
-} from '../control-plane/plan-review.js';
+} from '../server/plan-review.js';
 import {
   ImplementationPlanningRecordSchema,
   type ImplementationPlanningRecord,
-} from '../control-plane/implementation-planning-contracts.js';
+} from '../server/implementation-planning-contracts.js';
 import {
   PlanningTranscriptViewSchema,
   type PlanningTranscriptView,
-} from '../control-plane/planning-transcript.js';
+} from '../server/planning-transcript.js';
 import {
   JiraIssueSnapshotSchema,
   JiraIssueStateSchema,
@@ -58,8 +58,8 @@ import {
 import {
   RepositoryCatalogResponseSchema,
   type RepositoryCatalogEntry,
-} from '../repositories/contracts.js';
-import { RetrospectiveResponseSchema, type RetrospectiveResponse } from '../retrospective/index.js';
+} from '../workspace/contracts.js';
+import { RetrospectiveResponseSchema, type RetrospectiveResponse } from '../server/report.js';
 
 type WorkflowLookup =
   | { readonly status: 'found'; readonly response: WorkflowResponse }

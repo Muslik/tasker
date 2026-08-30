@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlockReceiptSchema } from '../../src/blocks/contracts.js';
-import { LedgerAgentInvocationReader } from '../../src/control-plane/agent-invocation-reader.js';
-import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { LedgerAgentInvocationRecorder } from '../../src/observability/agent-invocation.js';
+import { BlockReceiptSchema } from '../../src/steps/contracts.js';
+import { LedgerAgentInvocationReader } from '../../src/server/agent-invocation-reader.js';
+import { createOperatorWorkflowProjection } from '../../src/server/operator-workflow-projection.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
+import { LedgerAgentInvocationRecorder } from '../../src/steps/agent-invocation.js';
 import { planWorkflowProposal } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
-import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
-import { CompiledWorkflowSchema } from '../../src/workflow/schema.js';
+import { TaskRunLifecycleSchema } from '../../src/steps/public-state.js';
+import { CompiledWorkflowSchema } from '../../src/graph/schema.js';
 import { makeWorkflowProposal } from '../support/planning.js';
 
 const resources: SqliteLedger[] = [];

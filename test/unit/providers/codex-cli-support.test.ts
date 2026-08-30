@@ -5,8 +5,8 @@ import {
   codexOutputJsonSchema,
   normalizeCodexStructuredOutput,
   providerFailureMessage,
-} from '../../../src/providers/codex-cli-support.js';
-import { agentStepOutcomeSchema } from '../../../src/temporal/activities/block-execution-contracts.js';
+} from '../../../src/agents/codex-cli-support.js';
+import { agentStepOutcomeSchema } from '../../../src/steps/activities/block-execution-contracts.js';
 
 const objectRequirementIssues = (value: unknown, path = '$'): string[] => {
   if (Array.isArray(value)) {

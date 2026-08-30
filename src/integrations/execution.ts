@@ -1,11 +1,11 @@
 import type { PlanningTaskSnapshot } from '../planning/task-snapshot.js';
 import type { HarnessPolicyManifest, HarnessProjectManifest } from '../harness/index.js';
-import type { JsonValue } from '../workflow/schema.js';
-import type { WorkspaceLocator } from '../workspaces/contracts.js';
+import type { JsonValue } from '../graph/schema.js';
+import type { WorkspaceLocator } from '../workspace/contracts.js';
 import type { PullRequestReviewEvidence } from './bitbucket/review.js';
-import type { WorkflowChangeRequest } from '../workflow/execution-result.js';
+import type { WorkflowChangeRequest } from '../graph/execution-result.js';
 import type { TrackerStatusUpdates } from '../shared/task-run-settings.js';
-import type { AgentClaimCategory } from '../blocks/contracts.js';
+import type { AgentClaimCategory } from '../steps/contracts.js';
 
 export interface TaskRunStepEvidence {
   readonly operationId: string;

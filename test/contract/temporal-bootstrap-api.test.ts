@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlockReceiptStore } from '../../src/blocks/index.js';
-import { buildOperatorApi, createOperatorWorkflowService } from '../../src/control-plane/index.js';
-import { LedgerAgentInvocationReader } from '../../src/control-plane/agent-invocation-reader.js';
-import { PlanReviewStore } from '../../src/control-plane/plan-review.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
-import { LedgerAgentInvocationRecorder } from '../../src/observability/agent-invocation.js';
+import { BlockReceiptStore } from '../../src/steps/index.js';
+import { buildOperatorApi, createOperatorWorkflowService } from '../../src/server/index.js';
+import { LedgerAgentInvocationReader } from '../../src/server/agent-invocation-reader.js';
+import { PlanReviewStore } from '../../src/server/plan-review.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
+import { LedgerAgentInvocationRecorder } from '../../src/steps/agent-invocation.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { err, ok, type Outcome } from '../../src/shared/outcome.js';
 import {
@@ -18,7 +18,7 @@ import {
   type TaskRunError,
   type TaskRunPublicState,
   type TaskRunService,
-} from '../../src/temporal/index.js';
+} from '../../src/kernel/index.js';
 
 const resources: SqliteLedger[] = [];
 

@@ -28,7 +28,7 @@ const requestFor = (taskReference: string): IntegrationStepExecutionRequest => (
     workflowRunId: 'run-1',
     repository: {
       reference: task.repository,
-      sourcePath: '/repositories/front-avia',
+      sourcePath: '/workspace/front-avia',
       baseBranch: 'master',
       baseCommit: 'c'.repeat(40),
     },

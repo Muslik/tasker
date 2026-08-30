@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlockReceiptStore } from '../../src/blocks/index.js';
+import { BlockReceiptStore } from '../../src/steps/index.js';
 import {
   DependencyDeclarationStore,
   DependencyOperatorService,
   VerifiedPackagePublicationStore,
   buildOperatorApi,
   createOperatorWorkflowService,
-} from '../../src/control-plane/index.js';
-import { dependencyDeclarationIdFor } from '../../src/control-plane/dependency-declaration.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+} from '../../src/server/index.js';
+import { dependencyDeclarationIdFor } from '../../src/server/dependency-declaration.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import type { JiraIssueService } from '../../src/integrations/jira/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok, type Outcome } from '../../src/shared/outcome.js';
@@ -23,7 +23,7 @@ import {
   type TaskRunLifecycle,
   type TaskRunPublicState,
   type TaskRunService,
-} from '../../src/temporal/index.js';
+} from '../../src/kernel/index.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
 
 const resources: SqliteLedger[] = [];

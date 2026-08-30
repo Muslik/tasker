@@ -39,18 +39,18 @@ import type {
   RunStartCommand,
   WorkflowResponse,
   WorkflowView,
-} from '../control-plane/operator-contracts.js';
-import type { ImplementationPlanningRecord } from '../control-plane/implementation-planning-contracts.js';
-import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
+} from '../server/operator-contracts.js';
+import type { ImplementationPlanningRecord } from '../server/implementation-planning-contracts.js';
+import type { PlanningTranscriptView } from '../server/planning-transcript.js';
 import {
   PlanReviewAnnotationSchema,
   type PlanReviewAnnotation,
   type PlanReviewRound,
-} from '../control-plane/plan-review.js';
+} from '../server/plan-review.js';
 import type { JiraIssueState, JiraIssueSnapshot } from '../integrations/jira/contracts.js';
 import type { PlanningStrategyRequest } from '../planning/implementation-plan.js';
-import type { RepositoryCatalogEntry } from '../repositories/contracts.js';
-import type { RetrospectiveResponse } from '../retrospective/index.js';
+import type { RepositoryCatalogEntry } from '../workspace/contracts.js';
+import type { RetrospectiveResponse } from '../server/report.js';
 import { taskBranchName, taskBranchNameMatches } from '../shared/git-branch.js';
 import {
   answerPlanningClarification,

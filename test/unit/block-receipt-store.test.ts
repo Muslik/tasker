@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlockReceiptStore } from '../../src/blocks/index.js';
+import { BlockReceiptStore } from '../../src/steps/index.js';
 import { loadHarnessPack } from '../../src/harness/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { systemClock } from '../../src/shared/clock.js';
 
 const block = loadHarnessPack().steps.find(

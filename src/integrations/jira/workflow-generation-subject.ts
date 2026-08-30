@@ -6,7 +6,7 @@ import {
   type WorkflowGenerationSubjectResolver,
 } from '../../planning/index.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
-import { JsonValueSchema } from '../../workflow/index.js';
+import { JsonValueSchema } from '../../graph/index.js';
 import type { JiraIssueService, JiraWorkflowPlanningSource } from './service.js';
 
 const qualifiedRepositoryReference = (aliases: readonly string[]): string | null =>

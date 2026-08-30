@@ -16,14 +16,14 @@ import { describe, expect, it } from 'vitest';
 
 import { loadHarnessPack } from '../../src/harness/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
-import { nodeCommandRunner } from '../../src/providers/command-runner.js';
-import { prepareAgentSkills } from '../../src/providers/agent-skills.js';
-import type { WorkspaceLocator } from '../../src/workspaces/contracts.js';
+import { nodeCommandRunner } from '../../src/agents/command-runner.js';
+import { prepareAgentSkills } from '../../src/agents/agent-skills.js';
+import type { WorkspaceLocator } from '../../src/workspace/contracts.js';
 import {
   assertWorkspaceHarnessSkillBindings,
   loadWorkspaceHarnessPack,
-} from '../../src/workspaces/harness-pack.js';
-import { HarnessProfileWorkspaceBootstrapAdapter } from '../../src/workspaces/harness-profile-bootstrap.js';
+} from '../../src/workspace/harness-pack.js';
+import { HarnessProfileWorkspaceBootstrapAdapter } from '../../src/workspace/harness-profile-bootstrap.js';
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();

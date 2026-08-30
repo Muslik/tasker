@@ -7,7 +7,7 @@ import {
   createStepTypeRegistry,
   createWaitRegistry,
   type SemanticWorkflowSource,
-} from '../../../src/workflow/index.js';
+} from '../../../src/graph/index.js';
 
 const contracts = () => ({
   predicates: createPredicateRegistry([

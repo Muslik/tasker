@@ -1,11 +1,11 @@
-import type { LedgerRepository } from '../../ledger/repository.js';
-import type { JsonValue, LedgerConflict } from '../../ledger/types.js';
+import type { LedgerRepository } from '../../store/repository.js';
+import type { JsonValue, LedgerConflict } from '../../store/types.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import {
   JiraRepositoryBindingSchema,
   type JiraRepositoryBinding,
-} from '../../repositories/contracts.js';
+} from '../../workspace/contracts.js';
 import { JiraIssueStateSchema, type JiraIssueKey, type JiraIssueState } from './contracts.js';
 
 export const JIRA_ISSUE_PROJECTION = 'jira_issue';

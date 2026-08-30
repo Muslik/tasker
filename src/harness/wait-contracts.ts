@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { WaitContract } from '../workflow/contracts.js';
+import type { WaitContract } from '../graph/contracts.js';
 
 export const harnessWaitContracts = [
   {

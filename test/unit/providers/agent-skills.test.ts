@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { prepareAgentSkills, workspaceHarnessEnvironment } from '../../../src/providers/index.js';
+import { prepareAgentSkills, workspaceHarnessEnvironment } from '../../../src/agents/index.js';
 
 const createWorkspaceSkillCatalog = (profile = 'front-bus'): string => {
   const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-agent-skills-workspace-'));

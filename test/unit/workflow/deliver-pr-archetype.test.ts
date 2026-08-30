@@ -9,7 +9,7 @@ import {
   resolveDeliverPrScaffoldConfig,
   scaffoldDeliverPr,
   type DeliverPrSegment,
-} from '../../../src/workflow/index.js';
+} from '../../../src/graph/index.js';
 
 const config = resolveDeliverPrScaffoldConfig(getHarnessPack().policies);
 

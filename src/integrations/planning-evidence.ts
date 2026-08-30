@@ -3,12 +3,12 @@ import { z } from 'zod';
 import type {
   PlanningEvidenceReader,
   PlanningEvidenceReadError,
-} from '../control-plane/planning-evidence.js';
+} from '../server/planning-evidence.js';
 import type { PlanningEvidenceObservation, PlanningEvidenceRequest } from '../planning/index.js';
 import { loadHarnessEnvironmentDefaults } from '../shared/env-file.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema } from '../graph/schema.js';
 import { JiraIssueKeySchema, type JiraIssuePort, type JiraSyncProblem } from './jira/index.js';
 
 const REQUEST_TIMEOUT_MS = 15_000;

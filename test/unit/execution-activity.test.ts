@@ -4,15 +4,15 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { LedgerExecutionActivityReader } from '../../src/control-plane/execution-activity.js';
-import { PlanningTranscriptStore } from '../../src/control-plane/planning-transcript.js';
-import { BlockReceiptSchema, blockReceiptId } from '../../src/blocks/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { LedgerExecutionActivityReader } from '../../src/server/execution-activity.js';
+import { PlanningTranscriptStore } from '../../src/server/planning-transcript.js';
+import { BlockReceiptSchema, blockReceiptId } from '../../src/steps/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { systemClock } from '../../src/shared/clock.js';
-import { TemporalTaskStepTraceStore } from '../../src/temporal/activities/block-execution.js';
-import { TaskStepEvidenceStore } from '../../src/temporal/activities/task-step-evidence.js';
-import { JsonValueSchema } from '../../src/workflow/schema.js';
-import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
+import { TemporalTaskStepTraceStore } from '../../src/steps/activities/block-execution.js';
+import { TaskStepEvidenceStore } from '../../src/steps/activities/task-step-evidence.js';
+import { JsonValueSchema } from '../../src/graph/schema.js';
+import { TaskRunLifecycleSchema } from '../../src/steps/public-state.js';
 
 describe('execution activity', () => {
   let ledger: SqliteLedger | null = null;

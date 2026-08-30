@@ -8,12 +8,12 @@ import type {
   ExecutionWorkflowActivities,
   ExecutionWorkflowInput,
   ExecutionWorkflowPublicState,
-} from '../../src/temporal/execution-kernel/contracts.js';
-import { TemporalExecutionRunService } from '../../src/temporal/execution-kernel/client.js';
-import type { executionWorkflowV2 } from '../../src/temporal/workflows/execution-workflow-v2.js';
+} from '../../src/kernel/execution-kernel/contracts.js';
+import { TemporalExecutionRunService } from '../../src/kernel/execution-kernel/client.js';
+import type { executionWorkflowV2 } from '../../src/kernel/workflows/execution-workflow-v2.js';
 
 const workflowsPath = fileURLToPath(
-  new URL('../../src/temporal/workflows/execution-workflow-v2.ts', import.meta.url),
+  new URL('../../src/kernel/workflows/execution-workflow-v2.ts', import.meta.url),
 );
 
 const workflowInput = (taskReference: string): ExecutionWorkflowInput => ({

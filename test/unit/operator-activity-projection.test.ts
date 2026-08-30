@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   projectOperatorActivity,
   type OperatorActivitySources,
-} from '../../src/control-plane/operator-activity-projection.js';
+} from '../../src/server/operator-activity-projection.js';
 
 const entry = (
   title: string,

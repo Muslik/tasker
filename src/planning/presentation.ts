@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { CompiledWorkflowArtifact, CompiledWorkflowNode } from '../workflow/index.js';
+import type { CompiledWorkflowArtifact, CompiledWorkflowNode } from '../graph/index.js';
 import type { WorkflowProposalArtifact } from './proposal.js';
 
 const PresentationStatusSchema = z.literal('planned');

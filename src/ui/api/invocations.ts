@@ -5,7 +5,7 @@ import {
   OperatorTaskInvocationListResponseSchema,
   type OperatorTaskInvocationDetail,
   type OperatorTaskInvocationListResponse,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { getJson, getOptionalJson } from './http.js';
 import { operatorQueryKeys } from './query.js';
 

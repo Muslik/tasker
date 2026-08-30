@@ -4,8 +4,8 @@ import {
   type ReadyImplementationPlanningDecision,
   createWorkflowProposalFromAnalyzerOutput,
 } from '../../src/planning/index.js';
-import { type ImplementationPlanner } from '../../src/providers/index.js';
-import type { SemanticWorkflowSource } from '../../src/workflow/index.js';
+import { type ImplementationPlanner } from '../../src/agents/index.js';
+import type { SemanticWorkflowSource } from '../../src/graph/index.js';
 import {
   WorkflowGenerationSubjectSource,
   type PlanningTaskSnapshot,

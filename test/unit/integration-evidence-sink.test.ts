@@ -4,11 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { systemClock } from '../../src/shared/clock.js';
-import { TaskStepEvidenceStore } from '../../src/temporal/activities/task-step-evidence.js';
-import { TaskStepFilesystemStore } from '../../src/temporal/activities/task-step-filesystem.js';
-import { TaskStepIntegrationEvidenceSink } from '../../src/temporal/activities/integration-evidence-sink.js';
+import { TaskStepEvidenceStore } from '../../src/steps/activities/task-step-evidence.js';
+import { TaskStepFilesystemStore } from '../../src/steps/activities/task-step-filesystem.js';
+import { TaskStepIntegrationEvidenceSink } from '../../src/steps/activities/integration-evidence-sink.js';
 
 describe('integration evidence sink', () => {
   let root: string | null = null;

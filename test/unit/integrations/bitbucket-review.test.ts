@@ -9,7 +9,7 @@ import {
   type BitbucketReviewSnapshot,
   type TaskRunStepEvidence,
 } from '../../../src/integrations/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../../src/store/index.js';
 import { ok } from '../../../src/shared/outcome.js';
 
 const configuration = {

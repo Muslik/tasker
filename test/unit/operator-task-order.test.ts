@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { OperatorTaskSummary } from '../../src/control-plane/operator-contracts.js';
-import { orderOperatorTasks } from '../../src/control-plane/operator-task-order.js';
+import type { OperatorTaskSummary } from '../../src/server/operator-contracts.js';
+import { orderOperatorTasks } from '../../src/server/operator-task-order.js';
 
 const task = (
   taskId: string,

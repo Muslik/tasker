@@ -12,14 +12,14 @@ import {
   OPERATOR_WORKFLOW_OPERATION_PROJECTION,
   PersistedGenerationSubjectResolver,
   PersistedGenerationSubjectRunStore,
-} from '../../src/control-plane/index.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
+} from '../../src/server/index.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import { WorkflowAnalyzerOutputSchema } from '../../src/planning/index.js';
 import { WorkflowGenerationSubjectSource } from '../../src/planning/index.js';
 import {
   WorkflowAnalyzerReceiptSchema,
   type WorkflowAnalyzerReceipt,
-} from '../../src/providers/contracts.js';
+} from '../../src/agents/contracts.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { makeAnalyzerOutput, makePlanningTaskSnapshot } from '../support/planning.js';
 

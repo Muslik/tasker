@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import type { z } from 'zod';
 
 import type { pullRequestOutputSchema } from '../../harness/step-contracts.js';
-import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../../graph/schema.js';
 import type {
   IntegrationStepExecutionRequest,
   IntegrationStepExecutionResult,

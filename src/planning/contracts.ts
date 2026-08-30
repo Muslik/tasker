@@ -7,7 +7,7 @@ import {
   createWaitRegistry,
   toContractReference,
   type WorkflowCompilerContracts,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 
 const parseReference = (reference: string) => {
   const separator = reference.lastIndexOf('@');

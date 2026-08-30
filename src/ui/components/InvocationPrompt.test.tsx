@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { OperatorTaskInvocationDetail } from '../../control-plane/operator-contracts.js';
+import type { OperatorTaskInvocationDetail } from '../../server/operator-contracts.js';
 import { InvocationPrompt, triggerInvocationPromptCopy } from './InvocationPrompt.js';
 
 const detail: OperatorTaskInvocationDetail = {

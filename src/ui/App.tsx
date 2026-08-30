@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import type { OperatorTaskSummary } from '../control-plane/operator-contracts.js';
+import type { OperatorTaskSummary } from '../server/operator-contracts.js';
 import { taskListQueryOptions, taskProjectionQueryOptions } from './api/index.js';
 import { TaskCard } from './components/TaskCard.js';
 import { TaskQueue } from './components/TaskQueue.js';

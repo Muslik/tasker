@@ -11,17 +11,17 @@ import {
   EvidenceBundleStore,
   ImplementationPlanningStore,
   PersistedGenerationSubjectRunStore,
-} from '../../src/control-plane/index.js';
+} from '../../src/server/index.js';
 import type { JiraIssuePort } from '../../src/integrations/index.js';
 import {
   createJiraIssueService,
   JiraWorkflowGenerationSubjectResolver,
 } from '../../src/integrations/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { WorkflowGenerationSubjectSource } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
-import { SemanticWorkflowSourceSchema, type SemanticNodeSource } from '../../src/workflow/index.js';
+import { SemanticWorkflowSourceSchema, type SemanticNodeSource } from '../../src/graph/index.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
 import { makeRepositoryCatalog } from '../helpers/repositories.js';
 import { makeReadyPlanningDecision, makeTestImplementationPlanner } from '../support/planning.js';

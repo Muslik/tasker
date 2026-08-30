@@ -7,7 +7,7 @@ import type {
   OperatorTaskInvocationListResponse,
   OperatorTaskSummary,
   OperatorWorkflowProjection,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { operatorQueryKeys } from '../api/index.js';
 import { TaskCard, triggerTaskInvocationOpen } from './TaskCard.js';
 

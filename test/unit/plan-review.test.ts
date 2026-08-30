@@ -8,8 +8,8 @@ import {
   PlanReviewStore,
   planReviewResolution,
   type PlanReviewCommand,
-} from '../../src/control-plane/plan-review.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+} from '../../src/server/plan-review.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 const resources: SqliteLedger[] = [];

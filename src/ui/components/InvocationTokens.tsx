@@ -1,7 +1,7 @@
 import type {
   OperatorTaskInvocationListResponse,
   OperatorTaskInvocationListRow,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { cn } from '../../cockpit/lib/utils.js';
 import type { InvocationSelection } from './CurrentAttemptStatus.js';
 

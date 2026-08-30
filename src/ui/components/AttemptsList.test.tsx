@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   OperatorRunLogResponse,
   OperatorTaskInvocationListRow,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import {
   AttemptsList,
   attemptSelectionFor,

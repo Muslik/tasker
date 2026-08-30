@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { BlockDefinitionSchema } from '../blocks/contracts.js';
+import { BlockDefinitionSchema } from '../steps/contracts.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
@@ -13,9 +13,9 @@ import {
 } from '../harness/execution-profile-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import type { Outcome } from '../shared/outcome.js';
-import { JsonValueSchema, StepActivityDeliverySchema } from '../workflow/schema.js';
+import { JsonValueSchema, StepActivityDeliverySchema } from '../graph/schema.js';
 import { EvidenceBundleReferenceSchema } from './evidence-bundle.js';
-import { SemanticWorkflowSourceSchema } from '../workflow/semantic-schema.js';
+import { SemanticWorkflowSourceSchema } from '../graph/semantic-schema.js';
 
 const ContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 

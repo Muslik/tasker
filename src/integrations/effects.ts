@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-import type { LedgerRepository } from '../ledger/repository.js';
+import type { LedgerRepository } from '../store/repository.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { canonicalJson } from '../shared/json.js';
-import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../graph/schema.js';
 
 const ExternalEffectIdentitySchema = z
   .object({

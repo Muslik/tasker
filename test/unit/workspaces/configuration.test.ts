@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadDockerWorkspaceConfiguration,
   loadTaskStepFilesystemConfiguration,
-} from '../../../src/workspaces/configuration.js';
+} from '../../../src/workspace/configuration.js';
 
 describe('Docker workspace configuration', () => {
   it('stores runtime receipts beside the managed worktree store', () => {

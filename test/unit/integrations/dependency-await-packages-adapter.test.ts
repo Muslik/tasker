@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { DependencyDeclarationStore } from '../../../src/control-plane/dependency-declaration.js';
-import { VerifiedPackagePublicationStore } from '../../../src/control-plane/verified-package-publication.js';
+import { DependencyDeclarationStore } from '../../../src/server/dependency-declaration.js';
+import { VerifiedPackagePublicationStore } from '../../../src/server/verified-package-publication.js';
 import { loadHarnessPack } from '../../../src/harness/index.js';
 import {
   DependencyAwaitPackagesAdapter,
   type IntegrationStepExecutionRequest,
 } from '../../../src/integrations/index.js';
-import { openSqliteLedger } from '../../../src/ledger/index.js';
+import { openSqliteLedger } from '../../../src/store/index.js';
 import { makeAdjustableClock } from '../../../src/shared/clock.js';
-import type { JsonValue } from '../../../src/workflow/schema.js';
+import type { JsonValue } from '../../../src/graph/schema.js';
 import { makePlanningTaskSnapshot } from '../../support/planning.js';
 
 const task = makePlanningTaskSnapshot('avia-14001-translation-component', {

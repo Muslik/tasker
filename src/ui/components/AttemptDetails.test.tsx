@@ -6,7 +6,7 @@ import type {
   OperatorExecutionAttempt,
   OperatorRunLogEntry,
   OperatorTaskInvocationDetail,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import {
   AttemptDetails,
   availableAttemptDetailsTabs,

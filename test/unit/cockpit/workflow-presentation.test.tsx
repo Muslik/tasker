@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { OperatorWorkflowStage } from '../../../src/control-plane/operator-contracts.js';
+import type { OperatorWorkflowStage } from '../../../src/server/operator-contracts.js';
 import { compactCommand } from '../../../src/cockpit/App.js';
 import { WorkflowStages } from '../../../src/cockpit/WorkflowStages.js';
 

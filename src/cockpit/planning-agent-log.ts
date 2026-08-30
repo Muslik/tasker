@@ -1,4 +1,4 @@
-import type { PlanningTranscriptView } from '../control-plane/planning-transcript.js';
+import type { PlanningTranscriptView } from '../server/planning-transcript.js';
 import { isRecord } from '../shared/is-record.js';
 
 export type PlanningAgentEvent =

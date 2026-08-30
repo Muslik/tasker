@@ -7,13 +7,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   CommandRequest,
   HostControlPlaneCommandRunner,
-} from '../../../src/providers/command-runner.js';
+} from '../../../src/agents/command-runner.js';
 import {
   DockerWorkspaceCommandRunner,
   DockerWorkspaceRuntimeStore,
   type DockerWorkspaceConfiguration,
   type DockerWorkspaceRuntimeReceipt,
-} from '../../../src/workspaces/index.js';
+} from '../../../src/workspace/index.js';
 
 const roots: string[] = [];
 

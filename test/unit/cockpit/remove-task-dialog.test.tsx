@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RemoveTaskDialog } from '../../../src/cockpit/App.js';
-import { OperatorTaskSummarySchema } from '../../../src/control-plane/operator-contracts.js';
+import { OperatorTaskSummarySchema } from '../../../src/server/operator-contracts.js';
 
 const task = (status: 'backlog' | 'running') =>
   OperatorTaskSummarySchema.parse({

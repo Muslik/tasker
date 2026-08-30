@@ -3,7 +3,7 @@ import {
   toContractReference,
   VALIDATION_RUN_STEP_REFERENCE,
   type JsonValue,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 import { z } from 'zod';
 import {
   applyHarnessPolicySkills,
@@ -15,7 +15,7 @@ import { HARNESS_AVAILABLE_CAPABILITIES } from './proposal.js';
 import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import type { PlanningTaskSnapshot } from './task-snapshot.js';
 import { resolveProjectWorkflowProfile } from './project-policies.js';
-import { resolveWorkspaceRuntimePolicy } from '../workspaces/runtime-policy.js';
+import { resolveWorkspaceRuntimePolicy } from '../workspace/runtime-policy.js';
 
 export interface WorkflowAnalyzerContext {
   readonly taskSnapshot: JsonValue;

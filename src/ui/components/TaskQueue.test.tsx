@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { OperatorTaskSummarySchema } from '../../control-plane/operator-contracts.js';
+import { OperatorTaskSummarySchema } from '../../server/operator-contracts.js';
 import { formatElapsed } from '../lib/format.js';
 import { TaskQueue, buildTaskQueueItems } from './TaskQueue.js';
 

@@ -6,7 +6,7 @@ import {
   compileSemanticWorkflow,
   SemanticWorkflowArtifactSchema,
   ValidationReportSchema,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import { validateWorkflowObligations } from './obligations.js';
 import {

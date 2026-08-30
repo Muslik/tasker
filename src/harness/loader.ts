@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { z } from 'zod';
 
-import { BlockDefinitionSchema } from '../blocks/index.js';
+import { BlockDefinitionSchema } from '../steps/index.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
@@ -16,7 +16,7 @@ import {
   type LoadedPrompt,
 } from './contracts.js';
 import { stepDefinitionFromManifest } from './step-contracts.js';
-import { toContractReference } from '../workflow/index.js';
+import { toContractReference } from '../graph/index.js';
 import { validateExecutionProfileConfiguration } from './execution-profiles.js';
 
 const DEFAULT_HARNESS_ROOT = fileURLToPath(new URL('../../harness/', import.meta.url));

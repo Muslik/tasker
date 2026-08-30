@@ -3,7 +3,7 @@ import { queryOptions } from '@tanstack/react-query';
 import {
   OperatorActivityResponseSchema,
   type OperatorActivityResponse,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import { getJson } from './http.js';
 import { operatorQueryKeys } from './query.js';
 

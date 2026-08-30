@@ -13,26 +13,26 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { blockReceiptId } from '../../../src/blocks/index.js';
-import { openSqliteLedger } from '../../../src/ledger/index.js';
+import { blockReceiptId } from '../../../src/steps/index.js';
+import { openSqliteLedger } from '../../../src/store/index.js';
 import {
   AgentInvocationArtifactSchema,
   executionAgentInvocationId,
-} from '../../../src/observability/agent-invocation.js';
+} from '../../../src/steps/agent-invocation.js';
 import type {
   CommandRequest,
   CommandResult,
   WorkspaceCommandRunner,
-} from '../../../src/providers/index.js';
+} from '../../../src/agents/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 import {
   SubscriptionCliTaskStepAgentRunner,
   TemporalTaskStepTraceStore,
-} from '../../../src/temporal/activities/block-execution.js';
-import { agentStepOutcomeSchema } from '../../../src/temporal/activities/block-execution-contracts.js';
-import { TaskStepFilesystemStore } from '../../../src/temporal/activities/task-step-filesystem.js';
-import { TaskStepEvidenceStore } from '../../../src/temporal/activities/task-step-evidence.js';
+} from '../../../src/steps/activities/block-execution.js';
+import { agentStepOutcomeSchema } from '../../../src/steps/activities/block-execution-contracts.js';
+import { TaskStepFilesystemStore } from '../../../src/steps/activities/task-step-filesystem.js';
+import { TaskStepEvidenceStore } from '../../../src/steps/activities/task-step-evidence.js';
 
 const codexStream = (finalMessage: string): string =>
   [

@@ -1,10 +1,10 @@
-import type { RepositoryCatalog } from '../../repositories/catalog.js';
+import type { RepositoryCatalog } from '../../workspace/catalog.js';
 import {
   JiraRepositoryBindingSchema,
   RepositoryReferenceSchema,
   type JiraRepositoryBinding,
   type RepositoryBindingSource,
-} from '../../repositories/contracts.js';
+} from '../../workspace/contracts.js';
 import type { JiraIssueSnapshot } from './contracts.js';
 
 type RepositoryReferenceResult =

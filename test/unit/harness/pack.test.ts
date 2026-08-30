@@ -10,7 +10,7 @@ import {
   createHarnessWorkflowContracts,
   getHarnessStepDefinition,
 } from '../../../src/planning/index.js';
-import { compileWorkflow, type StepTypeContract } from '../../../src/workflow/index.js';
+import { compileWorkflow, type StepTypeContract } from '../../../src/graph/index.js';
 
 const temporaryDirectories: string[] = [];
 

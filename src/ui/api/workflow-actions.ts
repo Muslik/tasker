@@ -5,11 +5,11 @@ import {
   RestartRunCommandSchema,
   ResumeRunCommandSchema,
   type ExecutionRunView,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import {
   ApprovePlanReviewCommandSchema,
   RequestPlanChangesCommandSchema,
-} from '../../control-plane/plan-review.js';
+} from '../../server/plan-review.js';
 import { postJson } from './http.js';
 
 export type ResumeTaskWorkflowInput = z.input<typeof ResumeRunCommandSchema>;

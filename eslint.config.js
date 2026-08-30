@@ -9,6 +9,7 @@ export default tseslint.config(
       'coverage/**',
       'dist/**',
       'eslint.config.js',
+      '.dependency-cruiser.cjs',
       'harness/workspace/**',
       'node_modules/**',
       'playwright-report/**',

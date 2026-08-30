@@ -11,7 +11,7 @@ import type {
   JsonValue,
   ValidationIssue,
   ValidationReport,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 
 interface PolicyTask {

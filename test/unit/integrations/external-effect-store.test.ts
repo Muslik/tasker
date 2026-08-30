@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ExternalEffectStore } from '../../../src/integrations/effects.js';
-import { openSqliteLedger } from '../../../src/ledger/index.js';
+import { openSqliteLedger } from '../../../src/store/index.js';
 import { makeAdjustableClock } from '../../../src/shared/clock.js';
 
 describe('external effect store', () => {

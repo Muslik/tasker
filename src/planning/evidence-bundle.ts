@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema } from '../graph/schema.js';
 
 export const EvidenceContentHashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { TaskPresenceStore } from '../../src/control-plane/task-presence.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
+import { TaskPresenceStore } from '../../src/server/task-presence.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
 describe('task presence', () => {

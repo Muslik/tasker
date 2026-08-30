@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { nodeCommandRunner } from '../../../src/providers/command-runner.js';
+import { nodeCommandRunner } from '../../../src/agents/command-runner.js';
 
 describe('node command runner', () => {
   it('stops the provider when durable output persistence fails', async () => {

@@ -11,17 +11,17 @@ vi.mock('@temporalio/activity', () => ({
 import {
   DependencyDeclarationStore,
   dependencyDeclarationIdFor,
-} from '../../src/control-plane/dependency-declaration.js';
-import { ImplementationPlanningStore } from '../../src/control-plane/implementation-planning.js';
+} from '../../src/server/dependency-declaration.js';
+import { ImplementationPlanningStore } from '../../src/server/implementation-planning.js';
 import { loadHarnessPack, resolveImplementationPlannerProfile } from '../../src/harness/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import type { EvidenceBundle } from '../../src/planning/evidence-bundle.js';
 import type { WorkflowAnalyzerOutput } from '../../src/planning/index.js';
-import type { WorkflowAnalyzerReceipt } from '../../src/providers/contracts.js';
+import type { WorkflowAnalyzerReceipt } from '../../src/agents/contracts.js';
 import { ok } from '../../src/shared/outcome.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
-import { createExecutionContinuationActivity } from '../../src/temporal/activities/execution-continuation-activity.js';
-import type { WorkflowAnalyzer } from '../../src/control-plane/workflow-generator.js';
+import { createExecutionContinuationActivity } from '../../src/steps/activities/execution-continuation-activity.js';
+import type { WorkflowAnalyzer } from '../../src/server/workflow-generator.js';
 
 const baseTask = {
   schemaVersion: 1 as const,

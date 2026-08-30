@@ -13,7 +13,7 @@ import {
   type JenkinsFinishedBuild,
   type JenkinsObserverTime,
 } from '../../../src/integrations/index.js';
-import type { WorkspaceCommandRunner } from '../../../src/providers/command-runner.js';
+import type { WorkspaceCommandRunner } from '../../../src/agents/command-runner.js';
 import type {
   IntegrationEvidenceFile,
   IntegrationStepExecutionRequest,

@@ -5,13 +5,13 @@ import {
   DeliverPrArchetypeSchema,
   DeliverPrSegmentsSchema,
   ValidationProfileSchema,
-} from '../workflow/archetypes/index.js';
-import { JsonValueSchema, NodeIdSchema } from '../workflow/schema.js';
-import type { SemanticNodeSource, SemanticWorkflowSource } from '../workflow/semantic-schema.js';
+} from '../graph/archetypes/index.js';
+import { JsonValueSchema, NodeIdSchema } from '../graph/schema.js';
+import type { SemanticNodeSource, SemanticWorkflowSource } from '../graph/semantic-schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { VerificationPlanSchema } from './workflow-proposal-contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
-import { BlockDefinitionSchema } from '../blocks/contracts.js';
+import { BlockDefinitionSchema } from '../steps/contracts.js';
 import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
 
 export const PlanningStrategyRequestSchema = z.enum(['auto', 'fast', 'ralplan']);

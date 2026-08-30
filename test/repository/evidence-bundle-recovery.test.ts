@@ -4,11 +4,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  ContextDiscoveryService,
-  EvidenceBundleStore,
-} from '../../src/control-plane/evidence-bundle.js';
-import { openSqliteLedger } from '../../src/ledger/index.js';
+import { ContextDiscoveryService, EvidenceBundleStore } from '../../src/server/evidence-bundle.js';
+import { openSqliteLedger } from '../../src/store/index.js';
 import {
   EvidenceBodyReferenceSchema,
   EvidenceEntrySchema,

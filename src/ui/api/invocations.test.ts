@@ -3,7 +3,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import type {
   OperatorTaskInvocationDetail,
   OperatorTaskInvocationListResponse,
-} from '../../control-plane/operator-contracts.js';
+} from '../../server/operator-contracts.js';
 import {
   fetchTaskInvocation,
   fetchTaskInvocations,

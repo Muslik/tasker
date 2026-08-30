@@ -5,11 +5,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openSqliteLedger, type SqliteLedger } from '../../../src/ledger/index.js';
-import { nodeCommandRunner } from '../../../src/providers/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../../src/store/index.js';
+import { nodeCommandRunner } from '../../../src/agents/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
-import { WorkspaceMutationRecoveryStore } from '../../../src/temporal/activities/workspace-mutation-recovery.js';
-import { GitWorkspaceMutationInspector } from '../../../src/workspaces/index.js';
+import { WorkspaceMutationRecoveryStore } from '../../../src/steps/activities/workspace-mutation-recovery.js';
+import { GitWorkspaceMutationInspector } from '../../../src/workspace/index.js';
 
 const git = (cwd: string, args: readonly string[]): void => {
   execFileSync('git', args, { cwd, stdio: 'ignore' });

@@ -4,7 +4,7 @@ import {
   planningAgentLogFrom,
   planningAgentLogFromRaw,
 } from '../../src/cockpit/planning-agent-log.js';
-import type { PlanningTranscriptView } from '../../src/control-plane/planning-transcript.js';
+import type { PlanningTranscriptView } from '../../src/server/planning-transcript.js';
 
 const chunk = (
   sequence: number,

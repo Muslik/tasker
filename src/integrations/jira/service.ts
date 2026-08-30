@@ -1,14 +1,14 @@
 import {
   OperatorTaskSummarySchema,
   type OperatorTaskSummary,
-} from '../../control-plane/operator-contracts.js';
-import type { LedgerRepository } from '../../ledger/repository.js';
-import { StaticRepositoryCatalog, type RepositoryCatalog } from '../../repositories/catalog.js';
+} from '../../server/operator-contracts.js';
+import type { LedgerRepository } from '../../store/repository.js';
+import { StaticRepositoryCatalog, type RepositoryCatalog } from '../../workspace/catalog.js';
 import {
   JiraRepositoryBindingSchema,
   type JiraRepositoryBinding,
   type RepositoryCatalogEntry,
-} from '../../repositories/contracts.js';
+} from '../../workspace/contracts.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import type { JiraAttachmentContent, JiraIssuePort } from './client.js';
