@@ -185,7 +185,7 @@ describe('implementation planning recovery', () => {
           executionSnapshot.value.harness.steps.find(
             ({ reference }) => reference === 'review.change@1',
           )?.executionProfile,
-        ).toMatchObject({ model: 'gpt-5.6-terra', effort: 'medium' });
+        ).toMatchObject({ model: 'sonnet', effort: 'high' });
         const firstDraft = first.coordinator.draftFor(planned.value);
         expect(firstDraft).toMatchObject({
           ok: true,
