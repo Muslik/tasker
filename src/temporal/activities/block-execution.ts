@@ -310,241 +310,253 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
   ): Promise<Outcome<TaskStepAgentResult, TaskStepAgentFailure>> {
     const profile = request.profile;
     const command = profile.command;
-    const version = await this.runner.run({
-      command,
-      args: ['--version'],
-      cwd: request.cwd,
-      workspaceAccess: 'read_write',
-      stdin: '',
-      timeoutMs: 10_000,
-    });
-    if (version.status === 'spawn_failed') {
-      return err({ kind: 'provider_unavailable', message: version.message });
-    }
-    if (version.status !== 'exited' || version.exitCode !== 0) {
-      return err({
-        kind: 'provider_unavailable',
-        message: `${profile.provider} CLI version probe failed`,
-      });
-    }
-
-    const directory = await mkdtemp(join(tmpdir(), 'tasker-step-agent-'));
-    const stepFilesystem = await this.filesystems.prepare(request.operationId);
-    const workspaceScratchPath = join(
-      request.cwd,
-      '.tasker',
-      'scratch',
-      basename(stepFilesystem.scratchPath),
-    );
-    await mkdir(workspaceScratchPath, { recursive: true, mode: 0o700 });
+    const heartbeat = (): void => {
+      request.runtime.heartbeat({ phase: 'agent' });
+    };
+    const heartbeatTimer = setInterval(heartbeat, 10_000);
+    heartbeatTimer.unref();
     try {
-      const inputArtifacts = await this.evidence.materializeInputs(
-        request.inputArtifactIds,
-        stepFilesystem.inputsPath,
-      );
-      if (!inputArtifacts.ok) {
-        return err({
-          kind: 'input_evidence_unavailable',
-          message: `Immutable input evidence is unavailable: ${inputArtifacts.error.kind}`,
-        });
-      }
-      const schemaPath = join(directory, 'task-step-output.schema.json');
-      const isolatedConfigurationRoot = join(directory, 'provider-home');
-      if (profile.provider === 'codex') {
-        await prepareIsolatedCodexHome(isolatedConfigurationRoot);
-      } else {
-        await prepareIsolatedClaudeHome(isolatedConfigurationRoot);
-      }
-      const preparedSkills = await prepareAgentSkills({
-        provider: profile.provider,
-        repositoryPath: request.cwd,
-        configurationRoot: isolatedConfigurationRoot,
-        selection: {
-          kind: 'step',
-          reference: request.stepReference,
-          skills: [...request.skills],
-        },
-      });
-      if (!preparedSkills.ok) return err(preparedSkills.error);
-      await writeFile(
-        schemaPath,
-        `${JSON.stringify(codexOutputJsonSchema(request.outputSchema), null, 2)}\n`,
-        'utf8',
-      );
-      const outputSchema = codexOutputJsonSchema(request.outputSchema);
-      const harnessEnvironment = workspaceHarnessEnvironment(
-        request.cwd,
-        preparedSkills.value.skillsRoot,
-      );
-      const harnessEnvironmentFile = harnessEnvironment.TASKER_HARNESS_ENV_FILE;
-      const inputEvidenceMounts: readonly CommandMount[] = inputArtifacts.value.map(({ path }) => ({
-        source: path,
-        target: path,
-        readOnly: true,
-      }));
-      const extraMounts: readonly CommandMount[] =
-        harnessEnvironmentFile !== undefined && harnessEnvironmentFile !== '/dev/null'
-          ? [
-              {
-                source: harnessEnvironmentFile,
-                target: harnessEnvironmentFile,
-                readOnly: true,
-              },
-            ]
-          : [];
-      const execution = await this.runCommand(request, {
+      heartbeat();
+      const version = await this.runner.run({
         command,
-        args:
-          profile.provider === 'codex'
-            ? [
-                'exec',
-                '--model',
-                profile.model,
-                '-c',
-                `service_tier="${profile.serviceTier}"`,
-                '-c',
-                `model_reasoning_effort="${profile.effort}"`,
-                '--ephemeral',
-                '--skip-git-repo-check',
-                '--dangerously-bypass-approvals-and-sandbox',
-                '--cd',
-                request.cwd,
-                '--output-schema',
-                schemaPath,
-                '--json',
-                '-',
-              ]
-            : [
-                '--print',
-                '--model',
-                profile.model,
-                '--effort',
-                profile.effort,
-                '--output-format',
-                'stream-json',
-                '--verbose',
-                '--no-session-persistence',
-                '--dangerously-skip-permissions',
-                '--json-schema',
-                JSON.stringify(outputSchema),
-                ...preparedSkills.value.cliArguments,
-              ],
+        args: ['--version'],
         cwd: request.cwd,
-        workspaceAccess: request.workspaceAccess,
-        env: {
-          ...(profile.provider === 'codex'
-            ? { CODEX_HOME: isolatedConfigurationRoot }
-            : { HOME: isolatedConfigurationRoot }),
-          ...harnessEnvironment,
-          TASKER_SCRATCH_ROOT: workspaceScratchPath,
-          TASKER_ARTIFACTS_ROOT: stepFilesystem.artifactsPath,
-        },
-        mounts: [
-          { source: directory, target: directory, readOnly: false },
-          {
-            source: stepFilesystem.scratchPath,
-            target: workspaceScratchPath,
-            readOnly: false,
-          },
-          {
-            source: stepFilesystem.artifactsPath,
-            target: stepFilesystem.artifactsPath,
-            readOnly: false,
-          },
-          ...extraMounts,
-          ...inputEvidenceMounts,
-        ],
-        stdin: [
-          request.prompt,
-          '',
-          'Mounted immutable input evidence:',
-          JSON.stringify(inputArtifacts.value, null, 2),
-          'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
-        ].join('\n'),
-        timeoutMs: profile.timeoutMs,
+        workspaceAccess: 'read_write',
+        stdin: '',
+        timeoutMs: 10_000,
       });
-      if (execution.status === 'spawn_failed') {
-        return err({ kind: 'provider_unavailable', message: execution.message });
+      if (version.status === 'spawn_failed') {
+        return err({ kind: 'provider_unavailable', message: version.message });
       }
-      if (execution.status === 'timed_out') {
+      if (version.status !== 'exited' || version.exitCode !== 0) {
         return err({
-          kind: 'provider_timed_out',
-          durationMs: execution.durationMs,
-          stderr: execution.stderr,
+          kind: 'provider_unavailable',
+          message: `${profile.provider} CLI version probe failed`,
         });
       }
-      if (execution.exitCode !== 0) {
-        return err({
-          kind: 'provider_failed',
-          exitCode: execution.exitCode,
-          message: providerFailureMessage(execution.stdout, execution.stderr),
-          stdout: execution.stdout,
-          stderr: execution.stderr,
-        });
-      }
-      const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
-      if (!stream.ok) return err(stream.error);
-      if (stream.value.diagnostics.length > 0) {
-        const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s):\n${stream.value.diagnostics.join('\n')}\n`;
-        const appended = request.transcriptStore.append(
-          request.operationId,
-          request.runtime.attempt,
-          'stderr',
-          diagnosticsLine,
+
+      const directory = await mkdtemp(join(tmpdir(), 'tasker-step-agent-'));
+      const stepFilesystem = await this.filesystems.prepare(request.operationId);
+      const workspaceScratchPath = join(
+        request.cwd,
+        '.tasker',
+        'scratch',
+        basename(stepFilesystem.scratchPath),
+      );
+      await mkdir(workspaceScratchPath, { recursive: true, mode: 0o700 });
+      try {
+        const inputArtifacts = await this.evidence.materializeInputs(
+          request.inputArtifactIds,
+          stepFilesystem.inputsPath,
         );
-        if (!appended.ok) {
+        if (!inputArtifacts.ok) {
           return err({
-            kind: 'evidence_persistence_failed',
-            message: `Task step transcript persistence failed: ${appended.error.kind}`,
+            kind: 'input_evidence_unavailable',
+            message: `Immutable input evidence is unavailable: ${inputArtifacts.error.kind}`,
           });
         }
-      }
-      const evidence = await this.evidence.register(
-        request.operationId,
-        stepFilesystem.artifactsPath,
-      );
-      if (!evidence.ok) {
-        return err({
-          kind: 'evidence_persistence_failed',
-          message: `Task-step evidence registration failed: ${evidence.error.kind}`,
-        });
-      }
-      const parsed = request.outputSchema.safeParse(
-        normalizeTaskStepEvidencePaths(stream.value.finalMessage, stepFilesystem.artifactsPath),
-      );
-      if (!parsed.success) {
-        return err({
-          kind: 'invalid_output',
-          issues: parsed.error.issues.map(
-            (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
-          ),
-        });
-      }
-      return ok({
-        stdout: execution.stdout,
-        stderr: execution.stderr,
-        finalMessage: parsed.data,
-        artifactIds: evidence.value,
-        usage: {
+        const schemaPath = join(directory, 'task-step-output.schema.json');
+        const isolatedConfigurationRoot = join(directory, 'provider-home');
+        if (profile.provider === 'codex') {
+          await prepareIsolatedCodexHome(isolatedConfigurationRoot);
+        } else {
+          await prepareIsolatedClaudeHome(isolatedConfigurationRoot);
+        }
+        const preparedSkills = await prepareAgentSkills({
           provider: profile.provider,
-          profile: profile.name,
-          profileSha256: profile.configurationSha256,
-          model: profile.model,
-          effort: profile.effort,
-          serviceTier: profile.provider === 'codex' ? profile.serviceTier : null,
-          sessionId: stream.value.sessionId,
-          durationMs: execution.durationMs,
-          inputTokens: stream.value.usage?.inputTokens ?? 0,
-          cachedInputTokens: stream.value.usage?.cachedInputTokens ?? 0,
-          outputTokens: stream.value.usage?.outputTokens ?? 0,
-          reasoningOutputTokens: stream.value.usage?.reasoningOutputTokens ?? 0,
-          apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
-        },
-      });
+          repositoryPath: request.cwd,
+          configurationRoot: isolatedConfigurationRoot,
+          selection: {
+            kind: 'step',
+            reference: request.stepReference,
+            skills: [...request.skills],
+          },
+        });
+        if (!preparedSkills.ok) return err(preparedSkills.error);
+        await writeFile(
+          schemaPath,
+          `${JSON.stringify(codexOutputJsonSchema(request.outputSchema), null, 2)}\n`,
+          'utf8',
+        );
+        const outputSchema = codexOutputJsonSchema(request.outputSchema);
+        const harnessEnvironment = workspaceHarnessEnvironment(
+          request.cwd,
+          preparedSkills.value.skillsRoot,
+        );
+        const harnessEnvironmentFile = harnessEnvironment.TASKER_HARNESS_ENV_FILE;
+        const inputEvidenceMounts: readonly CommandMount[] = inputArtifacts.value.map(
+          ({ path }) => ({
+            source: path,
+            target: path,
+            readOnly: true,
+          }),
+        );
+        const extraMounts: readonly CommandMount[] =
+          harnessEnvironmentFile !== undefined && harnessEnvironmentFile !== '/dev/null'
+            ? [
+                {
+                  source: harnessEnvironmentFile,
+                  target: harnessEnvironmentFile,
+                  readOnly: true,
+                },
+              ]
+            : [];
+        const execution = await this.runCommand(request, {
+          command,
+          args:
+            profile.provider === 'codex'
+              ? [
+                  'exec',
+                  '--model',
+                  profile.model,
+                  '-c',
+                  `service_tier="${profile.serviceTier}"`,
+                  '-c',
+                  `model_reasoning_effort="${profile.effort}"`,
+                  '--ephemeral',
+                  '--skip-git-repo-check',
+                  '--dangerously-bypass-approvals-and-sandbox',
+                  '--cd',
+                  request.cwd,
+                  '--output-schema',
+                  schemaPath,
+                  '--json',
+                  '-',
+                ]
+              : [
+                  '--print',
+                  '--model',
+                  profile.model,
+                  '--effort',
+                  profile.effort,
+                  '--output-format',
+                  'stream-json',
+                  '--verbose',
+                  '--no-session-persistence',
+                  '--dangerously-skip-permissions',
+                  '--json-schema',
+                  JSON.stringify(outputSchema),
+                  ...preparedSkills.value.cliArguments,
+                ],
+          cwd: request.cwd,
+          workspaceAccess: request.workspaceAccess,
+          env: {
+            ...(profile.provider === 'codex'
+              ? { CODEX_HOME: isolatedConfigurationRoot }
+              : { HOME: isolatedConfigurationRoot }),
+            ...harnessEnvironment,
+            TASKER_SCRATCH_ROOT: workspaceScratchPath,
+            TASKER_ARTIFACTS_ROOT: stepFilesystem.artifactsPath,
+          },
+          mounts: [
+            { source: directory, target: directory, readOnly: false },
+            {
+              source: stepFilesystem.scratchPath,
+              target: workspaceScratchPath,
+              readOnly: false,
+            },
+            {
+              source: stepFilesystem.artifactsPath,
+              target: stepFilesystem.artifactsPath,
+              readOnly: false,
+            },
+            ...extraMounts,
+            ...inputEvidenceMounts,
+          ],
+          stdin: [
+            request.prompt,
+            '',
+            'Mounted immutable input evidence:',
+            JSON.stringify(inputArtifacts.value, null, 2),
+            'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
+          ].join('\n'),
+          timeoutMs: profile.timeoutMs,
+        });
+        if (execution.status === 'spawn_failed') {
+          return err({ kind: 'provider_unavailable', message: execution.message });
+        }
+        if (execution.status === 'timed_out') {
+          return err({
+            kind: 'provider_timed_out',
+            durationMs: execution.durationMs,
+            stderr: execution.stderr,
+          });
+        }
+        if (execution.exitCode !== 0) {
+          return err({
+            kind: 'provider_failed',
+            exitCode: execution.exitCode,
+            message: providerFailureMessage(execution.stdout, execution.stderr),
+            stdout: execution.stdout,
+            stderr: execution.stderr,
+          });
+        }
+        const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
+        if (!stream.ok) return err(stream.error);
+        if (stream.value.diagnostics.length > 0) {
+          const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s):\n${stream.value.diagnostics.join('\n')}\n`;
+          const appended = request.transcriptStore.append(
+            request.operationId,
+            request.runtime.attempt,
+            'stderr',
+            diagnosticsLine,
+          );
+          if (!appended.ok) {
+            return err({
+              kind: 'evidence_persistence_failed',
+              message: `Task step transcript persistence failed: ${appended.error.kind}`,
+            });
+          }
+        }
+        const evidence = await this.evidence.register(
+          request.operationId,
+          stepFilesystem.artifactsPath,
+        );
+        if (!evidence.ok) {
+          return err({
+            kind: 'evidence_persistence_failed',
+            message: `Task-step evidence registration failed: ${evidence.error.kind}`,
+          });
+        }
+        const parsed = request.outputSchema.safeParse(
+          normalizeTaskStepEvidencePaths(stream.value.finalMessage, stepFilesystem.artifactsPath),
+        );
+        if (!parsed.success) {
+          return err({
+            kind: 'invalid_output',
+            issues: parsed.error.issues.map(
+              (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+            ),
+          });
+        }
+        return ok({
+          stdout: execution.stdout,
+          stderr: execution.stderr,
+          finalMessage: parsed.data,
+          artifactIds: evidence.value,
+          usage: {
+            provider: profile.provider,
+            profile: profile.name,
+            profileSha256: profile.configurationSha256,
+            model: profile.model,
+            effort: profile.effort,
+            serviceTier: profile.provider === 'codex' ? profile.serviceTier : null,
+            sessionId: stream.value.sessionId,
+            durationMs: execution.durationMs,
+            inputTokens: stream.value.usage?.inputTokens ?? 0,
+            cachedInputTokens: stream.value.usage?.cachedInputTokens ?? 0,
+            outputTokens: stream.value.usage?.outputTokens ?? 0,
+            reasoningOutputTokens: stream.value.usage?.reasoningOutputTokens ?? 0,
+            apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
+          },
+        });
+      } finally {
+        await this.filesystems.cleanupScratch(stepFilesystem);
+        await removeWorkspaceScratchMountPoint(workspaceScratchPath);
+        await rm(directory, { recursive: true, force: true });
+      }
     } finally {
-      await this.filesystems.cleanupScratch(stepFilesystem);
-      await removeWorkspaceScratchMountPoint(workspaceScratchPath);
-      await rm(directory, { recursive: true, force: true });
+      clearInterval(heartbeatTimer);
     }
   }
 
@@ -1015,16 +1027,34 @@ const withRecoveryArtifact = (
 const registryFrom = (pack: LoadedHarnessPack): ReadonlyMap<string, LoadedHarnessStep> =>
   new Map(pack.steps.map((step) => [step.reference, step] as const));
 
-const runHistoryIndex = (steps: readonly TaskRunStepEvidence[]) =>
-  steps.map(({ operationId, nodeId, stepReference, status, summary, artifactIds, recordedAt }) => ({
-    operationId,
-    nodeId,
-    stepReference,
-    status,
-    summary,
-    artifactIds,
-    recordedAt,
-  }));
+const HISTORY_INDEX_LIMIT = 10;
+const REVIEW_INPUTS_LIMIT = 5;
+
+interface CappedEntries<T> {
+  readonly entries: readonly T[];
+  readonly omittedCount: number;
+}
+
+const capEntries = <T>(items: readonly T[], limit: number): CappedEntries<T> => ({
+  entries: items.slice(-limit),
+  omittedCount: Math.max(0, items.length - limit),
+});
+
+export const runHistoryIndex = (steps: readonly TaskRunStepEvidence[]) =>
+  capEntries(
+    steps.map(
+      ({ operationId, nodeId, stepReference, status, summary, artifactIds, recordedAt }) => ({
+        operationId,
+        nodeId,
+        stepReference,
+        status,
+        summary,
+        artifactIds,
+        recordedAt,
+      }),
+    ),
+    HISTORY_INDEX_LIMIT,
+  );
 
 export const selectAgentRunEvidence = (evidence: TaskRunEvidence): TaskRunEvidence => {
   const selected = new Set<string>();
@@ -1049,7 +1079,7 @@ export const selectAgentRunEvidence = (evidence: TaskRunEvidence): TaskRunEviden
   };
 };
 
-const promptForAgentStep = (input: {
+export const promptForAgentStep = (input: {
   readonly snapshottedPrompt: string;
   readonly taskReference: string;
   readonly nodeId: string;
@@ -1068,8 +1098,13 @@ const promptForAgentStep = (input: {
   readonly operatorGuidance: string | null;
   readonly evidence: TaskRunEvidence;
   readonly historyIndex: ReturnType<typeof runHistoryIndex>;
-}): string =>
-  [
+}): string => {
+  const runEvidence = {
+    acceptedPlan: input.evidence.acceptedPlan,
+    completedSteps: input.evidence.completedSteps,
+    reviewInputs: capEntries(input.evidence.reviewInputs, REVIEW_INPUTS_LIMIT),
+  };
+  return [
     input.snapshottedPrompt.trim(),
     '',
     'Execution context:',
@@ -1090,7 +1125,7 @@ const promptForAgentStep = (input: {
         preferredSkills: input.skills,
         activityRecovery: input.recovery,
         operatorGuidance: input.operatorGuidance,
-        runEvidence: input.evidence,
+        runEvidence,
         runHistoryIndex: input.historyIndex,
       },
       null,
@@ -1102,8 +1137,9 @@ const promptForAgentStep = (input: {
     'For a workflow change, set status="workflow_change_required", set outputJson=null, put the serialized typed workflow-change request JSON in requestJson, and set blockingReason=null.',
     'For a recoverable infrastructure, access, or ambiguity failure that does not change task scope, set status="blocked", requestJson=null, blockingReason to the actionable reason, and outputJson to serialized evidence details or null.',
     'Do not encode infrastructure failures as workflow changes.',
-    'runEvidence contains the bounded causal frontier. runHistoryIndex lists every prior attempt; full immutable receipt files are mounted for on-demand inspection.',
+    'runEvidence contains the bounded causal frontier; reviewInputs is capped to the most recent entries. runHistoryIndex lists the most recent prior attempts; older entries are counted, not listed. Full immutable receipt files are mounted for on-demand inspection.',
   ].join('\n');
+};
 
 const snapshottedStepFrom = (
   snapshot: RunPlanningSnapshot,
@@ -1604,7 +1640,10 @@ export const executeRegisteredTaskStep = async (
     if (!provider.ok) {
       const reason =
         'message' in provider.error
-          ? provider.error.message.replace(/\s+/gu, ' ').trim().slice(0, 1_000)
+          ? provider.error.message
+              .replace(/[ \t]+/gu, ' ')
+              .trim()
+              .slice(0, 4_000)
           : provider.error.kind;
       return persistAgentBlockedResult(
         dependencies.traces,
@@ -1619,7 +1658,10 @@ export const executeRegisteredTaskStep = async (
     }
     const decodedDecision = decodeAgentStepOutcome(provider.value.finalMessage);
     if (!decodedDecision.ok) {
-      const issues = decodedDecision.error.issues.join('; ').replace(/\s+/gu, ' ').slice(0, 1_000);
+      const issues = decodedDecision.error.issues
+        .join('; ')
+        .replace(/[ \t]+/gu, ' ')
+        .slice(0, 4_000);
       throw ApplicationFailure.create({
         message: `Agent execution for ${input.uses} returned an invalid outcome: ${issues}`,
         type: 'agent_contract.invalid_outcome',

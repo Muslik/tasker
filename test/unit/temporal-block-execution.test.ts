@@ -11,6 +11,7 @@ import {
   IntegrationStepAdapterRegistry,
   type TaskRunEvidence,
 } from '../../src/integrations/index.js';
+import type { PullRequestReviewEvidence } from '../../src/integrations/bitbucket/review.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
 import { RunPlanningSnapshotSchema } from '../../src/planning/run-planning-snapshot.js';
 import type { CommandRunner, WorkspaceCommandRunner } from '../../src/providers/command-runner.js';
@@ -20,6 +21,8 @@ import {
   createCurrentStepRegistry,
   createTaskExecutionActivity,
   executeRegisteredTaskStep,
+  promptForAgentStep,
+  runHistoryIndex,
   selectAgentRunEvidence,
   TemporalTaskStepTraceStore,
   type TaskStepAgentRunner,
@@ -318,6 +321,72 @@ describe('temporal block execution activity', () => {
     expect(
       selectAgentRunEvidence(evidence).completedSteps.map(({ operationId }) => operationId),
     ).toEqual(['verify-3', 'verify-4', 'implement-1']);
+  });
+
+  it('caps runHistoryIndex to the last 10 entries and reports how many were omitted', () => {
+    const step = (operationId: string): TaskRunEvidence['completedSteps'][number] => ({
+      operationId,
+      nodeId: 'verify',
+      stepReference: 'verify@1',
+      status: 'completed',
+      summary: operationId,
+      artifactIds: [],
+      details: { operationId },
+      recordedAt: '2026-08-25T00:00:00.000Z',
+    });
+    const receipts = Array.from({ length: 15 }, (_, index) => step(`attempt-${String(index + 1)}`));
+
+    const history = runHistoryIndex(receipts);
+
+    expect(history.entries).toHaveLength(10);
+    expect(history.omittedCount).toBe(5);
+    expect(history.entries.map(({ operationId }) => operationId)).toEqual(
+      receipts.slice(5).map(({ operationId }) => operationId),
+    );
+  });
+
+  it('caps reviewInputs to the last 5 entries when assembling the agent prompt', () => {
+    const reviewInputs = Array.from(
+      { length: 15 },
+      (_, index) =>
+        ({ reviewId: `review-${String(index + 1)}` }) as unknown as PullRequestReviewEvidence,
+    );
+    const evidence: TaskRunEvidence = { acceptedPlan: null, completedSteps: [], reviewInputs };
+
+    const prompt = promptForAgentStep({
+      snapshottedPrompt: 'do the work',
+      taskReference: 'task-ref',
+      nodeId: 'verify',
+      stepAttempt: 1,
+      uses: 'verify.acceptance@1',
+      workspacePath: '/tmp/workspace',
+      taskSnapshot: {},
+      stepInput: {},
+      requiredCapabilities: [],
+      allowedEffects: [],
+      workflowChanges: [],
+      stepOutputContract: {},
+      workflowChangeRequestContract: {},
+      skills: [],
+      recovery: { kind: 'single_attempt' },
+      operatorGuidance: null,
+      evidence,
+      historyIndex: runHistoryIndex([]),
+    });
+
+    const contextMatch = /Execution context:\n([\s\S]+?)\n\nOperate only/u.exec(prompt);
+    if (contextMatch?.[1] === undefined) throw new Error('Execution context missing from prompt');
+    const context = JSON.parse(contextMatch[1]) as {
+      readonly runEvidence: {
+        readonly reviewInputs: {
+          readonly entries: readonly unknown[];
+          readonly omittedCount: number;
+        };
+      };
+    };
+
+    expect(context.runEvidence.reviewInputs.entries).toHaveLength(5);
+    expect(context.runEvidence.reviewInputs.omittedCount).toBe(10);
   });
 
   it('uses the snapshotted prompt and base step binding for an agent attempt', async () => {

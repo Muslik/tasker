@@ -874,6 +874,25 @@ const planningFailureView = (
   }
 };
 
+const operatorServiceErrorDetail = (error: OperatorServiceError): string => {
+  const parts: string[] = [];
+  const collect = (value: unknown): void => {
+    if (value === null || typeof value !== 'object') return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.message === 'string') parts.push(record.message);
+    if (typeof record.reason === 'string') parts.push(record.reason);
+    if (Array.isArray(record.issues)) {
+      for (const issue of record.issues) {
+        if (typeof issue === 'string') parts.push(issue);
+      }
+    }
+    if (typeof record.error === 'object') collect(record.error);
+    if (typeof record.failure === 'object') collect(record.failure);
+  };
+  collect(error);
+  return parts.join('; ');
+};
+
 export type ImplementationPlanningError =
   | { readonly kind: 'subject'; readonly error: OperatorServiceError }
   | { readonly kind: 'workflow_not_ready'; readonly taskReference: string }
@@ -1725,11 +1744,13 @@ export class ImplementationPlanningCoordinator {
             operationId,
           );
           if (!assembled.ok) {
+            const detail = operatorServiceErrorDetail(assembled.error);
+            const message = `Workflow assembly failed: ${assembled.error.kind}${detail.length > 0 ? `: ${detail}` : ''}`;
             const failed = this.store.fail(
               planning,
               {
                 kind: 'invalid_planner_output',
-                issues: [`Workflow assembly failed: ${assembled.error.kind}`],
+                issues: [message.slice(0, 4_000)],
               },
               result.value.receipt,
             );
