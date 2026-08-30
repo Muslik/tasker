@@ -41,9 +41,28 @@ export const ProjectValidationMissingFailureSchema = z
   })
   .strict();
 
+export const ProductNotMappedFailureSchema = z
+  .object({
+    kind: z.literal('product_not_mapped'),
+    message: z.string().min(1),
+    retryable: z.literal(false),
+    taskId: z.string().min(1),
+    jiraProjectKey: z.string().min(1),
+    repositoryReference: z.string().min(1),
+    availableProjectKeys: z
+      .array(z.string().min(1))
+      .max(50)
+      .refine(
+        (keys) => new Set(keys).size === keys.length,
+        'Available project keys must be unique',
+      ),
+  })
+  .strict();
+
 export const ImplementationPlanningFailureSchema = z.discriminatedUnion('kind', [
   ProviderPlanningFailureSchema,
   ProjectValidationMissingFailureSchema,
+  ProductNotMappedFailureSchema,
 ]);
 
 export type ImplementationPlanningFailure = z.infer<typeof ImplementationPlanningFailureSchema>;

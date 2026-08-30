@@ -194,6 +194,7 @@ const persistExecutionSnapshot = (ledger: SqliteLedger) => {
     harness: {
       company: pack.company,
       project,
+      products: [...pack.products],
       implementationPlanner: {
         prompt: pack.prompts.implementationPlanner,
         skills: ['jira'],

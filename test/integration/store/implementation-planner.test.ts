@@ -72,6 +72,9 @@ afterAll(() => {
   rmSync(plannerRepositoryPath, { recursive: true, force: true });
 });
 const proposal = makeWorkflowProposal();
+if (!('validationProfile' in proposal.verificationPlan)) {
+  throw new Error('Expected deliver-pr verification plan fixture');
+}
 const verificationStepId = 'verify-change';
 
 const readyDecision = {
@@ -285,6 +288,7 @@ const request = (strategy: 'fast' | 'ralplan') => ({
     taskSnapshot: { taskId: 'AVIA-13235', summary: 'Repair seat marker color' },
     blocks: getHarnessPack().steps.map(({ block }) => block),
     evidenceBundle: makeEvidenceBundle(),
+    product: null,
     repositoryReference: 'onetwotrip/front-avia',
     operatorGuidance: null,
     validationFeedback: [],

@@ -46,6 +46,10 @@ Use `ready` only when the plan, archetype selection, optional segments, and veri
 
 {"status":"ready","executionStrategy":"simple|standard|complex","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"kebab-case","title":"...","objective":"...","repository":"...","files":["path or bounded search target"],"verification":["observable check"]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"observable-outcome","expected":"...","verification":[{"kind":"process","profile":"targeted","scenario":"...","workflowStepIds":["run-validation"]}]}]},"archetype":"deliver-pr","segments":["translations"],"verification":{"checks":["Run the targeted validation profile."],"profile":"targeted","validationProfile":"targeted","rationale":"The change is bounded and the proof is deterministic."},"rationale":"deliver-pr covers implementation, verification, review, and PR delivery; translations is required because the task changes externalized copy."}
 
+Research example:
+
+{"status":"ready","executionStrategy":"standard","plan":{"schemaVersion":2,"title":"...","summary":"...","steps":[{"id":"investigate-scope","title":"...","objective":"...","repository":"...","files":["bounded search target"],"verification":["Confirm the published package cites the current implementation and lists open decisions."]}],"assumptions":[],"risks":[],"acceptanceCriteria":[{"id":"research-published","expected":"The approved research package is published and the proposed tasks are ready.","verification":[{"kind":"inspection","target":"published research package","expectation":"The approved document and proposed task list are present.","workflowStepIds":["publish-research","file-research-tasks"]}]}]},"archetype":"research","segments":[],"verification":{"checks":["Review accepts the draft and the publication package is complete."],"profile":"research","rationale":"Research is proven by review acceptance and publication, not project validation commands."},"questions":["..."],"rationale":"research covers investigation, drafting, review, publication, and task filing."}
+
 Select `simple` only for one-repository bounded low-risk work with clear acceptance and no material
 architecture or product decision. Select `standard` for ordinary multi-surface implementation or
 moderate uncertainty. Select `complex` for cross-repository, publication, architecture, or high-risk
@@ -56,9 +60,9 @@ work. This selects registered profiles; never emit a provider or model name.
 Tasker owns workflow topology. Do not emit `workflow`, `source`, `assemblyDecisions`, node kinds,
 or any other semantic graph structure. Declare only the archetype slots that Tasker will compile.
 
-For this phase, `archetype` must be `deliver-pr`.
+For this phase, `archetype` must be either `deliver-pr` or `research`.
 
-`segments` is a closed unique array. The only allowed entries are:
+For `deliver-pr`, `segments` is a closed unique array. The only allowed entries are:
 
 - `dependency_await`
 - `translations`
@@ -80,6 +84,18 @@ verification and `verify-change` for receipt judgment and runtime evidence. Tran
 Select segments only when task evidence, declarations, or project policy require them. Omit
 segments for work that stays inside the base `deliver-pr` skeleton.
 
+For `research`, `segments` must be `[]`. Do not emit `product`; Tasker resolves
+`plannerContext.product` server-side from the task Jira project and frozen harness products.
+Use `questions` to list 1-10 investigation threads the research package must answer.
+
+Base `research` step ids are stable and always exist in the scaffolded semantic workflow:
+
+- `investigate-research`
+- `draft-research`
+- `review-research`
+- `publish-research`
+- `file-research-tasks`
+
 ## External package dependencies
 
 `taskSnapshot.dependencyDeclarations`, when present, is the frozen typed source for external package
@@ -99,10 +115,12 @@ from plannerContext, return `needs_clarification`; do not replace them with loca
 ## Acceptance and verification
 
 Every acceptance criterion has a unique kebab-case `id`, one observable `expected` outcome, and at
-least one typed verification. Verification is designed during planning: `run-validation` executes
-the selected project profile and `verify-change` judges its receipt plus required runtime evidence;
-set `verification.validationProfile` to the profile, reuse it in process verification entries, and
-never name or compose individual commands.
+least one typed verification. For `deliver-pr`, `run-validation` executes the selected project
+profile and `verify-change` judges its receipt plus required runtime evidence; set
+`verification.validationProfile` to the profile, reuse it in process verification entries, and
+never name or compose individual commands. For `research`, omit `validationProfile`; verification
+must prove the draft was reviewed and the published package or follow-up tasks are present through
+the `review-research`, `publish-research`, and `file-research-tasks` ids.
 Do not add a generic test-materialization step.
 
 Use only these verification shapes:

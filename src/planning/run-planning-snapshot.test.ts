@@ -29,6 +29,7 @@ const baseSnapshot = () => {
     harness: {
       company: pack.company,
       project: null,
+      products: [],
       implementationPlanner: {
         prompt: pack.prompts.implementationPlanner,
         skills: ['jira'],

@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import type { HarnessStepManifest, HarnessStepSource } from './contracts.js';
+import {
+  HarnessProductManifestSchema,
+  type HarnessStepManifest,
+  type HarnessStepSource,
+} from './contracts.js';
 import { ValidationProfileSchema } from '../graph/archetypes/index.js';
 
 export const taskInputSchema = z
@@ -39,6 +43,34 @@ export const processInputSchema = z
   .strict();
 
 const DependencyChannelSchema = z.enum(['dev', 'final']);
+const ResearchOpenQuestionSchema = z
+  .object({
+    addressee: z.string().min(1),
+    question: z.string().min(1),
+  })
+  .strict();
+const ResearchProposedTaskSchema = z
+  .object({
+    title: z.string().min(1),
+    description: z.string().min(1),
+    team: z.enum(['FE', 'BE', 'product']),
+    dependsOn: z.string().min(1).optional(),
+  })
+  .strict();
+const ResearchReviewEditSchema = z
+  .object({
+    section: z.string().min(1),
+    change: z.string().min(1),
+  })
+  .strict();
+
+export const researchInputSchema = taskInputSchema
+  .extend({
+    questions: z.array(z.string().min(1)).min(1).max(10),
+    product: HarnessProductManifestSchema,
+    repositoryReference: z.string().min(1).optional(),
+  })
+  .strict();
 
 const DependencyPackageNameSchema = z
   .string()
@@ -164,6 +196,64 @@ export const reproductionOutputSchema = z
     phase: z.literal('after'),
     outcome: z.literal('verified_fixed'),
     evidence: z.array(ReproductionEvidenceSchema).min(1),
+  })
+  .strict();
+
+export const researchInvestigationOutputSchema = z
+  .object({
+    findings: z
+      .array(
+        z
+          .object({
+            statement: z.string().min(1),
+            sources: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+export const researchDraftOutputSchema = z
+  .object({
+    documentStorageHtml: z.string().min(1),
+    proposedTasks: z
+      .array(ResearchProposedTaskSchema)
+      .min(1)
+      .superRefine((tasks, context) => {
+        if (new Set(tasks.map(({ title }) => title)).size !== tasks.length) {
+          context.addIssue({ code: 'custom', message: 'Proposed task titles must be unique' });
+        }
+      }),
+    openQuestions: z.array(ResearchOpenQuestionSchema),
+  })
+  .strict();
+
+export const researchReviewOutputSchema = z.discriminatedUnion('decision', [
+  z
+    .object({
+      decision: z.literal('accepted'),
+      concreteEdits: z.array(z.never()).length(0),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal('changes_requested'),
+      concreteEdits: z.array(ResearchReviewEditSchema).min(1),
+    })
+    .strict(),
+]);
+
+export const researchPublicationOutputSchema = z
+  .object({
+    pageId: z.string().min(1),
+    pageUrl: z.url(),
+  })
+  .strict();
+
+export const researchTaskFilingOutputSchema = z
+  .object({
+    issueKeys: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/u)).min(1),
   })
   .strict();
 
@@ -352,6 +442,12 @@ const contractSchemas = {
   process_output: processOutputSchema,
   pull_request_input: pullRequestInputSchema,
   pull_request_output: pullRequestOutputSchema,
+  research_draft_output: researchDraftOutputSchema,
+  research_input: researchInputSchema,
+  research_investigation_output: researchInvestigationOutputSchema,
+  research_publication_output: researchPublicationOutputSchema,
+  research_review_output: researchReviewOutputSchema,
+  research_task_filing_output: researchTaskFilingOutputSchema,
   reproduction_input: reproductionInputSchema,
   reproduction_output: reproductionOutputSchema,
   task_input: taskInputSchema,

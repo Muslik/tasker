@@ -4,6 +4,7 @@ import {
   applyHarnessPolicySkills,
   harnessPolicyAppliesToTask,
   loadHarnessPack,
+  resolveHarnessProductByJiraProject,
   VALIDATION_PROCESS_COMMAND_REFERENCES,
   ValidationProcessExecutionPlansSchema,
   validationProcessCommandReference,
@@ -13,6 +14,7 @@ import {
 } from '../harness/index.js';
 import type {
   LoadedHarnessPack,
+  LoadedHarnessProduct,
   LoadedPrompt,
   ProcessExecutionBinding,
   ValidationProcessCommandReference,
@@ -56,7 +58,9 @@ import type {
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import {
+  RESEARCH_STEP_REFERENCES,
   resolveDeliverPrScaffoldConfig,
+  scaffoldResearch,
   scaffoldDeliverPr,
   VALIDATION_PROFILES,
   VALIDATION_RUN_STEP_REFERENCE,
@@ -224,6 +228,7 @@ const snapshotHarness = (
   return {
     company: pack.company,
     project: project ?? null,
+    products: snapshottedProducts(pack),
     implementationPlanner: {
       prompt: snapshotPrompt(pack.prompts.implementationPlanner),
       skills: implementationPlannerSkills,
@@ -250,17 +255,27 @@ const selectStrategy = (
   };
 };
 
-const INTERNAL_DELIVER_PR_INVARIANT = 'deliver-pr scaffold';
+const internalScaffoldInvariant = (archetype: string): string => `${archetype} scaffold`;
 
-const throwInternalDeliverPrInvariant = (detail: string): never => {
-  throw new Error(`Internal ${INTERNAL_DELIVER_PR_INVARIANT} invariant violated: ${detail}`);
+const throwInternalScaffoldInvariant = (invariant: string, detail: string): never => {
+  throw new Error(`Internal ${invariant} invariant violated: ${detail}`);
 };
 
-const requireInvariantValue = <T>(value: T | null | undefined, detail: string): T =>
-  value ?? throwInternalDeliverPrInvariant(detail);
+const requireInvariantValue = <T>(
+  value: T | null | undefined,
+  invariant: string,
+  detail: string,
+): T => value ?? throwInternalScaffoldInvariant(invariant, detail);
 
 const isSegmentSchemaFeedback = (issues: readonly string[]): boolean =>
   issues.length > 0 && issues.every((issue) => /^decision\.segments(?:\.|:|$)/u.test(issue));
+
+const isResearchProductSchemaFeedback = (issues: readonly string[]): boolean =>
+  issues.length > 0 &&
+  issues.every((issue) => /^decision(?::|\.|$)/u.test(issue) && issue.includes('product'));
+
+const plannerOutputCorrectionBudget = (issues: readonly string[]): number =>
+  isResearchProductSchemaFeedback(issues) ? 1 : isSegmentSchemaFeedback(issues) ? 2 : 0;
 
 interface ProjectValidationMissingFailure {
   readonly kind: 'project_validation_missing';
@@ -269,13 +284,45 @@ interface ProjectValidationMissingFailure {
   readonly missingKeys: readonly ValidationProcessCommandReference[];
 }
 
+interface ProductNotMappedFailure {
+  readonly kind: 'product_not_mapped';
+  readonly taskId: string;
+  readonly jiraProjectKey: string;
+  readonly repositoryReference: string;
+  readonly availableProjectKeys: readonly string[];
+}
+
+const snapshottedProducts = (pack: LoadedHarnessPack): readonly LoadedHarnessProduct[] =>
+  pack.products;
+
+const resolveSnapshottedProduct = (
+  products: readonly LoadedHarnessProduct[],
+  taskId: string,
+): {
+  readonly jiraProjectKey: string;
+  readonly product: LoadedHarnessProduct | null;
+} => {
+  const jiraProjectKey =
+    taskId
+      .trim()
+      .replace(/^jira:/iu, '')
+      .split('-')[0] ?? taskId;
+  return {
+    jiraProjectKey,
+    product: resolveHarnessProductByJiraProject(products, taskId),
+  };
+};
+
 const materializeDeliverPrScaffold = (input: {
   readonly task: WorkflowGenerationSubject['task'];
   readonly taskSnapshot: WorkflowGenerationSubject['taskSnapshot'];
   readonly blocks: readonly LoadedHarnessPack['steps'][number]['block'][];
   readonly project: LoadedHarnessPack['projects'][number] | null;
   readonly policies: readonly LoadedHarnessPack['policies'][number][];
-  readonly decision: ReadyImplementationPlanningDecision;
+  readonly decision: Extract<
+    ReadyImplementationPlanningDecision,
+    { readonly archetype: 'deliver-pr' }
+  >;
 }): Outcome<
   z.infer<typeof SemanticWorkflowSourceSchema>,
   | { readonly kind: 'slot_error'; readonly issues: readonly string[] }
@@ -300,13 +347,17 @@ const materializeDeliverPrScaffold = (input: {
   for (const reference of config.requiredStages) {
     const block = blockByReference.get(reference);
     if (block?.availableDuring.includes('execution') === true) continue;
-    throwInternalDeliverPrInvariant(`missing required execution block ${reference}`);
+    throwInternalScaffoldInvariant(
+      internalScaffoldInvariant('deliver-pr'),
+      `missing required execution block ${reference}`,
+    );
   }
   if (
     blockByReference.get(VALIDATION_RUN_STEP_REFERENCE)?.availableDuring.includes('execution') !==
     true
   ) {
-    throwInternalDeliverPrInvariant(
+    throwInternalScaffoldInvariant(
+      internalScaffoldInvariant('deliver-pr'),
       `missing required execution block ${VALIDATION_RUN_STEP_REFERENCE}`,
     );
   }
@@ -336,6 +387,53 @@ const materializeDeliverPrScaffold = (input: {
     },
     config,
   );
+};
+
+const materializeResearchScaffold = (input: {
+  readonly task: WorkflowGenerationSubject['task'];
+  readonly blocks: readonly LoadedHarnessPack['steps'][number]['block'][];
+  readonly products: readonly LoadedHarnessProduct[];
+  readonly decision: Extract<
+    ReadyImplementationPlanningDecision,
+    { readonly archetype: 'research' }
+  >;
+  readonly repositoryReference: string;
+}): Outcome<
+  z.infer<typeof SemanticWorkflowSourceSchema>,
+  { readonly kind: 'slot_error'; readonly issues: readonly string[] } | ProductNotMappedFailure
+> => {
+  const blockByReference = new Map(input.blocks.map((block) => [block.reference, block] as const));
+  const unavailableSteps = Object.values(RESEARCH_STEP_REFERENCES).flatMap((reference) => {
+    const block = blockByReference.get(reference);
+    return block?.availableDuring.includes('execution') === true
+      ? []
+      : [`Research scaffold requires execution block ${reference}.`];
+  });
+  if (unavailableSteps.length > 0) {
+    return err({ kind: 'slot_error', issues: unavailableSteps });
+  }
+
+  const { jiraProjectKey, product } = resolveSnapshottedProduct(input.products, input.task.taskId);
+  if (product === null) {
+    return err({
+      kind: 'product_not_mapped',
+      taskId: input.task.taskId,
+      jiraProjectKey,
+      repositoryReference: input.repositoryReference,
+      availableProjectKeys: [
+        ...new Set(input.products.flatMap(({ jiraProjects }) => jiraProjects)),
+      ].sort((left, right) => left.localeCompare(right)),
+    });
+  }
+
+  return scaffoldResearch({
+    task: input.task,
+    objective: input.decision.plan.summary,
+    questions: input.decision.questions,
+    product,
+    repositoryReference: input.repositoryReference,
+    segments: input.decision.segments,
+  });
 };
 
 export class ImplementationPlanningCoordinator {
@@ -785,6 +883,7 @@ export class ImplementationPlanningCoordinator {
       subject,
       blocks: loaded.value.harness.steps.map(({ block }) => block),
       project: loaded.value.harness.project,
+      products: loaded.value.harness.products,
       policies: loaded.value.harness.policies,
       promptTemplate: loaded.value.harness.implementationPlanner.prompt.content,
       plannerSkills: loaded.value.harness.implementationPlanner.skills,
@@ -902,6 +1001,10 @@ export class ImplementationPlanningCoordinator {
           taskSnapshot: planningInput.subject.taskSnapshot,
           blocks: planningInput.blocks,
           evidenceBundle: evidenceBundle.value.bundle,
+          product: resolveSnapshottedProduct(
+            planningInput.products,
+            planningInput.subject.task.taskId,
+          ).product,
           repositoryReference: planningInput.subject.task.repository,
           operatorGuidance,
           validationFeedback: planning.validationFeedback,
@@ -910,11 +1013,12 @@ export class ImplementationPlanningCoordinator {
         promptTemplate: planningInput.promptTemplate,
       });
       if (!result.ok) {
-        if (
-          result.error.kind === 'invalid_planner_output' &&
-          isSegmentSchemaFeedback(result.error.issues)
-        ) {
-          if (planning.validationRevision >= 2) {
+        const correctionBudget =
+          result.error.kind === 'invalid_planner_output'
+            ? plannerOutputCorrectionBudget(result.error.issues)
+            : 0;
+        if (result.error.kind === 'invalid_planner_output' && correctionBudget > 0) {
+          if (planning.validationRevision >= correctionBudget) {
             const failed = this.store.fail(
               planning,
               result.error,
@@ -968,16 +1072,28 @@ export class ImplementationPlanningCoordinator {
         }
 
         if (result.value.decision.status === 'ready') {
-          const scaffold = materializeDeliverPrScaffold({
-            task: planningInput.subject.task,
-            taskSnapshot: planningInput.subject.taskSnapshot,
-            blocks: planningInput.blocks,
-            project: planningInput.project,
-            policies: planningInput.policies,
-            decision: result.value.decision,
-          });
+          const scaffold =
+            result.value.decision.archetype === 'deliver-pr'
+              ? materializeDeliverPrScaffold({
+                  task: planningInput.subject.task,
+                  taskSnapshot: planningInput.subject.taskSnapshot,
+                  blocks: planningInput.blocks,
+                  project: planningInput.project,
+                  policies: planningInput.policies,
+                  decision: result.value.decision,
+                })
+              : materializeResearchScaffold({
+                  task: planningInput.subject.task,
+                  blocks: planningInput.blocks,
+                  products: planningInput.products,
+                  decision: result.value.decision,
+                  repositoryReference: planningInput.workspace.reference,
+                });
           if (!scaffold.ok) {
-            if (scaffold.error.kind === 'project_validation_missing') {
+            if (
+              scaffold.error.kind === 'project_validation_missing' ||
+              scaffold.error.kind === 'product_not_mapped'
+            ) {
               const failed = this.store.fail(planning, scaffold.error, result.value.receipt);
               return failed.ok ? failed : err({ kind: 'store', error: failed.error });
             }
@@ -1035,30 +1151,37 @@ export class ImplementationPlanningCoordinator {
             assembled.value.status !== 'ready' ||
             assembled.value.view.workflow.graphHash === null
           ) {
-            throwInternalDeliverPrInvariant(
+            const invariant = internalScaffoldInvariant(result.value.decision.archetype);
+            throwInternalScaffoldInvariant(
+              invariant,
               assembled.value.view.workflow.validatorReport.issues
                 .map(({ message }) => message)
                 .join('; '),
             );
           }
+          const invariant = internalScaffoldInvariant(result.value.decision.archetype);
           const workflowHash = requireInvariantValue(
             assembled.value.view.workflow.graphHash,
+            invariant,
             'compiled workflow hash is absent',
           );
           const semanticHash = requireInvariantValue(
             assembled.value.view.workflow.semanticHash,
+            invariant,
             'semantic workflow provenance is absent from the compiled candidate',
           );
           const compilerVersion = requireInvariantValue(
             assembled.value.view.workflow.compilerVersion,
+            invariant,
             'semantic workflow provenance is absent from the compiled candidate',
           );
           const parsedGraph = CompiledWorkflowSchema.safeParse(assembled.value.view.workflow.graph);
           if (!parsedGraph.success) {
-            throwInternalDeliverPrInvariant('compiled workflow graph is corrupt');
+            throwInternalScaffoldInvariant(invariant, 'compiled workflow graph is corrupt');
           }
           const graph = requireInvariantValue(
             parsedGraph.data,
+            invariant,
             'compiled workflow graph is corrupt',
           );
           const blockByReference = new Map(
@@ -1071,13 +1194,14 @@ export class ImplementationPlanningCoordinator {
               : [`Block ${reference} is not available during execution.`];
           });
           if (phaseIssues.length > 0) {
-            throwInternalDeliverPrInvariant(phaseIssues.join('; '));
+            throwInternalScaffoldInvariant(invariant, phaseIssues.join('; '));
           }
           const semanticSource = SemanticWorkflowSourceSchema.safeParse(
             assembled.value.view.workflow.semanticSource,
           );
           if (!semanticSource.success) {
-            throwInternalDeliverPrInvariant(
+            throwInternalScaffoldInvariant(
+              invariant,
               'semantic workflow source is absent from the compiled candidate',
             );
           }

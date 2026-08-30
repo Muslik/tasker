@@ -9,6 +9,7 @@ import { BlockDefinitionSchema } from '../steps/index.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
+  HarnessProductManifestSchema,
   HarnessProjectManifestSchema,
   HarnessStepManifestSchema,
   parseVersionedReference,
@@ -135,6 +136,17 @@ const loadProjects = (root: string) => {
     });
 };
 
+const loadProducts = (root: string) => {
+  const productsRoot = join(root, 'products');
+  if (!existsSync(productsRoot)) return [];
+  return readdirSync(productsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) =>
+      Object.freeze(parseFile(HarnessProductManifestSchema, join(productsRoot, entry.name))),
+    );
+};
+
 const loadStepPackages = (root: string) => {
   const stepsRoot = join(root, 'steps');
   if (!existsSync(stepsRoot)) return [];
@@ -192,6 +204,7 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   const company = parseFile(HarnessCompanyManifestSchema, join(rootPath, 'company.json'));
   validateSubagentDefinitions(rootPath, company.subagentProfiles);
   const projects = loadProjects(rootPath);
+  const products = loadProducts(rootPath);
   const policies = loadPolicies(rootPath);
   const enabledPolicies = new Set(policies.map(({ id }) => id));
   const seenRepositories = new Set<string>();
@@ -200,6 +213,37 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       throw new Error(`Duplicate harness project profile for ${project.repository}`);
     }
     seenRepositories.add(project.repository);
+  }
+  const seenProductIds = new Set<string>();
+  const seenJiraProjects = new Map<string, string>();
+  const knownProjectRepositories = new Set(
+    projects.flatMap(({ repository }) => [
+      repository,
+      repository.slice(repository.lastIndexOf('/') + 1),
+    ]),
+  );
+  for (const product of products) {
+    if (seenProductIds.has(product.id)) {
+      throw new Error(`Duplicate harness product definition for ${product.id}`);
+    }
+    seenProductIds.add(product.id);
+    for (const repository of [product.repositories.primary, ...product.repositories.linked]) {
+      const alias = repository.slice(repository.lastIndexOf('/') + 1);
+      if (!knownProjectRepositories.has(repository) && !knownProjectRepositories.has(alias)) {
+        throw new Error(
+          `Harness product ${product.id} references unavailable repository ${repository}`,
+        );
+      }
+    }
+    for (const jiraProject of product.jiraProjects) {
+      const owner = seenJiraProjects.get(jiraProject);
+      if (owner !== undefined) {
+        throw new Error(
+          `Duplicate harness product Jira project ${jiraProject} claimed by ${owner} and ${product.id}`,
+        );
+      }
+      seenJiraProjects.set(jiraProject, product.id);
+    }
   }
 
   const seenSteps = new Set<string>();
@@ -278,11 +322,15 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
     ),
   );
   const seenPredicates = new Set(
-    steps.flatMap((step) =>
-      Object.values(step.block.outputPredicates?.cases ?? {}).flatMap((facts) =>
-        Object.keys(facts),
-      ),
-    ),
+    steps.flatMap((step) => {
+      const mapping = step.block.outputPredicates;
+      if (mapping === undefined) return [];
+      if ('facts' in mapping) return Object.keys(mapping.facts);
+      return [
+        ...Object.values(mapping.cases).flatMap((facts) => Object.keys(facts)),
+        ...Object.keys(mapping.defaultFacts ?? {}),
+      ];
+    }),
   );
 
   for (const policy of policies) {
@@ -336,6 +384,7 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
     steps: Object.freeze(steps),
     policies: Object.freeze(policies),
     projects: Object.freeze(projects),
+    products: Object.freeze(products),
     prompts: Object.freeze({
       implementationPlanner: loadPrompt(rootPath, company.systemPrompts.implementationPlanner),
       workflowAnalyzer: loadPrompt(rootPath, company.systemPrompts.workflowAnalyzer),

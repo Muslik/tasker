@@ -24,14 +24,19 @@ const outputFrom = (artifact: TaskStepOutputArtifact): unknown => {
     : undefined;
 };
 
-const externalIdFrom = (output: unknown): string | null =>
+const externalIdentityFrom = (output: unknown): string | null =>
   output !== null &&
   !Array.isArray(output) &&
   typeof output === 'object' &&
-  'externalId' in output &&
-  typeof output.externalId === 'string' &&
-  output.externalId.length > 0
-    ? output.externalId
+  (('externalId' in output &&
+    typeof output.externalId === 'string' &&
+    output.externalId.length > 0) ||
+    ('pageId' in output && typeof output.pageId === 'string' && output.pageId.length > 0))
+    ? 'externalId' in output &&
+      typeof output.externalId === 'string' &&
+      output.externalId.length > 0
+      ? output.externalId
+      : (output as { readonly pageId: string }).pageId
     : null;
 
 const workspacePathsFrom = (output: unknown): readonly string[] => {
@@ -131,13 +136,13 @@ export const collectBlockCompletionEvidence = async (
         break;
       }
       case 'reconciled_effect': {
-        const externalId = externalIdFrom(output);
-        if (input.outputArtifact.runner === 'integration' && externalId !== null) {
+        const externalIdentity = externalIdentityFrom(output);
+        if (input.outputArtifact.runner === 'integration' && externalIdentity !== null) {
           evidence.push({
             kind: 'effect',
             reference: `task-step-output:${input.operationId}:artifact`,
             reconciled: true,
-            remoteIdentity: externalId,
+            remoteIdentity: externalIdentity,
           });
         } else {
           issues.push('The integration adapter did not persist a reconciled external identity');

@@ -1,4 +1,6 @@
 import {
+  type DeliverPrVerificationPlan,
+  type ImplementationPlan,
   type WorkflowAnalyzerOutput,
   type ImplementationPlanningDecision,
   type ReadyImplementationPlanningDecision,
@@ -274,7 +276,7 @@ const semanticWorkflow = (task: TestTaskFixture): SemanticWorkflowSource => {
   };
 };
 
-const verificationPlanFor = (task: TestTaskFixture): WorkflowAnalyzerOutput['verificationPlan'] =>
+const verificationPlanFor = (task: TestTaskFixture): DeliverPrVerificationPlan =>
   task.family === 'short_bugfix'
     ? {
         checks: ['reproduction evidence', 'targeted tests for changed behavior'],
@@ -343,11 +345,15 @@ export const makeWorkflowProposal = (
 };
 
 const READY_VALIDATION_STEP_ID = 'run-validation';
+type ReadyDeliverPrDecision = Extract<
+  ReadyImplementationPlanningDecision,
+  { readonly archetype: 'deliver-pr' }
+>;
 
 type ReadyPlanningDecisionOptions = {
   readonly task?: TestTaskFixture;
-  readonly segments?: ReadyImplementationPlanningDecision['segments'];
-  readonly plan?: Partial<ReadyImplementationPlanningDecision['plan']>;
+  readonly segments?: ReadyDeliverPrDecision['segments'];
+  readonly plan?: Partial<ImplementationPlan>;
 };
 
 export const makeReadyPlanningDecision = (
@@ -355,7 +361,7 @@ export const makeReadyPlanningDecision = (
 ): ImplementationPlanningDecision => {
   const task = options.task ?? makeTaskFixture();
   const verificationPlan = verificationPlanFor(task);
-  const plan: ReadyImplementationPlanningDecision['plan'] = {
+  const plan: ImplementationPlan = {
     schemaVersion: 2,
     title: 'Repair the reported behavior',
     summary: 'Inspect the bounded surface, implement the repair, and verify the result.',
@@ -397,6 +403,59 @@ export const makeReadyPlanningDecision = (
     rationale: verificationPlan.rationale,
   };
 };
+
+export const makeResearchPlanningDecision = (
+  task: TestTaskFixture = makeTaskFixture(),
+): ImplementationPlanningDecision => ({
+  status: 'ready',
+  executionStrategy: 'simple',
+  plan: {
+    schemaVersion: 2,
+    title: 'Prepare the research package',
+    summary:
+      'Investigate the current flow, draft the analysis, review it, and publish the final package.',
+    steps: [
+      {
+        id: 'investigate-scope',
+        title: 'Investigate the current scope',
+        objective: 'Ground the analysis in the current repository and linked evidence.',
+        repository: task.repository,
+        files: ['src', 'docs', 'harness'],
+        verification: ['Confirm the draft cites the current implementation and open decisions.'],
+      },
+    ],
+    assumptions: [],
+    risks: [],
+    acceptanceCriteria: [
+      {
+        id: 'research-published',
+        expected: 'The approved research is published and its follow-up tasks are ready to file.',
+        verification: [
+          {
+            kind: 'inspection',
+            target: 'published research package',
+            expectation:
+              'The approved document is published and the proposed tasks list is present.',
+            workflowStepIds: ['publish-research', 'file-research-tasks'],
+          },
+        ],
+      },
+    ],
+  },
+  archetype: 'research',
+  segments: [],
+  verification: {
+    checks: ['Review accepts the draft and the publication package is complete.'],
+    profile: 'research',
+    rationale:
+      'Research completion is proven by review acceptance and publication, not project validation commands.',
+  },
+  questions: [
+    'What current behavior, product constraints, and open decisions must the research package resolve?',
+  ],
+  rationale:
+    'research fits investigation, drafting, review, publication, and task filing without delivery validation.',
+});
 
 export const makeTestImplementationPlanner = (): ImplementationPlanner => ({
   plan: (request) =>

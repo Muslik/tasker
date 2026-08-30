@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "11",
+  "version": "12",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -29,7 +29,13 @@
       "path": "sources/work-shared-skills",
       "importPath": "imports/work-shared-skills",
       "scope": "step_bound",
-      "skills": ["playwright", "playwright-demo", "review-process"]
+      "skills": [
+        "playwright",
+        "playwright-demo",
+        "review-process",
+        "figma-inspector",
+        "figma-parity"
+      ]
     },
     {
       "id": "integrations",

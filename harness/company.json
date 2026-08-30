@@ -1,12 +1,13 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "5",
+  "version": "6",
   "availableCapabilities": [
     "ci.read",
     "command.run",
     "code-review.write",
     "git.write",
+    "knowledge.write",
     "repository.read",
     "tracker.write",
     "workspace.write"

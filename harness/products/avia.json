@@ -1,0 +1,13 @@
+{
+  "id": "avia",
+  "title": "Авиа",
+  "jiraProjects": ["AVIA"],
+  "confluence": {
+    "spaceKey": "AVIA",
+    "researchRootPageId": "39748148"
+  },
+  "repositories": {
+    "primary": "front-avia",
+    "linked": ["front-components"]
+  }
+}

@@ -513,6 +513,9 @@ describe('implementation planning recovery', () => {
             const base = await fallback.plan(request);
             if (!base.ok || base.value.decision?.status !== 'ready') return base;
             if (calls === 1) {
+              if (base.value.decision.archetype !== 'deliver-pr') {
+                throw new Error('Expected deliver-pr decision fixture');
+              }
               return ok({
                 ...base.value,
                 decision: {

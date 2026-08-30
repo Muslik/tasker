@@ -79,8 +79,16 @@ interface ProjectValidationMissingFailure {
   readonly missingKeys: readonly ValidationProcessCommandReference[];
 }
 
+interface ProductNotMappedFailure {
+  readonly kind: 'product_not_mapped';
+  readonly taskId: string;
+  readonly jiraProjectKey: string;
+  readonly repositoryReference: string;
+  readonly availableProjectKeys: readonly string[];
+}
+
 type ImplementationPlanningFailureInput =
-  ImplementationPlannerFailure | ProjectValidationMissingFailure;
+  ImplementationPlannerFailure | ProjectValidationMissingFailure | ProductNotMappedFailure;
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const DOCUMENT_KIND = 'implementation_planning';
@@ -782,6 +790,16 @@ const planningFailureView = (
         expectedKeys: [...failure.expectedKeys],
         missingKeys: [...failure.missingKeys],
         message: `Project ${failure.repositoryReference} must declare ${failure.expectedKeys.join(', ')}; missing ${failure.missingKeys.join(', ')}.`,
+        retryable: false,
+      };
+    case 'product_not_mapped':
+      return {
+        ...failure,
+        availableProjectKeys: [...failure.availableProjectKeys],
+        message:
+          failure.availableProjectKeys.length === 0
+            ? `Task ${failure.taskId} cannot map Jira project ${failure.jiraProjectKey} to a snapshotted harness product.`
+            : `Task ${failure.taskId} cannot map Jira project ${failure.jiraProjectKey} to a snapshotted harness product. Available product Jira projects: ${failure.availableProjectKeys.join(', ')}.`,
         retryable: false,
       };
     case 'invalid_skill_selection':

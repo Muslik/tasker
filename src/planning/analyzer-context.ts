@@ -9,6 +9,7 @@ import {
   applyHarnessPolicySkills,
   getHarnessPack,
   harnessPolicyAppliesToTask,
+  resolveHarnessProductByJiraProject,
   type HarnessPolicyManifest,
 } from '../harness/index.js';
 import { HARNESS_AVAILABLE_CAPABILITIES } from './proposal.js';
@@ -62,6 +63,8 @@ export const createWorkflowAnalyzerContext = (
 
   const pack = getHarnessPack();
   const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task));
+  const product =
+    task.origin === 'jira' ? resolveHarnessProductByJiraProject(pack.products, task.taskId) : null;
   const harnessProject = pack.projects.find(
     (candidate) => candidate.repository === targetRepository,
   );
@@ -103,6 +106,7 @@ export const createWorkflowAnalyzerContext = (
         projectHarnessVersion: harnessProject?.version ?? null,
         publication,
       },
+      product,
       obligations: policies.flatMap((policy) =>
         policy.obligations.map((obligation) => ({
           ...obligation,

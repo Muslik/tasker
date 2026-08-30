@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "reference": "research.file-tasks@1",
+  "description": "After approval of the published SA page, file only the missing Jira tasks from the approved breakdown.",
+  "stage": { "id": "delivery", "label": "Publish" },
+  "availableDuring": ["execution"],
+  "inputContract": "research_input",
+  "outputContract": "research_task_filing_output",
+  "outputPredicates": {
+    "facts": {
+      "research.tasks_filed@1": true
+    }
+  },
+  "executor": {
+    "kind": "agent",
+    "profile": "documentation",
+    "strategyRole": null,
+    "prompt": "prompt.md",
+    "skills": ["jira-issue", "jira-edit"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["research-tasks"]
+  },
+  "activityDelivery": "remote_reconciled",
+  "allowedEffects": ["tracker.write"],
+  "requiredCapabilities": ["repository.read", "tracker.write"],
+  "resumeBoundary": "step",
+  "idempotency": "key",
+  "waitKinds": ["research.approval@1"],
+  "artifactContracts": ["research-tasks"],
+  "requiredArtifactContracts": ["research-draft", "research-publication"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "receipt" }
+}

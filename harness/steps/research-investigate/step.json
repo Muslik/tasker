@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "reference": "research.investigate@1",
+  "description": "Ground a research task in Jira, Confluence, Loop, repository evidence, and measured current behavior before drafting the SA page.",
+  "stage": { "id": "development", "label": "Development" },
+  "availableDuring": ["execution"],
+  "inputContract": "research_input",
+  "outputContract": "research_investigation_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "investigation",
+    "strategyRole": "context",
+    "prompt": "prompt.md",
+    "skills": ["confluence", "jira", "loop", "delegation", "figma-inspector", "figma-parity"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["research-investigation"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "attempt",
+  "idempotency": "key",
+  "waitKinds": [],
+  "artifactContracts": ["research-investigation"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": [
+    "cross_repository_dependency",
+    "task_scope_changed",
+    "verification_scope_changed"
+  ],
+  "reconciliation": { "strategy": "receipt" }
+}

@@ -4,7 +4,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadHarnessPack } from './index.js';
+import {
+  loadHarnessPack,
+  resolveHarnessProductByJiraProject,
+  resolveTaskExecutionProfile,
+} from './index.js';
 import { JiraLifecyclePolicyConfigurationSchema } from '../integrations/jira/lifecycle.js';
 import { createHarnessWorkflowContracts, getHarnessStepDefinition } from '../planning/index.js';
 import { compileWorkflow, type StepTypeContract } from '../graph/index.js';
@@ -120,6 +124,14 @@ describe('file-backed harness pack', () => {
     expect(contracts.predicates.has('company.accepted@1')).toBe(true);
   });
 
+  it('registers static predicates declared by research publish and filing blocks', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const contracts = createHarnessWorkflowContracts(pack.steps);
+
+    expect(contracts.predicates.has('research.published@1')).toBe(true);
+    expect(contracts.predicates.has('research.tasks_filed@1')).toBe(true);
+  });
+
   it('loads readable prompts with content hashes and exposes fill-test-ops-plan', () => {
     const pack = loadHarnessPack(join(process.cwd(), 'harness'));
     const stepDefinition = pack.steps.find(
@@ -157,8 +169,8 @@ describe('file-backed harness pack', () => {
     const prompt = loadHarnessPack(join(process.cwd(), 'harness')).prompts.implementationPlanner;
 
     expect(prompt.content).toContain('Tasker owns workflow topology.');
-    expect(prompt.content).toContain('`archetype` must be `deliver-pr`');
-    expect(prompt.content).toContain('`segments` is a closed unique array.');
+    expect(prompt.content).toContain('`archetype` must be either `deliver-pr` or `research`');
+    expect(prompt.content).toContain('For `deliver-pr`, `segments` is a closed unique array.');
     expect(prompt.content).toContain('`dependency_await`');
     expect(prompt.content).toContain('`translations`');
     expect(prompt.content).toContain('`run-validation`');
@@ -248,6 +260,196 @@ describe('file-backed harness pack', () => {
       'local-ready-before-delivery',
       'delivery-feedback-is-frozen',
     ]);
+  });
+
+  it('loads research product routing metadata and resolves Jira projects deterministically', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+
+    expect(pack.products).toEqual([
+      {
+        id: 'avia',
+        title: 'Авиа',
+        jiraProjects: ['AVIA'],
+        confluence: {
+          spaceKey: 'AVIA',
+          researchRootPageId: '39748148',
+        },
+        repositories: {
+          primary: 'front-avia',
+          linked: ['front-components'],
+        },
+      },
+      {
+        id: 'railways',
+        title: 'ЖД',
+        jiraProjects: ['RR'],
+        confluence: {
+          spaceKey: 'PID',
+          researchRootPageId: '60555687',
+        },
+        repositories: {
+          primary: 'front-railways',
+          linked: ['front-components'],
+        },
+      },
+    ]);
+    expect(resolveHarnessProductByJiraProject(pack.products, 'AVIA-13235')?.id).toBe('avia');
+    expect(resolveHarnessProductByJiraProject(pack.products, 'rr')?.id).toBe('railways');
+    expect(resolveHarnessProductByJiraProject(pack.products, 'jira:RR-9060')?.id).toBe('railways');
+    expect(resolveHarnessProductByJiraProject(pack.products, 'UNKNOWN-1')).toBeNull();
+  });
+
+  it('rejects duplicate Jira product ownership in the harness pack', async () => {
+    const root = await createTemporaryPack();
+    const manifestPath = join(root, 'products', 'avia-copy.json');
+    const manifest = JSON.parse(await readFile(join(root, 'products', 'avia.json'), 'utf8')) as {
+      id: string;
+    };
+    manifest.id = 'avia-copy';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+    expect(() => loadHarnessPack(root)).toThrow('Duplicate harness product Jira project AVIA');
+  });
+
+  it('registers the shared figma skills for step-bound research work', async () => {
+    const manifest = JSON.parse(
+      await readFile(join(process.cwd(), 'harness/workspace/manifest.json'), 'utf8'),
+    ) as {
+      skillSources: { id: string; skills: string[] }[];
+    };
+    const sharedStep = manifest.skillSources.find(({ id }) => id === 'shared-step');
+
+    expect(sharedStep?.skills).toEqual(expect.arrayContaining(['figma-inspector', 'figma-parity']));
+  });
+
+  it('ships the research step catalog with typed outputs and approval-gated filing', () => {
+    const pack = loadHarnessPack(join(process.cwd(), 'harness'));
+    const investigate = pack.steps.find(({ reference }) => reference === 'research.investigate@1');
+    const draft = pack.steps.find(({ reference }) => reference === 'research.draft@1');
+    const review = pack.steps.find(({ reference }) => reference === 'research.review@1');
+    const publish = pack.steps.find(({ reference }) => reference === 'research.publish@1');
+    const fileTasks = pack.steps.find(({ reference }) => reference === 'research.file-tasks@1');
+
+    expect(investigate?.block).toMatchObject({
+      stage: { id: 'development', label: 'Development' },
+      executor: {
+        kind: 'agent',
+        profile: 'investigation',
+        strategyRole: 'context',
+        skills: ['confluence', 'jira', 'loop', 'delegation', 'figma-inspector', 'figma-parity'],
+      },
+    });
+    expect(draft?.block.executor).toMatchObject({
+      kind: 'agent',
+      profile: 'implementation',
+      strategyRole: 'implementation',
+      skills: ['confluence', 'jira', 'loop', 'delegation', 'figma-inspector', 'figma-parity'],
+    });
+    expect(draft?.block.stage).toEqual({ id: 'development', label: 'Development' });
+    expect(review?.block).toMatchObject({
+      executor: {
+        kind: 'agent',
+        profile: 'review',
+        strategyRole: 'review',
+        skills: ['confluence', 'jira', 'loop', 'delegation', 'figma-inspector', 'figma-parity'],
+      },
+      outputPredicates: {
+        discriminator: 'decision',
+        cases: {
+          accepted: { 'research.review_accepted@1': true },
+          changes_requested: { 'research.review_accepted@1': false },
+        },
+      },
+    });
+    for (const strategy of ['simple', 'standard', 'complex'] as const) {
+      expect(resolveTaskExecutionProfile(pack.company, null, strategy, 'review')).toMatchObject({
+        name: 'review-claude-sonnet',
+        provider: 'claude',
+      });
+    }
+    expect(publish?.block).toMatchObject({
+      executor: { kind: 'effect', adapter: 'research.publish@1' },
+      completion: { kind: 'reconciled_effect' },
+    });
+    expect(publish?.block.outputPredicates).toEqual({
+      facts: { 'research.published@1': true },
+    });
+    expect(fileTasks?.block).toMatchObject({
+      executor: {
+        kind: 'agent',
+        profile: 'documentation',
+        strategyRole: null,
+        skills: ['jira-issue', 'jira-edit'],
+      },
+      outputPredicates: {
+        facts: { 'research.tasks_filed@1': true },
+      },
+    });
+    expect(fileTasks?.contract.waitKinds).toEqual(['research.approval@1']);
+    expect(
+      investigate?.contract.inputSchema.safeParse({
+        objective: 'Prepare SA',
+        repository: 'onetwotrip/front-railways',
+        taskId: 'RR-9060',
+        questions: ['Что именно должен доказать SA?'],
+        product: pack.products[1],
+      }).success,
+    ).toBe(true);
+    expect(
+      investigate?.contract.outputSchema.safeParse({
+        findings: [
+          {
+            statement: 'Current flow already reuses the shared passenger component.',
+            sources: [
+              'src/passengers/model.ts:48',
+              'https://confluence.example/pages/viewpage.action?pageId=42',
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      draft?.contract.outputSchema.safeParse({
+        documentStorageHtml: '<ac:layout />',
+        proposedTasks: [
+          {
+            title: 'Убрать завязки на babies в FE',
+            description: 'Подготовить фронтовую реализацию.',
+            team: 'FE',
+          },
+        ],
+        openQuestions: [{ addressee: 'Backend', question: 'Нужен ли новый флаг?' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      draft?.contract.outputSchema.safeParse({
+        documentStorageHtml: '<p>Duplicate tasks</p>',
+        proposedTasks: [
+          { title: 'Одинаковая задача', description: 'Первая.', team: 'FE' },
+          { title: 'Одинаковая задача', description: 'Вторая.', team: 'BE' },
+        ],
+        openQuestions: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      review?.contract.outputSchema.safeParse({
+        decision: 'changes_requested',
+        concreteEdits: [
+          { section: 'Как сейчас', change: 'Добавить measured screenshot and source.' },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      publish?.contract.outputSchema.safeParse({
+        pageId: '60555687',
+        pageUrl: 'https://confluence.example/pages/viewpage.action?pageId=60555687',
+      }).success,
+    ).toBe(true);
+    expect(
+      fileTasks?.contract.outputSchema.safeParse({
+        issueKeys: ['RR-9060', 'RR-9061'],
+      }).success,
+    ).toBe(true);
   });
 
   it('keeps mise configuration inside the writable workspace home volume', () => {

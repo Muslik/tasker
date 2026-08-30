@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "reference": "research.review@1",
+  "description": "Independently review the drafted SA page, ticket breakdown, and open questions before publication.",
+  "stage": { "id": "agent_review", "label": "Agent review" },
+  "availableDuring": ["execution"],
+  "inputContract": "research_input",
+  "outputContract": "research_review_output",
+  "outputPredicates": {
+    "discriminator": "decision",
+    "cases": {
+      "accepted": {
+        "research.review_accepted@1": true
+      },
+      "changes_requested": {
+        "research.review_accepted@1": false
+      }
+    }
+  },
+  "executor": {
+    "kind": "agent",
+    "profile": "review",
+    "strategyRole": "review",
+    "prompt": "prompt.md",
+    "skills": ["confluence", "jira", "loop", "delegation", "figma-inspector", "figma-parity"]
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["research-review"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "attempt",
+  "idempotency": "none",
+  "waitKinds": [],
+  "artifactContracts": ["research-review"],
+  "requiredArtifactContracts": ["research-investigation", "research-draft"],
+  "workflowChanges": []
+}

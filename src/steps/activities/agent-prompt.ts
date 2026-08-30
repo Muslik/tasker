@@ -71,6 +71,7 @@ export const promptForAgentStep = (input: {
   readonly skills: readonly string[];
   readonly recovery: TaskStepRecoveryContext;
   readonly operatorGuidance: string | null;
+  readonly waitResolution: unknown;
   readonly evidence: TaskRunEvidence;
   readonly historyIndex: ReturnType<typeof runHistoryIndex>;
 }): string => {
@@ -100,6 +101,7 @@ export const promptForAgentStep = (input: {
         preferredSkills: input.skills,
         activityRecovery: input.recovery,
         operatorGuidance: input.operatorGuidance,
+        waitResolution: input.waitResolution,
         runEvidence,
         runHistoryIndex: input.historyIndex,
       },

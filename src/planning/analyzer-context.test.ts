@@ -73,6 +73,13 @@ describe('workflow analyzer context', () => {
     const context = createWorkflowAnalyzerContext(fixture);
     const plannerContext = z
       .object({
+        product: z
+          .object({
+            id: z.string(),
+            confluence: z.object({ researchRootPageId: z.string() }),
+            repositories: z.object({ primary: z.string(), linked: z.array(z.string()) }),
+          })
+          .nullable(),
         buildingBlocks: z.object({
           steps: z.array(z.object({ reference: z.string() }).loose()),
         }),
@@ -87,6 +94,20 @@ describe('workflow analyzer context', () => {
     expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toContain(
       'deliver.pull-request@1',
     );
+    expect(plannerContext.buildingBlocks.steps.map(({ reference }) => reference)).toEqual(
+      expect.arrayContaining([
+        'research.investigate@1',
+        'research.draft@1',
+        'research.review@1',
+        'research.publish@1',
+        'research.file-tasks@1',
+      ]),
+    );
+    expect(plannerContext.product).toMatchObject({
+      id: 'avia',
+      confluence: { researchRootPageId: '39748148' },
+      repositories: { primary: 'front-avia', linked: ['front-components'] },
+    });
     expect(plannerContext.obligations.map(({ id }) => id)).toEqual([
       'local-ready-before-delivery',
       'delivery-feedback-is-frozen',

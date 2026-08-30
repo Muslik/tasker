@@ -24,6 +24,10 @@ import {
   ProjectExecutionProfileOverridesSchema,
   SubagentRoleSchema,
 } from './execution-profile-contracts.js';
+import { JiraProjectKeySchema, type HarnessProductManifest } from '../shared/product.js';
+
+export { HarnessProductManifestSchema } from '../shared/product.js';
+export type { HarnessProductManifest } from '../shared/product.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const PolicyIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
@@ -114,6 +118,12 @@ export const HarnessContractNameSchema = z.enum([
   'process_output',
   'pull_request_input',
   'pull_request_output',
+  'research_draft_output',
+  'research_input',
+  'research_investigation_output',
+  'research_publication_output',
+  'research_review_output',
+  'research_task_filing_output',
   'reproduction_input',
   'reproduction_output',
   'task_input',
@@ -485,6 +495,7 @@ export interface LoadedHarnessStep {
 }
 
 export type LoadedHarnessProject = HarnessProjectManifest;
+export type LoadedHarnessProduct = HarnessProductManifest;
 
 export interface LoadedHarnessPack {
   readonly rootPath: string;
@@ -492,11 +503,31 @@ export interface LoadedHarnessPack {
   readonly steps: readonly LoadedHarnessStep[];
   readonly policies: readonly HarnessPolicyManifest[];
   readonly projects: readonly LoadedHarnessProject[];
+  readonly products: readonly LoadedHarnessProduct[];
   readonly prompts: {
     readonly implementationPlanner: LoadedPrompt;
     readonly workflowAnalyzer: LoadedPrompt;
   };
 }
+
+const jiraProjectKeyFrom = (issueKeyOrProjectKey: string): string | null => {
+  const candidate = issueKeyOrProjectKey.trim().replace(/^jira:/iu, '');
+  if (candidate.length === 0) return null;
+  const projectKey = candidate.includes('-')
+    ? candidate.slice(0, candidate.indexOf('-'))
+    : candidate;
+  const parsed = JiraProjectKeySchema.safeParse(projectKey.toUpperCase());
+  return parsed.success ? parsed.data : null;
+};
+
+export const resolveHarnessProductByJiraProject = (
+  products: readonly LoadedHarnessProduct[],
+  issueKeyOrProjectKey: string,
+): LoadedHarnessProduct | null => {
+  const projectKey = jiraProjectKeyFrom(issueKeyOrProjectKey);
+  if (projectKey === null) return null;
+  return products.find((product) => product.jiraProjects.includes(projectKey)) ?? null;
+};
 
 export const applyHarnessPolicySkills = (
   block: BlockDefinition,

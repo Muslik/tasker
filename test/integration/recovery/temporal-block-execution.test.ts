@@ -374,6 +374,7 @@ describe('temporal block execution activity', () => {
       skills: [],
       recovery: { kind: 'single_attempt' },
       operatorGuidance: null,
+      waitResolution: { decision: 'approve' },
       evidence,
       historyIndex: runHistoryIndex([]),
     });
@@ -381,6 +382,7 @@ describe('temporal block execution activity', () => {
     const contextMatch = /Execution context:\n([\s\S]+?)\n\nOperate only/u.exec(prompt);
     if (contextMatch?.[1] === undefined) throw new Error('Execution context missing from prompt');
     const context = JSON.parse(contextMatch[1]) as {
+      readonly waitResolution: unknown;
       readonly runEvidence: {
         readonly reviewInputs: {
           readonly entries: readonly unknown[];
@@ -391,6 +393,7 @@ describe('temporal block execution activity', () => {
 
     expect(context.runEvidence.reviewInputs.entries).toHaveLength(5);
     expect(context.runEvidence.reviewInputs.omittedCount).toBe(10);
+    expect(context.waitResolution).toEqual({ decision: 'approve' });
     expect(prompt).toContain('{"status":"completed","output":{...}}');
     expect(prompt).toContain('{"status":"waiting","waitKind":"..."');
     expect(prompt).toContain('{"status":"failed","category":"..."');

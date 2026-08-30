@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ReadyDeliverPrImplementationPlanningDecisionSchema,
+  ReadyResearchImplementationPlanningDecisionSchema,
   ReadyImplementationPlanningDecisionSchema,
   validateAcceptanceVerificationLinks,
 } from './index.js';
@@ -29,6 +31,60 @@ const workflowSource = SemanticWorkflowSourceSchema.parse({
           repository: 'onetwotrip/front-avia',
           taskId: 'AVIA-12045',
         },
+      },
+    ],
+  },
+});
+
+const researchWorkflowSource = SemanticWorkflowSourceSchema.parse({
+  schemaVersion: 1,
+  id: 'research-package',
+  version: 1,
+  root: {
+    kind: 'sequence',
+    id: 'task-work',
+    children: [
+      {
+        kind: 'bounded_loop',
+        id: 'review-feedback',
+        maxAttempts: 3,
+        until: 'research.review_accepted@1',
+        body: {
+          kind: 'sequence',
+          id: 'review-attempt',
+          children: [
+            {
+              kind: 'step',
+              id: 'investigate-research',
+              uses: 'research.investigate@1',
+              with: {},
+            },
+            {
+              kind: 'step',
+              id: 'draft-research',
+              uses: 'research.draft@1',
+              with: {},
+            },
+            {
+              kind: 'step',
+              id: 'review-research',
+              uses: 'research.review@1',
+              with: {},
+            },
+          ],
+        },
+      },
+      {
+        kind: 'step',
+        id: 'publish-research',
+        uses: 'research.publish@1',
+        with: {},
+      },
+      {
+        kind: 'step',
+        id: 'file-research-tasks',
+        uses: 'research.file-tasks@1',
+        with: {},
       },
     ],
   },
@@ -81,7 +137,7 @@ const decision = {
 
 describe('implementation plan acceptance contract', () => {
   it('accepts a criterion whose verification is performed by a workflow step', () => {
-    const parsed = ReadyImplementationPlanningDecisionSchema.parse(decision);
+    const parsed = ReadyDeliverPrImplementationPlanningDecisionSchema.parse(decision);
 
     expect(parsed.plan.acceptanceCriteria[0]?.verification[0]).toMatchObject({
       kind: 'runtime_evidence',
@@ -90,7 +146,7 @@ describe('implementation plan acceptance contract', () => {
   });
 
   it('rejects a criterion whose declared verification is absent from the workflow', () => {
-    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+    const candidate = ReadyDeliverPrImplementationPlanningDecisionSchema.parse({
       ...decision,
       plan: {
         ...decision.plan,
@@ -114,7 +170,7 @@ describe('implementation plan acceptance contract', () => {
   });
 
   it('rejects duplicate acceptance criterion ids while using the explicit workflow source', () => {
-    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+    const candidate = ReadyDeliverPrImplementationPlanningDecisionSchema.parse({
       ...decision,
       plan: {
         ...decision.plan,
@@ -156,7 +212,7 @@ describe('implementation plan acceptance contract', () => {
   });
 
   it('defaults an omitted validation profile to targeted', () => {
-    const parsed = ReadyImplementationPlanningDecisionSchema.parse({
+    const parsed = ReadyDeliverPrImplementationPlanningDecisionSchema.parse({
       ...decision,
       verification: {
         checks: ['Repeat the investigated scenario.'],
@@ -172,7 +228,7 @@ describe('implementation plan acceptance contract', () => {
     expect(
       ['targeted', 'full', 'build'].map(
         (validationProfile) =>
-          ReadyImplementationPlanningDecisionSchema.parse({
+          ReadyDeliverPrImplementationPlanningDecisionSchema.parse({
             ...decision,
             verification: {
               ...decision.verification,
@@ -196,7 +252,7 @@ describe('implementation plan acceptance contract', () => {
   });
 
   it('rejects process verification owned by the acceptance judge', () => {
-    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+    const candidate = ReadyDeliverPrImplementationPlanningDecisionSchema.parse({
       ...decision,
       plan: {
         ...decision.plan,
@@ -223,7 +279,7 @@ describe('implementation plan acceptance contract', () => {
   });
 
   it('rejects a process profile that differs from the verification slot', () => {
-    const candidate = ReadyImplementationPlanningDecisionSchema.parse({
+    const candidate = ReadyDeliverPrImplementationPlanningDecisionSchema.parse({
       ...decision,
       plan: {
         ...decision.plan,
@@ -247,5 +303,110 @@ describe('implementation plan acceptance contract', () => {
     expect(validateAcceptanceVerificationLinks(candidate, workflowSource)).toContain(
       'Acceptance criterion validation-passes process profile full does not match validation profile targeted.',
     );
+  });
+
+  it('accepts a research decision without a validation profile', () => {
+    const parsed = ReadyResearchImplementationPlanningDecisionSchema.parse({
+      status: 'ready',
+      executionStrategy: 'simple',
+      plan: {
+        schemaVersion: 2,
+        title: 'Prepare research',
+        summary: 'Investigate, draft, review, publish, and file follow-up tasks.',
+        steps: [
+          {
+            id: 'prepare-research',
+            title: 'Prepare research',
+            objective: 'Ground the package in current evidence.',
+            repository: 'onetwotrip/front-avia',
+            files: ['src', 'docs'],
+            verification: ['Publish the approved package and proposed tasks.'],
+          },
+        ],
+        assumptions: [],
+        risks: [],
+        acceptanceCriteria: [
+          {
+            id: 'research-published',
+            expected: 'The approved research package is published.',
+            verification: [
+              {
+                kind: 'inspection',
+                target: 'published package',
+                expectation: 'The published page and proposed tasks are present.',
+                workflowStepIds: ['publish-research', 'file-research-tasks'],
+              },
+            ],
+          },
+        ],
+      },
+      archetype: 'research',
+      segments: [],
+      verification: {
+        checks: ['Review accepts the draft and the publication package is complete.'],
+        profile: 'research',
+        rationale: 'Research uses review and publication instead of project validation commands.',
+      },
+      questions: [
+        'Which current constraints and open decisions must the research package resolve?',
+      ],
+      rationale: 'research matches the document-first workflow.',
+    });
+
+    expect(parsed.verification).not.toHaveProperty('validationProfile');
+    expect(validateAcceptanceVerificationLinks(parsed, researchWorkflowSource)).toEqual([]);
+  });
+
+  it('rejects missing research workflow steps through the shared link validator', () => {
+    const candidate = ReadyResearchImplementationPlanningDecisionSchema.parse({
+      status: 'ready',
+      executionStrategy: 'simple',
+      plan: {
+        schemaVersion: 2,
+        title: 'Prepare research',
+        summary: 'Investigate, draft, review, publish, and file follow-up tasks.',
+        steps: [
+          {
+            id: 'prepare-research',
+            title: 'Prepare research',
+            objective: 'Ground the package in current evidence.',
+            repository: 'onetwotrip/front-avia',
+            files: ['src', 'docs'],
+            verification: ['Publish the approved package and proposed tasks.'],
+          },
+        ],
+        assumptions: [],
+        risks: [],
+        acceptanceCriteria: [
+          {
+            id: 'research-published',
+            expected: 'The approved research package is published.',
+            verification: [
+              {
+                kind: 'inspection',
+                target: 'published package',
+                expectation: 'The published page and proposed tasks are present.',
+                workflowStepIds: ['missing-research-step'],
+              },
+            ],
+          },
+        ],
+      },
+      archetype: 'research',
+      segments: [],
+      verification: {
+        checks: ['Review accepts the draft and the publication package is complete.'],
+        profile: 'research',
+        rationale: 'Research uses review and publication instead of project validation commands.',
+      },
+      questions: [
+        'Which current constraints and open decisions must the research package resolve?',
+      ],
+      rationale: 'research matches the document-first workflow.',
+    });
+
+    expect(validateAcceptanceVerificationLinks(candidate, researchWorkflowSource)).toEqual([
+      'Acceptance criterion research-published references missing workflow step missing-research-step.',
+    ]);
   });
 });

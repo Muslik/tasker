@@ -137,6 +137,7 @@ planning uncertainty. Do not start a consensus or implementation workflow.`;
         task: request.context.task,
         taskSnapshot: request.context.taskSnapshot,
         blocks: request.context.blocks,
+        product: request.context.product,
         repositoryReference: request.context.repositoryReference,
         operatorGuidance: request.context.operatorGuidance,
         validationFeedback: request.context.validationFeedback,

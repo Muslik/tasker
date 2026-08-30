@@ -105,11 +105,13 @@ export interface WaitResolutionMapping {
   readonly cases: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
 }
 
-export interface OutputPredicateMapping {
-  readonly discriminator: string;
-  readonly cases: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
-  readonly defaultFacts?: Readonly<Record<string, boolean>> | undefined;
-}
+export type OutputPredicateMapping =
+  | {
+      readonly discriminator: string;
+      readonly cases: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
+      readonly defaultFacts?: Readonly<Record<string, boolean>> | undefined;
+    }
+  | { readonly facts: Readonly<Record<string, boolean>> };
 
 export interface CompiledFinalizeNode {
   readonly kind: 'finalize';
@@ -283,7 +285,11 @@ export const WaitResolutionMappingSchema = z
   })
   .strict();
 
-export const OutputPredicateMappingSchema = z
+const PredicateFactsSchema = z
+  .record(PredicateReferenceSchema, z.boolean())
+  .refine((facts) => Object.keys(facts).length > 0, 'Output predicate facts must not be empty');
+
+const DiscriminatedOutputPredicateMappingSchema = z
   .object({
     discriminator: z.string().min(1),
     cases: z
@@ -300,20 +306,20 @@ export const OutputPredicateMappingSchema = z
         (cases) => Object.keys(cases).length > 0,
         'An output predicate mapping must declare at least one case',
       ),
-    defaultFacts: z
-      .record(PredicateReferenceSchema, z.boolean())
-      .refine(
-        (facts) => Object.keys(facts).length > 0,
-        'Default output predicate facts must not be empty',
-      )
-      .optional(),
+    defaultFacts: PredicateFactsSchema.optional(),
   })
   .strict();
+
+export const OutputPredicateMappingSchema = z.union([
+  DiscriminatedOutputPredicateMappingSchema,
+  z.object({ facts: PredicateFactsSchema }).strict(),
+]);
 
 export const resolveOutputPredicateFacts = (
   mapping: OutputPredicateMapping | undefined,
   output: JsonValue,
 ): Readonly<Record<string, boolean>> => {
+  if (mapping !== undefined && 'facts' in mapping) return mapping.facts;
   if (
     mapping === undefined ||
     output === null ||

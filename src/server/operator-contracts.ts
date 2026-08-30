@@ -534,7 +534,13 @@ export const WorkflowViewSchema = z
         expectedArtifacts: z.array(z.string().min(1)),
         verificationPlan: z
           .object({
-            profile: z.enum(['build_only', 'targeted_tests', 'full_suite', 'visual_compare']),
+            profile: z.enum([
+              'build_only',
+              'targeted_tests',
+              'full_suite',
+              'visual_compare',
+              'research_review',
+            ]),
             rationale: z.string().min(1),
           })
           .strict(),

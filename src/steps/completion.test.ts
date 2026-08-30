@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { acceptsAnyProcessExit, evaluateBlockCompletion, type AgentClaim } from './index.js';
-import { OutputPredicateMappingSchema } from '../graph/index.js';
+import { OutputPredicateMappingSchema, resolveOutputPredicateFacts } from '../graph/index.js';
 
 const claim: AgentClaim = {
   status: 'candidate_complete',
@@ -140,5 +140,15 @@ describe('block completion', () => {
     expect(
       OutputPredicateMappingSchema.safeParse({ discriminator: 'decision', cases: {} }).success,
     ).toBe(false);
+  });
+
+  it('accepts static output predicate facts for unconditional completion predicates', () => {
+    const mapping = OutputPredicateMappingSchema.parse({
+      facts: { 'research.published@1': true },
+    });
+
+    expect(resolveOutputPredicateFacts(mapping, { pageId: '42' })).toEqual({
+      'research.published@1': true,
+    });
   });
 });

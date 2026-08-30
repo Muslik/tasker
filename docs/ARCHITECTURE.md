@@ -9,10 +9,11 @@ that workflow through Temporal, and preserves the evidence an operator needs to 
 1. **Bootstrap.** `bootstrapWorkflowV3` prepares a managed Git workspace, assembles the
    task and repository context, collects an Evidence Bundle, and can run bounded
    bootstrap investigation steps.
-2. **Planning.** The implementation planner returns a typed plan: execution strategy,
-   acceptance criteria, verification links, the `deliver-pr` archetype, optional
-   `dependency_await`/`translations` segments, and the selected validation profile.
-   `materializeDeliverPrScaffold` fills those slots; the planner does not own topology.
+2. **Planning.** The implementation planner returns a typed plan and selects a code-owned
+   archetype. `deliver-pr` accepts optional `dependency_await`/`translations` segments and a
+   validation profile; `research` accepts bounded investigation questions and resolves its
+   product from the Jira project. Deterministic scaffold materialization fills those slots;
+   the planner does not own topology.
 3. **Freeze.** The candidate is compiled, obligation- and capability-validated, may
    pass plan review, and is persisted with its hashes and references by
    `WorkflowFreezeStore`. The execution input contains only the frozen graph and
@@ -23,9 +24,10 @@ that workflow through Temporal, and preserves the evidence an operator needs to 
    not a receipt: `claims.ts`, transcripts, evidence, and output artifacts provide the
    independently persisted proof used before a graph transition. `waiting` is durable
    state, not a failed attempt.
-5. **Delivery.** The scaffold runs validation, verification, review, preparation, and
-   pull-request delivery. Bitbucket, Jira, and Jenkins adapters reconcile external
-   effects and return typed completion, wait, or failure results.
+5. **Delivery.** `deliver-pr` runs validation, verification, review, preparation, and
+   pull-request delivery. `research` reviews and reconciles a Confluence СА publication,
+   then waits for approval before filing its proposed Jira tasks. External adapters return
+   typed completion, wait, or failure results.
 6. **Retrospective.** The execution retrospective activity computes per-step attempts,
    waits, tokens, duration, cost, findings, and proposed follow-up changes; the report
    is stored and surfaced by the operator API.
@@ -60,7 +62,7 @@ flowchart TD
 - `src/server/` — Fastify operator API, projections, planning services, and retrospectives.
 - `src/ui/` — TanStack Query cockpit, small components, and SSE realtime updates.
 - `src/shared/` — canonical JSON, clock, IDs, outcomes, environment, and small helpers.
-- `harness/` — file-backed company, step, policy, project, prompt, and workspace guidance.
+- `harness/` — file-backed company, product, step, policy, project, prompt, and workspace guidance.
 
 ## SQLite schema
 
@@ -85,7 +87,7 @@ fresh final schema.
 | --- | --- |
 | New step | Add `harness/steps/<name>/step.json` and its prompt; add the runtime contract or adapter in `src/harness/`, `src/steps/`, or `src/integrations/` as its executor requires. |
 | New archetype | Add a scaffold under `src/graph/archetypes/`, export it, and extend the planning decision/schema and deterministic materialization path. |
+| New product | Add a validated manifest under `harness/products/`; Jira project keys select products server-side. |
 | New provider | Implement the provider/parser contract in `src/agents/`, register it in the provider surface, and add corpus fixtures under `test/contract/providers/`. |
 | New subagent role | Add the role markdown under `harness/workspace/agents/`, then add matching Claude/Codex entries to `harness/company.json` and `models.env`. |
 | Model routing | Edit `harness/company.json` execution profiles and `executionProfileRouting`; keep project overrides in `harness/projects/*/project.json`. |
-

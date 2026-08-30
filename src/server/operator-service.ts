@@ -112,6 +112,8 @@ const verificationProfile = (
   proposal: WorkflowProposalArtifact,
 ): WorkflowView['workflow']['verificationPlan']['profile'] => {
   switch (proposal.verificationPlan.profile) {
+    case 'research':
+      return 'research_review';
     case 'targeted':
     case 'translation_and_targeted':
       return 'targeted_tests';
@@ -500,8 +502,8 @@ export class OperatorWorkflowService {
     const proposal = createWorkflowProposalFromAnalyzerOutput(task, 'implementation-planner@4', {
       assemblyDecisions: [
         {
-          id: 'deterministic-deliver-pr-scaffold',
-          title: 'Deterministic deliver-pr scaffold',
+          id: `deterministic-${decision.archetype}-scaffold`,
+          title: `Deterministic ${decision.archetype} scaffold`,
           source: decision.archetype,
           reason: decision.rationale,
           effect: decision.rationale,
@@ -512,13 +514,13 @@ export class OperatorWorkflowService {
     });
     if (!proposal.ok) {
       throw new Error(
-        `Internal deliver-pr scaffold invariant violated: ${proposal.error.issues.map(({ message }) => message).join('; ')}`,
+        `Internal ${decision.archetype} scaffold invariant violated: ${proposal.error.issues.map(({ message }) => message).join('; ')}`,
       );
     }
 
     return this.persistPlanning(
       task,
-      planWorkflowProposal(proposal.value, { internalInvariant: 'deliver-pr scaffold' }),
+      planWorkflowProposal(proposal.value, { internalInvariant: `${decision.archetype} scaffold` }),
       operationId,
     );
   }

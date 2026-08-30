@@ -111,4 +111,16 @@ export const harnessWaitContracts = [
       .strict(),
     description: 'Wait for an operator to configure a newly discovered external dependency.',
   },
+  {
+    id: 'research.approval',
+    version: '1',
+    stage: { id: 'research_delivery', label: 'Research delivery' },
+    resolutionSchema: z
+      .object({
+        decision: z.literal('approve'),
+        guidance: z.string().trim().min(1).optional(),
+      })
+      .strict(),
+    description: 'Wait for approval of the published system analysis before filing Jira tasks.',
+  },
 ] satisfies readonly WaitContract[];

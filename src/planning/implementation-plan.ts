@@ -4,12 +4,18 @@ import {
   DELIVER_PR_NODE_IDS,
   DeliverPrArchetypeSchema,
   DeliverPrSegmentsSchema,
+  ResearchArchetypeSchema,
+  ResearchSegmentsSchema,
   ValidationProfileSchema,
 } from '../graph/archetypes/index.js';
 import { JsonValueSchema, NodeIdSchema } from '../graph/schema.js';
 import type { SemanticNodeSource, SemanticWorkflowSource } from '../graph/semantic-schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
-import { VerificationPlanSchema } from './workflow-proposal-contracts.js';
+import {
+  DeliverPrVerificationPlanSchema,
+  ResearchVerificationPlanSchema,
+} from './workflow-proposal-contracts.js';
+import { SnapshottedHarnessProductSchema } from './run-planning-snapshot.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import { BlockDefinitionSchema } from '../steps/contracts.js';
 import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
@@ -169,17 +175,36 @@ const workflowStepIds = (root: SemanticNodeSource): ReadonlySet<string> => {
   return ids;
 };
 
-export const ReadyImplementationPlanningDecisionSchema = z
+const ReadyImplementationPlanningDecisionBaseSchema = z
   .object({
     status: z.literal('ready'),
     executionStrategy: TaskExecutionStrategySchema,
     plan: ImplementationPlanSchema,
-    archetype: DeliverPrArchetypeSchema,
-    segments: DeliverPrSegmentsSchema,
-    verification: VerificationPlanSchema,
     rationale: z.string().min(1).max(1_000),
   })
   .strict();
+
+const ResearchQuestionSchema = z.string().trim().min(1).max(2_000);
+
+export const ReadyDeliverPrImplementationPlanningDecisionSchema =
+  ReadyImplementationPlanningDecisionBaseSchema.extend({
+    archetype: DeliverPrArchetypeSchema,
+    segments: DeliverPrSegmentsSchema,
+    verification: DeliverPrVerificationPlanSchema,
+  }).strict();
+
+export const ReadyResearchImplementationPlanningDecisionSchema =
+  ReadyImplementationPlanningDecisionBaseSchema.extend({
+    archetype: ResearchArchetypeSchema,
+    segments: ResearchSegmentsSchema,
+    verification: ResearchVerificationPlanSchema,
+    questions: z.array(ResearchQuestionSchema).min(1).max(10),
+  }).strict();
+
+export const ReadyImplementationPlanningDecisionSchema = z.discriminatedUnion('archetype', [
+  ReadyDeliverPrImplementationPlanningDecisionSchema,
+  ReadyResearchImplementationPlanningDecisionSchema,
+]);
 
 export const validateAcceptanceVerificationLinks = (
   decision: z.infer<typeof ReadyImplementationPlanningDecisionSchema>,
@@ -195,6 +220,7 @@ export const validateAcceptanceVerificationLinks = (
     criterionIds.add(criterion.id);
     criterion.verification.forEach((verification) => {
       if (
+        decision.archetype === 'deliver-pr' &&
         verification.kind === 'process' &&
         (verification.workflowStepIds.length !== 1 ||
           verification.workflowStepIds[0] !== DELIVER_PR_NODE_IDS.runValidation)
@@ -204,6 +230,7 @@ export const validateAcceptanceVerificationLinks = (
         );
       }
       if (
+        decision.archetype === 'deliver-pr' &&
         verification.kind === 'process' &&
         verification.profile !== decision.verification.validationProfile
       ) {
@@ -245,6 +272,7 @@ export const ImplementationPlannerContextSchema = z
     taskSnapshot: JsonValueSchema,
     blocks: z.array(BlockDefinitionSchema).min(1),
     evidenceBundle: EvidenceBundleSchema,
+    product: SnapshottedHarnessProductSchema.nullable(),
     repositoryReference: z.string().min(1),
     operatorGuidance: z.string().min(1).max(10_000).nullable(),
     validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),

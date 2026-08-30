@@ -4,8 +4,10 @@ import { BlockDefinitionSchema } from '../steps/contracts.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
+  HarnessProductManifestSchema,
   HarnessProjectManifestSchema,
   ProcessExecutionBindingSchema,
+  type HarnessProductManifest,
 } from '../harness/contracts.js';
 import {
   ResolvedExecutionProfileSchema,
@@ -45,10 +47,13 @@ const SnapshottedStepSchema = z
   })
   .strict();
 
+export const SnapshottedHarnessProductSchema = HarnessProductManifestSchema;
+
 const SnapshottedHarnessSchema = z
   .object({
     company: HarnessCompanyManifestSchema,
     project: HarnessProjectManifestSchema.nullable(),
+    products: z.array(SnapshottedHarnessProductSchema).default([]),
     implementationPlanner: z
       .object({
         prompt: SnapshottedPromptSchema,
@@ -114,6 +119,7 @@ export type PlanningSnapshotReference = z.infer<typeof PlanningSnapshotReference
 export type PlanningContextSnapshot = z.infer<typeof PlanningContextSnapshotSchema>;
 export type ExecutionRunSnapshot = z.infer<typeof ExecutionRunSnapshotSchema>;
 export type RunPlanningSnapshot = z.infer<typeof RunPlanningSnapshotSchema>;
+export type SnapshottedHarnessProduct = HarnessProductManifest;
 
 export interface PlanningSnapshotWorkspace {
   readonly workspaceId: string;

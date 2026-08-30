@@ -23,6 +23,8 @@ import {
   BitbucketPullRequestAdapter,
   BitbucketPullRequestClient,
   ConfluencePlanningEvidenceReader,
+  ConfluenceResearchPublishAdapter,
+  ConfluenceServerClient,
   DependencyAwaitPackagesAdapter,
   PullRequestReviewEvidenceStore,
   PullRequestDeliveryAdapter,
@@ -40,6 +42,7 @@ import {
   JiraWorkflowGenerationSubjectResolver,
   LoopPlanningEvidenceReader,
   loadConfluencePlanningEvidenceConfiguration,
+  loadConfluenceConfiguration,
   loadJenkinsBuildConfiguration,
   loadJiraConfiguration,
   loadLoopPlanningEvidenceConfiguration,
@@ -157,9 +160,13 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
   const jenkinsConfiguration = loadJenkinsBuildConfiguration();
   const jiraConfiguration = loadJiraConfiguration();
   const jiraLifecycleEffectsEnabled = process.env.TASKER_ENABLE_JIRA_EFFECTS === 'true';
+  const confluenceConfiguration = loadConfluenceConfiguration();
   const externalEffectAuthorization = loadExternalEffectTaskAuthorization(
-    bitbucketPullRequestEffectsEnabled || jiraLifecycleEffectsEnabled,
+    bitbucketPullRequestEffectsEnabled ||
+      jiraLifecycleEffectsEnabled ||
+      confluenceConfiguration !== null,
   );
+  const confluenceClient = new ConfluenceServerClient(confluenceConfiguration);
   const authorizeExternalEffect = (
     adapter: IntegrationStepAdapter,
   ): TaskScopedIntegrationAdapter => {
@@ -198,8 +205,15 @@ export const startTaskerTemporalWorker = async (): Promise<void> => {
     jiraLifecycleClient === null || !jiraLifecycleEffectsEnabled
       ? null
       : new JiraStartWorkAdapter(jiraLifecycleClient, externalEffects);
+  const confluenceResearchPublish =
+    confluenceConfiguration === null
+      ? null
+      : new ConfluenceResearchPublishAdapter(confluenceClient, externalEffects);
   const integrationAdapters = new IntegrationStepAdapterRegistry([
     new DependencyAwaitPackagesAdapter(dependencyDeclarations, verifiedPackagePublications),
+    ...(confluenceResearchPublish === null
+      ? []
+      : [authorizeExternalEffect(confluenceResearchPublish)]),
     ...(bitbucketPullRequests === null || jenkinsBuildObserver === null
       ? []
       : [

@@ -16,6 +16,7 @@ import {
 } from './block-execution-contracts.js';
 import type { ExecuteTaskStepInputSchema } from './block-execution-contracts.js';
 import { promptForAgentStep, runHistoryIndex, selectAgentRunEvidence } from './agent-prompt.js';
+import { resolveResearchFileTasksApproval } from './research-file-tasks-approval.js';
 import {
   block,
   blockingWaitKindFor,
@@ -145,6 +146,21 @@ export const runAgentStep = async (
       artifactIds,
     );
   }
+  const researchApproval = resolveResearchFileTasksApproval(
+    input.uses,
+    input.waitResolution,
+    evidence,
+  );
+  if (researchApproval.status === 'waiting') {
+    const artifactIds = persistBlockedArtifact(dependencies.traces, input, 'system', {
+      kind: 'research_approval_required',
+      pageUrl: researchApproval.pageUrl,
+    });
+    return block(researchApproval.reason, 'research.approval@1', artifactIds, {
+      category: 'authorization',
+      retryable: false,
+    });
+  }
   let recovery: TaskStepRecoveryContext = TaskStepRecoveryContextSchema.parse({
     kind: 'single_attempt',
   });
@@ -186,6 +202,7 @@ export const runAgentStep = async (
     skills: snapshottedStep.block.executor.skills,
     recovery,
     operatorGuidance: input.operatorGuidance,
+    waitResolution: input.waitResolution,
     evidence: agentEvidence,
     historyIndex: runHistoryIndex(evidence.completedSteps),
   });

@@ -36,6 +36,10 @@ export const createHarnessWorkflowContracts = (
   for (const definition of definitions) {
     const mappings = definition.contract.outputPredicates;
     if (mappings === undefined) continue;
+    if ('facts' in mappings) {
+      for (const reference of Object.keys(mappings.facts)) predicateReferences.add(reference);
+      continue;
+    }
     for (const reference of [
       ...Object.values(mappings.cases).flatMap((facts) => Object.keys(facts)),
       ...Object.keys(mappings.defaultFacts ?? {}),
