@@ -42,6 +42,7 @@ the task. Omit a section only when it is genuinely empty; never invent content t
 fill one.
 
 **Invariant core (always):**
+
 1. **Responsible** — table: TL / Dev / QA / Статус (DOCUMENTATION).
 2. **Links** — table: Epic, SA-задача, Loop-обсуждения, СА бэкенда (if exists),
    Макеты (Figma), Аналитика (BI), смежные СА других продуктов.
