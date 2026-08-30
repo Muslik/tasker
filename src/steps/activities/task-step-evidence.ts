@@ -169,20 +169,15 @@ export class TaskStepEvidenceStore implements IntegrationEvidenceReader {
       });
       const existing = this.ledger.readArtifact(artifactId);
       if (existing === null) {
-        const persisted = this.ledger.transact({
-          artifacts: [
-            {
-              artifactId,
-              artifactKind: 'task_step_evidence',
-              storageUri: pathToFileURL(resolved).href,
-              payload,
-              metadata: { operationId, relativePath, contentSha256 },
-              createdAt: recordedAt,
-            },
-          ],
-          timestamp: recordedAt,
+        const persisted = this.ledger.insertArtifact({
+          artifactId,
+          artifactKind: 'task_step_evidence',
+          storageUri: pathToFileURL(resolved).href,
+          payload,
+          metadata: { operationId, relativePath, contentSha256 },
+          createdAt: recordedAt,
         });
-        if (!persisted.ok) return err({ kind: 'artifact_conflict', artifactId });
+        if (!persisted) return err({ kind: 'artifact_conflict', artifactId });
       } else {
         const parsed = TaskStepEvidenceArtifactSchema.safeParse(existing.payload);
         if (!parsed.success || parsed.data.contentSha256 !== contentSha256) {

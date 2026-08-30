@@ -86,29 +86,14 @@ const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 const reportId = (workflowId: string, workflowRunId: string): string =>
   `retrospective:${workflowId}:${workflowRunId}`;
 
-const RetrospectiveGeneratedPayloadSchema = z
-  .object({
-    artifactId: z.string().min(1),
-    taskReference: z.string().min(1),
-  })
-  .strict();
-
 const outputArtifacts = (ledger: LedgerRepository, workflowId: string, workflowRunId: string) => {
-  const prefix = `task-step-output:${workflowId}:${workflowRunId}:`;
-  return ledger
-    .listEvents()
-    .filter(
-      (event) =>
-        event.eventType === 'TaskStepOutputRecorded' && event.aggregateId.startsWith(prefix),
-    )
-    .flatMap((event) => {
-      const pointer = z.object({ artifactId: z.string().min(1) }).safeParse(event.payload);
-      if (!pointer.success) return [];
-      const artifact = ledger.readArtifact(pointer.data.artifactId);
-      if (artifact === null) return [];
-      const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
-      return parsed.success ? [{ artifactId: pointer.data.artifactId, output: parsed.data }] : [];
-    });
+  return ledger.listArtifacts({ artifactKind: 'task_step_output' }).flatMap((artifact) => {
+    const parsed = TaskStepOutputArtifactSchema.safeParse(artifact.payload);
+    if (!parsed.success) return [];
+    return parsed.data.workflowId === workflowId && parsed.data.workflowRunId === workflowRunId
+      ? [{ artifactId: artifact.artifactId, output: parsed.data }]
+      : [];
+  });
 };
 
 export class RetrospectiveStore {
@@ -137,27 +122,23 @@ export class RetrospectiveStore {
   public readLatest(
     taskReference: string,
   ): Outcome<RetrospectiveReport | null, RetrospectiveStoreError> {
-    const event = this.ledger
-      .listEvents()
-      .toReversed()
-      .find((candidate) => {
-        if (candidate.eventType !== 'RetrospectiveGenerated') return false;
-        const payload = RetrospectiveGeneratedPayloadSchema.safeParse(candidate.payload);
-        return payload.success && payload.data.taskReference === taskReference;
-      });
-    if (event === undefined) return ok(null);
-    const payload = RetrospectiveGeneratedPayloadSchema.parse(event.payload);
-    const artifact = this.ledger.readArtifact(payload.artifactId);
-    if (artifact === null) return err({ kind: 'report_corrupt', issues: ['artifact: missing'] });
-    const report = RetrospectiveReportSchema.safeParse(artifact.payload);
-    return report.success
-      ? ok(report.data)
-      : err({
+    for (const artifact of this.ledger
+      .listArtifacts({ artifactKind: 'retrospective_report', taskReference })
+      .toReversed()) {
+      const report = RetrospectiveReportSchema.safeParse(artifact.payload);
+      if (!report.success) {
+        return err({
           kind: 'report_corrupt',
           issues: report.error.issues.map(
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
+      }
+      if (report.data.taskReference === taskReference) {
+        return ok(report.data);
+      }
+    }
+    return ok(null);
   }
 
   public readLatestRun(
@@ -290,38 +271,20 @@ export class RetrospectiveStore {
       generatedAt,
     });
     const id = reportId(input.workflowId, input.workflowRunId);
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: id,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${id}:generated`,
-            eventType: 'RetrospectiveGenerated',
-            eventSchemaVersion: 1,
-            payload: asJson({ artifactId: id, taskReference: input.taskReference }),
-            actor: 'retrospective',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId: id,
-          artifactKind: 'retrospective_report',
-          storageUri: `ledger://artifacts/${id}`,
-          payload: asJson(report),
-          metadata: asJson({
-            taskReference: input.taskReference,
-            workflowId: input.workflowId,
-            workflowRunId: input.workflowRunId,
-            outcome: input.outcome,
-          }),
-          createdAt: generatedAt,
-        },
-      ],
-      timestamp: generatedAt,
+    const committed = this.ledger.insertArtifact({
+      artifactId: id,
+      artifactKind: 'retrospective_report',
+      storageUri: `ledger://artifacts/${id}`,
+      payload: asJson(report),
+      metadata: asJson({
+        taskReference: input.taskReference,
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        outcome: input.outcome,
+      }),
+      createdAt: generatedAt,
     });
-    if (committed.ok) return ok(report);
+    if (committed) return ok(report);
     const concurrent = this.read(input.workflowId, input.workflowRunId);
     return concurrent.ok && concurrent.value !== null
       ? ok(concurrent.value)

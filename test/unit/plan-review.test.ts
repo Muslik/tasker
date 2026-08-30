@@ -99,7 +99,19 @@ describe('native plan review', () => {
         },
       ],
     });
-    expect(ledger.repository.listEvents(`plan-review:${PLANNING_EPISODE_ID}`)).toHaveLength(2);
+    expect(
+      ledger.repository.readDocument('plan_review', `${PLANNING_EPISODE_ID}:review-1`, 1)?.payload,
+    ).toMatchObject({
+      reviewId: 'review-1',
+      status: 'submitted',
+      appliedAt: null,
+    });
+    expect(
+      ledger.repository.readDocument('plan_review', `${PLANNING_EPISODE_ID}:review-1`)?.payload,
+    ).toMatchObject({
+      reviewId: 'review-1',
+      status: 'applied',
+    });
   });
 
   it('restores review rounds after the ledger is reopened', () => {

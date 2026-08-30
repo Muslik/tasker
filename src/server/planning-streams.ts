@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { PlanningStrategySchema } from '../planning/implementation-plan.js';
-import type { EventRecord, StreamEventRecord } from '../store/types.js';
+import type { StreamEventRecord } from '../store/types.js';
 import {
   OperatorActivityEntrySchema,
   OperatorStreamEventSchema,
@@ -41,32 +41,41 @@ const planningActivityDetail = (episode: PlanningActivityEpisode): string => {
   return `${status} · ${episode.strategy} · ${String(attempts)} provider ${attempts === 1 ? 'attempt' : 'attempts'}.`;
 };
 
+const planningEventSequence = (event: StreamEventRecord): number => event.seq;
+
+const parsePlanningActivityPayload = (
+  event: StreamEventRecord,
+): z.infer<typeof PlanningActivityEventPayloadSchema> | null => {
+  const payload = PlanningActivityEventPayloadSchema.safeParse(event.payload);
+  if (payload.success) return payload.data;
+  return null;
+};
+
 export const readImplementationPlanningActivity = (
-  planningEvents: readonly EventRecord[],
+  planningEvents: readonly StreamEventRecord[],
 ): OperatorActivityResponse['entries'] => {
   const entries: Array<OperatorActivityResponse['entries'][number]> = [];
   const episodes = new Map<string, PlanningActivityEpisode>();
 
-  const recordEpisode = (event: EventRecord, status: PlanningActivityStatus): void => {
-    const payload = PlanningActivityEventPayloadSchema.safeParse(event.payload);
-    if (!payload.success) {
-      throw new Error(`Invalid implementation planning event payload: ${event.eventType}`);
-    }
-    const { episodeId, selectedStrategy } = payload.data;
+  const recordEpisode = (event: StreamEventRecord, status: PlanningActivityStatus): void => {
+    const payload = parsePlanningActivityPayload(event);
+    if (payload === null) return;
+    const { episodeId, selectedStrategy } = payload;
+    const sequence = planningEventSequence(event);
     const existing = episodes.get(episodeId);
     if (existing === undefined) {
       episodes.set(episodeId, {
-        attempts: new Set([payload.data.attempt]),
+        attempts: new Set([payload.attempt]),
         strategy: selectedStrategy,
         status,
-        sequence: event.sequence,
+        sequence,
         occurredAt: event.occurredAt,
       });
     } else {
-      existing.attempts.add(payload.data.attempt);
+      existing.attempts.add(payload.attempt);
       existing.strategy = selectedStrategy;
       existing.status = status;
-      existing.sequence = event.sequence;
+      existing.sequence = sequence;
       existing.occurredAt = event.occurredAt;
     }
   };
@@ -93,7 +102,7 @@ export const readImplementationPlanningActivity = (
     }
 
     const common = {
-      sequence: event.sequence,
+      sequence: planningEventSequence(event),
       occurredAt: event.occurredAt,
       source: 'planner' as const,
       level: 'info' as const,
@@ -132,7 +141,7 @@ export const readImplementationPlanningActivity = (
       case 'ImplementationWorkflowCandidateRejected': {
         const corrected = planningEvents.some(
           (candidate) =>
-            candidate.sequence > event.sequence &&
+            planningEventSequence(candidate) > planningEventSequence(event) &&
             candidate.eventType === 'ImplementationWorkflowCandidateValidated',
         );
         entries.push(

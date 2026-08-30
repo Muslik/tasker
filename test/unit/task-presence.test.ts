@@ -16,8 +16,15 @@ describe('task presence', () => {
     expect(store.restore('jira:FC-2244')).toEqual({ ok: true, value: undefined });
     expect(store.isRemoved('jira:FC-2244')).toBe(false);
     expect(
-      ledger.repository.listEvents('task-presence:jira:FC-2244').map(({ eventType }) => eventType),
-    ).toEqual(['TaskRemoved', 'TaskRestored']);
+      ledger.repository.readDocument('task_presence', 'jira:FC-2244', 1)?.payload,
+    ).toMatchObject({
+      status: 'removed',
+      revision: 1,
+    });
+    expect(ledger.repository.readDocument('task_presence', 'jira:FC-2244')?.payload).toMatchObject({
+      status: 'active',
+      revision: 2,
+    });
     ledger.close();
   });
 });

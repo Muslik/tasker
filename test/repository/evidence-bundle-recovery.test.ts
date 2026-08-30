@@ -83,7 +83,9 @@ describe('evidence bundle recovery', () => {
       ]);
       if (!duplicate.ok) throw new Error(`Duplicate revision failed: ${duplicate.error.kind}`);
       expect(duplicate.value.reference).toEqual(first.value.reference);
-      expect(firstLedger.repository.listEvents(`evidence-bundle:${scopeId}`)).toHaveLength(1);
+      expect(
+        firstLedger.repository.readDocument('evidence_bundle_reference', scopeId, 1)?.payload,
+      ).toEqual(first.value.reference);
 
       const second = store.record(scopeId, 'jira:AVIA-13235', '2'.repeat(64), [
         entry('a', clock.now()),

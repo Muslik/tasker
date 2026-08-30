@@ -1,11 +1,5 @@
 import type { LedgerRepository } from '../store/repository.js';
-import type {
-  ArtifactWrite,
-  EventRecord,
-  EventWrite,
-  JsonValue,
-  LedgerConflict,
-} from '../store/types.js';
+import type { ArtifactWrite, JsonValue, DocumentConflict, LedgerConflict } from '../store/types.js';
 import {
   WorkflowAnalyzerReceiptSchema,
   type WorkflowAnalyzerReceipt,
@@ -16,12 +10,14 @@ import {
 } from '../planning/index.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { isRecord } from '../shared/is-record.js';
 import { WorkflowViewSchema, type WorkflowView } from './operator-contracts.js';
 
 export const OPERATOR_WORKFLOW_OPERATION_PROJECTION = 'operator_workflow_by_operation';
 export const OPERATOR_GENERATION_SUBJECT_PROJECTION = 'operator_generation_subject';
 export const OPERATOR_RUN_GENERATION_SUBJECT_PROJECTION = 'operator_run_generation_subject';
+const OPERATOR_WORKFLOW_DOCUMENT_KIND = OPERATOR_WORKFLOW_OPERATION_PROJECTION;
+const OPERATOR_GENERATION_DOCUMENT_KIND = 'operator_generation_subject';
+const OPERATOR_RUN_GENERATION_DOCUMENT_KIND = 'operator_run_generation_subject';
 
 export interface OperatorWorkflowArtifacts {
   readonly analyzerVersion: string;
@@ -57,10 +53,12 @@ export interface OperatorGenerationSubjectSaveResult {
 
 const asJson = (value: unknown): JsonValue => value as JsonValue;
 
-const workflowAggregateId = (operationId: string): string => `workflow-operation:${operationId}`;
-
-const eventBelongsToTask = (event: EventRecord, taskReference: string): boolean =>
-  isRecord(event.payload) && event.payload.taskReference === taskReference;
+const ledgerConflictFromDocumentConflict = (conflict: DocumentConflict): LedgerConflict => ({
+  kind: 'version_conflict',
+  aggregateId: `document:${conflict.documentKind}:${conflict.documentId}`,
+  expectedVersion: conflict.expectedRevision,
+  actualVersion: conflict.actualRevision,
+});
 
 const candidateAttempt = (operationId: string): number => {
   const match = /:workflow-candidate:(\d+)$/u.exec(operationId);
@@ -76,13 +74,10 @@ export class OperatorWorkflowStore {
   public readGenerationSubject(
     taskReference: string,
   ): Outcome<WorkflowGenerationSubject | null, OperatorStoreError> {
-    const projection = this.ledger.readProjection(
-      OPERATOR_GENERATION_SUBJECT_PROJECTION,
-      taskReference,
-    );
-    if (projection === null) return ok(null);
+    const document = this.ledger.readDocument(OPERATOR_GENERATION_DOCUMENT_KIND, taskReference);
+    if (document === null) return ok(null);
 
-    const parsed = WorkflowGenerationSubjectSchema.safeParse(projection.payload);
+    const parsed = WorkflowGenerationSubjectSchema.safeParse(document.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
@@ -107,48 +102,20 @@ export class OperatorWorkflowStore {
         : err({ kind: 'generation_subject_conflict', taskReference });
     }
 
-    const aggregateId = `workflow-subject:${taskReference}`;
-    const saved = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:workflow-subject:${taskReference}`,
-            eventType: 'WorkflowGenerationSubjectSaved',
-            eventSchemaVersion: 1,
-            payload: asJson({ taskReference, repository: subject.task.repository }),
-            actor: 'workflow_continuation_planner',
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: OPERATOR_GENERATION_SUBJECT_PROJECTION,
-          projectionId: taskReference,
-          payload: asJson(subject),
-        },
-      ],
-      timestamp: this.clock.now(),
-    });
+    const saved = this.ledger.appendDocument(
+      OPERATOR_GENERATION_DOCUMENT_KIND,
+      taskReference,
+      0,
+      asJson(subject),
+      this.clock.now(),
+    );
     if (saved.ok) return ok({ disposition: 'saved', subject });
-
-    if (saved.error.kind === 'version_conflict') {
-      const concurrent = this.readGenerationSubject(taskReference);
-      if (
-        concurrent.ok &&
-        concurrent.value !== null &&
-        JSON.stringify(concurrent.value) === JSON.stringify(subject)
-      ) {
-        return ok({ disposition: 'already_exists', subject: concurrent.value });
-      }
-      if (concurrent.ok && concurrent.value !== null) {
-        return err({ kind: 'generation_subject_conflict', taskReference });
-      }
-    }
-
-    return err({ kind: 'ledger_conflict', conflict: saved.error });
+    const concurrent = this.readGenerationSubject(taskReference);
+    return concurrent.ok &&
+      concurrent.value !== null &&
+      JSON.stringify(concurrent.value) === JSON.stringify(subject)
+      ? ok({ disposition: 'already_exists', subject: concurrent.value })
+      : err({ kind: 'generation_subject_conflict', taskReference });
   }
 
   public readRunGenerationSubject(
@@ -156,12 +123,9 @@ export class OperatorWorkflowStore {
     workflowRunId: string,
   ): Outcome<WorkflowGenerationSubject | null, OperatorStoreError> {
     const projectionId = `${taskReference}:${workflowRunId}`;
-    const projection = this.ledger.readProjection(
-      OPERATOR_RUN_GENERATION_SUBJECT_PROJECTION,
-      projectionId,
-    );
-    if (projection === null) return ok(null);
-    const parsed = WorkflowGenerationSubjectSchema.safeParse(projection.payload);
+    const document = this.ledger.readDocument(OPERATOR_RUN_GENERATION_DOCUMENT_KIND, projectionId);
+    if (document === null) return ok(null);
+    const parsed = WorkflowGenerationSubjectSchema.safeParse(document.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
@@ -188,55 +152,20 @@ export class OperatorWorkflowStore {
     }
 
     const subjectId = `${taskReference}:${workflowRunId}`;
-    const saved = this.ledger.transact({
-      aggregate: {
-        aggregateId: `workflow-run-subject:${subjectId}`,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:workflow-run-subject:${subjectId}`,
-            eventType: 'WorkflowRunGenerationSubjectCaptured',
-            eventSchemaVersion: 1,
-            payload: asJson({ taskReference, workflowRunId, repository: subject.task.repository }),
-            actor: 'temporal_bootstrap',
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: OPERATOR_RUN_GENERATION_SUBJECT_PROJECTION,
-          projectionId: subjectId,
-          payload: asJson(subject),
-        },
-      ],
-      timestamp: this.clock.now(),
-    });
+    const saved = this.ledger.appendDocument(
+      OPERATOR_RUN_GENERATION_DOCUMENT_KIND,
+      subjectId,
+      0,
+      asJson(subject),
+      this.clock.now(),
+    );
     if (saved.ok) return ok({ disposition: 'saved', subject });
-
-    if (saved.error.kind === 'version_conflict') {
-      const concurrent = this.readRunGenerationSubject(taskReference, workflowRunId);
-      if (
-        concurrent.ok &&
-        concurrent.value !== null &&
-        JSON.stringify(concurrent.value) === JSON.stringify(subject)
-      ) {
-        return ok({ disposition: 'already_exists', subject: concurrent.value });
-      }
-      if (concurrent.ok && concurrent.value !== null) {
-        return err({ kind: 'generation_subject_conflict', taskReference });
-      }
-    }
-    return err({ kind: 'ledger_conflict', conflict: saved.error });
-  }
-
-  public listEvents(taskReference?: string): readonly EventRecord[] {
-    const events = this.ledger
-      .listEvents()
-      .filter((event) => event.aggregateId.startsWith('workflow-operation:'));
-    return taskReference === undefined
-      ? events
-      : events.filter((event) => eventBelongsToTask(event, taskReference));
+    const concurrent = this.readRunGenerationSubject(taskReference, workflowRunId);
+    return concurrent.ok &&
+      concurrent.value !== null &&
+      JSON.stringify(concurrent.value) === JSON.stringify(subject)
+      ? ok({ disposition: 'already_exists', subject: concurrent.value })
+      : err({ kind: 'generation_subject_conflict', taskReference });
   }
 
   public listStreamEventsAfter(sequence: number) {
@@ -251,22 +180,27 @@ export class OperatorWorkflowStore {
     taskReference: string,
     planningEpisodeId: string,
   ): Outcome<WorkflowAnalyzerReceipt | null, OperatorStoreError> {
-    const event = this.listEvents(taskReference).findLast(
-      (candidate) =>
-        candidate.eventType === 'WorkflowAnalyzed' &&
-        isRecord(candidate.payload) &&
-        typeof candidate.payload.operationId === 'string' &&
-        candidate.payload.operationId.startsWith(`${planningEpisodeId}:`),
-    );
-    if (event === undefined || !isRecord(event.payload)) return ok(null);
+    const event = this.ledger
+      .listStreamEventsAfter(0)
+      .findLast(
+        (candidate) =>
+          candidate.taskReference === taskReference &&
+          candidate.eventType === 'WorkflowAnalyzed' &&
+          typeof candidate.payload === 'object' &&
+          candidate.payload !== null &&
+          !Array.isArray(candidate.payload) &&
+          typeof candidate.payload.operationId === 'string' &&
+          candidate.payload.operationId.startsWith(`${planningEpisodeId}:`),
+      );
+    if (
+      event === undefined ||
+      typeof event.payload !== 'object' ||
+      event.payload === null ||
+      Array.isArray(event.payload) ||
+      typeof event.payload.operationId !== 'string'
+    )
+      return ok(null);
     const operationId = event.payload.operationId;
-    if (typeof operationId !== 'string') {
-      return err({
-        kind: 'projection_corrupt',
-        taskReference,
-        issues: [`Planning episode ${planningEpisodeId} has no workflow operation`],
-      });
-    }
     const artifact = this.ledger.readArtifact(`analyzer-receipt:${operationId}`);
     if (artifact === null) {
       return err({
@@ -291,12 +225,9 @@ export class OperatorWorkflowStore {
     taskReference: string,
     operationId: string,
   ): Outcome<WorkflowView | null, OperatorStoreError> {
-    const projection = this.ledger.readProjection(
-      OPERATOR_WORKFLOW_OPERATION_PROJECTION,
-      operationId,
-    );
-    if (projection === null) return ok(null);
-    const parsed = WorkflowViewSchema.safeParse(projection.payload);
+    const document = this.ledger.readDocument(OPERATOR_WORKFLOW_DOCUMENT_KIND, operationId);
+    if (document === null) return ok(null);
+    const parsed = WorkflowViewSchema.safeParse(document.payload);
     if (!parsed.success) {
       return err({
         kind: 'projection_corrupt',
@@ -323,7 +254,6 @@ export class OperatorWorkflowStore {
     }
 
     const taskReference = candidateView.taskSummary.reference;
-    const aggregateId = workflowAggregateId(operationId);
     const proposalArtifactId = `proposal:${operationId}`;
     const view = WorkflowViewSchema.parse({
       ...candidateView,
@@ -373,12 +303,10 @@ export class OperatorWorkflowStore {
     }
 
     const attempt = candidateAttempt(operationId);
-    const events: EventWrite[] = [];
+    const eventPayloads: Array<{ readonly eventType: string; readonly payload: JsonValue }> = [];
     if (analyzerReceipt !== undefined) {
-      events.push({
-        eventId: `event:workflow-analyzed:${operationId}`,
+      eventPayloads.push({
         eventType: 'WorkflowAnalyzed',
-        eventSchemaVersion: 1,
         payload: asJson({
           analyzerVersion: analyzerReceipt.analyzerVersion,
           durationMs: analyzerReceipt.durationMs,
@@ -388,13 +316,10 @@ export class OperatorWorkflowStore {
           sessionId: analyzerReceipt.sessionId,
           usage: analyzerReceipt.usage,
         }),
-        actor: 'subscription_cli_analyzer',
       });
     }
-    events.push({
-      eventId: `event:workflow-planned:${operationId}`,
+    eventPayloads.push({
       eventType: view.workflow.status === 'valid' ? 'WorkflowPlanned' : 'WorkflowRejected',
-      eventSchemaVersion: 1,
       payload: asJson({
         taskReference,
         attempt,
@@ -402,47 +327,34 @@ export class OperatorWorkflowStore {
         operationId,
         status: view.workflow.status,
       }),
-      actor: 'workflow_planner',
     });
-
-    const result = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: 0,
-        events,
-      },
-      snapshots: [
-        {
-          snapshotId: `snapshot:${operationId}`,
-          aggregateId,
-          aggregateVersion: events.length,
-          snapshotSchemaVersion: 1,
-          payload: asJson(view),
-        },
-      ],
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: OPERATOR_WORKFLOW_OPERATION_PROJECTION,
-          projectionId: operationId,
-          payload: asJson(view),
-        },
-      ],
-      artifacts: artifactWrites,
-      timestamp: this.clock.now(),
-    });
-
-    if (!result.ok) {
-      if (result.error.kind === 'version_conflict') {
-        const concurrent = this.readPlanningOperation(taskReference, operationId);
-        if (!concurrent.ok) return concurrent;
-        if (concurrent.value !== null) {
-          return ok({ disposition: 'already_exists', view: concurrent.value });
-        }
-      }
-      return err({ kind: 'ledger_conflict', conflict: result.error });
+    const timestamp = this.clock.now();
+    for (const artifact of artifactWrites) this.ledger.insertArtifact(artifact);
+    const saved = this.ledger.appendDocument(
+      OPERATOR_WORKFLOW_DOCUMENT_KIND,
+      operationId,
+      0,
+      asJson(view),
+      timestamp,
+    );
+    if (!saved.ok) {
+      const concurrent = this.readPlanningOperation(taskReference, operationId);
+      if (!concurrent.ok) return concurrent;
+      if (concurrent.value !== null)
+        return ok({ disposition: 'already_exists', view: concurrent.value });
+      return err({
+        kind: 'ledger_conflict',
+        conflict: ledgerConflictFromDocumentConflict(saved.error),
+      });
     }
-
+    for (const event of eventPayloads) {
+      this.ledger.appendStreamEvent({
+        taskReference,
+        eventType: event.eventType,
+        payload: event.payload,
+        occurredAt: timestamp,
+      });
+    }
     return ok({ disposition: 'saved', view });
   }
 }

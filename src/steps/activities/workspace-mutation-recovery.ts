@@ -88,37 +88,19 @@ export class WorkspaceMutationRecoveryStore {
       baseline: current.value,
       createdAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: artifactId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${artifactId}:1`,
-            eventType: 'TaskStepMutationIntentPrepared',
-            eventSchemaVersion: 1,
-            payload: asJson({ artifactId }),
-            actor: 'kernel',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'task_step_mutation_intent',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(intent),
-          metadata: asJson({
-            operationId: input.operationId,
-            workspaceId: input.workspaceId,
-            stepReference: input.stepReference,
-          }),
-          createdAt,
-        },
-      ],
-      timestamp: createdAt,
+    const committed = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'task_step_mutation_intent',
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: asJson(intent),
+      metadata: asJson({
+        operationId: input.operationId,
+        workspaceId: input.workspaceId,
+        stepReference: input.stepReference,
+      }),
+      createdAt,
     });
-    if (committed.ok) {
+    if (committed) {
       return ok({
         kind: 'initial_delivery',
         intentArtifactId: artifactId,

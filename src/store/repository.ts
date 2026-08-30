@@ -4,70 +4,56 @@ import { err, ok, type Outcome } from '../shared/outcome.js';
 import type { Clock } from '../shared/clock.js';
 
 import { checksumString } from './checksum.js';
-import { SUPPORTED_EVENT_SCHEMA_VERSION, SUPPORTED_SNAPSHOT_SCHEMA_VERSION } from './types.js';
 import type {
-  AggregateHeadRecord,
+  LedgerConflict,
   AgentInvocationFinishWrite,
   AgentInvocationRecord,
   AgentInvocationRunningWrite,
   AgentInvocationTotalsRecord,
   ArtifactRecord,
   ArtifactWrite,
-  EventRecord,
+  DocumentConflict,
+  DocumentRecord,
+  DocumentRevisionSelector,
+  DocumentWrite,
   JsonValue,
-  LedgerCommitResult,
-  LedgerConflict,
-  LedgerTransaction,
-  ProjectionRecord,
   ReceiptRecord,
   ReceiptWrite,
-  SnapshotRecord,
-  SnapshotWrite,
   StreamEventRecord,
   StreamEventWrite,
   TranscriptRecord,
   TranscriptWrite,
 } from './types.js';
 
-class ConflictSignal extends Error {
-  public readonly conflict: LedgerConflict;
-
-  public constructor(conflict: LedgerConflict) {
-    super(conflict.kind);
-    this.conflict = conflict;
-  }
-}
-
-const raiseConflict = (conflict: LedgerConflict): never => {
-  throw new ConflictSignal(conflict);
-};
-
 const toJsonText = (value: JsonValue | undefined, fallback: JsonValue = {}): string =>
   JSON.stringify(value ?? fallback);
 
 const parseJson = (value: string): JsonValue => JSON.parse(value) as JsonValue;
 
-const STREAMED_LEGACY_EVENT_TYPES = new Set([
-  'WorkflowAnalyzed',
-  'WorkflowPlanned',
-  'WorkflowRejected',
-  'ImplementationPlanningStarted',
-  'ImplementationPlanReady',
-  'ImplementationPlanNeedsClarification',
-  'ImplementationPlanInvestigationRequired',
-  'ImplementationPlanningFailed',
-  'ImplementationWorkflowCandidateValidated',
-  'PlanningEvidenceRequested',
-  'PlanningEvidenceAppended',
-  'PlanningClarificationAnswered',
-  'ImplementationWorkflowCandidateRejected',
-]);
-
 const taskReferenceFrom = (payload: JsonValue): string | null => {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const taskReference = payload.taskReference;
-  return typeof taskReference === 'string' && taskReference.length > 0 ? taskReference : null;
+  return typeof payload.taskReference === 'string' ? payload.taskReference : null;
 };
+
+type DocumentRow = {
+  readonly kind: string;
+  readonly id: string;
+  readonly revision: number;
+  readonly payload_json: string;
+  readonly checksum: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+};
+
+const toDocumentRecord = (row: DocumentRow): DocumentRecord => ({
+  kind: row.kind,
+  id: row.id,
+  revision: row.revision,
+  payload: parseJson(row.payload_json),
+  checksum: row.checksum,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
 
 const isSqliteConstraintError = (
   error: unknown,
@@ -80,303 +66,23 @@ const isSqliteConstraintError = (
   typeof (error as { readonly message: unknown }).message === 'string' &&
   (error as { readonly code: string }).code.startsWith('SQLITE_CONSTRAINT');
 
-const containsDuplicate = (values: readonly string[]): string | null => {
-  const seen = new Set<string>();
-  for (const value of values) {
-    if (seen.has(value)) {
-      return value;
-    }
-
-    seen.add(value);
-  }
-
-  return null;
-};
-
 export class LedgerRepository {
-  private readonly writeTransaction;
-
   public constructor(
     private readonly database: SqliteDatabase,
     private readonly clock: Clock,
-  ) {
-    const transaction = this.database.transaction((input: LedgerTransaction): LedgerCommitResult =>
-      this.commitTransaction(input),
-    );
-    this.writeTransaction = (input: LedgerTransaction): LedgerCommitResult =>
-      transaction.immediate(input);
+  ) {}
+
+  public transact(input: {
+    readonly artifacts?: readonly ArtifactWrite[];
+    readonly timestamp?: string;
+  }): Outcome<{ readonly appendedArtifactCount: number }, LedgerConflict> {
+    this.database
+      .transaction(() => {
+        this.insertArtifacts(input.artifacts ?? [], input.timestamp ?? this.clock.now());
+      })
+      .immediate();
+    return ok({ appendedArtifactCount: input.artifacts?.length ?? 0 });
   }
-
-  public transact(transaction: LedgerTransaction): Outcome<LedgerCommitResult, LedgerConflict> {
-    try {
-      return ok(this.writeTransaction(transaction));
-    } catch (error) {
-      if (error instanceof ConflictSignal) {
-        return err(error.conflict);
-      }
-
-      throw error;
-    }
-  }
-
-  public readAggregateHead(aggregateId: string): AggregateHeadRecord | null {
-    const row = this.database
-      .prepare<[{ readonly aggregateId: string }], { version: number; updated_at: string }>(
-        `
-          SELECT version, updated_at
-          FROM aggregate_heads
-          WHERE aggregate_id = @aggregateId
-        `,
-      )
-      .get({ aggregateId });
-
-    if (row === undefined) {
-      return null;
-    }
-
-    return {
-      aggregateId,
-      version: row.version,
-      updatedAt: row.updated_at,
-    };
-  }
-
-  public listEvents(aggregateId?: string): readonly EventRecord[] {
-    const rows =
-      aggregateId === undefined
-        ? this.database
-            .prepare<
-              [],
-              {
-                sequence: number;
-                event_id: string;
-                aggregate_id: string;
-                aggregate_version: number;
-                event_type: string;
-                event_schema_version: number;
-                payload_json: string;
-                metadata_json: string;
-                occurred_at: string;
-                causation_id: string | null;
-                correlation_id: string | null;
-                actor: string | null;
-              }
-            >(
-              `
-                SELECT
-                  sequence,
-                  event_id,
-                  aggregate_id,
-                  aggregate_version,
-                  event_type,
-                  event_schema_version,
-                  payload_json,
-                  metadata_json,
-                  occurred_at,
-                  causation_id,
-                  correlation_id,
-                  actor
-                FROM events
-                ORDER BY sequence ASC
-              `,
-            )
-            .all()
-        : this.database
-            .prepare<
-              [{ readonly aggregateId: string }],
-              {
-                sequence: number;
-                event_id: string;
-                aggregate_id: string;
-                aggregate_version: number;
-                event_type: string;
-                event_schema_version: number;
-                payload_json: string;
-                metadata_json: string;
-                occurred_at: string;
-                causation_id: string | null;
-                correlation_id: string | null;
-                actor: string | null;
-              }
-            >(
-              `
-                SELECT
-                  sequence,
-                  event_id,
-                  aggregate_id,
-                  aggregate_version,
-                  event_type,
-                  event_schema_version,
-                  payload_json,
-                  metadata_json,
-                  occurred_at,
-                  causation_id,
-                  correlation_id,
-                  actor
-                FROM events
-                WHERE aggregate_id = @aggregateId
-                ORDER BY sequence ASC
-              `,
-            )
-            .all({ aggregateId });
-
-    return rows.map((row) => ({
-      sequence: row.sequence,
-      eventId: row.event_id,
-      aggregateId: row.aggregate_id,
-      aggregateVersion: row.aggregate_version,
-      eventType: row.event_type,
-      eventSchemaVersion: row.event_schema_version,
-      payload: parseJson(row.payload_json),
-      metadata: parseJson(row.metadata_json),
-      occurredAt: row.occurred_at,
-      causationId: row.causation_id,
-      correlationId: row.correlation_id,
-      actor: row.actor,
-    }));
-  }
-
-  public readProjection(projectionType: string, projectionId: string): ProjectionRecord | null {
-    const row = this.database
-      .prepare<
-        [{ readonly projectionType: string; readonly projectionId: string }],
-        {
-          payload_json: string;
-          checksum: string;
-          updated_at: string;
-          last_event_sequence: number | null;
-        }
-      >(
-        `
-          SELECT payload_json, checksum, updated_at, last_event_sequence
-          FROM projections
-          WHERE projection_type = @projectionType
-            AND projection_id = @projectionId
-        `,
-      )
-      .get({ projectionType, projectionId });
-
-    if (row === undefined) {
-      return null;
-    }
-
-    return {
-      projectionType,
-      projectionId,
-      payload: parseJson(row.payload_json),
-      checksum: row.checksum,
-      updatedAt: row.updated_at,
-      lastEventSequence: row.last_event_sequence,
-    };
-  }
-
-  public listProjections(projectionType?: string): readonly ProjectionRecord[] {
-    const rows =
-      projectionType === undefined
-        ? this.database
-            .prepare<
-              [],
-              {
-                projection_type: string;
-                projection_id: string;
-                payload_json: string;
-                checksum: string;
-                updated_at: string;
-                last_event_sequence: number | null;
-              }
-            >(
-              `
-                SELECT
-                  projection_type,
-                  projection_id,
-                  payload_json,
-                  checksum,
-                  updated_at,
-                  last_event_sequence
-                FROM projections
-                ORDER BY projection_type ASC, projection_id ASC
-              `,
-            )
-            .all()
-        : this.database
-            .prepare<
-              [{ readonly projectionType: string }],
-              {
-                projection_type: string;
-                projection_id: string;
-                payload_json: string;
-                checksum: string;
-                updated_at: string;
-                last_event_sequence: number | null;
-              }
-            >(
-              `
-                SELECT
-                  projection_type,
-                  projection_id,
-                  payload_json,
-                  checksum,
-                  updated_at,
-                  last_event_sequence
-                FROM projections
-                WHERE projection_type = @projectionType
-                ORDER BY projection_id ASC
-              `,
-            )
-            .all({ projectionType });
-
-    return rows.map((row) => ({
-      projectionType: row.projection_type,
-      projectionId: row.projection_id,
-      payload: parseJson(row.payload_json),
-      checksum: row.checksum,
-      updatedAt: row.updated_at,
-      lastEventSequence: row.last_event_sequence,
-    }));
-  }
-
-  public readSnapshot(snapshotId: string): SnapshotRecord | null {
-    const row = this.database
-      .prepare<
-        [{ readonly snapshotId: string }],
-        {
-          aggregate_id: string;
-          aggregate_version: number;
-          snapshot_schema_version: number;
-          payload_json: string;
-          checksum: string;
-          taken_at: string;
-        }
-      >(
-        `
-          SELECT
-            aggregate_id,
-            aggregate_version,
-            snapshot_schema_version,
-            payload_json,
-            checksum,
-            taken_at
-          FROM snapshots
-          WHERE snapshot_id = @snapshotId
-        `,
-      )
-      .get({ snapshotId });
-
-    if (row === undefined) {
-      return null;
-    }
-
-    return {
-      snapshotId,
-      aggregateId: row.aggregate_id,
-      aggregateVersion: row.aggregate_version,
-      snapshotSchemaVersion: row.snapshot_schema_version,
-      payload: parseJson(row.payload_json),
-      checksum: row.checksum,
-      takenAt: row.taken_at,
-    };
-  }
-
   public readArtifact(artifactId: string): ArtifactRecord | null {
     const row = this.database
       .prepare<
@@ -496,6 +202,190 @@ export class LedgerRepository {
       if (isSqliteConstraintError(error)) return false;
       throw error;
     }
+  }
+
+  public readDocument(
+    kind: string,
+    id: string,
+    revision: DocumentRevisionSelector = 'latest',
+  ): DocumentRecord | null {
+    if (revision !== 'latest' && (!Number.isSafeInteger(revision) || revision < 1)) {
+      throw new Error('Document revision selector must be "latest" or a positive safe integer');
+    }
+
+    const row =
+      revision === 'latest'
+        ? this.database
+            .prepare<[{ readonly kind: string; readonly id: string }], DocumentRow>(
+              `
+                SELECT kind, id, revision, payload_json, checksum, created_at, updated_at
+                FROM documents
+                WHERE kind = @kind
+                  AND id = @id
+                ORDER BY revision DESC
+                LIMIT 1
+              `,
+            )
+            .get({ kind, id })
+        : this.database
+            .prepare<
+              [{ readonly kind: string; readonly id: string; readonly revision: number }],
+              DocumentRow
+            >(
+              `
+                SELECT kind, id, revision, payload_json, checksum, created_at, updated_at
+                FROM documents
+                WHERE kind = @kind
+                  AND id = @id
+                  AND revision = @revision
+              `,
+            )
+            .get({ kind, id, revision });
+
+    return row === undefined ? null : toDocumentRecord(row);
+  }
+
+  public listDocuments(kind: string): readonly DocumentRecord[] {
+    return this.database
+      .prepare<[{ readonly kind: string }], DocumentRow>(
+        `
+          SELECT document.kind,
+                 document.id,
+                 document.revision,
+                 document.payload_json,
+                 document.checksum,
+                 document.created_at,
+                 document.updated_at
+          FROM documents AS document
+          INNER JOIN (
+            SELECT id, MAX(revision) AS revision
+            FROM documents
+            WHERE kind = @kind
+            GROUP BY id
+          ) AS latest
+            ON latest.id = document.id
+           AND latest.revision = document.revision
+          WHERE document.kind = @kind
+          ORDER BY document.id ASC
+        `,
+      )
+      .all({ kind })
+      .map(toDocumentRecord);
+  }
+
+  public insertDocument(write: DocumentWrite): boolean {
+    if (!Number.isSafeInteger(write.revision) || write.revision < 1) {
+      throw new Error('Document revision must be a positive safe integer');
+    }
+
+    const createdAt = write.createdAt ?? this.clock.now();
+    const updatedAt = write.updatedAt ?? createdAt;
+    const payloadJson = toJsonText(write.payload);
+    const checksum = checksumString(payloadJson);
+    try {
+      this.database
+        .prepare<[string, string, number, string, string, string, string]>(
+          `
+            INSERT INTO documents (
+              kind,
+              id,
+              revision,
+              payload_json,
+              checksum,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(write.kind, write.id, write.revision, payloadJson, checksum, createdAt, updatedAt);
+      return true;
+    } catch (error) {
+      if (isSqliteConstraintError(error)) return false;
+      throw error;
+    }
+  }
+
+  public appendDocument(
+    kind: string,
+    id: string,
+    expectedRevision: number,
+    payload: JsonValue,
+    timestamp = this.clock.now(),
+  ): Outcome<DocumentRecord, DocumentConflict> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error('Document expected revision must be a non-negative safe integer');
+    }
+
+    const payloadJson = toJsonText(payload);
+    const checksum = checksumString(payloadJson);
+    return this.database
+      .transaction(() => {
+        const actualRevision =
+          this.database
+            .prepare<[{ readonly kind: string; readonly id: string }], { revision: number }>(
+              `
+                SELECT revision
+                FROM documents
+                WHERE kind = @kind
+                  AND id = @id
+                ORDER BY revision DESC
+                LIMIT 1
+              `,
+            )
+            .get({ kind, id })?.revision ?? 0;
+
+        if (actualRevision !== expectedRevision) {
+          return err({
+            kind: 'document_revision_conflict',
+            documentKind: kind,
+            documentId: id,
+            expectedRevision,
+            actualRevision,
+          } satisfies DocumentConflict);
+        }
+
+        const revision = expectedRevision + 1;
+        this.database
+          .prepare<[string, string, number, string, string, string, string]>(
+            `
+              INSERT INTO documents (
+                kind,
+                id,
+                revision,
+                payload_json,
+                checksum,
+                created_at,
+                updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `,
+          )
+          .run(kind, id, revision, payloadJson, checksum, timestamp, timestamp);
+
+        return ok({
+          kind,
+          id,
+          revision,
+          payload,
+          checksum,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        } satisfies DocumentRecord);
+      })
+      .immediate();
+  }
+
+  public deleteDocuments(kind: string, id: string): number {
+    return this.database
+      .prepare<[string, string]>(
+        `
+          DELETE FROM documents
+          WHERE kind = ?
+            AND id = ?
+        `,
+      )
+      .run(kind, id).changes;
   }
 
   public appendTranscript(write: TranscriptWrite): TranscriptRecord {
@@ -1079,247 +969,6 @@ export class LedgerRepository {
     );
   }
 
-  private commitTransaction(transaction: LedgerTransaction): LedgerCommitResult {
-    const now = transaction.timestamp ?? this.clock.now();
-    this.verifySchemaVersions(transaction);
-    const eventIds = transaction.aggregate?.events.map((event) => event.eventId) ?? [];
-    const duplicateEventId = containsDuplicate(eventIds);
-    if (duplicateEventId !== null) {
-      raiseConflict({ kind: 'duplicate_event_id', eventId: duplicateEventId });
-    }
-
-    const aggregate = transaction.aggregate;
-    let aggregateVersion: number | null = null;
-    let lastEventSequence: number | null = null;
-    if (aggregate !== undefined) {
-      aggregateVersion = this.readCurrentVersion(aggregate.aggregateId);
-      if (aggregateVersion !== aggregate.expectedVersion) {
-        raiseConflict({
-          kind: 'version_conflict',
-          aggregateId: aggregate.aggregateId,
-          expectedVersion: aggregate.expectedVersion,
-          actualVersion: aggregateVersion,
-        });
-      }
-
-      let nextVersion = aggregateVersion;
-      for (const event of aggregate.events) {
-        nextVersion += 1;
-        const occurredAt = event.occurredAt ?? now;
-
-        try {
-          const result = this.database
-            .prepare<
-              [
-                string,
-                string,
-                number,
-                string,
-                number,
-                string,
-                string,
-                string,
-                string | null,
-                string | null,
-                string | null,
-              ]
-            >(
-              `
-                INSERT INTO events (
-                  event_id,
-                  aggregate_id,
-                  aggregate_version,
-                  event_type,
-                  event_schema_version,
-                  payload_json,
-                  metadata_json,
-                  occurred_at,
-                  causation_id,
-                  correlation_id,
-                  actor
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              `,
-            )
-            .run(
-              event.eventId,
-              aggregate.aggregateId,
-              nextVersion,
-              event.eventType,
-              event.eventSchemaVersion,
-              toJsonText(event.payload),
-              toJsonText(event.metadata),
-              occurredAt,
-              event.causationId ?? null,
-              event.correlationId ?? null,
-              event.actor ?? null,
-            );
-
-          lastEventSequence = Number(result.lastInsertRowid);
-          const taskReference = taskReferenceFrom(event.payload);
-          if (taskReference !== null && STREAMED_LEGACY_EVENT_TYPES.has(event.eventType)) {
-            this.insertStreamEvent({
-              taskReference,
-              eventType: event.eventType,
-              payload: {},
-              occurredAt,
-            });
-          }
-        } catch (error) {
-          this.handleEventInsertError(error, event.eventId, aggregate.aggregateId, nextVersion);
-        }
-      }
-
-      aggregateVersion = nextVersion;
-
-      if (aggregate.events.length > 0) {
-        this.database
-          .prepare<[string, number, string]>(
-            `
-              INSERT INTO aggregate_heads (aggregate_id, version, updated_at)
-              VALUES (?, ?, ?)
-              ON CONFLICT(aggregate_id)
-              DO UPDATE SET
-                version = excluded.version,
-                updated_at = excluded.updated_at
-            `,
-          )
-          .run(aggregate.aggregateId, aggregateVersion, now);
-      }
-    }
-
-    this.insertSnapshots(transaction.snapshots ?? [], now);
-    this.applyProjectionMutations(transaction.projections ?? [], now);
-    this.insertArtifacts(transaction.artifacts ?? [], now);
-
-    return {
-      aggregateId: aggregate?.aggregateId ?? null,
-      aggregateVersion,
-      appendedEventCount: aggregate?.events.length ?? 0,
-      lastEventSequence,
-    };
-  }
-
-  private verifySchemaVersions(transaction: LedgerTransaction): void {
-    for (const event of transaction.aggregate?.events ?? []) {
-      if (event.eventSchemaVersion !== SUPPORTED_EVENT_SCHEMA_VERSION) {
-        raiseConflict({
-          kind: 'unsupported_schema_version',
-          schemaKind: 'event',
-          receivedVersion: event.eventSchemaVersion,
-          supportedVersion: SUPPORTED_EVENT_SCHEMA_VERSION,
-          recovery: 'quarantine',
-        });
-      }
-    }
-
-    for (const snapshot of transaction.snapshots ?? []) {
-      if (snapshot.snapshotSchemaVersion !== SUPPORTED_SNAPSHOT_SCHEMA_VERSION) {
-        raiseConflict({
-          kind: 'unsupported_schema_version',
-          schemaKind: 'snapshot',
-          receivedVersion: snapshot.snapshotSchemaVersion,
-          supportedVersion: SUPPORTED_SNAPSHOT_SCHEMA_VERSION,
-          recovery: 'quarantine',
-        });
-      }
-    }
-  }
-
-  private readCurrentVersion(aggregateId: string): number {
-    const row = this.database
-      .prepare<[{ readonly aggregateId: string }], { version: number }>(
-        `
-          SELECT version
-          FROM aggregate_heads
-          WHERE aggregate_id = @aggregateId
-        `,
-      )
-      .get({ aggregateId });
-
-    return row?.version ?? 0;
-  }
-
-  private insertSnapshots(snapshots: readonly SnapshotWrite[], now: string): void {
-    for (const snapshot of snapshots) {
-      const payloadJson = toJsonText(snapshot.payload);
-      this.database
-        .prepare<[string, string, number, number, string, string, string]>(
-          `
-            INSERT INTO snapshots (
-              snapshot_id,
-              aggregate_id,
-              aggregate_version,
-              snapshot_schema_version,
-              taken_at,
-              payload_json,
-              checksum
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `,
-        )
-        .run(
-          snapshot.snapshotId,
-          snapshot.aggregateId,
-          snapshot.aggregateVersion,
-          snapshot.snapshotSchemaVersion,
-          snapshot.takenAt ?? now,
-          payloadJson,
-          checksumString(payloadJson),
-        );
-    }
-  }
-
-  private applyProjectionMutations(
-    mutations: NonNullable<LedgerTransaction['projections']>,
-    now: string,
-  ): void {
-    for (const mutation of mutations) {
-      if (mutation.kind === 'delete') {
-        this.database
-          .prepare<[string, string]>(
-            `
-              DELETE FROM projections
-              WHERE projection_type = ?
-                AND projection_id = ?
-            `,
-          )
-          .run(mutation.projectionType, mutation.projectionId);
-        continue;
-      }
-
-      const payloadJson = toJsonText(mutation.payload);
-      this.database
-        .prepare<[string, string, string, string, string, number | null]>(
-          `
-            INSERT INTO projections (
-              projection_type,
-              projection_id,
-              payload_json,
-              checksum,
-              updated_at,
-              last_event_sequence
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(projection_type, projection_id)
-            DO UPDATE SET
-              payload_json = excluded.payload_json,
-              checksum = excluded.checksum,
-              updated_at = excluded.updated_at,
-              last_event_sequence = excluded.last_event_sequence
-          `,
-        )
-        .run(
-          mutation.projectionType,
-          mutation.projectionId,
-          payloadJson,
-          checksumString(payloadJson),
-          mutation.updatedAt ?? now,
-          mutation.lastEventSequence ?? null,
-        );
-    }
-  }
-
   private insertArtifacts(artifacts: readonly ArtifactWrite[], now: string): void {
     for (const artifact of artifacts) {
       const payloadJson = toJsonText(artifact.payload);
@@ -1373,30 +1022,5 @@ export class LedgerRepository {
       payload: write.payload,
       occurredAt,
     };
-  }
-
-  private handleEventInsertError(
-    error: unknown,
-    eventId: string,
-    aggregateId: string,
-    aggregateVersion: number,
-  ): never {
-    if (isSqliteConstraintError(error)) {
-      if (error.message.includes('events.event_id')) {
-        raiseConflict({ kind: 'duplicate_event_id', eventId });
-      }
-
-      if (error.message.includes('events.aggregate_id, events.aggregate_version')) {
-        const actualVersion = this.readCurrentVersion(aggregateId);
-        raiseConflict({
-          kind: 'version_conflict',
-          aggregateId,
-          expectedVersion: aggregateVersion - 1,
-          actualVersion,
-        });
-      }
-    }
-
-    throw error;
   }
 }

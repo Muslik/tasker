@@ -280,7 +280,6 @@ export class TemporalTaskStepTraceStore {
     { readonly artifactId: string; readonly result: ExecuteTaskStepResult | null },
     TemporalTaskStepTraceStoreError
   > {
-    const aggregateId = `task-step-output:${input.operationId}`;
     const artifactId = this.outputArtifactIdFor(input.operationId);
     const existing = this.ledger.readArtifact(artifactId);
     if (existing !== null) {
@@ -324,41 +323,23 @@ export class TemporalTaskStepTraceStore {
       result,
       recordedAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${aggregateId}:1`,
-            eventType: 'TaskStepOutputRecorded',
-            eventSchemaVersion: 1,
-            payload: asJson({ artifactId }),
-            actor: 'provider',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'task_step_output',
-          taskReference: input.taskReference,
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(payload),
-          metadata: asJson({
-            taskReference: input.taskReference,
-            operationId: input.operationId,
-            workflowId: input.workflowId,
-            workflowRunId: input.workflowRunId,
-            nodeId: input.nodeId,
-            stepReference: input.stepReference,
-            status: input.status,
-          }),
-          createdAt: recordedAt,
-        },
-      ],
-      timestamp: recordedAt,
+    const committed = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'task_step_output',
+      taskReference: input.taskReference,
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: asJson(payload),
+      metadata: asJson({
+        taskReference: input.taskReference,
+        operationId: input.operationId,
+        workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
+        nodeId: input.nodeId,
+        stepReference: input.stepReference,
+        status: input.status,
+      }),
+      createdAt: recordedAt,
     });
-    return committed.ok ? ok({ artifactId, result }) : err({ kind: 'ledger_conflict' });
+    return committed ? ok({ artifactId, result }) : err({ kind: 'ledger_conflict' });
   }
 }

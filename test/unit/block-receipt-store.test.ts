@@ -105,7 +105,6 @@ describe('BlockReceiptStore', () => {
       taskReference: input.taskReference,
     });
     expect(artifact?.metadata).toMatchObject({ taskReference: input.taskReference });
-    expect(ledger.repository.listEvents()).toEqual([]);
   });
 
   it('reads block receipts from the receipts row rather than the artifact payload', () => {

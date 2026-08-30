@@ -285,7 +285,6 @@ describe('agent invocation reader', () => {
       },
     });
 
-    expect(ledger.repository.listEvents()).toEqual([]);
     expect(planningStore.nextAgentInvocationNumber('planning-episode-1', 1)).toBe(3);
     expect(reader.list('jira:AVIA-13235')).toMatchObject({
       taskReference: 'jira:AVIA-13235',

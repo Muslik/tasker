@@ -1,7 +1,7 @@
 import { checksumString } from '../store/checksum.js';
 import type { BlockReceipt } from '../steps/index.js';
 import type { LedgerRepository } from '../store/repository.js';
-import type { JsonValue, LedgerConflict } from '../store/types.js';
+import type { DocumentConflict, JsonValue, LedgerConflict } from '../store/types.js';
 import {
   EvidenceBundleReferenceSchema,
   EvidenceBodyReferenceSchema,
@@ -19,7 +19,7 @@ import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { JsonValueSchema } from '../graph/schema.js';
 
-export const EVIDENCE_BUNDLE_PROJECTION = 'evidence_bundle_by_scope';
+export const EVIDENCE_BUNDLE_PROJECTION = 'evidence_bundle_reference';
 
 export interface EvidenceBundleRecord {
   readonly reference: EvidenceBundleReference;
@@ -60,8 +60,14 @@ export type EvidenceBundleStoreError =
     };
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
-const aggregateIdFor = (scopeId: string): string => `evidence-bundle:${scopeId}`;
 const MAX_INLINE_EXTERNAL_EVIDENCE_BYTES = 64 * 1024;
+
+const ledgerConflictFromDocumentConflict = (conflict: DocumentConflict): LedgerConflict => ({
+  kind: 'version_conflict',
+  aggregateId: `document:${conflict.documentKind}:${conflict.documentId}`,
+  expectedVersion: conflict.expectedRevision,
+  actualVersion: conflict.actualRevision,
+});
 
 export class EvidenceBundleStore {
   public constructor(
@@ -72,9 +78,9 @@ export class EvidenceBundleStore {
   public readLatest(
     scopeId: string,
   ): Outcome<EvidenceBundleRecord | null, EvidenceBundleStoreError> {
-    const projection = this.ledger.readProjection(EVIDENCE_BUNDLE_PROJECTION, scopeId);
-    if (projection === null) return ok(null);
-    const parsed = EvidenceBundleReferenceSchema.safeParse(projection.payload);
+    const document = this.ledger.readDocument(EVIDENCE_BUNDLE_PROJECTION, scopeId);
+    if (document === null) return ok(null);
+    const parsed = EvidenceBundleReferenceSchema.safeParse(document.payload);
     if (!parsed.success) {
       return err({
         kind: 'bundle_reference_corrupt',
@@ -187,58 +193,41 @@ export class EvidenceBundleStore {
         entries: [...mergedEntries.values()],
         createdAt,
       });
-      const artifactId = `${aggregateIdFor(scopeId)}:r${String(revision)}:${inputFingerprint.slice(0, 16)}`;
-      const saved = this.ledger.transact({
-        aggregate: {
-          aggregateId: aggregateIdFor(scopeId),
-          expectedVersion: revision - 1,
-          events: [
-            {
-              eventId: `event:${artifactId}`,
-              eventType: 'EvidenceBundleRevisionRecorded',
-              eventSchemaVersion: 1,
-              payload: asJson({ artifactId, inputFingerprint, revision, scopeId, taskReference }),
-              actor: 'evidence_recorder',
-            },
-          ],
-        },
-        artifacts: [
-          {
-            artifactId,
-            artifactKind: 'evidence_bundle',
-            storageUri: `ledger://artifacts/${encodeURIComponent(artifactId)}`,
-            payload: asJson(bundle),
-            metadata: asJson({ scopeId, taskReference, revision, inputFingerprint }),
-            createdAt,
-            ...(latest.value === null
-              ? {}
-              : { parentArtifactId: latest.value.reference.artifactId }),
-          },
-        ],
-        projections: [
-          {
-            kind: 'upsert',
-            projectionType: EVIDENCE_BUNDLE_PROJECTION,
-            projectionId: scopeId,
-            payload: asJson({
-              artifactId,
-              checksum: checksumString(JSON.stringify(bundle)),
-              revision,
-            }),
-          },
-        ],
-        timestamp: createdAt,
+      const artifactId = `evidence-bundle:${scopeId}:r${String(revision)}:${inputFingerprint.slice(0, 16)}`;
+      this.ledger.insertArtifact({
+        artifactId,
+        artifactKind: 'evidence_bundle',
+        taskReference,
+        storageUri: `ledger://artifacts/${encodeURIComponent(artifactId)}`,
+        payload: asJson(bundle),
+        metadata: asJson({ scopeId, taskReference, revision, inputFingerprint }),
+        createdAt,
+        ...(latest.value === null ? {} : { parentArtifactId: latest.value.reference.artifactId }),
       });
-      if (!saved.ok) {
-        if (saved.error.kind === 'version_conflict') {
-          lastConflict = saved.error;
-          continue;
-        }
-        return err({ kind: 'ledger_conflict', conflict: saved.error });
-      }
 
       const artifact = this.ledger.readArtifact(artifactId);
       if (artifact === null) return err({ kind: 'bundle_not_found', artifactId });
+
+      const saved = this.ledger.appendDocument(
+        EVIDENCE_BUNDLE_PROJECTION,
+        scopeId,
+        latest.value?.bundle.revision ?? 0,
+        asJson({
+          artifactId,
+          checksum: artifact.checksum,
+          revision,
+        }),
+        createdAt,
+      );
+      if (!saved.ok) {
+        lastConflict = ledgerConflictFromDocumentConflict(saved.error);
+        const concurrent = this.readLatest(scopeId);
+        if (!concurrent.ok) return concurrent;
+        if (concurrent.value?.bundle.inputFingerprint === inputFingerprint)
+          return ok(concurrent.value);
+        continue;
+      }
+
       return ok({
         reference: EvidenceBundleReferenceSchema.parse({
           artifactId,
@@ -249,8 +238,9 @@ export class EvidenceBundleStore {
       });
     }
 
-    if (lastConflict === null)
+    if (lastConflict === null) {
       throw new Error('Evidence bundle retry budget exhausted without conflict');
+    }
     return err({ kind: 'ledger_conflict', conflict: lastConflict });
   }
 
@@ -259,6 +249,8 @@ export class EvidenceBundleStore {
     operationId: string,
     capturesInput: readonly PlanningEvidenceCapture[],
   ): Outcome<EvidenceBundleRecord, EvidenceBundleStoreError> {
+    const base = this.read(baseReference);
+    if (!base.ok) return base;
     const capturedAt = this.clock.now();
     const entries: EvidenceEntry[] = [];
     for (const capture of capturesInput.map((value) =>
@@ -272,6 +264,7 @@ export class EvidenceBundleStore {
               capture.observation.content,
               capture.observation.mediaType,
               contentSha256,
+              base.value.bundle.taskReference,
             )
           : ok(capture.observation.content);
       if (!content.ok) return content;
@@ -292,8 +285,6 @@ export class EvidenceBundleStore {
         }),
       );
     }
-    const base = this.read(baseReference);
-    if (!base.ok) return base;
     const evidenceIds = new Set(base.value.bundle.entries.map(({ evidenceId }) => evidenceId));
     for (const entry of entries) evidenceIds.add(entry.evidenceId);
     const inputFingerprint = checksumString(JSON.stringify([...evidenceIds].sort()));
@@ -342,6 +333,7 @@ export class EvidenceBundleStore {
     content: JsonValue,
     mediaType: string,
     contentSha256: string,
+    taskReference: string,
   ): Outcome<EvidenceBodyReference, EvidenceBundleStoreError> {
     const artifactId = `evidence-body:${contentSha256}`;
     const existing = this.ledger.readArtifact(artifactId);
@@ -356,41 +348,30 @@ export class EvidenceBundleStore {
         }),
       );
     }
+
     const createdAt = this.clock.now();
-    const recorded = this.ledger.transact({
-      aggregate: {
-        aggregateId: artifactId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${artifactId}`,
-            eventType: 'EvidenceBodyRecorded',
-            eventSchemaVersion: 1,
-            payload: asJson({ artifactId, contentSha256 }),
-            actor: 'evidence_recorder',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'evidence_body',
-          storageUri: `ledger://artifacts/${encodeURIComponent(artifactId)}`,
-          payload: content,
-          metadata: asJson({ mediaType, contentSha256 }),
-          createdAt,
-        },
-      ],
-      timestamp: createdAt,
+    this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'evidence_body',
+      taskReference,
+      storageUri: `ledger://artifacts/${encodeURIComponent(artifactId)}`,
+      payload: content,
+      metadata: asJson({ mediaType, contentSha256 }),
+      createdAt,
     });
-    if (!recorded.ok) {
-      const concurrentlyRecorded = this.ledger.readArtifact(artifactId);
-      if (concurrentlyRecorded === null) {
-        return err({ kind: 'ledger_conflict', conflict: recorded.error });
-      }
-    }
+
     const artifact = this.ledger.readArtifact(artifactId);
-    if (artifact === null) return err({ kind: 'body_not_found', artifactId });
+    if (artifact === null) {
+      return err({
+        kind: 'ledger_conflict',
+        conflict: {
+          kind: 'version_conflict',
+          aggregateId: `artifact:${artifactId}`,
+          expectedVersion: 0,
+          actualVersion: 0,
+        },
+      });
+    }
     return ok(
       EvidenceBodyReferenceSchema.parse({
         kind: 'artifact',

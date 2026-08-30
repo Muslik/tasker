@@ -44,6 +44,16 @@ describe('DependencyDeclarationStore', () => {
         },
       });
       expect(recorded.ok && recorded.value.hash).toMatch(/^[a-f0-9]{64}$/u);
+      expect(
+        ledger.repository.readDocument(
+          'dependency_declaration',
+          dependencyDeclarationIdFor(baseInput.consumerTaskReference, baseInput.source),
+          1,
+        )?.payload,
+      ).toMatchObject({
+        revision: 1,
+        packages: ['@ott/core-button', '@ott/core-theme'],
+      });
     } finally {
       ledger.close();
     }
@@ -92,6 +102,13 @@ describe('DependencyDeclarationStore', () => {
         },
       });
       expect(revised.ok && revised.value.hash).not.toBe(first.value.hash);
+      expect(
+        ledger.repository.readDocument('dependency_declaration', first.value.declarationId)
+          ?.payload,
+      ).toMatchObject({
+        revision: 2,
+        mode: 'final_only',
+      });
     } finally {
       ledger.close();
     }

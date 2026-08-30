@@ -420,61 +420,40 @@ export const createExecutionContinuationActivity = (
       workflowHash: planned.value.compiled.hash,
       graph: planned.value.compiled.graph,
     });
-    const committed = ledger.transact({
-      aggregate: {
-        aggregateId: artifactId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${artifactId}:1`,
-            eventType: 'ExecutionContinuationPlanned',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              taskReference: input.taskReference,
-              continuationId,
-              semanticHash: candidate.semanticHash,
-              workflowHash: candidate.workflowHash,
-            }),
-            actor: 'continuation_planner',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId: candidate.analyzerReceiptReference,
-          artifactKind: 'workflow_analyzer_receipt',
-          storageUri: `ledger://artifacts/${candidate.analyzerReceiptReference}`,
-          payload: asJson(analyzed.value.receipt),
-          metadata: asJson({
-            taskReference: input.taskReference,
-            workflowId: input.workflowId,
-            workflowRunId: input.workflowRunId,
-            continuationId,
-            transcriptOperationId,
-          }),
-          createdAt: clock.now(),
-        },
-        {
-          artifactId,
-          artifactKind: 'execution_continuation_candidate',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(candidate),
-          metadata: asJson({
-            taskReference: input.taskReference,
-            workflowId: input.workflowId,
-            workflowRunId: input.workflowRunId,
-            parentNodeId: input.parentNodeId,
-            requestReference: input.requestReference,
-          }),
-          createdAt: clock.now(),
-        },
-      ],
-      timestamp: clock.now(),
-    });
-    if (!committed.ok) {
+    const committed = [
+      ledger.insertArtifact({
+        artifactId: candidate.analyzerReceiptReference,
+        artifactKind: 'workflow_analyzer_receipt',
+        storageUri: `ledger://artifacts/${candidate.analyzerReceiptReference}`,
+        payload: asJson(analyzed.value.receipt),
+        metadata: asJson({
+          taskReference: input.taskReference,
+          workflowId: input.workflowId,
+          workflowRunId: input.workflowRunId,
+          continuationId,
+          transcriptOperationId,
+        }),
+        createdAt: clock.now(),
+      }),
+      ledger.insertArtifact({
+        artifactId,
+        artifactKind: 'execution_continuation_candidate',
+        storageUri: `ledger://artifacts/${artifactId}`,
+        payload: asJson(candidate),
+        metadata: asJson({
+          taskReference: input.taskReference,
+          workflowId: input.workflowId,
+          workflowRunId: input.workflowRunId,
+          parentNodeId: input.parentNodeId,
+          requestReference: input.requestReference,
+        }),
+        createdAt: clock.now(),
+      }),
+    ].every(Boolean);
+    if (!committed) {
       return unavailable(
         'workflow_change.persistence-required@1',
-        `Continuation candidate could not be persisted: ${committed.error.kind}`,
+        'Continuation candidate could not be persisted.',
       );
     }
     return PlanExecutionContinuationResultSchema.parse({ status: 'ready', ...candidate });

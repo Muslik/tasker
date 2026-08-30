@@ -137,10 +137,10 @@ describe('operation-scoped workflow persistence', () => {
       value: { providerSession: { sessionId: 'session-run-b' } },
     });
     expect(
-      ledger.repository.readProjection(OPERATOR_WORKFLOW_OPERATION_PROJECTION, operationA)?.payload,
+      ledger.repository.readDocument(OPERATOR_WORKFLOW_OPERATION_PROJECTION, operationA)?.payload,
     ).toMatchObject({ workflow: { status: 'valid' } });
     expect(
-      ledger.repository.readProjection(OPERATOR_WORKFLOW_OPERATION_PROJECTION, operationB)?.payload,
+      ledger.repository.readDocument(OPERATOR_WORKFLOW_OPERATION_PROJECTION, operationB)?.payload,
     ).toMatchObject({ workflow: { status: 'rejected' } });
     ledger.close();
   });

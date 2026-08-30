@@ -3,7 +3,6 @@ import { z } from 'zod';
 import type { LedgerRepository } from '../store/repository.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../graph/schema.js';
 
 const TaskPresenceSchema = z
   .object({
@@ -17,8 +16,7 @@ const TaskPresenceSchema = z
 
 export type TaskPresenceError = { readonly kind: 'ledger_conflict' };
 
-const PROJECTION = 'task_presence';
-const aggregateIdFor = (taskReference: string): string => `task-presence:${taskReference}`;
+const DOCUMENT_KIND = 'task_presence';
 
 export class TaskPresenceStore {
   public constructor(
@@ -27,8 +25,8 @@ export class TaskPresenceStore {
   ) {}
 
   public isRemoved(taskReference: string): boolean {
-    const projection = this.ledger.readProjection(PROJECTION, taskReference);
-    return projection !== null && TaskPresenceSchema.parse(projection.payload).status === 'removed';
+    const document = this.ledger.readDocument(DOCUMENT_KIND, taskReference);
+    return document !== null && TaskPresenceSchema.parse(document.payload).status === 'removed';
   }
 
   public remove(taskReference: string): Outcome<void, TaskPresenceError> {
@@ -44,8 +42,8 @@ export class TaskPresenceStore {
     taskReference: string,
     status: 'active' | 'removed',
   ): Outcome<void, TaskPresenceError> {
-    const aggregateId = aggregateIdFor(taskReference);
-    const version = (this.ledger.readAggregateHead(aggregateId)?.version ?? 0) + 1;
+    const existing = this.ledger.readDocument(DOCUMENT_KIND, taskReference);
+    const version = (existing?.revision ?? 0) + 1;
     const updatedAt = this.clock.now();
     const presence = TaskPresenceSchema.parse({
       taskReference,
@@ -53,30 +51,13 @@ export class TaskPresenceStore {
       revision: version,
       updatedAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: version - 1,
-        events: [
-          {
-            eventId: `event:${aggregateId}:${String(version)}`,
-            eventType: status === 'removed' ? 'TaskRemoved' : 'TaskRestored',
-            eventSchemaVersion: 1,
-            payload: JsonValueSchema.parse(presence),
-            actor: 'operator',
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: PROJECTION,
-          projectionId: taskReference,
-          payload: JsonValueSchema.parse(presence),
-        },
-      ],
-      timestamp: updatedAt,
-    });
+    const committed = this.ledger.appendDocument(
+      DOCUMENT_KIND,
+      taskReference,
+      version - 1,
+      presence,
+      updatedAt,
+    );
     return committed.ok ? ok(undefined) : err({ kind: 'ledger_conflict' });
   }
 }

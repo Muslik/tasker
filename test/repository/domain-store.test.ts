@@ -17,6 +17,58 @@ const openLedger = () => {
 };
 
 describe('domain store', () => {
+  it('stores one latest document per kind and id while retaining revisions', () => {
+    const { ledger } = openLedger();
+    const repository = ledger.repository;
+
+    expect(
+      repository.insertDocument({
+        kind: 'test_document',
+        id: 'document-1',
+        revision: 1,
+        payload: { value: 'first' },
+      }),
+    ).toBe(true);
+    expect(
+      repository.insertDocument({
+        kind: 'test_document',
+        id: 'document-1',
+        revision: 1,
+        payload: { value: 'duplicate' },
+      }),
+    ).toBe(false);
+    expect(repository.listDocuments('test_document')).toMatchObject([
+      { id: 'document-1', revision: 1, payload: { value: 'first' } },
+    ]);
+  });
+
+  it('rejects stale document revisions without writing a partial update', () => {
+    const { ledger } = openLedger();
+    const repository = ledger.repository;
+    repository.insertDocument({
+      kind: 'test_document',
+      id: 'document-1',
+      revision: 1,
+      payload: { value: 'first' },
+    });
+
+    const stale = repository.appendDocument('test_document', 'document-1', 0, { value: 'stale' });
+
+    expect(stale).toEqual({
+      ok: false,
+      error: {
+        kind: 'document_revision_conflict',
+        documentKind: 'test_document',
+        documentId: 'document-1',
+        expectedRevision: 0,
+        actualRevision: 1,
+      },
+    });
+    expect(repository.readDocument('test_document', 'document-1')?.payload).toEqual({
+      value: 'first',
+    });
+  });
+
   it('reads transcript chunks after a sequence with a bounded limit', () => {
     const { ledger } = openLedger();
     const repository = ledger.repository;
@@ -40,7 +92,6 @@ describe('domain store', () => {
       },
     ]);
     expect(range[0]?.id).toContain('provider-attempt-2');
-    expect(repository.listEvents()).toEqual([]);
     expect(repository.listArtifacts({ artifactKind: 'planning_transcript_chunk' })).toEqual([]);
   });
 

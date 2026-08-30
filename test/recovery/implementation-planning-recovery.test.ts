@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { EvidenceBundleStore } from '../../src/server/evidence-bundle.js';
 import {
   createImplementationPlanningCoordinator,
-  createOperatorWorkflowService,
-  EvidenceBundleStore,
-  ImplementationPlanningStore,
   type ImplementationPlanningCoordinator,
-} from '../../src/server/index.js';
+} from '../../src/server/planning-coordinator.js';
+import { ImplementationPlanningStore } from '../../src/server/planning-episodes.js';
+import { createOperatorWorkflowService } from '../../src/server/operator-service.js';
 import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import {
   LedgerAgentInvocationRecorder,
@@ -110,33 +110,6 @@ const withPlanningFixture = async (
 };
 
 describe('implementation planning recovery', () => {
-  it('rejects obsolete planning activity payloads instead of inferring missing identity', async () => {
-    await withPlanningFixture('tasker-plan-obsolete-activity-', ({ directory, clock, ledger }) => {
-      const fixture = planningFixture(ledger, clock, directory, makeTestImplementationPlanner());
-      const aggregateId = `implementation-plan:${PLANNING_EPISODE_ID}`;
-      const recorded = ledger.repository.transact({
-        aggregate: {
-          aggregateId,
-          expectedVersion: 0,
-          events: [
-            {
-              eventId: `event:${aggregateId}:1`,
-              eventType: 'ImplementationPlanningStarted',
-              eventSchemaVersion: 1,
-              payload: { attempt: 1, strategy: 'fast' },
-            },
-          ],
-        },
-      });
-
-      expect(recorded.ok).toBe(true);
-      expect(() => fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toThrow(
-        'Invalid implementation planning event payload: ImplementationPlanningStarted',
-      );
-      return Promise.resolve();
-    });
-  });
-
   it('never supplies a plan from another run of the same task as previousDecision', async () => {
     await withPlanningFixture(
       'tasker-plan-run-isolation-',
@@ -406,11 +379,9 @@ describe('implementation planning recovery', () => {
 
         expect(prepared).toMatchObject({ ok: true, value: { status: 'ready', attempt: 1 } });
         expect(calls).toBe(1);
-        expect(
-          ledger.repository
-            .listEvents(`implementation-plan:${PLANNING_EPISODE_ID}`)
-            .map(({ eventType }) => eventType),
-        ).toContain('ImplementationWorkflowCandidateValidated');
+        expect(fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toEqual(
+          expect.arrayContaining([expect.objectContaining({ title: 'Implementation planning' })]),
+        );
       },
     );
   });
@@ -573,11 +544,6 @@ describe('implementation planning recovery', () => {
         );
         expect(previousStatus).toBe('ready');
         expect(calls).toBe(2);
-        expect(
-          ledger.repository
-            .listEvents(`implementation-plan:${PLANNING_EPISODE_ID}`)
-            .map(({ eventType }) => eventType),
-        ).toContain('ImplementationWorkflowCandidateRejected');
         expect(fixture.coordinator.readActivity(PLANNING_EPISODE_ID)).toEqual(
           expect.arrayContaining([
             expect.objectContaining({

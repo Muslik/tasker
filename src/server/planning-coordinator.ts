@@ -729,7 +729,18 @@ export class ImplementationPlanningCoordinator {
   }
 
   public readActivity(planningEpisodeId: string): OperatorActivityResponse['entries'] {
-    return readImplementationPlanningActivity(this.store.listEvents(planningEpisodeId));
+    return readImplementationPlanningActivity(
+      this.store.listStreamEventsAfter(0).filter((event) => {
+        if (
+          event.payload === null ||
+          typeof event.payload !== 'object' ||
+          Array.isArray(event.payload)
+        ) {
+          return false;
+        }
+        return event.payload.episodeId === planningEpisodeId;
+      }),
+    );
   }
 
   public listStreamEventsAfter(sequence: number): readonly OperatorStreamEvent[] {

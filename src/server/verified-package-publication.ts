@@ -90,7 +90,7 @@ export type VerifiedPackagePublicationStoreError =
       readonly issues: readonly string[];
     };
 
-const VERIFIED_PUBLICATION_BY_IDENTITY_PROJECTION = 'verified_package_publication_by_identity';
+const VERIFIED_PUBLICATION_DOCUMENT_KIND = 'verified_package_publication_by_identity';
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
 
@@ -152,11 +152,8 @@ export class VerifiedPackagePublicationStore {
     input: Pick<RecordVerifiedPackagePublicationInput, 'sourceOperationId'>,
   ): Outcome<VerifiedPackagePublication | null, VerifiedPackagePublicationStoreError> {
     const externalIdentity = verifiedPackagePublicationExternalIdentityFor(input);
-    const projection = this.ledger.readProjection(
-      VERIFIED_PUBLICATION_BY_IDENTITY_PROJECTION,
-      externalIdentity,
-    );
-    return projection === null ? ok(null) : parsePublication(externalIdentity, projection.payload);
+    const document = this.ledger.readDocument(VERIFIED_PUBLICATION_DOCUMENT_KIND, externalIdentity);
+    return document === null ? ok(null) : parsePublication(externalIdentity, document.payload);
   }
 
   public listByDeclaration(
@@ -164,11 +161,10 @@ export class VerifiedPackagePublicationStore {
     declarationRevision: number,
   ): Outcome<readonly VerifiedPackagePublication[], VerifiedPackagePublicationStoreError> {
     const matches: VerifiedPackagePublication[] = [];
-    for (const event of this.ledger.listEvents().toReversed()) {
-      if (event.eventType !== 'VerifiedPackagePublicationRecorded') continue;
-      const artifact = this.ledger.readArtifact(event.aggregateId);
-      if (artifact === null) continue;
-      const parsed = parsePublication(event.aggregateId, artifact.payload);
+    for (const artifact of this.ledger.listArtifacts({
+      artifactKind: 'verified_package_publication',
+    })) {
+      const parsed = parsePublication(artifact.artifactId, artifact.payload);
       if (!parsed.ok) return parsed;
       if (
         parsed.value.declarationId === declarationId &&
@@ -177,7 +173,7 @@ export class VerifiedPackagePublicationStore {
         matches.push(parsed.value);
       }
     }
-    return ok(matches.toReversed());
+    return ok(matches);
   }
 
   public record(
@@ -209,52 +205,44 @@ export class VerifiedPackagePublicationStore {
       ...input,
       observedAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: observationId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${observationId}:1`,
-            eventType: 'VerifiedPackagePublicationRecorded',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              observationId,
-              declarationId: publication.declarationId,
-              declarationRevision: publication.declarationRevision,
-              channel: publication.channel,
-            }),
-            actor: 'operator',
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: VERIFIED_PUBLICATION_BY_IDENTITY_PROJECTION,
-          projectionId: externalIdentity,
-          payload: asJson(publication),
-        },
-      ],
-      artifacts: [
-        {
-          artifactId: observationId,
-          artifactKind: 'verified_package_publication',
-          storageUri: `ledger://artifacts/${observationId}`,
-          payload: asJson(publication),
-          metadata: asJson({
-            declarationId: publication.declarationId,
-            declarationRevision: publication.declarationRevision,
-            producerTaskReference: publication.producerTaskReference,
-            channel: publication.channel,
-            externalIdentity,
-          }),
-          createdAt: observedAt,
-        },
-      ],
-      timestamp: observedAt,
+    const artifactInserted = this.ledger.insertArtifact({
+      artifactId: observationId,
+      artifactKind: 'verified_package_publication',
+      storageUri: `ledger://artifacts/${observationId}`,
+      payload: asJson(publication),
+      metadata: asJson({
+        declarationId: publication.declarationId,
+        declarationRevision: publication.declarationRevision,
+        producerTaskReference: publication.producerTaskReference,
+        channel: publication.channel,
+        externalIdentity,
+      }),
+      createdAt: observedAt,
     });
-    if (committed.ok) return ok(publication);
+    if (!artifactInserted) {
+      const concurrent = this.read(observationId);
+      if (!concurrent.ok) return concurrent;
+      if (concurrent.value !== null && samePublication(concurrent.value, input)) {
+        return ok(concurrent.value);
+      }
+      return concurrent.value !== null
+        ? err({
+            kind: 'publication_conflict',
+            externalIdentity,
+            observationId: concurrent.value.observationId,
+          })
+        : err({ kind: 'ledger_conflict' });
+    }
+
+    const documentInserted = this.ledger.insertDocument({
+      kind: VERIFIED_PUBLICATION_DOCUMENT_KIND,
+      id: externalIdentity,
+      revision: 1,
+      payload: asJson(publication),
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    });
+    if (documentInserted) return ok(publication);
 
     const concurrent = this.readByExternalIdentity(input);
     if (!concurrent.ok) return concurrent;

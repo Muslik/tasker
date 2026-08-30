@@ -298,7 +298,8 @@ export class OperatorWorkflowService {
       return err({ kind: 'store_failure', error: analyzerSession.error });
     }
 
-    const taskEvents = this.store.listEvents(taskReference).filter((event) => {
+    const taskEvents = this.store.listStreamEventsAfter(0).filter((event) => {
+      if (event.taskReference !== taskReference) return false;
       if (planningEpisodeId === null) return false;
       if (
         event.eventType !== 'WorkflowAnalyzed' &&
@@ -315,16 +316,16 @@ export class OperatorWorkflowService {
     });
     const entries = taskEvents.map((event) => {
       const source =
-        event.actor === 'subscription_cli_analyzer'
+        event.eventType === 'WorkflowAnalyzed'
           ? ('agent' as const)
-          : event.actor === 'workflow_planner'
+          : event.eventType === 'WorkflowPlanned' || event.eventType === 'WorkflowRejected'
             ? ('planner' as const)
             : ('kernel' as const);
 
       switch (event.eventType) {
         case 'IntakeAccepted':
           return {
-            sequence: event.sequence,
+            sequence: event.seq,
             occurredAt: event.occurredAt,
             source,
             level: 'info' as const,
@@ -333,7 +334,7 @@ export class OperatorWorkflowService {
           };
         case 'TaskCreated':
           return {
-            sequence: event.sequence,
+            sequence: event.seq,
             occurredAt: event.occurredAt,
             source,
             level: 'info' as const,
@@ -343,7 +344,7 @@ export class OperatorWorkflowService {
         case 'WorkflowAnalyzed': {
           const analysis = WorkflowAnalyzedEventPayloadSchema.safeParse(event.payload);
           return {
-            sequence: event.sequence,
+            sequence: event.seq,
             occurredAt: event.occurredAt,
             source,
             level: 'info' as const,
@@ -355,7 +356,7 @@ export class OperatorWorkflowService {
         }
         case 'WorkflowPlanned':
           return {
-            sequence: event.sequence,
+            sequence: event.seq,
             occurredAt: event.occurredAt,
             source,
             level: 'info' as const,
@@ -364,11 +365,10 @@ export class OperatorWorkflowService {
           };
         case 'WorkflowRejected': {
           const corrected = taskEvents.some(
-            (candidate) =>
-              candidate.sequence > event.sequence && candidate.eventType === 'WorkflowPlanned',
+            (candidate) => candidate.seq > event.seq && candidate.eventType === 'WorkflowPlanned',
           );
           return {
-            sequence: event.sequence,
+            sequence: event.seq,
             occurredAt: event.occurredAt,
             source,
             level: corrected ? ('info' as const) : ('error' as const),
@@ -380,7 +380,7 @@ export class OperatorWorkflowService {
         }
         default:
           return {
-            sequence: event.sequence,
+            sequence: event.seq,
             occurredAt: event.occurredAt,
             source,
             level: 'info' as const,

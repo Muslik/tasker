@@ -12,7 +12,7 @@ import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { CompiledWorkflowSchema, JsonValueSchema } from '../graph/schema.js';
 import type { LedgerRepository } from '../store/repository.js';
-import type { EventRecord, JsonValue, LedgerConflict } from '../store/types.js';
+import type { JsonValue, LedgerConflict } from '../store/types.js';
 import type { EvidenceBundleReference } from '../planning/index.js';
 import {
   PlanningClarificationAnswerCommandSchema,
@@ -83,8 +83,7 @@ type ImplementationPlanningFailureInput =
   ImplementationPlannerFailure | ProjectValidationMissingFailure;
 
 const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
-const aggregateIdFor = (planningEpisodeId: string): string =>
-  `implementation-plan:${planningEpisodeId}`;
+const DOCUMENT_KIND = 'implementation_planning';
 
 const ArchivedExecutionSnapshotSchema = z.looseObject({
   kind: z.literal('execution'),
@@ -104,12 +103,9 @@ export class ImplementationPlanningStore {
   public read(
     planningEpisodeId: string,
   ): Outcome<ImplementationPlanningRecord | null, ImplementationPlanningStoreError> {
-    const projection = this.ledger.readProjection(
-      IMPLEMENTATION_PLAN_PROJECTION,
-      planningEpisodeId,
-    );
-    if (projection === null) return ok(null);
-    const parsed = ImplementationPlanningRecordSchema.safeParse(projection.payload);
+    const document = this.ledger.readDocument(DOCUMENT_KIND, planningEpisodeId);
+    if (document === null) return ok(null);
+    const parsed = ImplementationPlanningRecordSchema.safeParse(document.payload);
     return parsed.success
       ? ok(parsed.data)
       : err({
@@ -119,14 +115,6 @@ export class ImplementationPlanningStore {
             (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
           ),
         });
-  }
-
-  public listEvents(planningEpisodeId?: string): readonly EventRecord[] {
-    return planningEpisodeId === undefined
-      ? this.ledger
-          .listEvents()
-          .filter((event) => event.aggregateId.startsWith('implementation-plan:'))
-      : this.ledger.listEvents(aggregateIdFor(planningEpisodeId));
   }
 
   public listStreamEventsAfter(sequence: number) {
@@ -158,40 +146,21 @@ export class ImplementationPlanningStore {
           });
     }
 
-    const aggregateId = artifactId;
-    const result = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${aggregateId}:1`,
-            eventType: 'PlanningRunSnapshotCreated',
-            eventSchemaVersion: 1,
-            payload: asJson({ artifactId, kind: snapshot.kind, snapshotHash }),
-            actor: 'kernel',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'planning_run_snapshot',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(snapshot),
-          metadata: asJson({
-            taskReference: snapshot.taskReference,
-            kind: snapshot.kind,
-            snapshotHash,
-            companyId: snapshot.harness.company.id,
-            companyVersion: snapshot.harness.company.version,
-          }),
-          createdAt: snapshot.createdAt,
-        },
-      ],
-      timestamp: snapshot.createdAt,
+    const result = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'planning_run_snapshot',
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: asJson(snapshot),
+      metadata: asJson({
+        taskReference: snapshot.taskReference,
+        kind: snapshot.kind,
+        snapshotHash,
+        companyId: snapshot.harness.company.id,
+        companyVersion: snapshot.harness.company.version,
+      }),
+      createdAt: snapshot.createdAt,
     });
-    if (!result.ok) {
+    if (!result) {
       const concurrentlyCreated = this.ledger.readArtifact(artifactId);
       if (concurrentlyCreated !== null) {
         return ok(
@@ -201,7 +170,15 @@ export class ImplementationPlanningStore {
           }),
         );
       }
-      return err({ kind: 'ledger_conflict', conflict: result.error });
+      return err({
+        kind: 'ledger_conflict',
+        conflict: {
+          kind: 'version_conflict',
+          aggregateId: artifactId,
+          expectedVersion: 0,
+          actualVersion: 1,
+        },
+      });
     }
     const created = this.ledger.readArtifact(artifactId);
     if (created === null) return err({ kind: 'planning_snapshot_not_found', artifactId });
@@ -635,46 +612,34 @@ export class ImplementationPlanningStore {
         : err({ kind: 'clarification_answer_conflict', taskReference: planning.taskReference });
     }
 
-    const aggregateId = aggregateIdFor(planning.planningEpisodeId);
-    const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
     const recordedAt = this.clock.now();
-    const result = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${aggregateId}:${String(expectedVersion + 1)}`,
-            eventType: 'PlanningClarificationAnswered',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              taskReference: planning.taskReference,
-              attempt: planning.attempt,
-              artifactId,
-              questionCount: planning.decision.questions.length,
-              episodeId: planning.planningEpisodeId,
-            }),
-            actor: 'operator',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'planning_clarification_answers',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(payload),
-          metadata: asJson({
-            taskReference: planning.taskReference,
-            sourceAttempt: planning.attempt,
-            questionArtifactId: planning.artifactId,
-          }),
-          createdAt: recordedAt,
-        },
-      ],
-      timestamp: recordedAt,
+    const result = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'planning_clarification_answers',
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: asJson(payload),
+      metadata: asJson({
+        taskReference: planning.taskReference,
+        sourceAttempt: planning.attempt,
+        questionArtifactId: planning.artifactId,
+      }),
+      createdAt: recordedAt,
     });
-    if (result.ok) return ok({ artifactId });
+    if (result) {
+      this.ledger.appendStreamEvent({
+        taskReference: planning.taskReference,
+        eventType: 'PlanningClarificationAnswered',
+        payload: asJson({
+          taskReference: planning.taskReference,
+          attempt: planning.attempt,
+          artifactId,
+          questionCount: planning.decision.questions.length,
+          episodeId: planning.planningEpisodeId,
+        }),
+        occurredAt: recordedAt,
+      });
+      return ok({ artifactId });
+    }
 
     const concurrentlyRecorded = this.ledger.readArtifact(artifactId);
     const parsed = PlanningClarificationAnswerCommandSchema.safeParse(
@@ -682,7 +647,15 @@ export class ImplementationPlanningStore {
     );
     return parsed.success && JSON.stringify(parsed.data) === JSON.stringify(payload)
       ? ok({ artifactId })
-      : err({ kind: 'ledger_conflict', conflict: result.error });
+      : err({
+          kind: 'ledger_conflict',
+          conflict: {
+            kind: 'version_conflict',
+            aggregateId: artifactId,
+            expectedVersion: 0,
+            actualVersion: 1,
+          },
+        });
   }
 
   public fail(
@@ -752,39 +725,50 @@ export class ImplementationPlanningStore {
       readonly createdAt: string;
     },
   ): Outcome<ImplementationPlanningRecord, ImplementationPlanningStoreError> {
-    const aggregateId = aggregateIdFor(record.planningEpisodeId);
-    const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
-    const result = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${aggregateId}:${String(expectedVersion + 1)}`,
-            eventType,
-            eventSchemaVersion: 1,
-            payload,
-            actor: eventType === 'ImplementationPlanningStarted' ? 'planner_router' : 'planner',
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: IMPLEMENTATION_PLAN_PROJECTION,
-          projectionId: record.planningEpisodeId,
-          payload: asJson(record),
+    const existing = this.ledger.readDocument(DOCUMENT_KIND, record.planningEpisodeId);
+    const timestamp =
+      'completedAt' in record
+        ? record.completedAt
+        : eventType === 'ImplementationPlanningStarted'
+          ? record.startedAt
+          : this.clock.now();
+    if (artifact !== undefined) this.ledger.insertArtifact(artifact);
+    const saved =
+      existing === null
+        ? this.ledger.insertDocument({
+            kind: DOCUMENT_KIND,
+            id: record.planningEpisodeId,
+            revision: 1,
+            payload: asJson(record),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          })
+        : this.ledger.appendDocument(
+            DOCUMENT_KIND,
+            record.planningEpisodeId,
+            existing.revision,
+            asJson(record),
+            timestamp,
+          ).ok;
+    if (!saved) {
+      return err({
+        kind: 'ledger_conflict',
+        conflict: {
+          kind: 'version_conflict',
+          aggregateId: record.planningEpisodeId,
+          expectedVersion: existing?.revision ?? 0,
+          actualVersion:
+            this.ledger.readDocument(DOCUMENT_KIND, record.planningEpisodeId)?.revision ?? 0,
         },
-      ],
-      ...(artifact === undefined ? {} : { artifacts: [artifact] }),
-      timestamp:
-        'completedAt' in record
-          ? record.completedAt
-          : eventType === 'ImplementationPlanningStarted'
-            ? record.startedAt
-            : this.clock.now(),
+      });
+    }
+    this.ledger.appendStreamEvent({
+      taskReference: record.taskReference,
+      eventType,
+      payload,
+      occurredAt: timestamp,
     });
-    return result.ok ? ok(record) : err({ kind: 'ledger_conflict', conflict: result.error });
+    return ok(record);
   }
 }
 

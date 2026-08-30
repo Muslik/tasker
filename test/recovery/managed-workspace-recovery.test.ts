@@ -190,6 +190,12 @@ describe('managed workspace recovery', () => {
     expect(first.value.repository.sourcePath).toBe(realpathSync(repositoryPath));
     expect(first.value.repository.baseBranch).toBe('main');
     expect(git(first.value.path, ['branch', '--show-current'])).toBe(first.value.branch);
+    expect(
+      ledger.repository.readDocument('workspace', first.value.workspaceId)?.payload,
+    ).toMatchObject({
+      workspaceId: first.value.workspaceId,
+      taskReference: request.taskReference,
+    });
 
     writeFileSync(join(first.value.path, 'feature.txt'), 'changed once\n', 'utf8');
     expect(git(repositoryPath, ['status', '--porcelain'])).toBe('');
@@ -314,5 +320,11 @@ describe('managed workspace recovery', () => {
     expect(recovered).toEqual(ok(externalReceipt));
     expect(applyCalls).toBe(1);
     expect(store.read(workspace.value.workspaceId)).toEqual(recovered);
+    expect(
+      ledger.repository.readDocument('workspace_bootstrap', workspace.value.workspaceId)?.payload,
+    ).toMatchObject({
+      workspaceId: workspace.value.workspaceId,
+      operationId: `workspace:${workspace.value.workspaceId}:bootstrap@1`,
+    });
   });
 });

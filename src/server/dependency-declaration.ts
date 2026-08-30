@@ -2,11 +2,9 @@ import type { ZodError } from 'zod';
 
 import { checksumString } from '../store/checksum.js';
 import type { LedgerRepository } from '../store/repository.js';
-import type { JsonValue } from '../store/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
 import { canonicalJson } from '../shared/json.js';
-import { JsonValueSchema } from '../graph/schema.js';
 import {
   DependencyDeclarationSchema,
   RecordDependencyDeclarationInputSchema,
@@ -26,9 +24,7 @@ export type DependencyDeclarationStoreError =
       readonly issues: readonly string[];
     };
 
-const DEPENDENCY_DECLARATION_PROJECTION = 'dependency_declaration_latest';
-
-const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
+const DEPENDENCY_DECLARATION_DOCUMENT_KIND = 'dependency_declaration';
 
 const issues = (error: ZodError): readonly string[] =>
   error.issues.map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`);
@@ -53,17 +49,9 @@ const sameDeclaration = (
 const declarationHash = (input: RecordDependencyDeclarationInput): string =>
   checksumString(canonicalJson(comparableDeclaration(input)));
 
-const artifactIdFor = (declarationId: string, revision: number): string =>
-  `${declarationId}:revision-${String(revision)}`;
-
-const eventIdFor = (declarationId: string, revision: number): string =>
-  `event:${declarationId}:revision-${String(revision)}`;
-
-const aggregateIdFor = (declarationId: string): string => declarationId;
-
 const parseDeclaration = (
   recordId: string,
-  payload: JsonValue,
+  payload: unknown,
 ): Outcome<DependencyDeclaration, DependencyDeclarationStoreError> => {
   const parsed = DependencyDeclarationSchema.safeParse(payload);
   return parsed.success
@@ -94,25 +82,28 @@ export class DependencyDeclarationStore {
   public readLatest(
     declarationId: string,
   ): Outcome<DependencyDeclaration | null, DependencyDeclarationStoreError> {
-    const projection = this.ledger.readProjection(DEPENDENCY_DECLARATION_PROJECTION, declarationId);
-    return projection === null ? ok(null) : parseDeclaration(declarationId, projection.payload);
+    const document = this.ledger.readDocument(DEPENDENCY_DECLARATION_DOCUMENT_KIND, declarationId);
+    return document === null ? ok(null) : parseDeclaration(declarationId, document.payload);
   }
 
   public readRevision(
     declarationId: string,
     revision: number,
   ): Outcome<DependencyDeclaration | null, DependencyDeclarationStoreError> {
-    const artifactId = artifactIdFor(declarationId, revision);
-    const artifact = this.ledger.readArtifact(artifactId);
-    return artifact === null ? ok(null) : parseDeclaration(artifactId, artifact.payload);
+    const document = this.ledger.readDocument(
+      DEPENDENCY_DECLARATION_DOCUMENT_KIND,
+      declarationId,
+      revision,
+    );
+    return document === null ? ok(null) : parseDeclaration(declarationId, document.payload);
   }
 
   public listLatestByConsumerTask(
     consumerTaskReference: string,
   ): Outcome<readonly DependencyDeclaration[], DependencyDeclarationStoreError> {
     const matches: DependencyDeclaration[] = [];
-    for (const projection of this.ledger.listProjections(DEPENDENCY_DECLARATION_PROJECTION)) {
-      const parsed = parseDeclaration(projection.projectionId, projection.payload);
+    for (const document of this.ledger.listDocuments(DEPENDENCY_DECLARATION_DOCUMENT_KIND)) {
+      const parsed = parseDeclaration(document.id, document.payload);
       if (!parsed.ok) return parsed;
       if (parsed.value.consumerTaskReference === consumerTaskReference) {
         matches.push(parsed.value);
@@ -141,65 +132,22 @@ export class DependencyDeclarationStore {
       return ok(existing.value);
     }
 
-    const revision = (existing.value?.revision ?? 0) + 1;
     const declaredAt = this.clock.now();
     const declaration = DependencyDeclarationSchema.parse({
       schemaVersion: 1,
       declarationId,
-      revision,
+      revision: (existing.value?.revision ?? 0) + 1,
       hash: declarationHash(input),
       ...input,
       createdAt: declaredAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: aggregateIdFor(declarationId),
-        expectedVersion: existing.value?.revision ?? 0,
-        events: [
-          {
-            eventId: eventIdFor(declarationId, revision),
-            eventType: 'DependencyDeclarationRecorded',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              declarationId,
-              revision,
-              consumerTaskReference: declaration.consumerTaskReference,
-              producerTaskReference: declaration.producerTaskReference,
-              producerRepository: declaration.producerRepository,
-              mode: declaration.mode,
-            }),
-            actor: 'operator',
-          },
-        ],
-      },
-      projections: [
-        {
-          kind: 'upsert',
-          projectionType: DEPENDENCY_DECLARATION_PROJECTION,
-          projectionId: declarationId,
-          payload: asJson(declaration),
-        },
-      ],
-      artifacts: [
-        {
-          artifactId: artifactIdFor(declarationId, revision),
-          artifactKind: 'dependency_declaration',
-          storageUri: `ledger://artifacts/${artifactIdFor(declarationId, revision)}`,
-          payload: asJson(declaration),
-          metadata: asJson({
-            declarationId,
-            revision,
-            consumerTaskReference: declaration.consumerTaskReference,
-            producerTaskReference: declaration.producerTaskReference,
-            producerRepository: declaration.producerRepository,
-            mode: declaration.mode,
-            sourceKind: declaration.source.kind,
-          }),
-          createdAt: declaredAt,
-        },
-      ],
-      timestamp: declaredAt,
-    });
+    const committed = this.ledger.appendDocument(
+      DEPENDENCY_DECLARATION_DOCUMENT_KIND,
+      declarationId,
+      existing.value?.revision ?? 0,
+      declaration,
+      declaredAt,
+    );
     if (committed.ok) return ok(declaration);
 
     const concurrent = this.readLatest(declarationId);

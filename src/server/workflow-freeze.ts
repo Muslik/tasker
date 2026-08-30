@@ -76,13 +76,14 @@ export class WorkflowFreezeStore {
   public readLatest(
     taskReference: string,
   ): Outcome<WorkflowFreezeReceipt | null, WorkflowFreezeStoreError> {
-    for (const event of this.ledger.listEvents().toReversed()) {
-      if (event.eventType !== 'TaskWorkflowFrozen') continue;
-      const artifact = this.ledger.readArtifact(event.aggregateId);
-      if (artifact === null) continue;
-      const receipt = parseReceipt(event.aggregateId, artifact.payload);
+    for (const artifact of this.ledger
+      .listArtifacts({ artifactKind: 'workflow_freeze_receipt', taskReference })
+      .toReversed()) {
+      const receipt = parseReceipt(artifact.artifactId, artifact.payload);
       if (!receipt.ok) return receipt;
-      if (receipt.value.taskReference === taskReference) return receipt;
+      if (receipt.value.taskReference === taskReference) {
+        return receipt;
+      }
     }
     return ok(null);
   }
@@ -102,48 +103,26 @@ export class WorkflowFreezeStore {
       receiptId,
       frozenAt,
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId: receiptId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${receiptId}:1`,
-            eventType: 'TaskWorkflowFrozen',
-            eventSchemaVersion: 1,
-            payload: asJson({
-              receiptId,
-              semanticHash: receipt.semanticHash,
-              workflowHash: receipt.workflowHash,
-            }),
-            actor: 'kernel',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId: receiptId,
-          artifactKind: 'workflow_freeze_receipt',
-          storageUri: `ledger://artifacts/${receiptId}`,
-          payload: asJson(receipt),
-          metadata: asJson({
-            taskReference: receipt.taskReference,
-            workflowId: receipt.workflowId,
-            workflowRunId: receipt.workflowRunId,
-            workflowHash: receipt.workflowHash,
-            semanticHash: receipt.semanticHash,
-            compilerVersion: receipt.compilerVersion,
-            harnessSnapshotHash: receipt.harnessSnapshotHash,
-            planningArtifactId: receipt.planningArtifactId,
-            evidenceBundleArtifactId: receipt.evidenceBundle.artifactId,
-            approval: receipt.approval.kind,
-          }),
-          createdAt: frozenAt,
-        },
-      ],
-      timestamp: frozenAt,
+    const committed = this.ledger.insertArtifact({
+      artifactId: receiptId,
+      artifactKind: 'workflow_freeze_receipt',
+      storageUri: `ledger://artifacts/${receiptId}`,
+      payload: asJson(receipt),
+      metadata: asJson({
+        taskReference: receipt.taskReference,
+        workflowId: receipt.workflowId,
+        workflowRunId: receipt.workflowRunId,
+        workflowHash: receipt.workflowHash,
+        semanticHash: receipt.semanticHash,
+        compilerVersion: receipt.compilerVersion,
+        harnessSnapshotHash: receipt.harnessSnapshotHash,
+        planningArtifactId: receipt.planningArtifactId,
+        evidenceBundleArtifactId: receipt.evidenceBundle.artifactId,
+        approval: receipt.approval.kind,
+      }),
+      createdAt: frozenAt,
     });
-    if (committed.ok) return ok(receipt);
+    if (committed) return ok(receipt);
 
     const concurrent = this.ledger.readArtifact(receiptId);
     return concurrent === null

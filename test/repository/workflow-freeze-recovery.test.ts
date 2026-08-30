@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { WorkflowFreezeStore } from '../../src/server/index.js';
+import { WorkflowFreezeStore } from '../../src/server/workflow-freeze.js';
 import { openSqliteLedger } from '../../src/store/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 
@@ -51,9 +51,10 @@ describe('workflow freeze recovery', () => {
       expect(store.read(freezeInput.workflowId, freezeInput.workflowRunId)).toEqual(first);
       expect(store.read(freezeInput.workflowId, 'another-run')).toEqual({ ok: true, value: null });
       expect(
-        ledger.repository
-          .listEvents(first.value.receiptId)
-          .filter((event) => event.eventType === 'TaskWorkflowFrozen'),
+        ledger.repository.listArtifacts({
+          artifactKind: 'workflow_freeze_receipt',
+          taskReference: freezeInput.taskReference,
+        }),
       ).toHaveLength(1);
     } finally {
       ledger.close();

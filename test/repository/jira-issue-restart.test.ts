@@ -40,7 +40,7 @@ describe('Jira issue persistence', () => {
 
     expect(preview).toMatchObject({ ok: true, value: { issueKey: 'FC-2244' } });
     expect(service.listOperatorTasks()).toEqual({ ok: true, value: [] });
-    expect(ledger.repository.listEvents()).toEqual([]);
+    expect(ledger.repository.listDocuments('jira_issue')).toEqual([]);
   });
 
   it('keeps an intake repository when the first Jira request is blocked', async () => {
@@ -110,8 +110,16 @@ describe('Jira issue persistence', () => {
 
     expect(firstSync).toMatchObject({ ok: true, value: { status: 'current' } });
     expect(
-      firstLedger.repository.listEvents('intake:jira:AVIA-13235').map((event) => event.eventType),
-    ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
+      firstLedger.repository.readDocument('jira_issue', 'AVIA-13235', 1)?.payload,
+    ).toMatchObject({
+      status: 'current',
+    });
+    expect(
+      firstLedger.repository.readDocument('jira_binding', 'AVIA-13235', 1)?.payload,
+    ).toMatchObject({
+      status: 'resolved',
+      reference: 'front-avia',
+    });
     firstLedger.close();
     resources.pop();
 
@@ -170,10 +178,16 @@ describe('Jira issue persistence', () => {
       ],
     });
     expect(
-      restartedLedger.repository
-        .listEvents('intake:jira:AVIA-13235')
-        .map((event) => event.eventType),
-    ).toEqual(['JiraIntakeRequested', 'JiraRepositoryBound']);
+      restartedLedger.repository.readDocument('jira_issue', 'AVIA-13235')?.payload,
+    ).toMatchObject({
+      status: 'stale',
+    });
+    expect(
+      restartedLedger.repository.readDocument('jira_binding', 'AVIA-13235')?.payload,
+    ).toMatchObject({
+      status: 'resolved',
+      reference: 'front-avia',
+    });
   });
 
   it('does not reuse a persisted checkout that is outside the current managed store', async () => {

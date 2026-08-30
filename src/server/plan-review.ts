@@ -1,10 +1,8 @@
 import { z } from 'zod';
 
 import type { LedgerRepository } from '../store/repository.js';
-import type { JsonValue } from '../store/types.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../graph/schema.js';
 
 export const PlanReviewAnnotationSchema = z
   .object({
@@ -110,10 +108,10 @@ export type PlanReviewStoreError =
       readonly issues: readonly string[];
     };
 
-const asJson = (value: unknown): JsonValue => JsonValueSchema.parse(value);
-const aggregateIdFor = (planningEpisodeId: string): string => `plan-review:${planningEpisodeId}`;
-const artifactIdFor = (planningEpisodeId: string, reviewId: string): string =>
-  `plan-review-submission:${planningEpisodeId}:${reviewId}`;
+const DOCUMENT_KIND = 'plan_review';
+
+const documentIdFor = (planningEpisodeId: string, reviewId: string): string =>
+  `${planningEpisodeId}:${reviewId}`;
 
 const commandPayload = (command: PlanReviewCommand) => ({
   reviewId: command.reviewId,
@@ -125,7 +123,7 @@ const commandPayload = (command: PlanReviewCommand) => ({
 });
 
 const sameSubmission = (
-  submission: z.infer<typeof PlanReviewSubmissionSchema>,
+  submission: z.infer<typeof PlanReviewRoundSchema>,
   planningEpisodeId: string,
   taskReference: string,
   command: PlanReviewCommand,
@@ -160,151 +158,112 @@ export class PlanReviewStore {
     commandValue: PlanReviewCommand,
   ): Outcome<PlanReviewRound, PlanReviewStoreError> {
     const command = PlanReviewCommandSchema.parse(commandValue);
-    const artifactId = artifactIdFor(planningEpisodeId, command.reviewId);
-    const existing = this.ledger.readArtifact(artifactId);
+    const documentId = documentIdFor(planningEpisodeId, command.reviewId);
+    const existing = this.ledger.readDocument(DOCUMENT_KIND, documentId);
     if (existing !== null) {
       return this.restoreSubmission(planningEpisodeId, taskReference, command, existing.payload);
     }
 
     const submittedAt = this.clock.now();
-    const submission = PlanReviewSubmissionSchema.parse({
+    const submission = PlanReviewRoundSchema.parse({
       schemaVersion: 2,
       planningEpisodeId,
       taskReference,
       ...commandPayload(command),
       submittedAt,
+      status: 'submitted',
+      appliedAt: null,
     });
-    const aggregateId = aggregateIdFor(planningEpisodeId);
-    const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${artifactId}:submitted`,
-            eventType: 'PlanReviewSubmitted',
-            eventSchemaVersion: 1,
-            payload: asJson({ artifactId, reviewId: command.reviewId }),
-            actor: 'operator',
-          },
-        ],
-      },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'plan_review_submission',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: asJson(submission),
-          metadata: asJson({
-            taskReference,
-            planningEpisodeId,
-            planArtifactId: command.planArtifactId,
-            planAttempt: command.planAttempt,
-            decision: command.decision,
-          }),
-          createdAt: submittedAt,
-        },
-      ],
-      timestamp: submittedAt,
-    });
-    if (!committed.ok) {
-      const concurrent = this.ledger.readArtifact(artifactId);
-      return concurrent === null
-        ? err({ kind: 'ledger_conflict' })
-        : this.restoreSubmission(planningEpisodeId, taskReference, command, concurrent.payload);
-    }
-    return ok(PlanReviewRoundSchema.parse({ ...submission, status: 'submitted', appliedAt: null }));
+    const committed = this.ledger.appendDocument(
+      DOCUMENT_KIND,
+      documentId,
+      0,
+      submission,
+      submittedAt,
+    );
+    if (committed.ok) return ok(submission);
+
+    const concurrent = this.ledger.readDocument(DOCUMENT_KIND, documentId);
+    return concurrent === null
+      ? err({ kind: 'ledger_conflict' })
+      : this.restoreSubmission(planningEpisodeId, taskReference, command, concurrent.payload);
   }
 
   public markApplied(
     planningEpisodeId: string,
     reviewId: string,
   ): Outcome<void, PlanReviewStoreError> {
-    const aggregateId = aggregateIdFor(planningEpisodeId);
-    const appliedEventId = `event:${artifactIdFor(planningEpisodeId, reviewId)}:applied`;
-    if (this.ledger.listEvents(aggregateId).some((event) => event.eventId === appliedEventId)) {
-      return ok(undefined);
+    const documentId = documentIdFor(planningEpisodeId, reviewId);
+    const existing = this.ledger.readDocument(DOCUMENT_KIND, documentId);
+    if (existing === null) return ok(undefined);
+    const current = PlanReviewRoundSchema.safeParse(existing.payload);
+    if (!current.success) {
+      return err({
+        kind: 'review_corrupt',
+        reviewId,
+        issues: current.error.issues.map((issue) => issue.message),
+      });
     }
-    const expectedVersion = this.ledger.readAggregateHead(aggregateId)?.version ?? 0;
+    if (current.data.status === 'applied') return ok(undefined);
+
     const appliedAt = this.clock.now();
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion,
-        events: [
-          {
-            eventId: appliedEventId,
-            eventType: 'PlanReviewApplied',
-            eventSchemaVersion: 1,
-            payload: asJson({ reviewId, appliedAt }),
-            actor: 'kernel',
-          },
-        ],
-      },
-      timestamp: appliedAt,
-    });
+    const committed = this.ledger.appendDocument(
+      DOCUMENT_KIND,
+      documentId,
+      existing.revision,
+      PlanReviewRoundSchema.parse({
+        ...current.data,
+        status: 'applied',
+        appliedAt,
+      }),
+      appliedAt,
+    );
     if (committed.ok) return ok(undefined);
-    return this.ledger.listEvents(aggregateId).some((event) => event.eventId === appliedEventId)
-      ? ok(undefined)
-      : err({ kind: 'ledger_conflict' });
+
+    const concurrent = this.ledger.readDocument(DOCUMENT_KIND, documentId);
+    if (concurrent === null) return err({ kind: 'ledger_conflict' });
+    const parsed = PlanReviewRoundSchema.safeParse(concurrent.payload);
+    if (!parsed.success) {
+      return err({
+        kind: 'review_corrupt',
+        reviewId,
+        issues: parsed.error.issues.map((issue) => issue.message),
+      });
+    }
+    return parsed.data.status === 'applied' ? ok(undefined) : err({ kind: 'ledger_conflict' });
   }
 
   public read(
     planningEpisodeId: string,
   ): Outcome<readonly PlanReviewRound[], PlanReviewStoreError> {
-    const events = this.ledger.listEvents(aggregateIdFor(planningEpisodeId));
-    const applied = new Map<string, string>();
-    for (const event of events) {
-      if (event.eventType !== 'PlanReviewApplied') continue;
-      const parsed = z
-        .object({ reviewId: z.string().min(1), appliedAt: z.iso.datetime() })
-        .strict()
-        .safeParse(event.payload);
-      if (parsed.success) applied.set(parsed.data.reviewId, parsed.data.appliedAt);
-    }
     const rounds: PlanReviewRound[] = [];
-    for (const event of events) {
-      if (event.eventType !== 'PlanReviewSubmitted') continue;
-      const pointer = z
-        .object({ artifactId: z.string().min(1), reviewId: z.string().min(1) })
-        .strict()
-        .safeParse(event.payload);
-      if (!pointer.success) {
+    for (const document of this.ledger.listDocuments(DOCUMENT_KIND)) {
+      const round = PlanReviewRoundSchema.safeParse(document.payload);
+      if (!round.success) {
         return err({
           kind: 'review_corrupt',
-          reviewId: event.eventId,
-          issues: pointer.error.issues.map((issue) => issue.message),
+          reviewId: document.id,
+          issues: round.error.issues.map((issue) => issue.message),
         });
       }
-      const artifact = this.ledger.readArtifact(pointer.data.artifactId);
-      const submission = PlanReviewSubmissionSchema.safeParse(artifact?.payload);
-      if (!submission.success) {
-        return err({
-          kind: 'review_corrupt',
-          reviewId: pointer.data.reviewId,
-          issues: submission.error.issues.map((issue) => issue.message),
-        });
-      }
-      const appliedAt = applied.get(submission.data.reviewId) ?? null;
-      rounds.push(
-        PlanReviewRoundSchema.parse({
-          ...submission.data,
-          status: appliedAt === null ? 'submitted' : 'applied',
-          appliedAt,
-        }),
-      );
+      if (round.data.planningEpisodeId === planningEpisodeId) rounds.push(round.data);
     }
-    return ok(rounds);
+    return ok(
+      rounds.sort(
+        (left, right) =>
+          left.submittedAt.localeCompare(right.submittedAt) ||
+          left.reviewId.localeCompare(right.reviewId),
+      ),
+    );
   }
 
   private restoreSubmission(
     planningEpisodeId: string,
     taskReference: string,
     command: PlanReviewCommand,
-    payload: JsonValue,
+    payload: unknown,
   ): Outcome<PlanReviewRound, PlanReviewStoreError> {
-    const parsed = PlanReviewSubmissionSchema.safeParse(payload);
+    const parsed = PlanReviewRoundSchema.safeParse(payload);
     if (!parsed.success) {
       return err({
         kind: 'review_corrupt',
@@ -315,30 +274,6 @@ export class PlanReviewStore {
     if (!sameSubmission(parsed.data, planningEpisodeId, taskReference, command)) {
       return err({ kind: 'review_conflict', reviewId: command.reviewId });
     }
-    const applied = this.ledger
-      .listEvents(aggregateIdFor(planningEpisodeId))
-      .find(
-        (event) =>
-          event.eventType === 'PlanReviewApplied' &&
-          typeof event.payload === 'object' &&
-          event.payload !== null &&
-          !Array.isArray(event.payload) &&
-          event.payload.reviewId === command.reviewId,
-      );
-    const appliedAt =
-      applied !== undefined &&
-      typeof applied.payload === 'object' &&
-      applied.payload !== null &&
-      !Array.isArray(applied.payload) &&
-      typeof applied.payload.appliedAt === 'string'
-        ? applied.payload.appliedAt
-        : null;
-    return ok(
-      PlanReviewRoundSchema.parse({
-        ...parsed.data,
-        status: appliedAt === null ? 'submitted' : 'applied',
-        appliedAt,
-      }),
-    );
+    return ok(parsed.data);
   }
 }
