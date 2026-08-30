@@ -381,6 +381,7 @@ describe('workspace harness bootstrap', () => {
       'rust-design',
       'test-design',
       'typescript-design',
+      'retrospective',
     ]) {
       const directory = join(imported, skill);
       mkdirSync(directory, { recursive: true });

@@ -77,7 +77,9 @@ const requestFor = (
         details: {
           output: {
             documentStorageHtml: '<p>latest draft</p>',
-            proposedTasks: [{ title: 'Task 1', description: 'Draft follow-up', team: 'FE' }],
+            proposedTasks: [
+              { localId: 'task-1', title: 'Task 1', description: 'Draft follow-up', team: 'FE' },
+            ],
             openQuestions: [],
           },
         },

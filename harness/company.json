@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "7",
+  "version": "8",
   "availableCapabilities": [
     "ci.read",
     "command.run",
@@ -32,11 +32,26 @@
     },
     "bootstrap": [],
     "cacheVolumes": [
-      { "id": "home", "mountPath": "/tasker/home" },
-      { "id": "node-modules", "mountPath": "/workspace/node_modules" },
-      { "id": "pnpm-store", "mountPath": "/tasker/cache/pnpm-store" },
-      { "id": "mise-cache", "mountPath": "/tasker/cache/mise" },
-      { "id": "playwright-browsers", "mountPath": "/tasker/cache/playwright" },
+      {
+        "id": "home",
+        "mountPath": "/tasker/home"
+      },
+      {
+        "id": "node-modules",
+        "mountPath": "/workspace/node_modules"
+      },
+      {
+        "id": "pnpm-store",
+        "mountPath": "/tasker/cache/pnpm-store"
+      },
+      {
+        "id": "mise-cache",
+        "mountPath": "/tasker/cache/mise"
+      },
+      {
+        "id": "playwright-browsers",
+        "mountPath": "/tasker/cache/playwright"
+      },
       {
         "id": "nested-docker-data",
         "mountPath": "/var/lib/docker",
@@ -46,13 +61,18 @@
     "services": [
       {
         "id": "tasker-docker",
-        "image": { "kind": "prebuilt", "reference": "docker:29-dind" },
+        "image": {
+          "kind": "prebuilt",
+          "reference": "docker:29-dind"
+        },
         "command": "dockerd-entrypoint.sh --host=tcp://0.0.0.0:2375 --tls=false",
         "shell": "sh",
         "privileged": true,
         "aliases": ["tasker-docker"],
         "readyCheck": "docker info --format '{{.ServerVersion}}' >/dev/null",
-        "environment": { "DOCKER_TLS_CERTDIR": "" }
+        "environment": {
+          "DOCKER_TLS_CERTDIR": ""
+        }
       }
     ]
   },
@@ -61,10 +81,18 @@
     "implementationPlannerSkills": ["jira", "confluence", "loop", "grill-me"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
   },
-  "retrospective": { "enabled": true },
+  "retrospective": {
+    "enabled": true
+  },
   "subagentProfiles": {
-    "explore": { "claude": "claude-haiku-4-5", "codex": "gpt-5.6-luna" },
-    "test-writer": { "claude": "claude-haiku-4-5", "codex": "gpt-5.6-luna" }
+    "explore": {
+      "claude": "claude-haiku-4-5",
+      "codex": "gpt-5.6-luna"
+    },
+    "test-writer": {
+      "claude": "claude-haiku-4-5",
+      "codex": "gpt-5.6-luna"
+    }
   },
   "apiPricing": {
     "version": "openai-2026-08-22",
@@ -264,6 +292,29 @@
       "effort": "high",
       "timeoutMs": 900000,
       "serviceTier": "fast"
+    },
+    "draft-claude-sonnet": {
+      "provider": "claude",
+      "command": "claude",
+      "model": "sonnet",
+      "effort": "high",
+      "timeoutMs": 1800000
+    },
+    "review-codex-sol": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "task-filing": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "timeoutMs": 900000,
+      "serviceTier": "fast"
     }
   },
   "executionProfileRouting": {
@@ -271,7 +322,7 @@
     "retrospective": "retrospective-analysis",
     "implementationPlanner": {
       "fast": "planning-fast",
-      "ralplan": "planning-ralplan"
+      "ralplan": "claude-ralplan"
     },
     "taskStrategies": {
       "simple": {

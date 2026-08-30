@@ -48,8 +48,9 @@ fill one.
    Макеты (Figma), Аналитика (BI), смежные СА других продуктов.
 3. **Задачи к заведению** — the deliverable the operator will file in Jira: a table
    of proposed tasks (заголовок в стиле продукта, короткое описание, кому — FE/BE/
-   продукт, зависимость/блокер). Found-in-passing defects go here as separate tasks,
-   never mixed into the main scope.
+   продукт, тип — задача/баг/подзадача, родитель для подзадач, связи — блокирует/
+   связана). Express родительские и link-ссылки через localId из structured output.
+   Found-in-passing defects go here as separate tasks, never mixed into the main scope.
 4. **Договорённости** — decisions already closed while researching («разобрано с
    продуктом по ходу аналитики — чтобы не спрашивать заново»), each one line. Closed
    decisions are recorded here, never re-asked in «Что нужно решить».

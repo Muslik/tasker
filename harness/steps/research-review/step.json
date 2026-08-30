@@ -2,13 +2,16 @@
   "schemaVersion": 2,
   "reference": "research.review@1",
   "description": "Independently review the drafted SA page, ticket breakdown, and open questions before publication.",
-  "stage": { "id": "agent_review", "label": "Agent review" },
+  "stage": {
+    "id": "agent_review",
+    "label": "Agent review"
+  },
   "availableDuring": ["execution"],
   "inputContract": "research_input",
   "outputContract": "research_review_output",
   "executor": {
     "kind": "agent",
-    "profile": "review",
+    "profile": "review-codex-sol",
     "strategyRole": "review",
     "prompt": "prompt.md",
     "skills": [

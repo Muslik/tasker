@@ -345,7 +345,7 @@ describe('file-backed harness pack', () => {
     });
     expect(draft?.block.executor).toMatchObject({
       kind: 'agent',
-      profile: 'implementation',
+      profile: 'draft-claude-sonnet',
       strategyRole: 'implementation',
       skills: [
         'confluence',
@@ -362,7 +362,7 @@ describe('file-backed harness pack', () => {
     expect(review?.block).toMatchObject({
       executor: {
         kind: 'agent',
-        profile: 'review',
+        profile: 'review-codex-sol',
         strategyRole: 'review',
         skills: [
           'confluence',
@@ -404,7 +404,7 @@ describe('file-backed harness pack', () => {
     expect(fileTasks?.block).toMatchObject({
       executor: {
         kind: 'agent',
-        profile: 'documentation',
+        profile: 'task-filing',
         strategyRole: null,
         skills: ['jira-issue', 'jira-edit', 'confluence-edit'],
       },
@@ -440,6 +440,7 @@ describe('file-backed harness pack', () => {
         documentStorageHtml: '<ac:layout />',
         proposedTasks: [
           {
+            localId: 'remove-babies-fe',
             title: 'Убрать завязки на babies в FE',
             description: 'Подготовить фронтовую реализацию.',
             team: 'FE',
@@ -452,8 +453,43 @@ describe('file-backed harness pack', () => {
       draft?.contract.outputSchema.safeParse({
         documentStorageHtml: '<p>Duplicate tasks</p>',
         proposedTasks: [
-          { title: 'Одинаковая задача', description: 'Первая.', team: 'FE' },
-          { title: 'Одинаковая задача', description: 'Вторая.', team: 'BE' },
+          { localId: 'first-task', title: 'Одинаковая задача', description: 'Первая.', team: 'FE' },
+          {
+            localId: 'second-task',
+            title: 'Одинаковая задача',
+            description: 'Вторая.',
+            team: 'BE',
+          },
+        ],
+        openQuestions: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      draft?.contract.outputSchema.safeParse({
+        documentStorageHtml: '<ac:layout />',
+        proposedTasks: [
+          {
+            localId: 'child-task',
+            title: 'Подзадача без родителя',
+            description: 'Нужно выполнить часть работы.',
+            team: 'FE',
+            issueType: 'subtask',
+          },
+        ],
+        openQuestions: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      draft?.contract.outputSchema.safeParse({
+        documentStorageHtml: '<ac:layout />',
+        proposedTasks: [
+          {
+            localId: 'main-task',
+            title: 'Основная задача',
+            description: 'Нужно выполнить работу.',
+            team: 'FE',
+            links: [{ type: 'blocks', target: 'missing-task' }],
+          },
         ],
         openQuestions: [],
       }).success,

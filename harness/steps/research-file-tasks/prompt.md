@@ -6,9 +6,19 @@ Read the approved draft, the published page result, and `research_input.product`
 2. Run `node .tasker/harness/lib/research-task-idempotency.mjs <PROJECT> <proposed-tasks.json>`.
    Use `research_input.product.jiraProjects[0]` for `<PROJECT>`.
 3. The helper returns `existing` and `missing`. Create Jira issues only for `missing`,
-   using `jira-issue` and `jira-edit` as needed.
-4. Return one `issueKeys` array containing both the carried-forward keys from `existing`
-   and the newly created keys.
+   using `jira-issue` and `jira-edit` as needed. Resolve each task's `localId` to its
+   Jira key as it is created or carried forward. Search by summary before every create.
+   File parents and standalone tasks first. Then file subtasks, using the exact
+   corporate Sub-task issue-type name discovered via Jira `createmeta` or the jira skill
+   (never hardcode the type name), and set their parent with `--raw-field`.
+   Every created task gets the research task's epic link when one exists. Discover the
+   Server/DC epic-link custom field through the jira skill or field metadata; never
+   hardcode a `customfield_*` id.
+4. After all issue keys are resolved, create the declared links between them with
+   `jira-edit` (`--link "blocks:<KEY>"` or `--link "relates:<KEY>"`). The link operation
+   checks existing links before creating, so links are idempotent. Return one `issueKeys`
+   array containing both the carried-forward keys from `existing` and the newly created
+   keys.
 
 The earlier `research.document-review@1` approval already authorizes this filing step.
 Do not ask for another approval.

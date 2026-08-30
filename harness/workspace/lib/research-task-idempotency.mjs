@@ -12,7 +12,7 @@ export const selectUnfiledProposedTasks = (proposedTasks, existingIssues) => {
   return {
     existing: proposedTasks.flatMap((task) => {
       const issue = issueBySummary.get(task.title);
-      return issue === undefined ? [] : [{ title: task.title, issueKey: issue.key }];
+      return issue === undefined ? [] : [{ localId: task.localId, title: task.title, issueKey: issue.key }];
     }),
     missing: proposedTasks.filter((task) => !issueBySummary.has(task.title)),
   };

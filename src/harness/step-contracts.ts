@@ -51,12 +51,29 @@ const ResearchOpenQuestionSchema = z
     question: z.string().min(1),
   })
   .strict();
+const ResearchLocalIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a kebab-case localId');
+const JiraIssueKeySchema = z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/u);
+const ResearchTaskReferenceSchema = z.union([ResearchLocalIdSchema, JiraIssueKeySchema]);
 const ResearchProposedTaskSchema = z
   .object({
+    localId: ResearchLocalIdSchema,
     title: z.string().min(1),
     description: z.string().min(1),
     team: z.enum(['FE', 'BE', 'product']),
-    dependsOn: z.string().min(1).optional(),
+    issueType: z.enum(['task', 'bug', 'subtask']).default('task'),
+    parent: ResearchTaskReferenceSchema.optional(),
+    links: z
+      .array(
+        z
+          .object({
+            type: z.enum(['blocks', 'relates']),
+            target: ResearchTaskReferenceSchema,
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 const ResearchReviewEditSchema = z
@@ -226,6 +243,44 @@ export const researchDraftOutputSchema = z
       .superRefine((tasks, context) => {
         if (new Set(tasks.map(({ title }) => title)).size !== tasks.length) {
           context.addIssue({ code: 'custom', message: 'Proposed task titles must be unique' });
+        }
+        const localIds = tasks.map(({ localId }) => localId);
+        if (new Set(localIds).size !== localIds.length) {
+          context.addIssue({ code: 'custom', message: 'Proposed task localIds must be unique' });
+        }
+        const localIdSet = new Set(localIds);
+        const jiraKeyPattern = /^[A-Z][A-Z0-9_]*-\d+$/u;
+        for (const [index, task] of tasks.entries()) {
+          if (task.issueType === 'subtask' && !task.parent) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'parent'],
+              message: 'Subtasks must specify a parent',
+            });
+          }
+          if (task.issueType !== 'subtask' && task.parent) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'parent'],
+              message: 'Only subtasks may specify a parent',
+            });
+          }
+          if (task.parent && !localIdSet.has(task.parent) && !jiraKeyPattern.test(task.parent)) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'parent'],
+              message: 'Parent must reference a proposed localId or Jira issue key',
+            });
+          }
+          for (const [linkIndex, link] of (task.links ?? []).entries()) {
+            if (!localIdSet.has(link.target) && !jiraKeyPattern.test(link.target)) {
+              context.addIssue({
+                code: 'custom',
+                path: [index, 'links', linkIndex, 'target'],
+                message: 'Link target must reference a proposed localId or Jira issue key',
+              });
+            }
+          }
         }
       }),
     openQuestions: z.array(ResearchOpenQuestionSchema),
