@@ -28,15 +28,15 @@ import {
 } from '../execution-kernel/messages.js';
 
 const singleDeliveryActivities = proxyActivities<ExecutionWorkflowActivities>({
-  startToCloseTimeout: '35 minutes',
-  scheduleToCloseTimeout: '2 hours',
+  startToCloseTimeout: '45 minutes',
+  scheduleToCloseTimeout: '3 hours',
   heartbeatTimeout: '30 seconds',
   retry: { maximumAttempts: 1 },
 });
 
 const recoverableDeliveryActivities = proxyActivities<ExecutionWorkflowActivities>({
-  startToCloseTimeout: '35 minutes',
-  scheduleToCloseTimeout: '2 hours',
+  startToCloseTimeout: '45 minutes',
+  scheduleToCloseTimeout: '3 hours',
   heartbeatTimeout: '30 seconds',
   retry: {
     initialInterval: '1 second',

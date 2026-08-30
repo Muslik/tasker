@@ -24,11 +24,9 @@ run only in Docker-backed Temporal Activities; typed remote APIs remain Activity
 adapters; review, clarification, translation, publication, CI, and
 infrastructure pauses use durable Temporal messages and conditions.
 
-Read the canonical design in [`docs/codex`](docs/codex/README.md) and the extension
-contract in
-[`docs/codex/customization-guide.md`](docs/codex/customization-guide.md).
-Docker-only execution and project bootstrap are documented in
-[`docs/codex/docker-execution.md`](docs/codex/docker-execution.md).
+The project is mid-rebuild: the canon, target architecture, and phase status live in
+[`docs/REBUILD.md`](docs/REBUILD.md). Historical design documents are archived in
+[`docs/archive`](docs/archive) and no longer describe the system.
 
 Prompts and company/project workflow guidance are editable under [`harness`](harness).
 Company step packages and policies are file-backed under [`harness/steps`](harness/steps) and
@@ -55,8 +53,7 @@ evidence and is not attached to Jira automatically.
 Block Contract v3 is authoritative: an agent may return a candidate claim, but only
 independently collected process, artifact, workspace, or reconciled-effect evidence can
 produce the immutable receipt that advances the graph. Provider/model selection is a
-strict versioned execution-profile decision resolved before freeze. See
-[`docs/codex/implementation-plan.md`](docs/codex/implementation-plan.md).
+strict versioned execution-profile decision resolved before freeze.
 
 ```bash
 fnm exec --using=24.16.0 /usr/local/bin/pnpm verify

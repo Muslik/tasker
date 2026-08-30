@@ -32,8 +32,8 @@ import {
 import { executionWorkflowV2 } from './execution-workflow-v2.js';
 
 const activities = proxyActivities<BootstrapWorkflowActivities>({
-  startToCloseTimeout: '35 minutes',
-  scheduleToCloseTimeout: '2 hours',
+  startToCloseTimeout: '45 minutes',
+  scheduleToCloseTimeout: '3 hours',
   heartbeatTimeout: '30 seconds',
   retry: {
     initialInterval: '1 second',
