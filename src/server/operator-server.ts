@@ -187,7 +187,7 @@ export const startOperatorServer = async (): Promise<void> => {
           new BitbucketReviewClient(bitbucketConfiguration),
           new PullRequestReviewEvidenceStore(ledger.repository, systemClock),
         );
-  const cockpitDirectory = resolve('dist/cockpit');
+  const uiDirectory = resolve('dist/ui');
   const api = buildOperatorApi({
     service,
     jiraIssueService,
@@ -207,7 +207,7 @@ export const startOperatorServer = async (): Promise<void> => {
     completedRuns,
     taskPresence,
     taskRemoval,
-    ...(existsSync(cockpitDirectory) ? { cockpitDirectory } : {}),
+    ...(existsSync(uiDirectory) ? { uiDirectory } : {}),
   });
 
   const close = async (): Promise<void> => {

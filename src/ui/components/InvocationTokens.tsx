@@ -2,7 +2,7 @@ import type {
   OperatorTaskInvocationListResponse,
   OperatorTaskInvocationListRow,
 } from '../../server/operator-contracts.js';
-import { cn } from '../../cockpit/lib/utils.js';
+import { cn } from '../lib/utils.js';
 import type { InvocationSelection } from './CurrentAttemptStatus.js';
 
 export type InvocationTokensRowView = Readonly<{

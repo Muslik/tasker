@@ -42,17 +42,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/cockpit/**/*.{ts,tsx}', 'test/unit/cockpit/**/*.tsx'],
-    languageOptions: {
-      parserOptions: {
-        projectService: false,
-        project: ['./tsconfig.cockpit.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
-  {
-    files: ['src/ui/**/*.{ts,tsx}'],
+    files: ['src/ui/**/*.{ts,tsx}', 'test/unit/**/*.tsx'],
     languageOptions: {
       parserOptions: {
         projectService: false,

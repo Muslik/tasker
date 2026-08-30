@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Button } from '../../cockpit/components/ui/button.js';
+import { Button } from './ui/button.js';
 import type {
   ExecutionRunView,
   OperatorTaskSummary,

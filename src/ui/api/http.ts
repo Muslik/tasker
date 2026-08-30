@@ -90,3 +90,22 @@ export const postJson = async <TRequestSchema extends z.ZodType, TResponseSchema
   if (!response.ok) throw toApiError(response, body);
   return responseSchema.parse(body);
 };
+
+export const deleteJson = async <
+  TRequestSchema extends z.ZodType,
+  TResponseSchema extends z.ZodType,
+>(
+  path: string,
+  requestSchema: TRequestSchema,
+  responseSchema: TResponseSchema,
+  input: z.input<TRequestSchema>,
+): Promise<z.output<TResponseSchema>> => {
+  const { body, response } = await requestJson(path, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(requestSchema.parse(input)),
+  });
+
+  if (!response.ok) throw toApiError(response, body);
+  return responseSchema.parse(body);
+};

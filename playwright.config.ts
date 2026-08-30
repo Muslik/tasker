@@ -8,7 +8,7 @@ const parsePort = (input: string | undefined, fallback: number, name: string): n
   return value;
 };
 
-const cockpitPort = parsePort(process.env.TASKER_E2E_COCKPIT_PORT, 4310, 'TASKER_E2E_COCKPIT_PORT');
+const uiPort = parsePort(process.env.TASKER_E2E_UI_PORT, 4312, 'TASKER_E2E_UI_PORT');
 
 export default defineConfig({
   testDir: './test/browser',
@@ -17,13 +17,13 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: `http://127.0.0.1:${String(cockpitPort)}`,
+    baseURL: `http://127.0.0.1:${String(uiPort)}`,
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `pnpm exec vite --port ${String(cockpitPort)}`,
-    url: `http://127.0.0.1:${String(cockpitPort)}`,
+    command: `pnpm exec vite --config vite.ui.config.ts --port ${String(uiPort)}`,
+    url: `http://127.0.0.1:${String(uiPort)}`,
     reuseExistingServer: false,
     timeout: 30_000,
   },

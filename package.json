@@ -15,12 +15,11 @@
     ]
   },
   "scripts": {
-    "build": "pnpm build:server && pnpm build:cockpit",
+    "build": "pnpm build:server && pnpm build:ui",
     "build:server": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
-    "build:cockpit": "vite build",
-    "typecheck": "pnpm typecheck:server && pnpm typecheck:cockpit && pnpm typecheck:ui",
+    "build:ui": "vite build --config vite.ui.config.ts",
+    "typecheck": "pnpm typecheck:server && pnpm typecheck:ui",
     "typecheck:server": "tsc --noEmit",
-    "typecheck:cockpit": "tsc --noEmit -p tsconfig.cockpit.json",
     "typecheck:ui": "tsc --noEmit -p tsconfig.ui.json",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -38,7 +37,6 @@
     "depcruise": "dependency-cruiser src --config .dependency-cruiser.cjs --validate",
     "dev": "pnpm build && node scripts/start-local.mjs",
     "dev:api:operator": "pnpm build:server && node dist/server/operator-server.js",
-    "dev:cockpit": "vite",
     "dev:ui": "vite --config vite.ui.config.ts",
     "temporal:dev": "temporal server start-dev --namespace tasker-dev --db-filename .tasker/temporal.sqlite",
     "temporal:api": "pnpm dev:api:operator",

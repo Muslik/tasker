@@ -2,7 +2,7 @@ import type {
   OperatorRunLogEntry,
   OperatorTaskInvocationDetail,
 } from '../../server/operator-contracts.js';
-import { cn } from '../../cockpit/lib/utils.js';
+import { cn } from '../lib/utils.js';
 import { formatDuration } from '../lib/format.js';
 
 export type InvocationPromptProps = {
