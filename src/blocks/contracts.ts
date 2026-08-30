@@ -95,6 +95,17 @@ export const AgentQuestionSchema = z
   .strict()
   .readonly();
 
+export const BlockedClaimCategorySchema = z.enum([
+  'infrastructure',
+  'authorization',
+  'task_ambiguity',
+  'configuration',
+  'invalid_request',
+  'remote_conflict',
+  'verification',
+  'unknown_outcome',
+]);
+
 export const AgentClaimSchema = z.discriminatedUnion('status', [
   z
     .object({
@@ -109,6 +120,7 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
     .object({
       status: z.literal('needs_input'),
       summary: z.string().min(1),
+      waitKind: z.string().min(1),
       questions: z.array(AgentQuestionSchema).min(1).max(10),
     })
     .strict()
@@ -126,16 +138,7 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
       status: z.literal('blocked'),
       summary: z.string().min(1),
       waitKind: z.string().min(1),
-      category: z.enum([
-        'infrastructure',
-        'authorization',
-        'task_ambiguity',
-        'configuration',
-        'invalid_request',
-        'remote_conflict',
-        'verification',
-        'unknown_outcome',
-      ]),
+      category: BlockedClaimCategorySchema,
       retryable: z.boolean(),
     })
     .strict()
@@ -217,11 +220,19 @@ export const CompletionVerdictSchema = z.discriminatedUnion('status', [
     })
     .strict()
     .readonly(),
+  z
+    .object({
+      status: z.literal('waiting'),
+      waitKind: z.string().min(1),
+      summary: z.string().min(1),
+    })
+    .strict()
+    .readonly(),
 ]);
 
 export const BlockReceiptSchema = z
   .object({
-    schemaVersion: z.literal(5),
+    schemaVersion: z.literal(6),
     receiptId: z.string().min(1),
     blockReference: VersionedReferenceSchema,
     blockDefinitionHash: z.string().min(1),
@@ -256,6 +267,7 @@ export type CompletionEvaluator =
 
 export type BlockDefinition = z.infer<typeof BlockDefinitionSchema>;
 export type AgentClaim = z.infer<typeof AgentClaimSchema>;
+export type BlockedClaimCategory = z.infer<typeof BlockedClaimCategorySchema>;
 export type CompletionEvidence = z.infer<typeof CompletionEvidenceSchema>;
 export type CompletionVerdict = z.infer<typeof CompletionVerdictSchema>;
 export type BlockReceipt = z.infer<typeof BlockReceiptSchema>;

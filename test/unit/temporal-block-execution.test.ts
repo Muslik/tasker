@@ -1094,6 +1094,143 @@ describe('temporal block execution activity', () => {
     );
   });
 
+  it('records a human-review wait as a waiting verdict and completes the block once it resolves', async () => {
+    ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);
+    const receipts = new BlockReceiptStore(ledger.repository, systemClock);
+    const pullRequest = {
+      externalId: '495',
+      status: 'open' as const,
+      provider: 'bitbucket',
+      repository: fixture.repository,
+      sourceBranch: 'AVIA-13236',
+      targetBranch: 'master',
+      url: 'https://bitbucket.example.test/pull-requests/495',
+    };
+    const ci = {
+      externalId: 'build-495',
+      status: 'passed' as const,
+      provider: 'jenkins',
+      build: {
+        number: 495,
+        url: 'https://jenkins.example.test/job/avia/495/',
+        revision: 'f'.repeat(40),
+        result: 'SUCCESS',
+        durationMs: 1_000,
+      },
+      stages: [],
+      failures: [],
+    };
+    const execute = vi.fn((request: { readonly waitResolution: unknown }) =>
+      Promise.resolve(
+        request.waitResolution === null
+          ? {
+              status: 'waiting' as const,
+              waitKind: 'code_review@1',
+              summary: 'Pull request 495 passed CI and is waiting for human review',
+              details: { phase: 'human_review' },
+              artifactIds: ['pull-request:495'],
+            }
+          : {
+              status: 'completed' as const,
+              summary: 'Pull request 495 passed CI and human review',
+              output: { ...pullRequest, outcome: 'accepted' as const, ci, repair: null },
+              artifactIds: ['pull-request:495'],
+            },
+      ),
+    );
+    const activity = createTaskExecutionActivity(
+      {
+        snapshots: { readRunSnapshot: () => ok(makeSnapshot('deliver.pull-request@1')) },
+        currentSteps: createCurrentStepRegistry(pack),
+        traces,
+        mutationRecovery,
+        receipts,
+        runtimes: readyRuntime(),
+        agentRunner: { run: vi.fn() },
+        commands: workspaceCommands(),
+        workspaces: stubWorkspaceStore,
+        integrations: new IntegrationStepAdapterRegistry([
+          { id: 'delivery.pull-request@1', execute },
+        ]),
+      },
+      () => ({
+        attempt: 1,
+        cancellationSignal: new AbortController().signal,
+        heartbeat: () => {},
+      }),
+    );
+    const input = {
+      schemaVersion: 2 as const,
+      taskReference: 'task-ref',
+      workflowId: stubWorkspace.workflowId,
+      workflowRunId: stubWorkspace.workflowRunId,
+      workflowHash: WORKFLOW_HASH,
+      nodeId: 'deliver-change',
+      blockRun: 1,
+      uses: 'deliver.pull-request@1',
+      activityDelivery: { kind: 'remote_reconciled' as const },
+      contextReferences: [
+        { kind: 'workspace' as const, reference: stubWorkspace.workspaceId },
+        {
+          kind: 'planning_snapshot' as const,
+          reference: 'planning-snapshot:test',
+          hash: 'd'.repeat(64),
+        },
+        { kind: 'tracker_status_updates' as const, reference: 'disabled' },
+      ],
+      operatorGuidance: null,
+      waitResolution: null,
+      input: {
+        objective: 'Deliver the reviewed change',
+        repository: fixture.repository,
+        taskId: fixture.taskId,
+      },
+    };
+    const receiptFor = (blockRun: number) =>
+      receipts.read(
+        blockReceiptId({
+          workflowId: stubWorkspace.workflowId,
+          workflowRunId: stubWorkspace.workflowRunId,
+          nodeId: 'deliver-change',
+          blockRun,
+        }),
+      );
+
+    const waited = await activity.runExecutionBlock(input);
+    const resumed = await activity.runExecutionBlock({
+      ...input,
+      blockRun: 2,
+      waitResolution: { decision: 'approved', reviewId: 'review-1' },
+    });
+
+    expect(waited).toEqual({
+      status: 'needs_input',
+      summary: 'Pull request 495 passed CI and is waiting for human review',
+      waitKind: 'code_review@1',
+    });
+    expect(receiptFor(1)).toMatchObject({
+      ok: true,
+      value: {
+        claim: { status: 'blocked', waitKind: 'code_review@1', retryable: true },
+        verdict: {
+          status: 'waiting',
+          waitKind: 'code_review@1',
+          summary: 'Pull request 495 passed CI and is waiting for human review',
+        },
+      },
+    });
+    expect(resumed).toMatchObject({
+      status: 'completed',
+      summary: 'Pull request 495 passed CI and human review',
+      predicateFacts: { 'delivery.accepted@1': true, 'delivery.repair_required@1': false },
+    });
+    expect(receiptFor(2)).toMatchObject({
+      ok: true,
+      value: { claim: { status: 'candidate_complete' }, verdict: { status: 'accepted' } },
+    });
+  });
+
   it('advances the execution graph only after an accepted BlockReceipt', async () => {
     ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
     const traces = new TemporalTaskStepTraceStore(ledger.repository, systemClock);

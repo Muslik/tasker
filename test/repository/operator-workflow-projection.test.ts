@@ -386,7 +386,7 @@ describe('operator workflow projection', () => {
       },
     });
     const receipt = BlockReceiptSchema.parse({
-      schemaVersion: 5,
+      schemaVersion: 6,
       receiptId: 'block-receipt:execution-workflow:execution-run:implement-change:run-1',
       blockReference: 'implement.change@1',
       blockDefinitionHash: 'block-definition-hash',

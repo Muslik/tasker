@@ -5,10 +5,10 @@ type TokenUsage = Pick<AgentInvocationUsage, 'inputTokens' | 'cachedInputTokens'
 
 export const estimateApiCost = (
   profile: ResolvedExecutionProfile,
-  usage: TokenUsage,
+  usage: TokenUsage | null,
   providerReportedUsd: number | null,
 ) => {
-  if (profile.apiPricing === null) {
+  if (usage === null || profile.apiPricing === null) {
     return AgentApiCostSchema.parse(
       providerReportedUsd === null
         ? { source: 'unrated' }

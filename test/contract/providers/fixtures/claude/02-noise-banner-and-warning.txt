@@ -1,0 +1,5 @@
+Claude Code v1.2.3 starting up...
+{"type":"system","subtype":"init","session_id":"claude-noise-1"}
+WARNING: rate limit approaching, retrying in 2s
+{"type":"assistant","message":{"content":[{"type":"text","text":"Continuing..."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"ok","summary":"Completed with warnings","count":1},"session_id":"claude-noise-1","usage":{"input_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":20}}

@@ -67,6 +67,7 @@ describe('block completion', () => {
         {
           status: 'needs_input',
           summary: 'The expected product behavior is ambiguous',
+          waitKind: 'implement.change@1.input-required@1',
           questions: [
             {
               id: 'expected-behavior',
@@ -78,8 +79,42 @@ describe('block completion', () => {
         [],
       ),
     ).toEqual({
+      status: 'waiting',
+      waitKind: 'implement.change@1.input-required@1',
+      summary: 'The expected product behavior is ambiguous',
+    });
+  });
+
+  it('records a wait instead of a rejection when a block waits on the world', () => {
+    expect(
+      evaluateBlockCompletion(
+        { kind: 'reconciled_effect' },
+        {
+          status: 'blocked',
+          summary: 'Pull request 495 passed CI and is waiting for human review',
+          waitKind: 'code_review@1',
+          category: 'unknown_outcome',
+          retryable: true,
+        },
+        [],
+      ),
+    ).toEqual({
+      status: 'waiting',
+      waitKind: 'code_review@1',
+      summary: 'Pull request 495 passed CI and is waiting for human review',
+    });
+  });
+
+  it('rejects a claim that neither completes nor waits', () => {
+    expect(
+      evaluateBlockCompletion(
+        { kind: 'workspace_mutation' },
+        { status: 'failed', summary: 'The provider crashed', category: 'provider' },
+        [],
+      ),
+    ).toEqual({
       status: 'rejected',
-      reasons: ['Agent claim needs_input is not a completion claim'],
+      reasons: ['Agent claim failed is not a completion claim'],
     });
   });
 

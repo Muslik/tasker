@@ -315,6 +315,15 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
 
       const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) return stream;
+      const streamDiagnosticsStderr =
+        stream.value.diagnostics.length === 0
+          ? execution.stderr
+          : [
+              execution.stderr,
+              `[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s): ${stream.value.diagnostics.join(' | ')}`,
+            ]
+              .filter((entry) => entry.length > 0)
+              .join('\n');
       const providerOutput = ImplementationPlannerProviderOutputSchema.safeParse(
         stream.value.finalMessage,
       );
@@ -344,10 +353,10 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         promptHash: sha256(prompt),
         durationMs: execution.durationMs,
         usage: {
-          inputTokens: stream.value.usage.inputTokens,
-          cachedInputTokens: stream.value.usage.cachedInputTokens,
-          outputTokens: stream.value.usage.outputTokens,
-          reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
+          inputTokens: stream.value.usage?.inputTokens ?? 0,
+          cachedInputTokens: stream.value.usage?.cachedInputTokens ?? 0,
+          outputTokens: stream.value.usage?.outputTokens ?? 0,
+          reasoningOutputTokens: stream.value.usage?.reasoningOutputTokens ?? 0,
         },
         apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
       });
@@ -358,7 +367,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         return ok({
           decision: null,
           evidenceRequests,
-          stderr: execution.stderr,
+          stderr: streamDiagnosticsStderr,
           receipt,
         });
       }
@@ -375,7 +384,7 @@ export class SubscriptionCliImplementationPlanner implements ImplementationPlann
         );
       }
 
-      return ok({ decision: decision.data, stderr: execution.stderr, receipt });
+      return ok({ decision: decision.data, stderr: streamDiagnosticsStderr, receipt });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

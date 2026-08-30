@@ -688,6 +688,7 @@ const problemResult = (
         : 'invalid_request',
   summary: problem.message,
   details: JsonValueSchema.parse(problem),
+  retryable: problem.retryable,
   artifactIds,
 });
 

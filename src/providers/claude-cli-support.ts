@@ -44,7 +44,16 @@ export interface ClaudeStreamResult {
     readonly reasoningOutputTokens: 0;
   };
   readonly reportedCostUsd: number | null;
+  readonly diagnostics: readonly string[];
 }
+
+const MAX_STREAM_DIAGNOSTICS = 20;
+const MAX_DIAGNOSTIC_LINE_LENGTH = 200;
+
+const truncateDiagnosticLine = (line: string): string =>
+  line.length <= MAX_DIAGNOSTIC_LINE_LENGTH
+    ? line
+    : `${line.slice(0, MAX_DIAGNOSTIC_LINE_LENGTH)}...`;
 
 export const prepareIsolatedClaudeHome = async (configurationRoot: string): Promise<void> => {
   const claudeRoot = join(configurationRoot, '.claude');
@@ -65,13 +74,17 @@ export const parseClaudeStream = (
   { readonly kind: 'invalid_event_stream'; readonly message: string }
 > => {
   let result: z.infer<typeof ClaudeResultEventSchema> | null = null;
+  const diagnostics: string[] = [];
   for (const line of stdout.split(/\r?\n/u)) {
     if (line.trim().length === 0) continue;
     let event: unknown;
     try {
       event = JSON.parse(line) as unknown;
     } catch {
-      return err({ kind: 'invalid_event_stream', message: 'Claude emitted invalid JSONL' });
+      if (diagnostics.length < MAX_STREAM_DIAGNOSTICS) {
+        diagnostics.push(truncateDiagnosticLine(line));
+      }
+      continue;
     }
     const parsed = ClaudeResultEventSchema.safeParse(event);
     if (parsed.success) result = parsed.data;
@@ -108,5 +121,6 @@ export const parseClaudeStream = (
       reasoningOutputTokens: 0,
     },
     reportedCostUsd: result.total_cost_usd ?? null,
+    diagnostics,
   });
 };

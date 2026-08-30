@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { BlockedClaimCategorySchema } from '../../blocks/contracts.js';
 import { PlanningSnapshotReferenceSchema } from '../../planning/run-planning-snapshot.js';
 import { WorkspaceLocatorSchema } from '../../workspaces/contracts.js';
 import { JsonValueSchema, StepActivityDeliverySchema } from '../../workflow/schema.js';
@@ -41,6 +42,8 @@ export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
   ExecuteTaskStepResultBaseSchema.extend({
     status: z.literal('blocked'),
     waitKind: z.string().min(1),
+    category: BlockedClaimCategorySchema.optional(),
+    retryable: z.boolean().optional(),
   })
     .strict()
     .readonly(),

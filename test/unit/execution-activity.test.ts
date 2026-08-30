@@ -296,7 +296,7 @@ describe('execution activity', () => {
           storageUri: `ledger://artifacts/${receiptId}`,
           payload: JsonValueSchema.parse(
             BlockReceiptSchema.parse({
-              schemaVersion: 5,
+              schemaVersion: 6,
               receiptId,
               blockReference: 'implement.change@1',
               blockDefinitionHash: 'definition-hash',

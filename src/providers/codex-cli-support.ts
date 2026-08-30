@@ -46,8 +46,17 @@ const TurnCompletedSchema = z
 export interface ParsedCodexStream {
   readonly sessionId: string;
   readonly finalMessage: string;
-  readonly usage: z.infer<typeof CodexTokenUsageSchema>;
+  readonly usage: z.infer<typeof CodexTokenUsageSchema> | null;
+  readonly diagnostics: readonly string[];
 }
+
+const MAX_STREAM_DIAGNOSTICS = 20;
+const MAX_DIAGNOSTIC_LINE_LENGTH = 200;
+
+const truncateDiagnosticLine = (line: string): string =>
+  line.length <= MAX_DIAGNOSTIC_LINE_LENGTH
+    ? line
+    : `${line.slice(0, MAX_DIAGNOSTIC_LINE_LENGTH)}...`;
 
 export const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -204,13 +213,18 @@ export const parseCodexStream = (
   let sessionId: string | null = null;
   let finalMessage: string | null = null;
   let usage: z.infer<typeof CodexTokenUsageSchema> | null = null;
+  const diagnostics: string[] = [];
 
-  for (const line of stdout.split(/\r?\n/u).filter((entry) => entry.trim().length > 0)) {
+  for (const line of stdout.split(/\r?\n/u)) {
+    if (line.trim().length === 0) continue;
     let event: unknown;
     try {
       event = JSON.parse(line) as unknown;
     } catch {
-      return err({ kind: 'invalid_event_stream', message: 'Codex emitted non-JSON stdout' });
+      if (diagnostics.length < MAX_STREAM_DIAGNOSTICS) {
+        diagnostics.push(truncateDiagnosticLine(line));
+      }
+      continue;
     }
 
     const thread = ThreadStartedSchema.safeParse(event);
@@ -229,12 +243,12 @@ export const parseCodexStream = (
     if (completed.success) usage = completed.data.usage;
   }
 
-  if (sessionId === null || finalMessage === null || usage === null) {
+  if (finalMessage === null) {
     return err({
       kind: 'invalid_event_stream',
-      message: 'Codex stream did not contain thread, final message, and usage evidence',
+      message: 'Codex stream did not contain an agent message',
     });
   }
 
-  return ok({ sessionId, finalMessage, usage });
+  return ok({ sessionId: sessionId ?? sha256(stdout), finalMessage, usage, diagnostics });
 };

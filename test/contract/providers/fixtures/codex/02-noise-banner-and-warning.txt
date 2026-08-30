@@ -1,0 +1,5 @@
+Codex CLI v0.9.0 — initializing session...
+{"type":"thread.started","thread_id":"thread-noise-1"}
+WARNING: sandbox escalation requested and denied
+{"type":"item.completed","item":{"type":"agent_message","text":"Completed with one denied escalation."}}
+{"type":"turn.completed","usage":{"input_tokens":150,"cached_input_tokens":0,"output_tokens":40}}

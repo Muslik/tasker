@@ -1,0 +1,3 @@
+[32m✓ Claude CLI ready[0m
+{"type":"system","subtype":"init","session_id":"claude-ansi-1"}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"ok","summary":"ANSI-safe","count":2},"session_id":"claude-ansi-1","usage":{"input_tokens":30,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":6}}

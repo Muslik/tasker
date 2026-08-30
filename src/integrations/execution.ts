@@ -98,6 +98,7 @@ export type IntegrationStepExecutionResult =
         | 'unknown_outcome';
       readonly summary: string;
       readonly details: JsonValue;
+      readonly retryable?: boolean;
       readonly artifactIds: readonly string[];
     }
   | {

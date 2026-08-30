@@ -207,8 +207,8 @@ export class ManagedWorkspaceManager {
     if (!baseCommit.ok) return baseCommit;
     await mkdir(this.configuration.workspaceStorePath, { recursive: true, mode: 0o700 });
 
-    if (existsSync(identity.path)) {
-      const candidate = WorkspaceLocatorSchema.parse({
+    const locatorFor = (): WorkspaceLocator =>
+      WorkspaceLocatorSchema.parse({
         schemaVersion: 1,
         ...identity,
         taskReference: request.taskReference,
@@ -223,6 +223,9 @@ export class ManagedWorkspaceManager {
         runnerId: this.configuration.runnerId,
         preparedAt: this.store.now(),
       });
+
+    if (existsSync(identity.path)) {
+      const candidate = locatorFor();
       const reconciled = await this.reconcile(candidate, true, sourceCommonDirectory.value);
       if (!reconciled.ok) return reconciled;
       return this.persist(candidate);
@@ -231,11 +234,29 @@ export class ManagedWorkspaceManager {
     const branchExists = await this.branchExists(request.repositoryPath, identity.branch);
     if (!branchExists.ok) return branchExists;
     if (branchExists.value) {
-      return err({
-        kind: 'workspace_path_conflict',
-        path: identity.path,
-        reason: `Branch ${identity.branch} exists without its deterministic worktree path`,
-      });
+      const holder = await this.worktreeHoldingBranch(request.repositoryPath, identity.branch);
+      if (!holder.ok) return holder;
+      if (holder.value !== null) {
+        return err({
+          kind: 'workspace_path_conflict',
+          path: identity.path,
+          reason: `Branch ${identity.branch} is checked out in the live worktree ${holder.value}. Release it with: git -C ${resolve(request.repositoryPath)} worktree remove --force -- ${holder.value} && git -C ${resolve(request.repositoryPath)} worktree prune`,
+        });
+      }
+      const attached = await this.git(
+        request.repositoryPath,
+        'attach managed worktree to the existing task branch',
+        ['worktree', 'add', '--', identity.path, identity.branch],
+      );
+      if (!attached.ok) return attached;
+      const reattached = locatorFor();
+      const reconciledReattachment = await this.reconcile(
+        reattached,
+        false,
+        sourceCommonDirectory.value,
+      );
+      if (!reconciledReattachment.ok) return reconciledReattachment;
+      return this.persist(reattached);
     }
     const remoteBranchExists = await this.remoteBranchExists(
       request.repositoryPath,
@@ -266,21 +287,7 @@ export class ManagedWorkspaceManager {
     ]);
     if (!added.ok) return added;
 
-    const locator = WorkspaceLocatorSchema.parse({
-      schemaVersion: 1,
-      ...identity,
-      taskReference: request.taskReference,
-      workflowId: request.workflowId,
-      workflowRunId: request.workflowRunId,
-      repository: {
-        reference: request.repositoryReference,
-        sourcePath: resolve(request.repositoryPath),
-        baseBranch: request.gitPolicy.baseBranch,
-        baseCommit: baseCommit.value,
-      },
-      runnerId: this.configuration.runnerId,
-      preparedAt: this.store.now(),
-    });
+    const locator = locatorFor();
     const reconciled = await this.reconcile(locator, true, sourceCommonDirectory.value);
     if (!reconciled.ok) return reconciled;
     return this.persist(locator);
@@ -415,6 +422,29 @@ export class ManagedWorkspaceManager {
       message: commandMessage(result),
       retryable: result.status !== 'exited' || result.exitCode !== 128,
     });
+  }
+
+  private async worktreeHoldingBranch(
+    repositoryPath: string,
+    branch: string,
+  ): Promise<Outcome<string | null, WorkspacePreparationError>> {
+    const pruned = await this.git(repositoryPath, 'prune stale managed worktrees', [
+      'worktree',
+      'prune',
+    ]);
+    if (!pruned.ok) return pruned;
+    const listed = await this.git(repositoryPath, 'inspect registered worktrees', [
+      'worktree',
+      'list',
+      '--porcelain',
+    ]);
+    if (!listed.ok) return listed;
+    const holder = listed.value
+      .split(/\n\s*\n/u)
+      .map((entry) => entry.split('\n'))
+      .find((lines) => lines.includes(`branch refs/heads/${branch}`));
+    const path = holder?.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
+    return ok(path !== undefined && existsSync(path) ? path : null);
   }
 
   private async remoteBranchExists(

@@ -11,8 +11,9 @@ export interface SubscriptionCliStreamResult {
     readonly cachedInputTokens: number;
     readonly outputTokens: number;
     readonly reasoningOutputTokens: number;
-  };
+  } | null;
   readonly reportedCostUsd: number | null;
+  readonly diagnostics: readonly string[];
 }
 
 export const parseSubscriptionCliStream = (
@@ -34,12 +35,16 @@ export const parseSubscriptionCliStream = (
   return ok({
     finalMessage,
     sessionId: parsed.value.sessionId,
-    usage: {
-      inputTokens: parsed.value.usage.input_tokens,
-      cachedInputTokens: parsed.value.usage.cached_input_tokens,
-      outputTokens: parsed.value.usage.output_tokens,
-      reasoningOutputTokens: parsed.value.usage.reasoning_output_tokens ?? 0,
-    },
+    usage:
+      parsed.value.usage === null
+        ? null
+        : {
+            inputTokens: parsed.value.usage.input_tokens,
+            cachedInputTokens: parsed.value.usage.cached_input_tokens,
+            outputTokens: parsed.value.usage.output_tokens,
+            reasoningOutputTokens: parsed.value.usage.reasoning_output_tokens ?? 0,
+          },
     reportedCostUsd: null,
+    diagnostics: parsed.value.diagnostics,
   });
 };

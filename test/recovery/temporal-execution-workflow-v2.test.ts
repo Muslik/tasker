@@ -106,6 +106,17 @@ const activities: ExecutionWorkflowActivities = {
       return Promise.reject(new Error('receipt persistence failed'));
     }
     if (
+      input.taskReference === 'fixture:loop-wait' &&
+      input.nodeId === 'repair' &&
+      input.blockRun === 1
+    ) {
+      return Promise.resolve({
+        status: 'needs_input',
+        summary: 'The change is published and waiting on a reviewer outside this run',
+        waitKind: 'fixture.repair@1.external-review@1',
+      });
+    }
+    if (
       input.taskReference.startsWith('fixture:continuation') &&
       input.nodeId === 'inspect' &&
       input.blockRun === 1
@@ -439,6 +450,37 @@ describe('Execution Workflow v2 recovery', () => {
     expect(await waitFor(taskReference, 'review.accepted@1')).toMatchObject({
       status: 'waiting',
       blockRuns: { inspect: 2 },
+    });
+    await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
+  }, 30_000);
+
+  it('keeps a block wait outside the bounded-loop attempt budget', async () => {
+    const taskReference = 'fixture:loop-wait';
+    expect(
+      await runs.start(workflowIdFor(taskReference), workflowInput(taskReference)),
+    ).toMatchObject({ ok: true });
+
+    const waiting = await waitFor(taskReference, 'fixture.repair@1.external-review@1');
+    expect(waiting).toMatchObject({
+      status: 'waiting',
+      currentNodeId: 'repair',
+      loopIterations: { 'repair-loop': 1 },
+      blockRuns: { repair: 1 },
+    });
+
+    expect(
+      await runs.resolveWait(workflowIdFor(taskReference), {
+        runId: waiting.runId,
+        nodeId: 'repair',
+        waitKind: 'fixture.repair@1.external-review@1',
+        resolution: { decision: 'approved' },
+      }),
+    ).toMatchObject({ ok: true });
+
+    expect(await waitFor(taskReference, 'review.accepted@1')).toMatchObject({
+      status: 'waiting',
+      loopIterations: { 'repair-loop': 1 },
+      blockRuns: { repair: 2 },
     });
     await environment.client.workflow.getHandle(workflowIdFor(taskReference)).cancel();
   }, 30_000);

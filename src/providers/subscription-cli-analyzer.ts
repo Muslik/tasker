@@ -227,6 +227,15 @@ export class SubscriptionCliWorkflowAnalyzer {
       if (!stream.ok) {
         return stream;
       }
+      const streamDiagnosticsStderr =
+        stream.value.diagnostics.length === 0
+          ? execution.stderr
+          : [
+              execution.stderr,
+              `[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s): ${stream.value.diagnostics.join(' | ')}`,
+            ]
+              .filter((entry) => entry.length > 0)
+              .join('\n');
 
       const providerOutput = WorkflowAnalyzerProviderOutputSchema.safeParse(
         stream.value.finalMessage,
@@ -256,7 +265,7 @@ export class SubscriptionCliWorkflowAnalyzer {
 
       return ok({
         output: output.data,
-        stderr: execution.stderr,
+        stderr: streamDiagnosticsStderr,
         receipt: WorkflowAnalyzerReceiptSchema.parse({
           status: 'completed',
           provider: profile.provider === 'codex' ? 'codex_cli' : 'claude_cli',
@@ -271,10 +280,10 @@ export class SubscriptionCliWorkflowAnalyzer {
           promptHash: sha256(prompt),
           durationMs: execution.durationMs,
           usage: {
-            inputTokens: stream.value.usage.inputTokens,
-            cachedInputTokens: stream.value.usage.cachedInputTokens,
-            outputTokens: stream.value.usage.outputTokens,
-            reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
+            inputTokens: stream.value.usage?.inputTokens ?? 0,
+            cachedInputTokens: stream.value.usage?.cachedInputTokens ?? 0,
+            outputTokens: stream.value.usage?.outputTokens ?? 0,
+            reasoningOutputTokens: stream.value.usage?.reasoningOutputTokens ?? 0,
           },
           apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
         }),

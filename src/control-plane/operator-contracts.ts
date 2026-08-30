@@ -66,7 +66,7 @@ export const BlockReceiptSummarySchema = z
       'blocked',
       'failed',
     ]),
-    verdict: z.enum(['accepted', 'rejected']),
+    verdict: z.enum(['accepted', 'rejected', 'waiting']),
     summary: z.string().min(1),
     evidence: z.array(CompletionEvidenceSchema),
     transcriptReference: z.string().min(1).nullable(),

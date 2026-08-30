@@ -83,10 +83,22 @@ export const evaluateBlockCompletion = (
   evaluator: CompletionEvaluator,
   claim: AgentClaim,
   evidence: readonly CompletionEvidence[],
-): CompletionVerdict =>
-  claim.status === 'candidate_complete'
-    ? evaluateRule(evaluator, evidence)
-    : reject(`Agent claim ${claim.status} is not a completion claim`);
+): CompletionVerdict => {
+  switch (claim.status) {
+    case 'candidate_complete':
+      return evaluateRule(evaluator, evidence);
+    case 'blocked':
+    case 'needs_input':
+      return CompletionVerdictSchema.parse({
+        status: 'waiting',
+        waitKind: claim.waitKind,
+        summary: claim.summary,
+      });
+    case 'continuation_required':
+    case 'failed':
+      return reject(`Agent claim ${claim.status} is not a completion claim`);
+  }
+};
 
 export const acceptsAnyProcessExit = (evaluator: CompletionEvaluator): boolean =>
   evaluator.kind === 'process_receipt'

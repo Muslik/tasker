@@ -8,10 +8,12 @@ import { z } from 'zod';
 import {
   acceptsAnyProcessExit,
   AgentClaimSchema,
+  BlockedClaimCategorySchema,
   CompletionVerdictSchema,
   blockReceiptId,
   evaluateBlockCompletion,
   type AgentClaim,
+  type BlockedClaimCategory,
   type BlockReceipt,
   type BlockReceiptStore,
   type CompletionVerdict,
@@ -482,6 +484,21 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
       }
       const stream = parseSubscriptionCliStream(profile.provider, execution.stdout);
       if (!stream.ok) return err(stream.error);
+      if (stream.value.diagnostics.length > 0) {
+        const diagnosticsLine = `\n[stream diagnostics] skipped ${String(stream.value.diagnostics.length)} non-JSON line(s):\n${stream.value.diagnostics.join('\n')}\n`;
+        const appended = request.transcriptStore.append(
+          request.operationId,
+          request.runtime.attempt,
+          'stderr',
+          diagnosticsLine,
+        );
+        if (!appended.ok) {
+          return err({
+            kind: 'evidence_persistence_failed',
+            message: `Task step transcript persistence failed: ${appended.error.kind}`,
+          });
+        }
+      }
       const evidence = await this.evidence.register(
         request.operationId,
         stepFilesystem.artifactsPath,
@@ -517,10 +534,10 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
           serviceTier: profile.provider === 'codex' ? profile.serviceTier : null,
           sessionId: stream.value.sessionId,
           durationMs: execution.durationMs,
-          inputTokens: stream.value.usage.inputTokens,
-          cachedInputTokens: stream.value.usage.cachedInputTokens,
-          outputTokens: stream.value.usage.outputTokens,
-          reasoningOutputTokens: stream.value.usage.reasoningOutputTokens,
+          inputTokens: stream.value.usage?.inputTokens ?? 0,
+          cachedInputTokens: stream.value.usage?.cachedInputTokens ?? 0,
+          outputTokens: stream.value.usage?.outputTokens ?? 0,
+          reasoningOutputTokens: stream.value.usage?.reasoningOutputTokens ?? 0,
           apiCost: estimateApiCost(profile, stream.value.usage, stream.value.reportedCostUsd),
         },
       });
@@ -975,6 +992,10 @@ const block = (
   summary: string,
   waitKind: string,
   artifactIds: readonly string[] = [],
+  classification: {
+    readonly category?: BlockedClaimCategory;
+    readonly retryable?: boolean;
+  } = {},
 ): ExecuteTaskStepResult =>
   ExecuteTaskStepResultSchema.parse({
     status: 'blocked',
@@ -982,6 +1003,7 @@ const block = (
     waitKind,
     artifactIds,
     transcriptId: null,
+    ...classification,
   });
 
 const withRecoveryArtifact = (
@@ -1415,6 +1437,12 @@ export const executeRegisteredTaskStep = async (
         execution.summary,
         execution.status === 'waiting' ? execution.waitKind : `${input.uses}.${execution.kind}@1`,
         execution.artifactIds,
+        execution.status === 'waiting'
+          ? {}
+          : {
+              category: execution.kind,
+              ...(execution.retryable === undefined ? {} : { retryable: execution.retryable }),
+            },
       );
       const persisted = dependencies.traces.persistOutputArtifact({
         operationId: executionOperationId(input),
@@ -1912,31 +1940,19 @@ const persistedOutput = (artifact: TaskStepOutputArtifact): JsonValue => {
     : {};
 };
 
-type BlockedClaimCategory = Extract<AgentClaim, { readonly status: 'blocked' }>['category'];
+const declaredBlockedCategory = (details: unknown): BlockedClaimCategory | null => {
+  if (typeof details !== 'object' || details === null || Array.isArray(details)) return null;
+  const declared = BlockedClaimCategorySchema.safeParse(
+    (details as Readonly<Record<string, unknown>>).kind,
+  );
+  return declared.success ? declared.data : null;
+};
 
-const integrationBlockedCategories = new Set<BlockedClaimCategory>([
-  'configuration',
-  'infrastructure',
-  'invalid_request',
-  'remote_conflict',
-  'verification',
-  'unknown_outcome',
-]);
-
-const blockedCategory = (summary: string, details: unknown): BlockedClaimCategory => {
+const inferredBlockedCategory = (summary: string): BlockedClaimCategory => {
   const normalized = summary.toLowerCase();
   if (/auth|credential|permission|forbidden|401|403/u.test(normalized)) return 'authorization';
   if (/ambigu|unclear|question|expected behavior|expected behaviour/u.test(normalized)) {
     return 'task_ambiguity';
-  }
-  if (typeof details === 'object' && details !== null && !Array.isArray(details)) {
-    const kind = (details as Readonly<Record<string, unknown>>).kind;
-    if (
-      typeof kind === 'string' &&
-      integrationBlockedCategories.has(kind as BlockedClaimCategory)
-    ) {
-      return kind as BlockedClaimCategory;
-    }
   }
   return 'infrastructure';
 };
@@ -1959,8 +1975,11 @@ const claimFromResult = (
         status: 'blocked',
         summary: result.summary,
         waitKind: result.waitKind,
-        category: blockedCategory(result.summary, outputArtifact.details),
-        retryable: true,
+        category:
+          result.category ??
+          declaredBlockedCategory(outputArtifact.details) ??
+          inferredBlockedCategory(result.summary),
+        retryable: result.retryable ?? true,
       });
     case 'workflow_change_required':
       return AgentClaimSchema.parse({
@@ -1983,9 +2002,17 @@ const appendEvidenceIssues = (
       });
 
 const executionResultFromReceipt = (receipt: BlockReceipt) => {
+  const verdict = receipt.verdict;
+  if (verdict.status === 'waiting') {
+    return {
+      status: 'needs_input' as const,
+      summary: verdict.summary,
+      waitKind: verdict.waitKind,
+    };
+  }
   switch (receipt.claim.status) {
     case 'candidate_complete':
-      return receipt.verdict.status === 'accepted'
+      return verdict.status === 'accepted'
         ? {
             status: 'completed' as const,
             summary: receipt.claim.summary,
@@ -1994,15 +2021,10 @@ const executionResultFromReceipt = (receipt: BlockReceipt) => {
           }
         : {
             status: 'needs_input' as const,
-            summary: `Completion evidence for ${receipt.blockReference} was rejected: ${receipt.verdict.reasons.join('; ')}`,
+            summary: `Completion evidence for ${receipt.blockReference} was rejected: ${verdict.reasons.join('; ')}`,
             waitKind: `${receipt.blockReference}.completion-evidence-required@1`,
           };
     case 'needs_input':
-      return {
-        status: 'needs_input' as const,
-        summary: receipt.claim.summary,
-        waitKind: `${receipt.blockReference}.input-required@1`,
-      };
     case 'blocked':
       return {
         status: 'needs_input' as const,
