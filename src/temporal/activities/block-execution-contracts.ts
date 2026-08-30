@@ -42,7 +42,7 @@ export const ExecuteTaskStepResultSchema = z.discriminatedUnion('status', [
   ExecuteTaskStepResultBaseSchema.extend({
     status: z.literal('blocked'),
     waitKind: z.string().min(1),
-    category: BlockedClaimCategorySchema.optional(),
+    category: BlockedClaimCategorySchema.nullable().optional(),
     retryable: z.boolean().optional(),
   })
     .strict()

@@ -93,7 +93,6 @@ describe('block completion', () => {
           status: 'blocked',
           summary: 'Pull request 495 passed CI and is waiting for human review',
           waitKind: 'code_review@1',
-          category: 'unknown_outcome',
           retryable: true,
         },
         [],

@@ -138,7 +138,7 @@ export const AgentClaimSchema = z.discriminatedUnion('status', [
       status: z.literal('blocked'),
       summary: z.string().min(1),
       waitKind: z.string().min(1),
-      category: BlockedClaimCategorySchema,
+      category: BlockedClaimCategorySchema.optional(),
       retryable: z.boolean(),
     })
     .strict()

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { blockReceiptId } from '../../src/blocks/index.js';
 import { createOperatorWorkflowProjection } from '../../src/control-plane/operator-workflow-projection.js';
 import { ok } from '../../src/shared/outcome.js';
 import { TaskRunLifecycleSchema } from '../../src/temporal/public-state.js';
@@ -278,6 +279,152 @@ describe('dependency operator projection', () => {
           declaration: { status: 'missing' },
         },
       },
+    });
+  });
+
+  it('surfaces claim category and retryability on projected block receipts', () => {
+    const lifecycle = TaskRunLifecycleSchema.parse({
+      bootstrap: {
+        runtime: 'bootstrap',
+        schemaVersion: 3,
+        taskReference: 'jira:AVIA-12045',
+        workflowId: 'bootstrap-workflow',
+        runId: 'bootstrap-run',
+        workflowHash: 'a'.repeat(64),
+        settings: { planReview: 'automatic', planningStrategy: 'fast' },
+        phase: 'execution',
+        workspaceContext: null,
+        context: null,
+        draft: {
+          semanticHash: 'b'.repeat(64),
+          compilerVersion: 'semantic-workflow-v1',
+          harnessSnapshotHash: 'c'.repeat(64),
+          retrospectiveEnabled: true,
+          workflowHash: 'a'.repeat(64),
+          graph: {
+            metadata: {
+              compilerVersion: 4,
+              irVersion: 'workflow-ir-v1',
+              workflowId: 'execution-workflow',
+              workflowVersion: 1,
+              references: { predicates: [], stepTypes: ['implement.change@1'], waits: [] },
+            },
+            root: {
+              kind: 'step',
+              id: 'implement-change',
+              uses: 'implement.change@1',
+              activityDelivery: { kind: 'workspace_reconciled' },
+              with: {},
+            },
+          },
+          planningSnapshot: { artifactId: 'planning-snapshot', checksum: 'd'.repeat(64) },
+          evidenceBundle: { artifactId: 'evidence-bundle', checksum: 'e'.repeat(64), revision: 1 },
+        },
+        planning: null,
+        activeTranscriptOperationId: null,
+        freezeReceipt: null,
+        executionWorkflowId: 'execution-workflow',
+        nodeStates: {},
+        attempts: {},
+        status: 'completed',
+        currentNodeId: null,
+        wait: null,
+        outcome: 'execution_started',
+      },
+      execution: {
+        runtime: 'execution',
+        schemaVersion: 2,
+        taskReference: 'jira:AVIA-12045',
+        workflowId: 'execution-workflow',
+        runId: 'execution-run',
+        workflowHash: 'a'.repeat(64),
+        nodeStates: { 'implement-change': 'waiting' },
+        blockRuns: { 'implement-change': 1 },
+        loopIterations: {},
+        continuations: [],
+        retrospective: 'disabled',
+        status: 'waiting',
+        currentNodeId: 'implement-change',
+        wait: {
+          nodeId: 'implement-change',
+          waitKind: 'code_review@1',
+          reason: 'Waiting for review approval',
+        },
+        outcome: null,
+      },
+    });
+    const receiptId = blockReceiptId({
+      workflowId: 'execution-workflow',
+      workflowRunId: 'execution-run',
+      nodeId: 'implement-change',
+      blockRun: 1,
+    });
+
+    const projection = createOperatorWorkflowProjection(
+      'jira:AVIA-12045',
+      lifecycle,
+      {
+        read: (candidateReceiptId) =>
+          ok(
+            candidateReceiptId === receiptId
+              ? {
+                  schemaVersion: 6,
+                  receiptId,
+                  blockReference: 'implement.change@1',
+                  blockDefinitionHash: 'f'.repeat(64),
+                  taskReference: 'jira:AVIA-12045',
+                  workflowId: 'execution-workflow',
+                  workflowRunId: 'execution-run',
+                  workflowHash: 'a'.repeat(64),
+                  nodeId: 'implement-change',
+                  blockRun: 1,
+                  claim: {
+                    status: 'blocked',
+                    summary: 'Waiting for review approval',
+                    waitKind: 'code_review@1',
+                    category: 'remote_conflict',
+                    retryable: true,
+                  },
+                  verdict: {
+                    status: 'waiting',
+                    waitKind: 'code_review@1',
+                    summary: 'Waiting for review approval',
+                  },
+                  predicateFacts: {},
+                  evidence: [],
+                  transcriptReference: null,
+                  usageReference: null,
+                  usage: null,
+                  completedAt: '2026-08-25T10:01:00.000Z',
+                }
+              : null,
+          ),
+      },
+      () => null,
+      () => null,
+      () => null,
+      {
+        listDeclarations: () => [],
+        readDeclaration: () => null,
+        readPublication: () => null,
+        readArtifact: () => null,
+      },
+    );
+
+    const step = projection.stages
+      .flatMap((stage) => stage.steps)
+      .find((candidate) => candidate.kind === 'agent' && candidate.id === 'implement-change');
+
+    expect(step).toMatchObject({
+      kind: 'agent',
+      receipts: [
+        {
+          receiptId,
+          claimStatus: 'blocked',
+          category: 'remote_conflict',
+          retryable: true,
+        },
+      ],
     });
   });
 });

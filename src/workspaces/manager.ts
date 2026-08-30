@@ -49,6 +49,20 @@ type GitOutcome = Outcome<
   Extract<WorkspacePreparationError, { readonly kind: 'git_failed' }>
 >;
 
+type BranchHolder =
+  | {
+      readonly path: string;
+      readonly kind: 'main';
+    }
+  | {
+      readonly path: string;
+      readonly kind: 'linked';
+    }
+  | {
+      readonly path: string;
+      readonly kind: 'locked';
+    };
+
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 const isWithin = (parent: string, child: string): boolean => {
@@ -207,7 +221,7 @@ export class ManagedWorkspaceManager {
     if (!baseCommit.ok) return baseCommit;
     await mkdir(this.configuration.workspaceStorePath, { recursive: true, mode: 0o700 });
 
-    const locatorFor = (): WorkspaceLocator =>
+    const locatorFor = (resolvedBaseCommit: string): WorkspaceLocator =>
       WorkspaceLocatorSchema.parse({
         schemaVersion: 1,
         ...identity,
@@ -218,14 +232,14 @@ export class ManagedWorkspaceManager {
           reference: request.repositoryReference,
           sourcePath: resolve(request.repositoryPath),
           baseBranch: request.gitPolicy.baseBranch,
-          baseCommit: baseCommit.value,
+          baseCommit: resolvedBaseCommit,
         },
         runnerId: this.configuration.runnerId,
         preparedAt: this.store.now(),
       });
 
     if (existsSync(identity.path)) {
-      const candidate = locatorFor();
+      const candidate = locatorFor(baseCommit.value);
       const reconciled = await this.reconcile(candidate, true, sourceCommonDirectory.value);
       if (!reconciled.ok) return reconciled;
       return this.persist(candidate);
@@ -237,10 +251,20 @@ export class ManagedWorkspaceManager {
       const holder = await this.worktreeHoldingBranch(request.repositoryPath, identity.branch);
       if (!holder.ok) return holder;
       if (holder.value !== null) {
+        if (holder.value.kind === 'locked') {
+          return err({
+            kind: 'workspace_path_conflict',
+            path: identity.path,
+            reason: `Branch ${identity.branch} is still registered to the locked worktree ${holder.value.path}. Unlock it before retrying with: git -C ${resolve(request.repositoryPath)} worktree unlock -- ${holder.value.path}`,
+          });
+        }
         return err({
           kind: 'workspace_path_conflict',
           path: identity.path,
-          reason: `Branch ${identity.branch} is checked out in the live worktree ${holder.value}. Release it with: git -C ${resolve(request.repositoryPath)} worktree remove --force -- ${holder.value} && git -C ${resolve(request.repositoryPath)} worktree prune`,
+          reason:
+            holder.value.kind === 'main'
+              ? `Branch ${identity.branch} is checked out in the main worktree ${holder.value.path}. Release it with: git -C ${resolve(request.repositoryPath)} switch --detach`
+              : `Branch ${identity.branch} is checked out in the live worktree ${holder.value.path}. Release it with: git -C ${resolve(request.repositoryPath)} worktree remove --force -- ${holder.value.path} && git -C ${resolve(request.repositoryPath)} worktree prune`,
         });
       }
       const attached = await this.git(
@@ -249,7 +273,16 @@ export class ManagedWorkspaceManager {
         ['worktree', 'add', '--', identity.path, identity.branch],
       );
       if (!attached.ok) return attached;
-      const reattached = locatorFor();
+      const reattachedBaseCommit = await this.resolveBranchBaseCommit(
+        identity.path,
+        identity.branch,
+        request.gitPolicy.baseBranch,
+      );
+      if (!reattachedBaseCommit.ok) {
+        await this.removeManagedWorktree(request.repositoryPath, identity.path);
+        return reattachedBaseCommit;
+      }
+      const reattached = locatorFor(reattachedBaseCommit.value);
       const reconciledReattachment = await this.reconcile(
         reattached,
         false,
@@ -287,7 +320,16 @@ export class ManagedWorkspaceManager {
     ]);
     if (!added.ok) return added;
 
-    const locator = locatorFor();
+    const resolvedBaseCommit = await this.resolveBranchBaseCommit(
+      identity.path,
+      identity.branch,
+      request.gitPolicy.baseBranch,
+    );
+    if (!resolvedBaseCommit.ok) {
+      await this.removeManagedWorktree(request.repositoryPath, identity.path);
+      return resolvedBaseCommit;
+    }
+    const locator = locatorFor(resolvedBaseCommit.value);
     const reconciled = await this.reconcile(locator, true, sourceCommonDirectory.value);
     if (!reconciled.ok) return reconciled;
     return this.persist(locator);
@@ -427,7 +469,7 @@ export class ManagedWorkspaceManager {
   private async worktreeHoldingBranch(
     repositoryPath: string,
     branch: string,
-  ): Promise<Outcome<string | null, WorkspacePreparationError>> {
+  ): Promise<Outcome<BranchHolder | null, WorkspacePreparationError>> {
     const pruned = await this.git(repositoryPath, 'prune stale managed worktrees', [
       'worktree',
       'prune',
@@ -444,7 +486,83 @@ export class ManagedWorkspaceManager {
       .map((entry) => entry.split('\n'))
       .find((lines) => lines.includes(`branch refs/heads/${branch}`));
     const path = holder?.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
-    return ok(path !== undefined && existsSync(path) ? path : null);
+    if (path === undefined) return ok(null);
+    const locked = holder?.some((line) => line === 'locked' || line.startsWith('locked ')) ?? false;
+    if (locked) return ok({ path, kind: 'locked' });
+    if (!existsSync(path)) return ok(null);
+    return ok({
+      path,
+      kind: resolve(path) === resolve(repositoryPath) ? 'main' : 'linked',
+    });
+  }
+
+  private async resolveBranchBaseCommit(
+    workspacePath: string,
+    branch: string,
+    baseBranch: string,
+  ): Promise<Outcome<string, WorkspacePreparationError>> {
+    const mergeBase = await this.commands.run({
+      command: 'git',
+      args: ['merge-base', `refs/remotes/origin/${baseBranch}`, 'HEAD'],
+      cwd: workspacePath,
+      env: { GIT_TERMINAL_PROMPT: '0' },
+      stdin: '',
+      timeoutMs: 30_000,
+    });
+    if (mergeBase.status === 'exited' && mergeBase.exitCode === 0) {
+      const resolvedMergeBase = mergeBase.stdout.trim();
+      const ancestry = await this.commands.run({
+        command: 'git',
+        args: ['merge-base', '--is-ancestor', resolvedMergeBase, 'HEAD'],
+        cwd: workspacePath,
+        env: { GIT_TERMINAL_PROMPT: '0' },
+        stdin: '',
+        timeoutMs: 30_000,
+      });
+      if (ancestry.status === 'exited' && ancestry.exitCode === 0) {
+        return ok(resolvedMergeBase);
+      }
+      if (ancestry.status === 'exited' && ancestry.exitCode === 1) {
+        return err({
+          kind: 'workspace_path_conflict',
+          path: workspacePath,
+          reason: `Branch ${branch} already exists but does not descend from origin/${baseBranch}. Remove or rename the foreign branch before retrying.`,
+        });
+      }
+      return err({
+        kind: 'git_failed',
+        operation: 'verify task branch ancestry',
+        message: commandMessage(ancestry),
+        retryable: ancestry.status !== 'exited' || ancestry.exitCode !== 128,
+      });
+    }
+    if (mergeBase.status === 'exited' && mergeBase.exitCode === 1) {
+      return err({
+        kind: 'workspace_path_conflict',
+        path: workspacePath,
+        reason: `Branch ${branch} already exists but does not share history with origin/${baseBranch}. Remove or rename the foreign branch before retrying.`,
+      });
+    }
+    return err({
+      kind: 'git_failed',
+      operation: 'read task branch fork point',
+      message: commandMessage(mergeBase),
+      retryable: mergeBase.status !== 'exited' || mergeBase.exitCode !== 128,
+    });
+  }
+
+  private async removeManagedWorktree(
+    repositoryPath: string,
+    workspacePath: string,
+  ): Promise<void> {
+    await this.commands.run({
+      command: 'git',
+      args: ['worktree', 'remove', '--force', '--', workspacePath],
+      cwd: repositoryPath,
+      env: { GIT_TERMINAL_PROMPT: '0' },
+      stdin: '',
+      timeoutMs: 2 * 60_000,
+    });
   }
 
   private async remoteBranchExists(

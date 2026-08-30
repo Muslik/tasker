@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -72,7 +80,7 @@ const setup = () => {
     new WorkspaceStore(ledger.repository, clock),
     nodeCommandRunner,
   );
-  return { configuration, request, repositoryPath, manager };
+  return { root, configuration, request, repositoryPath, manager };
 };
 
 afterEach(() => {
@@ -102,6 +110,27 @@ describe('managed workspace restart', () => {
     expect(readFileSync(join(restarted.value.path, 'feature.txt'), 'utf8')).toBe('delivered\n');
   });
 
+  it('records the task branch fork point when origin base advances before reattach', async () => {
+    const { request, repositoryPath, manager } = setup();
+    const forkPoint = git(repositoryPath, ['rev-parse', 'HEAD']);
+    const first = await manager.prepare(request);
+    if (!first.ok) throw new Error(first.error.kind);
+    writeFileSync(join(first.value.path, 'feature.txt'), 'delivered\n', 'utf8');
+    git(first.value.path, ['add', 'feature.txt']);
+    commit(first.value.path, 'FIX-1 deliver the change');
+    git(repositoryPath, ['worktree', 'remove', '--force', '--', first.value.path]);
+
+    writeFileSync(join(repositoryPath, 'feature.txt'), 'base advanced\n', 'utf8');
+    git(repositoryPath, ['add', 'feature.txt']);
+    const advancedBase = commit(repositoryPath, 'advance base');
+
+    const restarted = await manager.prepare({ ...request, workflowRunId: 'run-2' });
+
+    if (!restarted.ok) throw new Error(restarted.error.kind);
+    expect(restarted.value.repository.baseCommit).toBe(forkPoint);
+    expect(restarted.value.repository.baseCommit).not.toBe(advancedBase);
+  });
+
   it('names the live worktree holding the task branch instead of attaching a second one', async () => {
     const { request, repositoryPath, manager } = setup();
     const first = await manager.prepare(request);
@@ -119,6 +148,64 @@ describe('managed workspace restart', () => {
     );
     expect(restarted.error.reason).toContain(
       `git -C ${realpathSync(repositoryPath)} worktree prune`,
+    );
+  });
+
+  it('tells the operator to detach the main worktree when it holds the task branch', async () => {
+    const { request, repositoryPath, manager } = setup();
+    const branch = manager.identity(request).branch;
+    git(repositoryPath, ['checkout', '--quiet', '-b', branch]);
+
+    const prepared = await manager.prepare(request);
+
+    expect(prepared.ok).toBe(false);
+    if (prepared.ok) return;
+    expect(prepared.error.kind).toBe('workspace_path_conflict');
+    if (prepared.error.kind !== 'workspace_path_conflict') return;
+    expect(prepared.error.reason).toContain(
+      `git -C ${realpathSync(repositoryPath)} switch --detach`,
+    );
+    expect(prepared.error.reason).not.toContain('worktree remove --force');
+  });
+
+  it('rejects an unrelated pre-existing task branch with a friendly conflict', async () => {
+    const { request, repositoryPath, manager } = setup();
+    const identity = manager.identity(request);
+    git(repositoryPath, ['checkout', '--quiet', '--orphan', identity.branch]);
+    writeFileSync(join(repositoryPath, 'feature.txt'), 'foreign\n', 'utf8');
+    git(repositoryPath, ['add', 'feature.txt']);
+    commit(repositoryPath, 'foreign branch');
+    git(repositoryPath, ['checkout', '--quiet', 'main']);
+
+    const prepared = await manager.prepare(request);
+
+    expect(prepared.ok).toBe(false);
+    if (prepared.ok) return;
+    expect(prepared.error.kind).toBe('workspace_path_conflict');
+    if (prepared.error.kind !== 'workspace_path_conflict') return;
+    expect(prepared.error.reason).toContain(
+      `Branch ${identity.branch} already exists but does not share history with origin/main`,
+    );
+    expect(existsSync(identity.path)).toBe(false);
+  });
+
+  it('surfaces locked worktree holders even when their path is gone', async () => {
+    const { root, request, repositoryPath, manager } = setup();
+    const branch = manager.identity(request).branch;
+    const lockedWorktreePath = join(root, 'locked-holder');
+    git(repositoryPath, ['worktree', 'add', '-b', branch, '--', lockedWorktreePath, 'HEAD']);
+    const registeredWorktreePath = realpathSync(lockedWorktreePath);
+    git(repositoryPath, ['worktree', 'lock', registeredWorktreePath]);
+    rmSync(registeredWorktreePath, { recursive: true, force: true });
+
+    const prepared = await manager.prepare(request);
+
+    expect(prepared.ok).toBe(false);
+    if (prepared.ok) return;
+    expect(prepared.error.kind).toBe('workspace_path_conflict');
+    if (prepared.error.kind !== 'workspace_path_conflict') return;
+    expect(prepared.error.reason).toContain(
+      `git -C ${realpathSync(repositoryPath)} worktree unlock -- ${registeredWorktreePath}`,
     );
   });
 });

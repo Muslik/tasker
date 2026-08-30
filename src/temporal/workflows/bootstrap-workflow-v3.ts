@@ -410,6 +410,7 @@ export async function bootstrapWorkflowV3(
               activityFailureReason(`Pre-plan investigation ${step.id} failed`, error),
             );
             operatorGuidance = retryGuidanceFrom(resolution);
+            attempts[attemptKey] = (attempts[attemptKey] ?? 0) + 1;
             markRunning('investigation', 'investigation');
             continue;
           }

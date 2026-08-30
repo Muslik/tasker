@@ -10,11 +10,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { openSqliteLedger } from '../../../src/ledger/index.js';
-import type { CommandRequest, WorkspaceCommandRunner } from '../../../src/providers/index.js';
+import type {
+  CommandRequest,
+  CommandResult,
+  WorkspaceCommandRunner,
+} from '../../../src/providers/index.js';
 import { systemClock } from '../../../src/shared/clock.js';
 import { TEST_CLAUDE_PROFILE, TEST_CODEX_PROFILE } from '../../helpers/execution-profile.js';
 import {
@@ -111,6 +115,78 @@ const writeSkillCatalog = (repositoryPath: string): void => {
 };
 
 describe('subscription CLI task-step runner', () => {
+  it('surfaces heartbeat cancellation through the awaited command and stops its timer', async () => {
+    vi.useFakeTimers();
+    const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-cancelled-step-workspace-'));
+    const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-cancelled-step-data-'));
+    const ledger = openSqliteLedger({ filename: ':memory:', clock: systemClock });
+    const cancellation = new Error('activity cancelled');
+    const controller = new AbortController();
+    const requests: CommandRequest[] = [];
+    let resolveVersion: ((result: CommandResult) => void) | undefined;
+    const version = new Promise<CommandResult>((resolve) => {
+      resolveVersion = resolve;
+    });
+    const commands: WorkspaceCommandRunner = {
+      executionEnvironment: 'docker_workspace',
+      run: (request) => {
+        requests.push(request);
+        return version;
+      },
+    };
+    const runner = new SubscriptionCliTaskStepAgentRunner(
+      commands,
+      new TaskStepFilesystemStore(stepDataPath),
+      new TaskStepEvidenceStore(ledger.repository, systemClock),
+    );
+
+    try {
+      const result = runner.run({
+        inputArtifactIds: [],
+        operationId: 'workflow:cancelled-step:attempt-1',
+        stepReference: 'implement.change@1',
+        profile: TEST_CODEX_PROFILE,
+        prompt: 'Return the result.',
+        skills: [],
+        recovery: { kind: 'single_attempt' },
+        outputSchema,
+        cwd: repositoryPath,
+        workspaceAccess: 'read_write',
+        runtime: {
+          attempt: 1,
+          cancellationSignal: controller.signal,
+          heartbeat: () => {
+            controller.signal.throwIfAborted();
+          },
+        },
+        transcriptStore: new TemporalTaskStepTraceStore(ledger.repository, systemClock),
+      });
+      const rejection = expect(result).rejects.toBe(cancellation);
+
+      expect(vi.getTimerCount()).toBe(1);
+      controller.abort(cancellation);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.cancellationSignal).toBe(controller.signal);
+      if (resolveVersion === undefined) throw new Error('Version probe did not start');
+      resolveVersion({
+        status: 'exited',
+        exitCode: 0,
+        stdout: 'codex-cli 0.120.0\n',
+        stderr: '',
+        durationMs: 1,
+      });
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+      ledger.close();
+      rmSync(repositoryPath, { recursive: true, force: true });
+      rmSync(stepDataPath, { recursive: true, force: true });
+    }
+  });
+
   it('invokes Codex with only the step-scoped skill view', async () => {
     const repositoryPath = mkdtempSync(join(tmpdir(), 'tasker-codex-step-workspace-'));
     const stepDataPath = mkdtempSync(join(tmpdir(), 'tasker-codex-step-data-'));

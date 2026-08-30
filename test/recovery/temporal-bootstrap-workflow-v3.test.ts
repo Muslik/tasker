@@ -471,12 +471,12 @@ describe('Bootstrap investigation recovery', () => {
         )
         .toBe('code_review@1');
 
-      expect(observedBlockRuns).toEqual([1, 1]);
+      expect(observedBlockRuns).toEqual([1, 2]);
       const recovered = await runs.readLifecycle('fixture:investigation-retry');
       expect(recovered).toMatchObject({
         ok: true,
         value: {
-          bootstrap: { attempts: { 'investigation:reproduce-payment-spacing': 1 } },
+          bootstrap: { attempts: { 'investigation:reproduce-payment-spacing': 2 } },
           execution: { status: 'waiting', wait: { waitKind: 'code_review@1' } },
         },
       });

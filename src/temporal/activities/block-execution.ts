@@ -310,13 +310,32 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
   ): Promise<Outcome<TaskStepAgentResult, TaskStepAgentFailure>> {
     const profile = request.profile;
     const command = profile.command;
-    const heartbeat = (): void => {
-      request.runtime.heartbeat({ phase: 'agent' });
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let heartbeatFailure: Error | null = null;
+    const heartbeat = (
+      details: {
+        readonly stdoutBytes?: number;
+        readonly stderrBytes?: number;
+      } = {},
+    ): void => {
+      try {
+        request.runtime.heartbeat({ phase: 'agent', ...details });
+      } catch (error) {
+        heartbeatFailure ??= error instanceof Error ? error : new Error(String(error));
+        clearInterval(heartbeatTimer);
+      }
     };
-    const heartbeatTimer = setInterval(heartbeat, 10_000);
+    const throwIfHeartbeatFailed = (): void => {
+      if (heartbeatFailure !== null) throw heartbeatFailure;
+    };
+    const heartbeatTimer = setInterval(() => {
+      heartbeat();
+    }, 10_000);
     heartbeatTimer.unref();
     try {
       heartbeat();
+      throwIfHeartbeatFailed();
       const version = await this.runner.run({
         command,
         args: ['--version'],
@@ -324,7 +343,9 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
         workspaceAccess: 'read_write',
         stdin: '',
         timeoutMs: 10_000,
+        cancellationSignal: request.runtime.cancellationSignal,
       });
+      throwIfHeartbeatFailed();
       if (version.status === 'spawn_failed') {
         return err({ kind: 'provider_unavailable', message: version.message });
       }
@@ -401,6 +422,7 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
                 },
               ]
             : [];
+        heartbeat({ stdoutBytes, stderrBytes });
         const execution = await this.runCommand(request, {
           command,
           args:
@@ -471,7 +493,13 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
             'Inspect these exact files. Do not rerun broad verification to reconstruct accepted evidence.',
           ].join('\n'),
           timeoutMs: profile.timeoutMs,
+          onOutput: (stream, chunk) => {
+            if (stream === 'stdout') stdoutBytes += Buffer.byteLength(chunk, 'utf8');
+            else stderrBytes += Buffer.byteLength(chunk, 'utf8');
+            heartbeat({ stdoutBytes, stderrBytes });
+          },
         });
+        throwIfHeartbeatFailed();
         if (execution.status === 'spawn_failed') {
           return err({ kind: 'provider_unavailable', message: execution.message });
         }
@@ -568,42 +596,25 @@ export class SubscriptionCliTaskStepAgentRunner implements TaskStepAgentRunner {
     request: TaskStepAgentRequest,
     command: CommandRequest,
   ): Promise<CommandResult> {
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    const heartbeat = (): void => {
-      request.runtime.heartbeat({
-        phase: 'agent',
-        stdoutBytes,
-        stderrBytes,
-      });
-    };
-    const timer = setInterval(heartbeat, 10_000);
-    timer.unref();
-    try {
-      heartbeat();
-      const result = await this.runner.run({
-        ...command,
-        cancellationSignal: request.runtime.cancellationSignal,
-        onOutput: (stream, chunk) => {
-          const appended = request.transcriptStore.append(
-            request.operationId,
-            request.runtime.attempt,
-            stream,
-            chunk,
-          );
-          if (!appended.ok) {
-            throw new Error(`Task step transcript persistence failed: ${appended.error.kind}`);
-          }
-          if (stream === 'stdout') stdoutBytes += Buffer.byteLength(chunk, 'utf8');
-          else stderrBytes += Buffer.byteLength(chunk, 'utf8');
-          heartbeat();
-        },
-      });
-      request.runtime.cancellationSignal.throwIfAborted();
-      return result;
-    } finally {
-      clearInterval(timer);
-    }
+    const commandOutput = command.onOutput;
+    const result = await this.runner.run({
+      ...command,
+      cancellationSignal: request.runtime.cancellationSignal,
+      onOutput: (stream, chunk) => {
+        const appended = request.transcriptStore.append(
+          request.operationId,
+          request.runtime.attempt,
+          stream,
+          chunk,
+        );
+        if (!appended.ok) {
+          throw new Error(`Task step transcript persistence failed: ${appended.error.kind}`);
+        }
+        commandOutput?.(stream, chunk);
+      },
+    });
+    request.runtime.cancellationSignal.throwIfAborted();
+    return result;
   }
 }
 
@@ -1009,7 +1020,7 @@ const block = (
   waitKind: string,
   artifactIds: readonly string[] = [],
   classification: {
-    readonly category?: BlockedClaimCategory;
+    readonly category?: BlockedClaimCategory | null;
     readonly retryable?: boolean;
   } = {},
 ): ExecuteTaskStepResult =>
@@ -1478,7 +1489,7 @@ export const executeRegisteredTaskStep = async (
         execution.status === 'waiting' ? execution.waitKind : `${input.uses}.${execution.kind}@1`,
         execution.artifactIds,
         execution.status === 'waiting'
-          ? {}
+          ? { category: null }
           : {
               category: execution.kind,
               ...(execution.retryable === undefined ? {} : { retryable: execution.retryable }),
@@ -2016,17 +2027,21 @@ const claimFromResult = (
         output: persistedOutput(outputArtifact),
         evidenceReferences: [...new Set([outputReference, ...result.artifactIds])],
       });
-    case 'blocked':
+    case 'blocked': {
+      const category =
+        result.category === null
+          ? null
+          : (result.category ??
+            declaredBlockedCategory(outputArtifact.details) ??
+            inferredBlockedCategory(result.summary));
       return AgentClaimSchema.parse({
         status: 'blocked',
         summary: result.summary,
         waitKind: result.waitKind,
-        category:
-          result.category ??
-          declaredBlockedCategory(outputArtifact.details) ??
-          inferredBlockedCategory(result.summary),
         retryable: result.retryable ?? true,
+        ...(category === null ? {} : { category }),
       });
+    }
     case 'workflow_change_required':
       return AgentClaimSchema.parse({
         status: 'continuation_required',

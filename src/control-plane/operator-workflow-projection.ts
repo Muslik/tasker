@@ -97,6 +97,8 @@ const receiptSummary = (receipt: BlockReceipt): BlockReceiptSummary =>
     claimStatus: receipt.claim.status,
     verdict: receipt.verdict.status,
     summary: receipt.claim.summary,
+    ...('category' in receipt.claim ? { category: receipt.claim.category } : {}),
+    ...('retryable' in receipt.claim ? { retryable: receipt.claim.retryable } : {}),
     evidence: receipt.evidence,
     transcriptReference: receipt.transcriptReference,
     usageReference: receipt.usageReference,

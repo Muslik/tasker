@@ -1355,6 +1355,7 @@ describe('temporal block execution activity', () => {
         },
       },
     });
+    expect(receiptFor(1)).not.toHaveProperty('value.claim.category');
     expect(resumed).toMatchObject({
       status: 'completed',
       summary: 'Pull request 495 passed CI and human review',
