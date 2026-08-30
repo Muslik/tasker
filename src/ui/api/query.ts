@@ -15,11 +15,16 @@ export const operatorQueryKeys = {
     [...operatorQueryKeys.attempts(taskReference), nodeId, blockRun] as const,
   currentRun: (taskReference: string) =>
     [...operatorQueryKeys.task(taskReference), 'current-run'] as const,
+  invocations: (taskReference: string) =>
+    [...operatorQueryKeys.task(taskReference), 'invocations'] as const,
+  invocation: (taskReference: string, invocationId: string) =>
+    ['invocation', taskReference, invocationId] as const,
 } as const;
 
 export interface InvalidateTaskQueriesOptions {
   readonly includeRunLog?: boolean;
   readonly includeAttempts?: boolean;
+  readonly includeInvocations?: boolean;
 }
 
 const invalidate = (queryClient: QueryClient, queryKey: readonly unknown[]): void => {
@@ -42,5 +47,9 @@ export const invalidateTaskQueries = (
 
   if (options.includeAttempts === true) {
     invalidate(queryClient, operatorQueryKeys.attempts(taskReference));
+  }
+
+  if (options.includeInvocations === true) {
+    invalidate(queryClient, operatorQueryKeys.invocations(taskReference));
   }
 };

@@ -1,15 +1,21 @@
 import type {
   OperatorExecutionAttempt,
   OperatorRunLogEntry,
+  OperatorTaskInvocationDetail,
 } from '../../control-plane/operator-contracts.js';
 import { cn } from '../../cockpit/lib/utils.js';
 import { formatDuration } from '../lib/format.js';
+import { InvocationPrompt } from './InvocationPrompt.js';
 
 export type AttemptDetailsTab = 'log' | 'transcript' | 'output' | 'details' | 'prompt';
 
 export type AttemptDetailsProps = {
   entry: OperatorRunLogEntry | null;
   attempt?: OperatorExecutionAttempt | null;
+  invocationId?: string | null;
+  invocationDetail?: OperatorTaskInvocationDetail | null;
+  invocationDetailPending?: boolean;
+  invocationDetailError?: Error | null;
   selectedTab?: AttemptDetailsTab | null;
   onTabChange?: (tab: AttemptDetailsTab) => void;
   className?: string;
@@ -77,6 +83,10 @@ const DetailBlock = ({ label, value }: { label: string; value: string }) => (
 export function AttemptDetails({
   entry,
   attempt = null,
+  invocationId = null,
+  invocationDetail = null,
+  invocationDetailPending = false,
+  invocationDetailError = null,
   selectedTab = null,
   onTabChange,
   className,
@@ -213,12 +223,14 @@ export function AttemptDetails({
           <DetailBlock label="Structured details" value={formatJson(output.details)} />
         ) : null}
         {activeTab === 'prompt' ? (
-          <section className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-            Prompt
-            <p className="mt-2 text-xs text-muted-foreground">
-              Prompt artifacts are not wired into this surface yet.
-            </p>
-          </section>
+          <InvocationPrompt
+            invocationId={invocationId}
+            detail={invocationDetail}
+            pending={invocationDetailPending}
+            error={invocationDetailError}
+            attemptRuntime={entry.runtime}
+            attemptStatus={entry.status}
+          />
         ) : null}
       </div>
     </aside>

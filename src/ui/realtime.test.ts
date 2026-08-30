@@ -84,7 +84,10 @@ describe('operator realtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: operatorQueryKeys.attempts('jira:AVIA-1'),
     });
-    expect(invalidateSpy).toHaveBeenCalledTimes(6);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: operatorQueryKeys.invocations('jira:AVIA-1'),
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(7);
   });
 
   it('reports malformed ledger payloads without invalidating queries', () => {
