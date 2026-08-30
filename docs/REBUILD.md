@@ -96,8 +96,15 @@ size ceiling ~400 lines.
       verdict (receipt v6); restart reattaches existing branch; timeout headroom
       (45 m / 3 h); heartbeat covers probe + docker build; full failure reasons;
       prompt growth capped. (waves 1–2)
-- [ ] Phase 1 — observability: agent-invocation artifact, live "what/why/tokens" API.
-- [ ] Phase 2 — contract v-next + archetypes + deterministic verify.
+- [x] Phase 1 — observability: `agent_invocation` artifact (exact prompt, argv, usage,
+      cost, on every terminal path incl. failures), invocations API with totals,
+      projection v9 `currentAttempt`/`waitingSince`, SSE invocation events; UI panels
+      (tokens table with prompt-growth highlight, live attempt status, prompt viewer).
+- [x] Phase 2a — `deliver-pr` archetype scaffold owns workflow topology; planner emits
+      only archetype + segments + plan slots; obligations are scaffold invariants.
+- [ ] Phase 2b — step outcome contract: single-encoded envelope, typed
+      completed/waiting/failed(+category, retryable), no regex classification.
+- [ ] Phase 2c — deterministic verify bound to `validation.*@1` process commands.
 - [ ] Phase 3 — structure surgery: dead code removal, target layout, store rewrite,
       test relayout, docs from code, credentials out of agent containers.
 - [ ] Phase 4 — cockpit v2: TanStack Query, component decomposition, SSE realtime.
