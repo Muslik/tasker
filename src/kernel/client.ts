@@ -30,12 +30,18 @@ import {
 import { bootstrapWorkflowV3 } from './workflows/bootstrap-workflow-v3.js';
 import type { executionWorkflowV2 } from './workflows/execution-workflow-v2.js';
 import {
+  causedBy,
+  readWorkflowExecutionStatus,
+  temporalErrorMessage,
+} from './temporal-client-support.js';
+import {
   TaskRunLifecycleSchema,
   type TaskRunLifecycle,
   type TaskRunPublicState,
 } from '../steps/public-state.js';
 export type TaskRunError =
   | { readonly kind: 'run_not_found'; readonly taskReference: string }
+  | { readonly kind: 'run_not_active'; readonly taskReference: string; readonly runId: string }
   | { readonly kind: 'run_input_conflict'; readonly taskReference: string }
   | { readonly kind: 'run_not_restartable'; readonly taskReference: string }
   | {
@@ -81,25 +87,6 @@ export const DEFAULT_TEMPORAL_CLIENT_CONFIGURATION = {
 
 const bootstrapWorkflowIdFor = (taskReference: string): string => `tasker:v3:${taskReference}`;
 
-const messageFrom = (error: unknown): string => {
-  const messages: string[] = [];
-  let current = error;
-  while (current instanceof Error) {
-    messages.push(current.message);
-    current = current.cause;
-  }
-  return messages.length === 0 ? 'Temporal request failed' : messages.join(': ');
-};
-
-const causedBy = (error: unknown, constructor: { readonly name: string }): boolean => {
-  let current = error;
-  while (current instanceof Error) {
-    if (current.name === constructor.name) return true;
-    current = current.cause;
-  }
-  return false;
-};
-
 const sameImmutableInput = (
   state: BootstrapWorkflowPublicState,
   input: BootstrapWorkflowInput,
@@ -120,37 +107,43 @@ export class TemporalTaskRunService implements TaskRunService {
     inputValue: BootstrapWorkflowInput,
   ): Promise<Outcome<TaskRunPublicState, TaskRunError>> {
     const input = BootstrapWorkflowInputSchema.parse(inputValue);
-    try {
-      const handle = await this.launch(input);
-      const started = await this.readByBootstrapRun(
-        input.taskReference,
-        handle.firstExecutionRunId,
-      );
-      return started.ok && started.value !== null
-        ? ok(started.value)
-        : started.ok
-          ? err({ kind: 'run_not_found', taskReference: input.taskReference })
-          : started;
-    } catch (error) {
-      if (!causedBy(error, WorkflowExecutionAlreadyStartedError)) {
-        return err({ kind: 'runtime_unavailable', message: messageFrom(error) });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const handle = await this.launch(input);
+        const started = await this.readByBootstrapRun(
+          input.taskReference,
+          handle.firstExecutionRunId,
+        );
+        return started.ok && started.value !== null
+          ? ok(started.value)
+          : started.ok
+            ? err({ kind: 'run_not_found', taskReference: input.taskReference })
+            : started;
+      } catch (error) {
+        if (!causedBy(error, WorkflowExecutionAlreadyStartedError)) {
+          return err({ kind: 'runtime_unavailable', message: temporalErrorMessage(error) });
+        }
+        const status = await this.describeWorkflowStatus(
+          this.client.workflow.getHandle(bootstrapWorkflowIdFor(input.taskReference)),
+        );
+        if (!status.ok) return err(status.error);
+        if (status.value !== 'RUNNING') continue;
+        const bootstrap = await this.readBootstrap(input.taskReference);
+        if (!bootstrap.ok) return err(bootstrap.error);
+        if (bootstrap.value === null) continue;
+        if (!sameImmutableInput(bootstrap.value, input)) {
+          return err({ kind: 'run_input_conflict', taskReference: input.taskReference });
+        }
+        const current = await this.read(input.taskReference);
+        if (!current.ok) return err(current.error);
+        if (current.value === null) continue;
+        return ok(current.value);
       }
-      const bootstrap = await this.readBootstrap(input.taskReference);
-      if (!bootstrap.ok || bootstrap.value === null) {
-        return bootstrap.ok
-          ? err({ kind: 'run_not_found', taskReference: input.taskReference })
-          : bootstrap;
-      }
-      if (!sameImmutableInput(bootstrap.value, input)) {
-        return err({ kind: 'run_input_conflict', taskReference: input.taskReference });
-      }
-      const current = await this.read(input.taskReference);
-      return current.ok && current.value !== null
-        ? ok(current.value)
-        : current.ok
-          ? err({ kind: 'run_not_found', taskReference: input.taskReference })
-          : current;
     }
+    return err({
+      kind: 'runtime_unavailable',
+      message: 'Temporal request failed: workflow closed while retrying start',
+    });
   }
 
   public async restart(
@@ -186,7 +179,7 @@ export class TemporalTaskRunService implements TaskRunService {
     } catch (error) {
       return causedBy(error, WorkflowNotFoundError)
         ? err({ kind: 'run_not_found', taskReference })
-        : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
+        : err({ kind: 'runtime_unavailable', message: temporalErrorMessage(error) });
     }
   }
 
@@ -204,7 +197,7 @@ export class TemporalTaskRunService implements TaskRunService {
     } catch (error) {
       return causedBy(error, WorkflowNotFoundError)
         ? ok(undefined)
-        : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
+        : err({ kind: 'runtime_unavailable', message: temporalErrorMessage(error) });
     }
   }
 
@@ -227,9 +220,11 @@ export class TemporalTaskRunService implements TaskRunService {
       return ok(TaskRunLifecycleSchema.parse({ bootstrap: bootstrap.value, execution: null }));
     }
     const execution = await this.readExecution(bootstrap.value.executionWorkflowId);
-    return execution.ok
-      ? ok(TaskRunLifecycleSchema.parse({ bootstrap: bootstrap.value, execution: execution.value }))
-      : execution;
+    if (!execution.ok) return execution;
+    if (execution.value === null) return ok(null);
+    return ok(
+      TaskRunLifecycleSchema.parse({ bootstrap: bootstrap.value, execution: execution.value }),
+    );
   }
 
   private async readByBootstrapRun(
@@ -266,9 +261,24 @@ export class TemporalTaskRunService implements TaskRunService {
     const command = ResolveBootstrapWaitCommandSchema.parse(commandValue);
     const lifecycle = await this.readLifecycle(taskReference);
     if (!lifecycle.ok) return err(lifecycle.error);
-    if (lifecycle.value === null) return err({ kind: 'run_not_found', taskReference });
+    if (lifecycle.value === null) {
+      const status = await this.describeWorkflowStatus(
+        this.client.workflow.getHandle(bootstrapWorkflowIdFor(taskReference), command.runId),
+      );
+      if (!status.ok) return err(status.error);
+      return status.value === null
+        ? err({ kind: 'run_not_found', taskReference })
+        : err({ kind: 'run_not_active', taskReference, runId: command.runId });
+    }
     const activeRunId = (lifecycle.value.execution ?? lifecycle.value.bootstrap).runId;
     if (command.runId !== activeRunId) {
+      const status = await this.describeWorkflowStatus(
+        this.client.workflow.getHandle(bootstrapWorkflowIdFor(taskReference), command.runId),
+      );
+      if (!status.ok) return err(status.error);
+      if (status.value !== null && status.value !== 'RUNNING') {
+        return err({ kind: 'run_not_active', taskReference, runId: command.runId });
+      }
       return err({
         kind: 'stale_run',
         taskReference,
@@ -276,12 +286,15 @@ export class TemporalTaskRunService implements TaskRunService {
         activeRunId,
       });
     }
+    const targetWorkflowId =
+      lifecycle.value.execution?.workflowId ?? bootstrapWorkflowIdFor(taskReference);
+    const targetRunId = (lifecycle.value.execution ?? lifecycle.value.bootstrap).runId;
 
     try {
       if (lifecycle.value.execution === null) {
         const handle = this.client.workflow.getHandle<typeof bootstrapWorkflowV3>(
-          bootstrapWorkflowIdFor(taskReference),
-          lifecycle.value.bootstrap.runId,
+          targetWorkflowId,
+          targetRunId,
         );
         await this.client.withDeadline(Date.now() + this.configuration.updateTimeoutMs, () =>
           handle.executeUpdate(resolveBootstrapWaitUpdate, { args: [command] }),
@@ -289,8 +302,8 @@ export class TemporalTaskRunService implements TaskRunService {
       } else {
         const executionCommand = ResolveExecutionWaitCommandSchema.parse(command);
         const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(
-          lifecycle.value.execution.workflowId,
-          lifecycle.value.execution.runId,
+          targetWorkflowId,
+          targetRunId,
         );
         await this.client.withDeadline(Date.now() + this.configuration.updateTimeoutMs, () =>
           handle.executeUpdate(resolveExecutionWaitUpdate, { args: [executionCommand] }),
@@ -303,9 +316,17 @@ export class TemporalTaskRunService implements TaskRunService {
           ? err({ kind: 'run_not_found', taskReference })
           : current;
     } catch (error) {
+      const status = await this.describeWorkflowStatus(
+        this.client.workflow.getHandle(targetWorkflowId, targetRunId),
+      );
+      if (!status.ok) return err(status.error);
+      if (status.value === null) return err({ kind: 'run_not_found', taskReference });
+      if (status.value !== 'RUNNING') {
+        return err({ kind: 'run_not_active', taskReference, runId: targetRunId });
+      }
       return causedBy(error, WorkflowNotFoundError)
         ? err({ kind: 'run_not_found', taskReference })
-        : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
+        : err({ kind: 'runtime_unavailable', message: temporalErrorMessage(error) });
     }
   }
 
@@ -317,32 +338,45 @@ export class TemporalTaskRunService implements TaskRunService {
       bootstrapWorkflowIdFor(taskReference),
       runId,
     );
-    try {
-      return ok(
-        BootstrapWorkflowPublicStateSchema.parse(
-          await this.query(handle, bootstrapWorkflowStateQuery),
-        ),
-      );
-    } catch (error) {
-      return causedBy(error, WorkflowNotFoundError)
-        ? ok(null)
-        : err({ kind: 'runtime_unavailable', message: messageFrom(error) });
-    }
+    return this.readWorkflowState(handle, bootstrapWorkflowStateQuery, (value) =>
+      BootstrapWorkflowPublicStateSchema.parse(value),
+    );
   }
 
   private async readExecution(
     workflowId: string,
-  ): Promise<Outcome<ExecutionWorkflowPublicState, TaskRunError>> {
+  ): Promise<Outcome<ExecutionWorkflowPublicState | null, TaskRunError>> {
     const handle = this.client.workflow.getHandle<typeof executionWorkflowV2>(workflowId);
+    return this.readWorkflowState(handle, executionWorkflowStateQuery, (value) =>
+      ExecutionWorkflowPublicStateSchema.parse(value),
+    );
+  }
+
+  private async readWorkflowState<
+    State extends { readonly workflowId: string; readonly runId: string; readonly status: string },
+  >(
+    handle: WorkflowHandle,
+    query: unknown,
+    parse: (value: unknown) => State,
+  ): Promise<Outcome<State | null, TaskRunError>> {
     try {
-      return ok(
-        ExecutionWorkflowPublicStateSchema.parse(
-          await this.query(handle, executionWorkflowStateQuery),
-        ),
+      const state = parse(await this.query(handle, query));
+      const status = await this.describeWorkflowStatus(
+        this.client.workflow.getHandle(state.workflowId, state.runId),
       );
+      if (!status.ok) return err(status.error);
+      if (status.value === 'RUNNING') return ok(state);
+      if (status.value === 'COMPLETED' && state.status === 'completed') return ok(state);
+      return ok(null);
     } catch (error) {
-      return err({ kind: 'runtime_unavailable', message: messageFrom(error) });
+      return causedBy(error, WorkflowNotFoundError)
+        ? ok(null)
+        : err({ kind: 'runtime_unavailable', message: temporalErrorMessage(error) });
     }
+  }
+
+  private describeWorkflowStatus(handle: WorkflowHandle) {
+    return readWorkflowExecutionStatus(this.client, handle, this.configuration.queryTimeoutMs);
   }
 
   private query<Result>(handle: WorkflowHandle, query: unknown): Promise<Result> {

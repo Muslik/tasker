@@ -68,6 +68,18 @@ describe('Bootstrap Workflow v3 recovery', () => {
     return result.value;
   };
 
+  const startAndTerminateAtPlanReview = async (
+    taskReference: string,
+  ): Promise<TaskRunPublicState> => {
+    const started = await runs.start(inputFor(taskReference, 'required'));
+    if (!started.ok) throw new Error(JSON.stringify(started.error));
+    const waiting = await waitFor(taskReference, 'plan.approved@1');
+    await environment.client.workflow
+      .getHandle(waiting.workflowId, waiting.runId)
+      .terminate('Integration fixture closed by operator');
+    return waiting;
+  };
+
   beforeAll(async () => {
     environment = await TestWorkflowEnvironment.createTimeSkipping();
     runs = new TemporalTaskRunService(environment.client, {
@@ -157,6 +169,45 @@ describe('Bootstrap Workflow v3 recovery', () => {
       status: 'waiting',
       wait: { waitKind: 'code_review@1' },
     });
+  });
+
+  it('hides a terminated workflow from active run reads', async () => {
+    const taskReference = 'fixture:terminated-read';
+    await startAndTerminateAtPlanReview(taskReference);
+
+    const current = await runs.read(taskReference);
+    const lifecycle = await runs.readLifecycle(taskReference);
+
+    expect(current).toEqual(ok(null));
+    expect(lifecycle).toEqual(ok(null));
+  });
+
+  it('starts a new run after the previous workflow terminated', async () => {
+    const taskReference = 'fixture:start-after-terminated';
+    const terminated = await startAndTerminateAtPlanReview(taskReference);
+
+    const replacement = await runs.start(inputFor(taskReference, 'required'));
+
+    if (!replacement.ok) throw new Error(JSON.stringify(replacement.error));
+    expect(replacement.value.runId).not.toBe(terminated.runId);
+  });
+
+  it('reports a terminated plan-review target as no longer active', async () => {
+    const taskReference = 'fixture:resolve-terminated-plan-review';
+    const terminated = await startAndTerminateAtPlanReview(taskReference);
+    const replacement = await runs.start(inputFor(taskReference, 'required'));
+    if (!replacement.ok) throw new Error(JSON.stringify(replacement.error));
+
+    const resolved = await runs.resolveWait(taskReference, {
+      runId: terminated.runId,
+      nodeId: 'plan_review',
+      waitKind: 'plan.approved@1',
+      resolution: { decision: 'approve' },
+    });
+
+    expect(resolved).toEqual(
+      err({ kind: 'run_not_active', taskReference, runId: terminated.runId }),
+    );
   });
 
   it('restarts unfinished work in a new run and workspace without deleting old history', async () => {

@@ -221,6 +221,8 @@ const sendTemporalRunError = (reply: FastifyReply, error: TaskRunError): Fastify
   switch (error.kind) {
     case 'run_not_found':
       return reply.code(404).send(apiError(error.kind, 'This workflow has not started'));
+    case 'run_not_active':
+      return reply.code(409).send(apiError(error.kind, 'This workflow run is no longer active'));
     case 'run_input_conflict':
       return reply
         .code(409)

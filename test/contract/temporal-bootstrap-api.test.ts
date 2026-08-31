@@ -85,6 +85,7 @@ const waitingPlanReviewRun = (input: BootstrapWorkflowInput, runId: string): Tas
 class ContractTaskRunService implements TaskRunService {
   public readonly starts: BootstrapWorkflowInput[] = [];
   public readonly resolutions: ResolveBootstrapWaitCommand[] = [];
+  public nextResolutionError: TaskRunError | null = null;
   private current: TaskRunPublicState | null = null;
   private sequence = 0;
 
@@ -148,6 +149,9 @@ class ContractTaskRunService implements TaskRunService {
     taskReference: string,
     command: ResolveBootstrapWaitCommand,
   ): Promise<Outcome<TaskRunPublicState, TaskRunError>> {
+    if (this.nextResolutionError !== null) {
+      return Promise.resolve(err(this.nextResolutionError));
+    }
     if (this.current === null || this.current.taskReference !== taskReference) {
       return Promise.resolve(err({ kind: 'run_not_found' as const, taskReference }));
     }
@@ -189,6 +193,58 @@ const setup = (taskRemoval?: Parameters<typeof buildOperatorApi>[0]['taskRemoval
 };
 
 describe('Temporal bootstrap HTTP contract', () => {
+  it('projects a missing active lifecycle without a ghost run', async () => {
+    const { api } = setup();
+
+    const response = await api.inject({
+      method: 'GET',
+      url: '/api/operator/tasks/jira:AVIA-12045/projection',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'not_started',
+      activeRuntime: null,
+      activeRunId: null,
+      current: null,
+    });
+    await api.close();
+  });
+
+  it('reports that a plan-review target is no longer active when its workflow closed', async () => {
+    const { api, runs } = setup();
+    const input = BootstrapWorkflowInputSchema.parse({
+      schemaVersion: 3,
+      taskReference: 'jira:AVIA-12045',
+      settings: { planReview: 'required', planningStrategy: 'fast' },
+    });
+    runs.setCurrent(waitingPlanReviewRun(input, 'run-1'));
+    runs.nextResolutionError = {
+      kind: 'run_not_active',
+      taskReference: 'jira:AVIA-12045',
+      runId: 'run-1',
+    };
+
+    const response = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/jira:AVIA-12045/plan-review',
+      payload: {
+        expectedRunId: 'run-1',
+        reviewId: 'review-closed-run',
+        planArtifactId: PLAN_ARTIFACT_ID,
+        planAttempt: 1,
+        decision: 'approve',
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: 'run_not_active',
+      message: 'This workflow run is no longer active',
+    });
+    await api.close();
+  });
+
   it('accepts plan review annotations and forwards combined guidance to Temporal', async () => {
     const { api, runs, ledger } = setup();
     const input = BootstrapWorkflowInputSchema.parse({
