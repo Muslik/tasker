@@ -90,6 +90,7 @@ export type CurrentAttemptStatusProps = {
   status?: OperatorTaskSummary['status'];
   actions?: ReactNode;
   onOpenInvocation?: (selection: InvocationSelection) => void;
+  showWaitLine?: boolean;
   className?: string;
 };
 
@@ -98,6 +99,7 @@ export function CurrentAttemptStatus({
   status,
   actions,
   onOpenInvocation,
+  showWaitLine = true,
   className,
 }: CurrentAttemptStatusProps) {
   const [now, setNow] = useState(() => Date.now());
@@ -133,7 +135,7 @@ export function CurrentAttemptStatus({
         </dl>
         {actions}
       </div>
-      {view.waitLine === null ? null : (
+      {!showWaitLine || view.waitLine === null ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-2.5">
           <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm text-foreground">
             {view.waitLine}

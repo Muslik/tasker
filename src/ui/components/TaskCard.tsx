@@ -1,16 +1,23 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import type { OperatorTaskSummary } from '../../server/operator-contracts.js';
+import type {
+  ExecutionRunView,
+  OperatorRunLogResponse,
+  OperatorTaskInvocationListResponse,
+  OperatorTaskSummary,
+  OperatorWorkflowProjection,
+} from '../../server/operator-contracts.js';
 import {
+  invalidateTaskQueries,
   taskCurrentRunQueryOptions,
   taskExecutionAttemptQueryOptions,
   taskInvocationQueryOptions,
   taskInvocationsQueryOptions,
   taskProjectionQueryOptions,
   taskRunLogQueryOptions,
-  invalidateTaskQueries,
 } from '../api/index.js';
+import { AgentActivityFeed } from './AgentActivityFeed.js';
 import { AttemptDetails, type AttemptDetailsTab } from './AttemptDetails.js';
 import { AttemptsList, type AttemptSelection } from './AttemptsList.js';
 import { CurrentAttemptStatus, type InvocationSelection } from './CurrentAttemptStatus.js';
@@ -18,6 +25,7 @@ import { InvocationTokens } from './InvocationTokens.js';
 import { StatusChip } from './StatusChip.js';
 import { TaskActions } from './TaskActions.js';
 import { TaskOperatorSurfaces } from './TaskOperatorSurfaces.js';
+import { WaitBanner } from './WaitBanner.js';
 import { WorkflowRail } from './WorkflowRail.js';
 
 export type TaskCardProps = {
@@ -41,27 +49,38 @@ export const SELECTED_TASK_POLL_INTERVAL_MS = 8_000;
 export const shouldPollSelectedTask = (status: OperatorTaskSummary['status']): boolean =>
   status === 'running';
 
-export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
-  const queryClient = useQueryClient();
+type RunViewProps = {
+  readonly task: OperatorTaskSummary;
+  readonly projection: OperatorWorkflowProjection;
+  readonly currentRun: ExecutionRunView | null;
+  readonly runLog: OperatorRunLogResponse | null;
+  readonly invocations: OperatorTaskInvocationListResponse | null;
+  readonly errors: readonly string[];
+  readonly onStart?: () => void;
+  readonly onRemove?: () => void;
+};
+
+const TaskRunView = ({
+  task,
+  projection,
+  currentRun,
+  runLog,
+  invocations,
+  onStart,
+  onRemove,
+  errors,
+}: RunViewProps) => {
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection | null>(null);
   const [selectedTab, setSelectedTab] = useState<AttemptDetailsTab>('log');
-  const projectionQuery = useQuery(taskProjectionQueryOptions(task.id));
-  const runLogQuery = useQuery(taskRunLogQueryOptions(task.id));
-  const currentRunQuery = useQuery(taskCurrentRunQueryOptions(task.id));
-  const invocationsQuery = useQuery(taskInvocationsQueryOptions(task.id));
   const selectedInvocationId = selectedAttempt?.invocationId ?? null;
   const selectedAttemptIdentity =
     selectedAttempt !== null && selectedAttempt.nodeId !== null && selectedAttempt.blockRun !== null
-      ? {
-          nodeId: selectedAttempt.nodeId,
-          blockRun: selectedAttempt.blockRun,
-        }
+      ? { nodeId: selectedAttempt.nodeId, blockRun: selectedAttempt.blockRun }
       : null;
-
   const selectedEntry =
     selectedAttemptIdentity === null
       ? null
-      : (runLogQuery.data?.entries.find(
+      : (runLog?.entries.find(
           (entry) =>
             entry.nodeId === selectedAttemptIdentity.nodeId &&
             entry.blockRun === selectedAttemptIdentity.blockRun,
@@ -77,6 +96,125 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
       : taskInvocationQueryOptions(task.id, selectedInvocationId)),
     enabled: selectedInvocationId !== null,
   });
+  const openInvocation = (selection: InvocationSelection): void => {
+    triggerTaskInvocationOpen(selection, setSelectedAttempt, setSelectedTab);
+  };
+  const detailErrors = [attemptQuery.error, invocationQuery.error]
+    .filter((error): error is Error => error instanceof Error)
+    .map((error) => error.message);
+
+  return (
+    <div className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_23rem] xl:grid-rows-1">
+      <section className="min-h-0 min-w-0 overflow-y-auto bg-background">
+        <header className="sticky top-0 z-20 border-b bg-background/95 px-5 py-4 backdrop-blur">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                {task.taskId}
+              </span>
+              <h1 className="mt-2 text-xl font-semibold tracking-tight">{task.title}</h1>
+            </div>
+            <CurrentAttemptStatus
+              projection={projection}
+              status={task.status}
+              showWaitLine={false}
+              onOpenInvocation={openInvocation}
+              actions={
+                projection.current?.status === 'waiting' ? null : (
+                  <TaskActions
+                    task={task}
+                    projection={projection}
+                    currentRun={currentRun}
+                    {...(onStart === undefined ? {} : { onSettings: onStart })}
+                    {...(onRemove === undefined ? {} : { onRemove })}
+                  />
+                )
+              }
+            />
+          </div>
+          {currentRun?.settings?.operatorBrief ? (
+            <details className="mt-3 rounded-lg border bg-card px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium">Бриф оператора</summary>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                {currentRun.settings.operatorBrief}
+              </p>
+            </details>
+          ) : null}
+        </header>
+        <WaitBanner
+          task={task}
+          projection={projection}
+          currentRun={currentRun}
+          {...(onStart === undefined ? {} : { onStart })}
+          {...(onRemove === undefined ? {} : { onRemove })}
+          onOpenInvocation={openInvocation}
+        />
+        <div className="space-y-6 p-5">
+          <TaskOperatorSurfaces task={task} projection={projection} currentRun={currentRun} />
+          <AgentActivityFeed runLog={runLog} />
+          {errors.length + detailErrors.length === 0 ? null : (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              {[...errors, ...detailErrors].join(' ')}
+            </div>
+          )}
+          <details>
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Attempts and invocation details
+            </summary>
+            <div className="mt-4 space-y-4">
+              <AttemptsList
+                runLog={runLog}
+                invocations={invocations?.invocations ?? null}
+                selectedAttempt={selectedAttempt}
+                onOpenInvocation={openInvocation}
+                onSelectAttempt={(selection) => {
+                  setSelectedAttempt(selection);
+                  setSelectedTab('log');
+                }}
+              />
+              <AttemptDetails
+                entry={selectedEntry}
+                attempt={
+                  selectedEntry?.runtime === 'execution' ? (attemptQuery.data ?? null) : null
+                }
+                selectedTab={selectedTab}
+                onTabChange={setSelectedTab}
+                invocationDetail={invocationQuery.data ?? null}
+                invocationDetailPending={selectedInvocationId !== null && invocationQuery.isPending}
+                invocationDetailError={
+                  invocationQuery.error instanceof Error ? invocationQuery.error : null
+                }
+                invocationId={selectedInvocationId}
+              />
+            </div>
+          </details>
+        </div>
+      </section>
+      <aside className="min-h-0 min-w-0 overflow-y-auto border-t border-border bg-card xl:border-l xl:border-t-0">
+        <WorkflowRail
+          stages={projection.stages}
+          currentNodeId={projection.current?.nodeId ?? null}
+          invocations={invocations}
+        />
+        <details className="border-t px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium">Token details table</summary>
+          <InvocationTokens
+            invocations={invocations}
+            onOpenInvocation={openInvocation}
+            className="mt-3"
+          />
+        </details>
+      </aside>
+    </div>
+  );
+};
+
+export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
+  const queryClient = useQueryClient();
+  const projectionQuery = useQuery(taskProjectionQueryOptions(task.id));
+  const runLogQuery = useQuery(taskRunLogQueryOptions(task.id));
+  const currentRunQuery = useQuery(taskCurrentRunQueryOptions(task.id));
+  const invocationsQuery = useQuery(taskInvocationsQueryOptions(task.id));
 
   useEffect(() => {
     if (!shouldPollSelectedTask(task.status)) return;
@@ -96,7 +234,7 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
   const projection = projectionQuery.data;
   if (projection === undefined) {
     return (
-      <article className="grid h-full place-items-center p-6">
+      <article className="grid min-h-0 min-w-0 place-items-center p-6">
         <div className="max-w-md rounded-xl border bg-card p-6 text-center">
           <StatusChip status={task.status} />
           <h1 className="mt-3 text-lg font-semibold">{task.title}</h1>
@@ -110,131 +248,22 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
     );
   }
 
-  const openInvocation = (selection: InvocationSelection) => {
-    triggerTaskInvocationOpen(selection, setSelectedAttempt, setSelectedTab);
-  };
-  const errors = [
-    runLogQuery.error,
-    currentRunQuery.error,
-    invocationsQuery.error,
-    attemptQuery.error,
-    invocationQuery.error,
-  ]
+  const errors = [runLogQuery.error, currentRunQuery.error, invocationsQuery.error]
     .filter((error): error is Error => error instanceof Error)
     .map((error) => error.message);
-  const attemptDetailsProps = {
-    entry: selectedEntry,
-    attempt: selectedEntry?.runtime === 'execution' ? (attemptQuery.data ?? null) : null,
-    selectedTab,
-    onTabChange: setSelectedTab,
-    invocationDetail: invocationQuery.data ?? null,
-    invocationDetailPending: selectedInvocationId !== null && invocationQuery.isPending,
-    invocationDetailError: invocationQuery.error instanceof Error ? invocationQuery.error : null,
-    invocationId: selectedInvocationId,
-  };
 
   return (
-    <article className="min-h-0 overflow-y-auto bg-background">
-      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 py-4 backdrop-blur">
-        <div className="min-w-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                {task.taskId}
-              </span>
-            </div>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight">{task.title}</h1>
-          </div>
-          <div className="mt-4">
-            <CurrentAttemptStatus
-              projection={projection}
-              status={task.status}
-              onOpenInvocation={openInvocation}
-              actions={
-                <TaskActions
-                  task={task}
-                  projection={projection}
-                  currentRun={currentRunQuery.data ?? null}
-                  {...(onStart === undefined ? {} : { onSettings: onStart })}
-                  {...(onRemove === undefined ? {} : { onRemove })}
-                />
-              }
-            />
-          </div>
-          {currentRunQuery.data?.settings?.operatorBrief ? (
-            <details className="mt-3 rounded-lg border bg-card px-3 py-2">
-              <summary className="cursor-pointer text-sm font-medium">Бриф оператора</summary>
-              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                {currentRunQuery.data.settings.operatorBrief}
-              </p>
-            </details>
-          ) : null}
-        </div>
-      </header>
-
-      <div className="space-y-6 p-5">
-        <section className="space-y-4" aria-labelledby="task-card-workflow-heading">
-          <h2
-            id="task-card-workflow-heading"
-            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-          >
-            Workflow overview
-          </h2>
-          <WorkflowRail
-            stages={projection.stages}
-            currentNodeId={projection.current?.nodeId ?? null}
-          />
-          <InvocationTokens
-            invocations={invocationsQuery.data ?? null}
-            onOpenInvocation={openInvocation}
-          />
-        </section>
-        <section className="space-y-4" aria-labelledby="task-card-operators-heading">
-          <h2
-            id="task-card-operators-heading"
-            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-          >
-            Operator surfaces
-          </h2>
-          <TaskOperatorSurfaces
-            task={task}
-            projection={projection}
-            currentRun={currentRunQuery.data ?? null}
-          />
-          {errors.length === 0 ? null : (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              {errors.join(' ')}
-            </div>
-          )}
-        </section>
-        <section className="space-y-4" aria-labelledby="task-card-attempts-heading">
-          <h2
-            id="task-card-attempts-heading"
-            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-          >
-            Attempts
-          </h2>
-          <AttemptsList
-            runLog={runLogQuery.data ?? null}
-            invocations={invocationsQuery.data?.invocations ?? null}
-            selectedAttempt={selectedAttempt}
-            onOpenInvocation={openInvocation}
-            onSelectAttempt={(selection) => {
-              setSelectedAttempt(selection);
-              setSelectedTab('log');
-            }}
-          />
-        </section>
-        <section className="space-y-4" aria-labelledby="task-card-details-heading">
-          <h2
-            id="task-card-details-heading"
-            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
-          >
-            Attempt details
-          </h2>
-          <AttemptDetails {...attemptDetailsProps} />
-        </section>
-      </div>
+    <article className="min-h-0 min-w-0">
+      <TaskRunView
+        task={task}
+        projection={projection}
+        currentRun={currentRunQuery.data ?? null}
+        runLog={runLogQuery.data ?? null}
+        invocations={invocationsQuery.data ?? null}
+        errors={errors}
+        {...(onStart === undefined ? {} : { onStart })}
+        {...(onRemove === undefined ? {} : { onRemove })}
+      />
     </article>
   );
 };

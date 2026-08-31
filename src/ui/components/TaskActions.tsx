@@ -49,6 +49,7 @@ export type TaskActionsProps = {
   readonly currentRun: ExecutionRunView | null;
   readonly onSettings?: () => void;
   readonly onRemove?: () => void;
+  readonly compact?: boolean;
 };
 
 export const TaskActions = ({
@@ -57,6 +58,7 @@ export const TaskActions = ({
   currentRun,
   onSettings,
   onRemove,
+  compact = false,
 }: TaskActionsProps) => {
   const [guidance, setGuidance] = useState('');
   const [restartConfirming, setRestartConfirming] = useState(false);
@@ -91,7 +93,27 @@ export const TaskActions = ({
     },
   } satisfies Readonly<Record<TaskActionName, () => void>>;
   return (
-    <div aria-label="Task actions" className="flex flex-wrap items-center justify-end gap-2">
+    <div
+      aria-label="Task actions"
+      className={
+        compact
+          ? 'flex min-w-0 flex-1 flex-wrap items-center gap-2'
+          : 'flex flex-wrap items-center justify-end gap-2'
+      }
+    >
+      {compact ? (
+        <input
+          aria-label="Resume guidance"
+          className="h-8 min-w-48 flex-1 text-xs"
+          disabled={busy}
+          maxLength={10_000}
+          placeholder="Optional resume guidance"
+          value={guidance}
+          onChange={(event) => {
+            setGuidance(event.target.value);
+          }}
+        />
+      ) : null}
       {availability.resume ? (
         <Button
           disabled={busy}
@@ -156,7 +178,7 @@ export const TaskActions = ({
           Remove
         </Button>
       )}
-      {availability.resume ? (
+      {availability.resume && !compact ? (
         <details className="w-full pt-2 text-right">
           <summary className="cursor-pointer text-xs text-muted-foreground">
             Add resume guidance

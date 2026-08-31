@@ -21,6 +21,9 @@ import { TaskQueue } from './components/TaskQueue.js';
 import { RealtimeBridge } from './RealtimeBridge.js';
 import { JiraTaskLaunchDialog, type JiraTaskLaunchInput } from './components/TaskDialogs.js';
 import { RemoveTaskDialog } from './components/RemoveTaskDialog.js';
+import { readStoredBoolean, writeStoredBoolean } from './lib/collapse-state.js';
+
+const TASK_QUEUE_COLLAPSED_STORAGE_KEY = 'tasker.operator.taskQueueCollapsed';
 
 export const taskReferenceFromHash = (): string | null => {
   if (typeof window === 'undefined') return null;
@@ -44,6 +47,9 @@ export const App = () => {
   const [launchMode, setLaunchMode] = useState<'add' | 'start' | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [taskQueueCollapsed, setTaskQueueCollapsed] = useState(() =>
+    readStoredBoolean(TASK_QUEUE_COLLAPSED_STORAGE_KEY),
+  );
   const taskListQuery = useQuery(taskListQueryOptions());
   const tasks = taskListQuery.data?.tasks ?? [];
   const selectedTask = resolveSelectedTask(tasks, selectedReference);
@@ -145,12 +151,27 @@ export const App = () => {
           </button>
         </div>
       </header>
-      <main className="grid min-h-0 grid-rows-[15rem_minmax(0,1fr)] md:grid-cols-[minmax(17rem,21rem)_minmax(0,1fr)] md:grid-rows-1">
+      <main
+        className={
+          taskQueueCollapsed
+            ? 'grid min-h-0 grid-rows-[3.5rem_minmax(0,1fr)] md:grid-cols-[3.5rem_minmax(0,1fr)] md:grid-rows-1'
+            : 'grid min-h-0 grid-rows-[15rem_minmax(0,1fr)] md:grid-cols-[minmax(17rem,21rem)_minmax(0,1fr)] md:grid-rows-1'
+        }
+        data-task-queue-collapsed={String(taskQueueCollapsed)}
+      >
         <TaskQueue
           tasks={tasks}
           selectedTaskReference={selectedTask?.id ?? null}
           selectedNodeId={selectedProjectionQuery.data?.current?.nodeId ?? null}
           onSelect={selectTask}
+          collapsed={taskQueueCollapsed}
+          onToggleCollapsed={() => {
+            setTaskQueueCollapsed((current) => {
+              const next = !current;
+              writeStoredBoolean(TASK_QUEUE_COLLAPSED_STORAGE_KEY, next);
+              return next;
+            });
+          }}
         />
         {taskListQuery.isPending ? (
           <section className="grid place-items-center p-8 text-sm text-muted-foreground">
