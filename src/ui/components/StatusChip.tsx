@@ -1,5 +1,6 @@
 import type { OperatorTaskSummary } from '../../server/operator-contracts.js';
 import { cn } from '../lib/utils.js';
+import { Badge } from './ui/badge.js';
 
 type StatusPresentation = {
   readonly label: string;
@@ -70,14 +71,11 @@ export const StatusChip = ({ status }: { readonly status: OperatorTaskSummary['s
   const presentation = getStatusChipPresentation(status);
 
   return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-tight',
-        presentation.className,
-      )}
+    <Badge
+      className={cn('text-[11px] tracking-tight', presentation.className)}
       data-status={status}
     >
       {presentation.label}
-    </span>
+    </Badge>
   );
 };

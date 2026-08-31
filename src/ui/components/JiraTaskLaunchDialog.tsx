@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-
+import { LoaderCircle } from 'lucide-react';
 import type { JiraIssueSnapshot } from '../../integrations/jira/contracts.js';
-import type {
-  ExecutionRunView,
-  OperatorTaskSummary,
-  RunStartCommand,
-} from '../../server/operator-contracts.js';
+import type * as OperatorContracts from '../../server/operator-contracts.js';
 import type { RepositoryCatalogEntry } from '../../workspace/contracts.js';
 import type { JiraProductResolution } from '../../shared/product.js';
 import { taskBranchName, taskBranchNameMatches } from '../../shared/git-branch.js';
 import { TaskLaunchSettingsFields } from './TaskLaunchSettingsFields.js';
 import { TaskLaunchDialogHeader } from './TaskLaunchDialogHeader.js';
 import { TaskRunSettingsSummary, TaskRunSettingsUnavailable } from './TaskRunSettingsSummary.js';
+import { Checkbox } from './ui/checkbox.js';
+import { Dialog, DialogContent } from './ui/dialog.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select.js';
 import { Button } from './ui/button.js';
+import { ActionAlert } from './ActionAlert.js';
 
 export type JiraTaskLaunchInput = {
   readonly issueKey: string;
   readonly repository: string;
   readonly startImmediately: boolean;
-  readonly settings: RunStartCommand['settings'];
+  readonly settings: OperatorContracts.RunStartCommand['settings'];
 };
 
 type JiraPreview =
@@ -33,16 +33,20 @@ export type JiraTaskLaunchDialogProps = {
   readonly repositories: readonly RepositoryCatalogEntry[];
   readonly initialIssue?: JiraIssueSnapshot;
   readonly initialRepository?: string;
-  readonly task?: OperatorTaskSummary;
-  readonly run?: ExecutionRunView | null;
+  readonly task?: OperatorContracts.OperatorTaskSummary;
+  readonly run?: OperatorContracts.ExecutionRunView | null;
   readonly productTitle?: string | null;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onClose: () => void;
   readonly onResolveIssue: (issueKey: string) => Promise<JiraIssueSnapshot>;
   readonly onResolveProduct: (issueKey: string) => Promise<JiraProductResolution>;
   readonly onSubmit: (input: JiraTaskLaunchInput) => Promise<void>;
 };
+
+const repositoryPlaceholder = '__unselected__';
+const textInputClassName =
+  'h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50';
 
 export const repositorySelectionForProduct = (
   current: string,
@@ -111,18 +115,18 @@ export const JiraTaskLaunchDialog = ({
           setBranchName(taskBranchName(issue.issueKey, issue.summary));
           void onResolveProduct(issue.issueKey)
             .then((resolved) => {
-              setProduct(resolved.product);
-              if (resolved.product !== null) {
-                setRepository((current) => {
-                  const selection = repositorySelectionForProduct(
-                    current,
-                    resolved.product?.primaryRepository ?? '',
-                    repositoryAutoSelected.current,
-                  );
-                  repositoryAutoSelected.current = selection.autoSelected;
-                  return selection.repository;
-                });
-              }
+              const resolvedProduct = resolved.product;
+              setProduct(resolvedProduct);
+              if (resolvedProduct === null) return;
+              setRepository((current) => {
+                const selection = repositorySelectionForProduct(
+                  current,
+                  resolvedProduct.primaryRepository,
+                  repositoryAutoSelected.current,
+                );
+                repositoryAutoSelected.current = selection.autoSelected;
+                return selection.repository;
+              });
             })
             .catch(() => {
               setProduct(null);
@@ -141,10 +145,9 @@ export const JiraTaskLaunchDialog = ({
   }, [issueKey, mode, onResolveIssue, onResolveProduct, open]);
 
   if (!open) return null;
-  if (mode === 'start' && task !== undefined && run === undefined) {
+  if (mode === 'start' && task !== undefined && run === undefined)
     return <TaskRunSettingsUnavailable onClose={onClose} />;
-  }
-  if (mode === 'start' && task !== undefined && run !== null && run !== undefined) {
+  if (mode === 'start' && task !== undefined && run) {
     return (
       <TaskRunSettingsSummary
         task={task}
@@ -154,146 +157,144 @@ export const JiraTaskLaunchDialog = ({
       />
     );
   }
+
   const normalized = issueKey.trim().toUpperCase();
   const ready = preview.status === 'ready' && preview.issue.issueKey === normalized;
   const branchValid = ready && taskBranchNameMatches(branchName, normalized);
+  const launchDisabled =
+    pending || !ready || (startImmediately && (!branchValid || repository.length === 0));
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && !pending) onClose();
+  };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="presentation">
-      <form
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-background p-5 shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-launch-title"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!ready || pending || (startImmediately && (!branchValid || repository.length === 0)))
-            return;
-          void onSubmit({
-            issueKey: normalized,
-            repository,
-            startImmediately,
-            settings: {
-              planReview: planReview ? 'required' : 'automatic',
-              planningStrategy,
-              trackerStatusUpdates: trackerStatusUpdates ? 'enabled' : 'disabled',
-              ...(operatorBrief.length === 0 ? {} : { operatorBrief }),
-              ...(branchName.length === 0 ? {} : { branchName }),
-            },
-          });
-        }}
-      >
-        <TaskLaunchDialogHeader mode={mode} pending={pending} onClose={onClose} />
-        <div className="mt-5 space-y-4">
-          <label className="block space-y-1.5 text-xs font-medium">
-            Jira task
-            <input
-              autoFocus
-              aria-label="Jira task"
-              className="h-9 w-full uppercase"
-              placeholder="FC-2244"
-              value={issueKey}
-              disabled={pending || mode === 'start'}
-              onChange={(event) => {
-                setIssueKey(event.target.value);
-              }}
-            />
-            {preview.status === 'checking' ? (
-              <span className="text-muted-foreground">Checking Jira…</span>
-            ) : null}
-            {preview.status === 'invalid' ? (
-              <span className="text-destructive">{preview.message}</span>
-            ) : null}
-            {ready ? (
-              <span className="block text-muted-foreground">{preview.issue.summary}</span>
-            ) : null}
-          </label>
-          <label className="block space-y-1.5 text-xs font-medium">
-            Working repository
-            <select
-              aria-label="Working repository"
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={repository}
-              disabled={pending}
-              onChange={(event) => {
-                setRepository(event.target.value);
-                repositoryAutoSelected.current = false;
-              }}
-            >
-              <option value="">Select a repository</option>
-              {repositories.map((entry) => (
-                <option key={entry.repositoryId} value={entry.repositoryId}>
-                  {entry.repositoryId}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={startImmediately}
-              disabled={pending}
-              onChange={(event) => {
-                setStartImmediately(event.target.checked);
-              }}
-            />
-            Start immediately
-          </label>
-          {startImmediately ? (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-lg gap-0 p-5 sm:max-w-lg" showCloseButton={false}>
+        <form
+          className="max-h-[calc(90vh-2.5rem)] space-y-5 overflow-y-auto"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (launchDisabled) return;
+            void onSubmit({
+              issueKey: normalized,
+              repository,
+              startImmediately,
+              settings: {
+                planReview: planReview ? 'required' : 'automatic',
+                planningStrategy,
+                trackerStatusUpdates: trackerStatusUpdates ? 'enabled' : 'disabled',
+                ...(operatorBrief.length === 0 ? {} : { operatorBrief }),
+                ...(branchName.length === 0 ? {} : { branchName }),
+              },
+            });
+          }}
+        >
+          <TaskLaunchDialogHeader mode={mode} pending={pending} onClose={onClose} />
+          <div className="space-y-4">
             <label className="block space-y-1.5 text-xs font-medium">
-              Branch name
+              <span>Jira task</span>
               <input
-                aria-label="Branch name"
-                className="w-full"
-                value={branchName}
-                disabled={pending}
+                autoFocus
+                aria-label="Jira task"
+                className={`${textInputClassName} uppercase`}
+                placeholder="FC-2244"
+                value={issueKey}
+                disabled={pending || mode === 'start'}
                 onChange={(event) => {
-                  setBranchName(event.target.value);
+                  setIssueKey(event.target.value);
                 }}
               />
-              {!branchValid ? (
-                <span className="text-destructive">
-                  Use a branch beginning with {normalized || 'the Jira key'}.
-                </span>
+              {preview.status === 'checking' ? (
+                <span className="text-muted-foreground">Checking Jira…</span>
+              ) : null}
+              {preview.status === 'invalid' ? (
+                <span className="text-destructive">{preview.message}</span>
+              ) : null}
+              {ready ? (
+                <span className="block text-muted-foreground">{preview.issue.summary}</span>
               ) : null}
             </label>
-          ) : null}
-          <TaskLaunchSettingsFields
-            product={product}
-            operatorBrief={operatorBrief}
-            planningStrategy={planningStrategy}
-            planReview={planReview}
-            trackerStatusUpdates={trackerStatusUpdates}
-            pending={pending}
-            onOperatorBriefChange={(event) => {
-              setOperatorBrief(event.target.value);
-            }}
-            onPlanningStrategyChange={(event) => {
-              setPlanningStrategy(event.target.value as typeof planningStrategy);
-            }}
-            onPlanReviewChange={(event) => {
-              setPlanReview(event.target.checked);
-            }}
-            onTrackerStatusUpdatesChange={(event) => {
-              setTrackerStatusUpdates(event.target.checked);
-            }}
-          />
-          {error === null ? null : <p className="text-sm text-destructive">{error}</p>}
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            disabled={
-              pending || !ready || (startImmediately && (!branchValid || repository.length === 0))
-            }
-          >
-            {pending ? 'Starting…' : startImmediately ? 'Start task' : 'Add task'}
-          </Button>
-        </div>
-      </form>
-    </div>
+            <label className="block space-y-1.5 text-xs font-medium">
+              <span>Working repository</span>
+              <Select
+                value={repository.length === 0 ? repositoryPlaceholder : repository}
+                disabled={pending}
+                onValueChange={(value) => {
+                  if (value === null) return;
+                  repositoryAutoSelected.current = false;
+                  setRepository(value === repositoryPlaceholder ? '' : value);
+                }}
+              >
+                <SelectTrigger className="w-full" aria-label="Working repository">
+                  <SelectValue placeholder="Select a repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={repositoryPlaceholder}>Select a repository</SelectItem>
+                  {repositories.map((entry) => (
+                    <SelectItem key={entry.repositoryId} value={entry.repositoryId}>
+                      {entry.repositoryId}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border px-3 py-2 text-sm">
+              <Checkbox
+                checked={startImmediately}
+                disabled={pending}
+                onCheckedChange={setStartImmediately}
+              />
+              <span className="space-y-1">
+                <span className="block font-medium">Start immediately</span>
+                <span className="block text-xs text-muted-foreground">
+                  Queue the task right after it is added to Tasker.
+                </span>
+              </span>
+            </label>
+            {startImmediately ? (
+              <label className="block space-y-1.5 text-xs font-medium">
+                <span>Branch name</span>
+                <input
+                  aria-label="Branch name"
+                  className={textInputClassName}
+                  value={branchName}
+                  disabled={pending}
+                  onChange={(event) => {
+                    setBranchName(event.target.value);
+                  }}
+                />
+                {!branchValid ? (
+                  <span className="text-destructive">
+                    Use a branch beginning with {normalized || 'the Jira key'}.
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
+            <TaskLaunchSettingsFields
+              product={product}
+              operatorBrief={operatorBrief}
+              planningStrategy={planningStrategy}
+              planReview={planReview}
+              trackerStatusUpdates={trackerStatusUpdates}
+              pending={pending}
+              onOperatorBriefChange={setOperatorBrief}
+              onPlanningStrategyChange={setPlanningStrategy}
+              onPlanReviewChange={setPlanReview}
+              onTrackerStatusUpdatesChange={setTrackerStatusUpdates}
+            />
+            <ActionAlert error={error} />
+          </div>
+          <div className="flex justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={launchDisabled}>
+              {pending ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
+              {pending ? 'Starting…' : startImmediately ? 'Start task' : 'Add task'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 };

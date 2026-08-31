@@ -1,6 +1,14 @@
 import type { ExecutionRunView } from '../../server/operator-contracts.js';
 import type { OperatorTaskSummary } from '../../server/operator-contracts.js';
 import { Button } from './ui/button.js';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog.js';
 
 export type TaskRunSettingsSummaryProps = {
   readonly task: OperatorTaskSummary;
@@ -10,24 +18,24 @@ export type TaskRunSettingsSummaryProps = {
 };
 
 export const TaskRunSettingsUnavailable = ({ onClose }: { readonly onClose: () => void }) => (
-  <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="presentation">
-    <section
-      className="w-full max-w-lg rounded-xl border bg-background p-5 shadow-2xl"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="task-run-settings-title"
-    >
-      <h2 id="task-run-settings-title" className="text-base font-semibold">
-        Task settings
-      </h2>
-      <p className="mt-2 text-sm text-muted-foreground">Checking the current run settings…</p>
-      <div className="mt-5 flex justify-end">
+  <Dialog
+    defaultOpen
+    onOpenChange={(open) => {
+      if (!open) onClose();
+    }}
+  >
+    <DialogContent className="max-w-lg" showCloseButton={false}>
+      <DialogHeader>
+        <DialogTitle>Task settings</DialogTitle>
+        <DialogDescription>Checking the current run settings…</DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
         <Button type="button" variant="ghost" onClick={onClose}>
           Close
         </Button>
-      </div>
-    </section>
-  </div>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 );
 
 const valueOr = (value: string | undefined, fallback: string): string => value ?? fallback;
@@ -45,24 +53,17 @@ export const TaskRunSettingsSummary = ({
   const settings = run.settings;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="presentation">
-      <section
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-background p-5 shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-run-settings-title"
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 id="task-run-settings-title" className="text-base font-semibold">
-              Task settings
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">Settings for the current run.</p>
-          </div>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={onClose}>
-            ×
-          </Button>
-        </div>
+    <Dialog
+      defaultOpen
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto" showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Task settings</DialogTitle>
+          <DialogDescription>Settings for the current run.</DialogDescription>
+        </DialogHeader>
         <dl className="mt-5 space-y-3 text-sm">
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Jira task</dt>
@@ -105,12 +106,12 @@ export const TaskRunSettingsSummary = ({
             </dd>
           </div>
         </dl>
-        <div className="mt-5 flex justify-end">
+        <DialogFooter>
           <Button type="button" variant="ghost" onClick={onClose}>
             Close
           </Button>
-        </div>
-      </section>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };

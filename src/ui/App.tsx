@@ -21,6 +21,7 @@ import { TaskQueue } from './components/TaskQueue.js';
 import { RealtimeBridge } from './RealtimeBridge.js';
 import { JiraTaskLaunchDialog, type JiraTaskLaunchInput } from './components/TaskDialogs.js';
 import { RemoveTaskDialog } from './components/RemoveTaskDialog.js';
+import { Button } from './components/ui/button.js';
 import { readStoredBoolean, writeStoredBoolean } from './lib/collapse-state.js';
 
 const TASK_QUEUE_COLLAPSED_STORAGE_KEY = 'tasker.operator.taskQueueCollapsed';
@@ -46,7 +47,8 @@ export const App = () => {
   const [selectedReference, setSelectedReference] = useState(taskReferenceFromHash);
   const [launchMode, setLaunchMode] = useState<'add' | 'start' | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
-  const [operationError, setOperationError] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<Error | null>(null);
+  const [removeError, setRemoveError] = useState<Error | null>(null);
   const [taskQueueCollapsed, setTaskQueueCollapsed] = useState(() =>
     readStoredBoolean(TASK_QUEUE_COLLAPSED_STORAGE_KEY),
   );
@@ -87,11 +89,11 @@ export const App = () => {
     onSuccess: async (taskReference) => {
       await queryClient.invalidateQueries({ queryKey: ['operator'] });
       setLaunchMode(null);
-      setOperationError(null);
+      setLaunchError(null);
       selectTask(taskReference);
     },
     onError: (error: Error) => {
-      setOperationError(error.message);
+      setLaunchError(error);
     },
   });
   const removeMutation = useMutation({
@@ -103,10 +105,10 @@ export const App = () => {
       await queryClient.invalidateQueries({ queryKey: ['operator', 'task-list'] });
       setRemoveOpen(false);
       setSelectedReference(null);
-      setOperationError(null);
+      setRemoveError(null);
     },
     onError: (error: Error) => {
-      setOperationError(error.message);
+      setRemoveError(error);
     },
   });
 
@@ -139,16 +141,16 @@ export const App = () => {
           <span className="text-xs tabular-nums text-muted-foreground">
             {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
           </span>
-          <button
+          <Button
             type="button"
-            className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+            size="sm"
             onClick={() => {
-              setOperationError(null);
+              setLaunchError(null);
               setLaunchMode('add');
             }}
           >
             Add Jira task
-          </button>
+          </Button>
         </div>
       </header>
       <main
@@ -198,9 +200,11 @@ export const App = () => {
             key={selectedTask.id}
             task={selectedTask}
             onStart={() => {
+              setLaunchError(null);
               setLaunchMode('start');
             }}
             onRemove={() => {
+              setRemoveError(null);
               setRemoveOpen(true);
             }}
           />
@@ -226,7 +230,7 @@ export const App = () => {
             : ''
         }
         pending={launchMutation.isPending}
-        error={operationError}
+        error={launchError}
         onClose={() => {
           setLaunchMode(null);
         }}
@@ -238,7 +242,7 @@ export const App = () => {
         <RemoveTaskDialog
           task={selectedTask}
           pending={removeMutation.isPending}
-          error={operationError}
+          error={removeError}
           onClose={() => {
             setRemoveOpen(false);
           }}

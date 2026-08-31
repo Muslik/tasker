@@ -13,6 +13,9 @@ import {
   type ResearchDocumentReviewAnnotationDraft,
 } from '../lib/research-document-review-storage.js';
 import { Button } from './ui/button.js';
+import { ActionAlert } from './ActionAlert.js';
+import { Textarea } from './ui/textarea.js';
+import { ScrollArea } from './ui/scroll-area.js';
 
 export const ResearchDocumentReviewEditor = ({
   draftKey,
@@ -24,7 +27,7 @@ export const ResearchDocumentReviewEditor = ({
   readonly draftKey: string;
   readonly details: ResearchDocumentReviewWaitDetails;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onSubmit: (input: ResearchDocumentReviewResolution) => void;
 }) => {
   const documentRef = useRef<HTMLDivElement | null>(null);
@@ -104,17 +107,19 @@ export const ResearchDocumentReviewEditor = ({
               Добавить аннотацию
             </Button>
           )}
-          <div
-            className="research-document max-h-[68vh] overflow-auto rounded-lg border bg-background p-5"
-            ref={documentRef}
-            onKeyUp={() => {
-              updateSelection(documentRef.current, setSelection, setSelectionError);
-            }}
-            onMouseUp={() => {
-              updateSelection(documentRef.current, setSelection, setSelectionError);
-            }}
-            dangerouslySetInnerHTML={{ __html: documentHtml }}
-          />
+          <ScrollArea className="max-h-[68vh] rounded-lg border bg-background">
+            <div
+              className="research-document p-5"
+              ref={documentRef}
+              onKeyUp={() => {
+                updateSelection(documentRef.current, setSelection, setSelectionError);
+              }}
+              onMouseUp={() => {
+                updateSelection(documentRef.current, setSelection, setSelectionError);
+              }}
+              dangerouslySetInnerHTML={{ __html: documentHtml }}
+            />
+          </ScrollArea>
         </div>
         <div className="space-y-4">
           <div className="rounded-lg border bg-background p-4">
@@ -147,7 +152,7 @@ export const ResearchDocumentReviewEditor = ({
                     <blockquote className="mt-2 border-l-2 pl-3 text-sm italic">
                       {annotation.quote}
                     </blockquote>
-                    <textarea
+                    <Textarea
                       aria-label={`Annotation ${String(index + 1)} note`}
                       className="mt-3 min-h-24 w-full resize-y"
                       maxLength={2_000}
@@ -171,7 +176,7 @@ export const ResearchDocumentReviewEditor = ({
           </div>
           <label className="block rounded-lg border bg-background p-4 text-sm font-medium">
             Operator guidance
-            <textarea
+            <Textarea
               aria-label="Research review guidance"
               className="mt-3 min-h-28 w-full resize-y"
               maxLength={10_000}
@@ -186,7 +191,6 @@ export const ResearchDocumentReviewEditor = ({
           {selectionError === null ? null : (
             <p className="text-sm text-destructive">{selectionError}</p>
           )}
-          {error === null ? null : <p className="text-sm text-destructive">{error}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             <Button
               disabled={pending}
@@ -213,6 +217,7 @@ export const ResearchDocumentReviewEditor = ({
               Request changes
             </Button>
           </div>
+          <ActionAlert error={error} />
         </div>
       </div>
     </section>

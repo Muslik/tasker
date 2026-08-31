@@ -27,6 +27,7 @@ import { TaskActions } from './TaskActions.js';
 import { TaskOperatorSurfaces } from './TaskOperatorSurfaces.js';
 import { WaitBanner } from './WaitBanner.js';
 import { WorkflowRail } from './WorkflowRail.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible.js';
 
 export type TaskCardProps = {
   readonly task: OperatorTaskSummary;
@@ -196,14 +197,18 @@ const TaskRunView = ({
           currentNodeId={projection.current?.nodeId ?? null}
           invocations={invocations}
         />
-        <details className="border-t px-4 py-3">
-          <summary className="cursor-pointer text-sm font-medium">Token details table</summary>
-          <InvocationTokens
-            invocations={invocations}
-            onOpenInvocation={openInvocation}
-            className="mt-3"
-          />
-        </details>
+        <Collapsible defaultOpen className="border-t px-4 py-3">
+          <CollapsibleTrigger className="text-sm font-medium">
+            Token details table
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <InvocationTokens
+              invocations={invocations}
+              onOpenInvocation={openInvocation}
+              className="mt-3"
+            />
+          </CollapsibleContent>
+        </Collapsible>
       </aside>
     </div>
   );

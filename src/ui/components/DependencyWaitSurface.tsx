@@ -2,6 +2,8 @@ import { useState } from 'react';
 
 import type { OperatorInterventionAction } from '../../server/operator-contracts.js';
 import { Button } from './ui/button.js';
+import { ActionAlert } from './ActionAlert.js';
+import { Textarea } from './ui/textarea.js';
 
 type TypedAction = Extract<OperatorInterventionAction, { kind: 'typed_resolution' }>;
 type Details = NonNullable<TypedAction['details']>;
@@ -17,7 +19,7 @@ export const DependencyWaitSurface = ({
 }: {
   readonly action: TypedAction;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onAvailable: (
     versions: ReadonlyMap<string, string>,
     provenance: { postId: string; url: string },
@@ -48,7 +50,7 @@ const AvailableSurface = ({
 }: {
   readonly details: Available;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onSubmit: (
     versions: ReadonlyMap<string, string>,
     provenance: { postId: string; url: string },
@@ -105,7 +107,6 @@ const AvailableSurface = ({
           />
         </label>
       </div>
-      {error === null ? null : <p className="mt-2 text-sm text-destructive">{error}</p>}
       <div className="mt-4 flex justify-end">
         <Button
           type="button"
@@ -117,6 +118,7 @@ const AvailableSurface = ({
           {pending ? 'Verifying…' : 'Verify published versions'}
         </Button>
       </div>
+      <ActionAlert error={error} />
     </section>
   );
 };
@@ -129,7 +131,7 @@ const DiscoverySurface = ({
 }: {
   readonly details: Discovery;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onSubmit: (input: {
     producerTaskReference: string;
     producerRepository: string;
@@ -188,7 +190,7 @@ const DiscoverySurface = ({
         </label>
         <label className="block text-xs font-medium">
           Packages
-          <textarea
+          <Textarea
             className="mt-1 min-h-20 w-full"
             value={packages}
             disabled={pending}
@@ -198,7 +200,6 @@ const DiscoverySurface = ({
           />
         </label>
       </div>
-      {error === null ? null : <p className="mt-2 text-sm text-destructive">{error}</p>}
       <div className="mt-4 flex justify-end">
         <Button
           type="button"
@@ -215,6 +216,7 @@ const DiscoverySurface = ({
           {pending ? 'Saving…' : 'Configure dependency'}
         </Button>
       </div>
+      <ActionAlert error={error} />
     </section>
   );
 };

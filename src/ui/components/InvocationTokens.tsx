@@ -4,6 +4,9 @@ import type {
 } from '../../server/operator-contracts.js';
 import { cn } from '../lib/utils.js';
 import type { InvocationSelection } from './CurrentAttemptStatus.js';
+import { Badge } from './ui/badge.js';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip.js';
 import {
   formatOperatorCost,
   formatOperatorDurationMs,
@@ -184,25 +187,25 @@ export function InvocationTokens({
         </p>
       ) : (
         <div className="tasker-scroll-shell px-4 py-3">
-          <table className="tasker-fixed-table w-[86rem] table-fixed text-xs tabular-nums">
-            <thead>
-              <tr className="border-b border-border text-left uppercase tracking-[0.08em] text-muted-foreground">
-                <th className="w-28 pb-2 pr-4 font-medium">Status</th>
-                <th className="pb-2 pr-4 font-medium">Step / node</th>
-                <th className="w-24 pb-2 pr-4 font-medium">Block run</th>
-                <th className="w-40 pb-2 pr-4 font-medium">Model</th>
-                <th className="w-28 pb-2 pr-4 font-medium">Duration</th>
-                <th className="w-28 pb-2 pr-4 font-medium">Prompt</th>
-                <th className="w-24 pb-2 pr-4 font-medium">In</th>
-                <th className="w-24 pb-2 pr-4 font-medium">Out</th>
-                <th className="w-24 pb-2 pr-4 font-medium">Cached</th>
-                <th className="w-24 pb-2 pr-4 font-medium">Cost</th>
-                <th className="w-64 pb-2 font-medium">Failure</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="tasker-fixed-table w-[86rem] table-fixed text-xs tabular-nums">
+            <TableHeader>
+              <TableRow className="text-left uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="w-28 pr-4 font-medium">Status</TableHead>
+                <TableHead className="pr-4 font-medium">Step / node</TableHead>
+                <TableHead className="w-24 pr-4 font-medium">Block run</TableHead>
+                <TableHead className="w-40 pr-4 font-medium">Model</TableHead>
+                <TableHead className="w-28 pr-4 font-medium">Duration</TableHead>
+                <TableHead className="w-28 pr-4 font-medium">Prompt</TableHead>
+                <TableHead className="w-24 pr-4 font-medium">In</TableHead>
+                <TableHead className="w-24 pr-4 font-medium">Out</TableHead>
+                <TableHead className="w-24 pr-4 font-medium">Cached</TableHead>
+                <TableHead className="w-24 pr-4 font-medium">Cost</TableHead>
+                <TableHead className="w-64 font-medium">Failure</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((row) => (
-                <tr
+                <TableRow
                   key={row.invocationId}
                   className={cn(
                     'border-b border-border/60 align-top last:border-0',
@@ -213,17 +216,12 @@ export function InvocationTokens({
                     row.promptSpike ? 'Prompt grew to more than 2× its node baseline' : undefined
                   }
                 >
-                  <td className="py-2 pr-4">
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium',
-                        invocationStatusTone[row.status],
-                      )}
-                    >
+                  <TableCell className="py-2 pr-4">
+                    <Badge className={cn(invocationStatusTone[row.status])}>
                       {invocationStatusLabel(row.status)}
-                    </span>
-                  </td>
-                  <td className="py-2 pr-4 text-foreground">
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">
                     <button
                       type="button"
                       className="rounded-md text-left font-medium text-foreground transition hover:text-primary"
@@ -231,53 +229,37 @@ export function InvocationTokens({
                     >
                       {row.stepLabel}
                     </button>
-                  </td>
-                  <td className="py-2 pr-4 text-foreground">{row.blockRun}</td>
-                  <td className="py-2 pr-4 text-foreground">
-                    <span className="block truncate">{row.model}</span>
-                  </td>
-                  <td className="py-2 pr-4 text-foreground">{row.duration}</td>
-                  <td
+                  </TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">{row.blockRun}</TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">
+                    <Tooltip>
+                      <TooltipTrigger className="block max-w-full truncate">
+                        {row.model}
+                      </TooltipTrigger>
+                      <TooltipContent>{row.model}</TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">{row.duration}</TableCell>
+                  <TableCell
                     className={cn(
                       'py-2 pr-4 text-foreground',
                       row.promptSpike && 'font-semibold text-amber-700 dark:text-amber-300',
                     )}
                   >
                     {row.promptKb}
-                  </td>
-                  <td
-                    className={cn(
-                      'py-2 pr-4 text-foreground',
-                      row.status === 'failed' && !row.hasRecordedUsage && 'text-muted-foreground',
-                    )}
-                  >
-                    {row.inputTokens}
-                  </td>
-                  <td
-                    className={cn(
-                      'py-2 pr-4 text-foreground',
-                      row.status === 'failed' && !row.hasRecordedUsage && 'text-muted-foreground',
-                    )}
-                  >
-                    {row.outputTokens}
-                  </td>
-                  <td
-                    className={cn(
-                      'py-2 pr-4 text-foreground',
-                      row.status === 'failed' && !row.hasRecordedUsage && 'text-muted-foreground',
-                    )}
-                  >
-                    {row.cachedTokens}
-                  </td>
-                  <td
+                  </TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">{row.inputTokens}</TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">{row.outputTokens}</TableCell>
+                  <TableCell className="py-2 pr-4 text-foreground">{row.cachedTokens}</TableCell>
+                  <TableCell
                     className={cn(
                       'py-2 pr-4 text-foreground',
                       row.status === 'failed' && row.cost === '\u2014' && 'text-muted-foreground',
                     )}
                   >
                     {row.cost}
-                  </td>
-                  <td className="py-2 text-foreground">
+                  </TableCell>
+                  <TableCell className="py-2 text-foreground">
                     {row.failureReason === null ? (
                       <span className="text-muted-foreground">\u2014</span>
                     ) : (
@@ -288,11 +270,11 @@ export function InvocationTokens({
                         </p>
                       </details>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </section>

@@ -1,5 +1,6 @@
 import type { CodeReviewSyncResponse, ExecutionRunView } from '../../server/operator-contracts.js';
 import { Button } from './ui/button.js';
+import { ActionAlert } from './ActionAlert.js';
 
 export const CodeReviewControls = ({
   run,
@@ -12,7 +13,7 @@ export const CodeReviewControls = ({
   readonly run: ExecutionRunView;
   readonly notice: string | null;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onSync: () => void;
   readonly onComplete: () => void;
 }) => {
@@ -36,7 +37,7 @@ export const CodeReviewControls = ({
         </div>
       </div>
       {notice === null ? null : <p className="mt-3 text-sm text-muted-foreground">{notice}</p>}
-      {error === null ? null : <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <ActionAlert error={error} />
     </section>
   );
 };

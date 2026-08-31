@@ -21,6 +21,8 @@ import {
   researchDocumentReviewDraftKey,
 } from '../lib/research-document-review-storage.js';
 import { ResearchDocumentReviewEditor } from './ResearchDocumentReviewEditor.js';
+import { ActionAlert } from './ActionAlert.js';
+import { Button } from './ui/button.js';
 
 type ResearchDocumentReviewWait = Extract<
   NonNullable<OperatorWorkflowProjection['current']>,
@@ -65,6 +67,9 @@ export const ResearchDocumentReviewSurface = ({
       run={reviewRun}
       task={task}
       wait={reviewWait}
+      onRetry={() => {
+        void attempt.refetch();
+      }}
     />
   );
 };
@@ -75,12 +80,14 @@ const LoadedSurface = ({
   wait,
   attempt,
   error,
+  onRetry,
 }: {
   readonly task: OperatorTaskSummary;
   readonly run: ResearchDocumentReviewRun;
   readonly wait: ResearchDocumentReviewWait;
   readonly attempt: OperatorExecutionAttempt | null;
   readonly error: unknown;
+  readonly onRetry: () => void;
 }) => {
   const queryClient = useQueryClient();
   const details =
@@ -106,13 +113,28 @@ const LoadedSurface = ({
     },
   });
 
-  if (error instanceof Error) return <SurfaceError message={error.message} />;
+  if (error !== null && error !== undefined) {
+    return <SurfaceError error={error} onRetry={onRetry} />;
+  }
   if (attempt === null) return <SurfaceLoading />;
   if (attempt.output === null)
-    return <SurfaceError message="The review document is unavailable." />;
-  if (!details?.success) return <SurfaceError message="The review document payload is invalid." />;
+    return (
+      <SurfaceError error={new Error('The review document is unavailable.')} onRetry={onRetry} />
+    );
+  if (!details?.success)
+    return (
+      <SurfaceError
+        error={new Error('The review document payload is invalid.')}
+        onRetry={onRetry}
+      />
+    );
   if (draftKey === null)
-    return <SurfaceError message="The review draft could not be initialized." />;
+    return (
+      <SurfaceError
+        error={new Error('The review draft could not be initialized.')}
+        onRetry={onRetry}
+      />
+    );
 
   return (
     <ResearchDocumentReviewEditor
@@ -120,7 +142,7 @@ const LoadedSurface = ({
       draftKey={draftKey}
       details={details.data}
       pending={mutation.isPending}
-      error={mutation.error instanceof Error ? mutation.error.message : null}
+      error={mutation.error}
       onSubmit={(input) => {
         const resolution = ResearchDocumentReviewResolutionSchema.parse(input);
         mutation.mutate({
@@ -143,12 +165,21 @@ const SurfaceLoading = () => (
   </section>
 );
 
-const SurfaceError = ({ message }: { readonly message: string }) => (
+const SurfaceError = ({
+  error,
+  onRetry,
+}: {
+  readonly error: unknown;
+  readonly onRetry: () => void;
+}) => (
   <section
     aria-label="Research document review"
-    className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+    className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4"
   >
-    {message}
+    <ActionAlert error={error} />
+    <Button type="button" variant="outline" onClick={onRetry}>
+      Retry document
+    </Button>
   </section>
 );
 

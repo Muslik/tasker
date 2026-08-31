@@ -147,6 +147,7 @@ describe('TaskActions', () => {
     );
 
     expect(html).not.toContain('Resume');
+    expect(html).not.toContain('Optional resume guidance');
     expect(html).toContain('Restart');
   });
 });

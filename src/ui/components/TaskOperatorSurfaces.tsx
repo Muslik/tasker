@@ -166,87 +166,103 @@ export const TaskOperatorSurfaces = ({
     projection.current.intervention.kind === 'typed_resolution'
       ? projection.current.intervention
       : null;
-  const error =
-    [
-      planMutation.error,
-      clarificationMutation.error,
-      codeReviewMutation.error,
-      continuationMutation.error,
-      dependencyMutation.error,
-    ].find((item): item is Error => item instanceof Error)?.message ?? null;
   return (
     <div className="space-y-4">
       {bootstrapRun === null ? null : (
-        <PlanningClarificationSurface
-          run={bootstrapRun}
-          pending={clarificationMutation.isPending}
-          error={clarificationMutation.error?.message ?? null}
-          onSubmit={(answers) => {
-            clarificationMutation.mutate(answers);
-          }}
-        />
+        <div id="planning-clarification-surface" tabIndex={-1} className="scroll-mt-24">
+          <PlanningClarificationSurface
+            run={bootstrapRun}
+            pending={clarificationMutation.isPending}
+            error={clarificationMutation.error}
+            onSubmit={(answers) => {
+              clarificationMutation.mutate(answers);
+            }}
+          />
+        </div>
       )}
       {bootstrapRun === null ? null : (
-        <PlanReviewSurface
-          run={bootstrapRun}
-          plan={planRecord}
-          history={history.data ?? []}
-          pending={planMutation.isPending}
-          error={planMutation.error?.message ?? null}
-          onReview={(decision, guidance, annotations) => {
-            planMutation.mutate({ decision, guidance, annotations });
-          }}
-        />
+        <div id="plan-review-surface" tabIndex={-1} className="scroll-mt-24">
+          <PlanReviewSurface
+            run={bootstrapRun}
+            plan={planRecord}
+            planPending={plan.isPending}
+            planError={plan.error}
+            onRetryPlan={() => {
+              void plan.refetch();
+            }}
+            history={history.data ?? []}
+            historyPending={history.isPending}
+            historyError={history.error}
+            onRetryHistory={() => {
+              void history.refetch();
+            }}
+            pending={planMutation.isPending}
+            error={planMutation.error}
+            onReview={(decision, guidance, annotations) => {
+              planMutation.mutate({ decision, guidance, annotations });
+            }}
+          />
+        </div>
       )}
       {currentRun === null || continuation === undefined ? null : (
-        <WorkflowChangeReview
-          run={currentRun}
-          continuation={continuation}
-          pending={continuationMutation.isPending}
-          error={continuationMutation.error?.message ?? null}
-          onDecision={(decision, guidance) => {
-            continuationMutation.mutate({
-              decision,
-              ...(guidance === undefined ? {} : { guidance }),
-            });
-          }}
-        />
+        <div id="workflow-change-review-surface" tabIndex={-1} className="scroll-mt-24">
+          <WorkflowChangeReview
+            run={currentRun}
+            continuation={continuation}
+            pending={continuationMutation.isPending}
+            error={continuationMutation.error}
+            onDecision={(decision, guidance) => {
+              continuationMutation.mutate({
+                decision,
+                ...(guidance === undefined ? {} : { guidance }),
+              });
+            }}
+          />
+        </div>
       )}
       {currentRun === null ? null : (
-        <ResearchDocumentReviewSurface
-          task={task}
-          projection={projection}
-          currentRun={currentRun}
-        />
+        <div id="research-document-review-surface" tabIndex={-1} className="scroll-mt-24">
+          <ResearchDocumentReviewSurface
+            task={task}
+            projection={projection}
+            currentRun={currentRun}
+          />
+        </div>
       )}
       {currentRun === null ? null : (
-        <CodeReviewControls
-          run={currentRun}
-          notice={
-            codeReviewMutation.data === undefined ? null : codeReviewNotice(codeReviewMutation.data)
-          }
-          pending={codeReviewMutation.isPending}
-          error={codeReviewMutation.error?.message ?? null}
-          onSync={() => {
-            codeReviewMutation.mutate('sync');
-          }}
-          onComplete={() => {
-            codeReviewMutation.mutate('complete');
-          }}
-        />
+        <div id="code-review-surface" tabIndex={-1} className="scroll-mt-24">
+          <CodeReviewControls
+            run={currentRun}
+            notice={
+              codeReviewMutation.data === undefined
+                ? null
+                : codeReviewNotice(codeReviewMutation.data)
+            }
+            pending={codeReviewMutation.isPending}
+            error={codeReviewMutation.error}
+            onSync={() => {
+              codeReviewMutation.mutate('sync');
+            }}
+            onComplete={() => {
+              codeReviewMutation.mutate('complete');
+            }}
+          />
+        </div>
       )}
       {typedAction === null ? null : (
-        <DependencyWaitSurface
-          action={typedAction}
-          pending={dependencyMutation.isPending}
-          error={dependencyMutation.error?.message ?? null}
-          onAvailable={(versions, provenance) => {
-            dependencyMutation.mutate({ available: true, versions, provenance });
-          }}
-          onDiscovery={(discovery) => {
-            dependencyMutation.mutate({ available: false, discovery });
-          }}
-        />
+        <div id="dependency-wait-surface" tabIndex={-1} className="scroll-mt-24">
+          <DependencyWaitSurface
+            action={typedAction}
+            pending={dependencyMutation.isPending}
+            error={dependencyMutation.error}
+            onAvailable={(versions, provenance) => {
+              dependencyMutation.mutate({ available: true, versions, provenance });
+            }}
+            onDiscovery={(discovery) => {
+              dependencyMutation.mutate({ available: false, discovery });
+            }}
+          />
+        </div>
       )}
       {task.status === 'done' ? (
         <RetrospectiveSurface
@@ -257,13 +273,11 @@ export const TaskOperatorSurfaces = ({
           onProposalStatus={(proposalId, status) => {
             proposalMutation.mutate({ proposalId, status });
           }}
+          proposalPending={proposalMutation.isPending}
+          proposalError={proposalMutation.error}
+          proposalErrorProposalId={proposalMutation.variables?.proposalId ?? null}
         />
       ) : null}
-      {error === null ? null : (
-        <p className="sr-only" role="alert">
-          {error}
-        </p>
-      )}
     </div>
   );
 };

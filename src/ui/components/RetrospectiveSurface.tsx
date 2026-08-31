@@ -1,13 +1,21 @@
 import type { RetrospectivePatterns, RetrospectiveResponse } from '../../server/report.js';
+import { ActionAlert } from './ActionAlert.js';
+import { Button } from './ui/button.js';
 
 export const RetrospectiveSurface = ({
   response,
   patterns,
   onProposalStatus,
+  proposalPending = false,
+  proposalError = null,
+  proposalErrorProposalId = null,
 }: {
   readonly response: RetrospectiveResponse | undefined;
   readonly patterns?: RetrospectivePatterns;
   readonly onProposalStatus?: (proposalId: string, status: 'approved' | 'dismissed') => void;
+  readonly proposalPending?: boolean;
+  readonly proposalError?: unknown;
+  readonly proposalErrorProposalId?: string | null;
 }) => {
   if (response === undefined) return null;
   if (response.status === 'pending')
@@ -81,24 +89,34 @@ export const RetrospectiveSurface = ({
                   <span className="mt-2 block text-xs">Status: {proposal.status}</span>
                 )}
                 {proposal.status === 'proposed' && onProposalStatus !== undefined ? (
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onProposalStatus(proposal.id, 'approved');
-                      }}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onProposalStatus(proposal.id, 'dismissed');
-                      }}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
+                  <>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        type="button"
+                        disabled={proposalPending}
+                        onClick={() => {
+                          onProposalStatus(proposal.id, 'approved');
+                        }}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        type="button"
+                        disabled={proposalPending}
+                        onClick={() => {
+                          onProposalStatus(proposal.id, 'dismissed');
+                        }}
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                    <ActionAlert
+                      error={proposalErrorProposalId === proposal.id ? proposalError : null}
+                    />
+                  </>
                 ) : null}
                 {proposal.status === 'approved' ? (
                   <span className="mt-2 block text-xs text-muted-foreground">

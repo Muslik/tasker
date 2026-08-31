@@ -8,6 +8,7 @@ import type {
 } from '../../server/operator-contracts.js';
 import { cn } from '../lib/utils.js';
 import { formatOperatorDurationMs, formatOperatorUsd } from './operatorUiFormat.js';
+import { Badge } from './ui/badge.js';
 
 const statusTone = {
   planned: 'border-border bg-muted text-muted-foreground',
@@ -83,9 +84,9 @@ const WorkflowSteps = ({
           <CircleDot className="size-3 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">{step.label}</span>
           {tokens > 0 ? (
-            <span className="shrink-0 rounded bg-background/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+            <Badge variant="outline" className="shrink-0 text-[10px] tabular-nums">
               {compactTokens(tokens)}
-            </span>
+            </Badge>
           ) : null}
           {step.kind !== 'wait' && step.attempts > 0 ? (
             <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
@@ -124,9 +125,9 @@ const WorkflowRailContent = ({ stages, currentNodeId, invocations }: WorkflowRai
             <div className="min-w-0">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="truncate text-sm font-medium">{stage.label}</h3>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
+                <Badge variant="outline" className="shrink-0 text-[11px]">
                   {statusLabel(stage.status)}
-                </span>
+                </Badge>
               </div>
               {stage.steps.length === 0 ? null : (
                 <WorkflowSteps

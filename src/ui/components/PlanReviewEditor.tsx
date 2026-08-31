@@ -16,6 +16,9 @@ import {
 import { captureResearchDocumentSelection } from '../lib/research-document-review-selection.js';
 import { PlanReviewHistory } from './PlanReviewHistory.js';
 import { Button } from './ui/button.js';
+import { ScrollArea } from './ui/scroll-area.js';
+import { Textarea } from './ui/textarea.js';
+import { ActionAlert } from './ActionAlert.js';
 
 export const appendPlanReviewAnnotation = (
   annotations: readonly PlanReviewDraftAnnotation[],
@@ -28,8 +31,11 @@ export const PlanReviewEditor = ({
   planTitle,
   planAttempt,
   history,
+  historyPending,
+  historyError,
   pending,
   error,
+  onRetryHistory,
   onReview,
 }: {
   readonly draftKey: string;
@@ -37,8 +43,11 @@ export const PlanReviewEditor = ({
   readonly planTitle: string;
   readonly planAttempt: number;
   readonly history: readonly PlanReviewRound[];
+  readonly historyPending: boolean;
+  readonly historyError: unknown;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
+  readonly onRetryHistory: () => void;
   readonly onReview: (
     decision: 'approve' | 'request_changes',
     guidance: string,
@@ -66,7 +75,7 @@ export const PlanReviewEditor = ({
       return;
     }
     if (submitState !== 'pending' || pending) return;
-    if (error !== null) {
+    if (error !== null && error !== undefined) {
       setSubmitState('idle');
       return;
     }
@@ -98,58 +107,40 @@ export const PlanReviewEditor = ({
     !pending && feedback.length > 0 && annotations.length <= 50 && feedbackError === null;
 
   return (
-    <section
-      aria-label="Review implementation plan"
-      data-testid="plan-review-surface"
-      className="rounded-xl border bg-card p-4"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-600">
-            Action required
-          </p>
-          <h2 className="mt-1 text-base font-semibold">Implementation plan</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {planTitle} · attempt {String(planAttempt)}
-          </p>
-        </div>
-        <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-1 text-xs">
-          Review required
-        </span>
-      </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(18rem,0.9fr)]">
-        <div className="relative">
-          {selection === null ? null : (
-            <Button
-              className="fixed z-30"
-              data-testid="plan-review-add-annotation"
-              disabled={pending}
-              size="sm"
-              style={{ left: selection.left, top: selection.top + 8 }}
-              type="button"
-              onClick={() => {
-                if (annotations.length >= 50) {
-                  setSelection(null);
-                  setSelectionError('You can submit up to 50 annotations.');
-                  return;
-                }
-                setAnnotations((current) =>
-                  appendPlanReviewAnnotation(current, {
-                    id: localAnnotationId(),
-                    quote: selection.quote,
-                    note: '',
-                  }),
-                );
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start">
+      <div className="relative min-w-0">
+        {selection === null ? null : (
+          <Button
+            className="fixed z-30"
+            data-testid="plan-review-add-annotation"
+            disabled={pending}
+            size="sm"
+            style={{ left: selection.left, top: selection.top + 8 }}
+            type="button"
+            onClick={() => {
+              if (annotations.length >= 50) {
                 setSelection(null);
-                setSelectionError(null);
-                window.getSelection()?.removeAllRanges();
-              }}
-            >
-              Add annotation
-            </Button>
-          )}
+                setSelectionError('You can submit up to 50 annotations.');
+                return;
+              }
+              setAnnotations((current) =>
+                appendPlanReviewAnnotation(current, {
+                  id: localAnnotationId(),
+                  quote: selection.quote,
+                  note: '',
+                }),
+              );
+              setSelection(null);
+              setSelectionError(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+          >
+            Add annotation
+          </Button>
+        )}
+        <ScrollArea className="h-[min(72vh,calc(100vh-15rem))] rounded-xl border bg-background">
           <div
-            className="max-h-[68vh] overflow-auto rounded-lg border bg-background p-4"
+            className="px-4 py-5 sm:px-6"
             data-testid="plan-review-markdown"
             ref={planRef}
             onKeyUp={() => {
@@ -159,116 +150,129 @@ export const PlanReviewEditor = ({
               updateSelection(planRef.current, setSelection, setSelectionError);
             }}
           >
-            <div className="research-document tasker-plan-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+            <div className="mx-auto w-full max-w-[88ch]">
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                {planTitle} · attempt {String(planAttempt)}
+              </p>
+              <div className="research-document tasker-plan-markdown mt-4 max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="space-y-4">
-          <div className="rounded-lg border bg-background p-4">
-            <h3 className="text-sm font-semibold">Annotations</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Select text in the rendered plan to attach review notes to the exact excerpt.
-            </p>
-            <div className="mt-3 space-y-3">
-              {annotations.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No annotations yet.</p>
-              ) : (
-                annotations.map((annotation, index) => (
-                  <article className="rounded-md border p-3" key={annotation.id}>
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Annotation {String(index + 1)}
-                      </p>
-                      <button
-                        className="text-xs text-destructive"
-                        type="button"
-                        onClick={() => {
+        </ScrollArea>
+      </div>
+      <div className="min-w-0 xl:sticky xl:top-24">
+        <ScrollArea className="max-h-[72vh] rounded-xl border bg-background">
+          <div className="space-y-4 p-4">
+            <div className="rounded-lg border bg-card p-4">
+              <h3 className="text-sm font-semibold">Annotations</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select text in the plan, then add a note for the exact excerpt.
+              </p>
+              <div className="mt-3 space-y-3">
+                {annotations.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No annotations yet.</p>
+                ) : (
+                  annotations.map((annotation, index) => (
+                    <article className="rounded-md border p-3" key={annotation.id}>
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Annotation {String(index + 1)}
+                        </p>
+                        <button
+                          className="text-xs text-destructive"
+                          type="button"
+                          onClick={() => {
+                            setAnnotations((current) =>
+                              current.filter((item) => item.id !== annotation.id),
+                            );
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                      <blockquote className="mt-2 border-l-2 pl-3 text-sm italic">
+                        {annotation.quote}
+                      </blockquote>
+                      <Textarea
+                        aria-label={`Annotation ${String(index + 1)} note`}
+                        className="mt-3 min-h-24 resize-y"
+                        disabled={pending}
+                        maxLength={2_000}
+                        placeholder="What should change in this excerpt?"
+                        value={annotation.note}
+                        onChange={(event) => {
                           setAnnotations((current) =>
-                            current.filter((item) => item.id !== annotation.id),
+                            current.map((item) =>
+                              item.id === annotation.id
+                                ? { ...item, note: event.target.value }
+                                : item,
+                            ),
                           );
                         }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                    <blockquote className="mt-2 border-l-2 pl-3 text-sm italic">
-                      {annotation.quote}
-                    </blockquote>
-                    <textarea
-                      aria-label={`Annotation ${String(index + 1)} note`}
-                      className="mt-3 min-h-24 w-full resize-y"
-                      disabled={pending}
-                      maxLength={2_000}
-                      placeholder="What should change in this excerpt?"
-                      value={annotation.note}
-                      onChange={(event) => {
-                        setAnnotations((current) =>
-                          current.map((item) =>
-                            item.id === annotation.id
-                              ? { ...item, note: event.target.value }
-                              : item,
-                          ),
-                        );
-                      }}
-                    />
-                  </article>
-                ))
-              )}
+                      />
+                    </article>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
-          <label className="block rounded-lg border bg-background p-4 text-sm font-medium">
-            Overall guidance
-            <textarea
-              aria-label="Plan review guidance"
-              className="mt-3 min-h-28 w-full resize-y"
-              disabled={pending}
-              maxLength={10_000}
-              placeholder="Overall guidance for the next planning attempt"
-              value={guidance}
-              onChange={(event) => {
-                setGuidance(event.target.value);
-              }}
+            <label className="block rounded-lg border bg-card p-4 text-sm font-medium">
+              Overall guidance
+              <Textarea
+                aria-label="Plan review guidance"
+                className="mt-3 min-h-28 resize-y"
+                disabled={pending}
+                maxLength={10_000}
+                placeholder="Overall guidance for the next planning attempt"
+                value={guidance}
+                onChange={(event) => {
+                  setGuidance(event.target.value);
+                }}
+              />
+            </label>
+            {selectionError === null ? null : (
+              <p className="text-sm text-destructive">{selectionError}</p>
+            )}
+            {feedbackError === null ? null : (
+              <p className="text-sm text-destructive">{feedbackError}</p>
+            )}
+            <PlanReviewHistory
+              history={history}
+              pending={historyPending}
+              error={historyError}
+              onRetry={onRetryHistory}
             />
-          </label>
-          {selectionError === null ? null : (
-            <p className="text-sm text-destructive">{selectionError}</p>
-          )}
-          {feedbackError === null ? null : (
-            <p className="text-sm text-destructive">{feedbackError}</p>
-          )}
-          {error === null ? null : <p className="text-sm text-destructive">{error}</p>}
-          <PlanReviewHistory history={history} />
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canRequestChanges}
-              onClick={() => {
-                if (!canRequestChanges) return;
-                setSubmitState('submitted');
-                onReview('request_changes', trimmedGuidance, submittedAnnotations);
-              }}
-            >
-              {pending ? 'Sending…' : 'Request changes'}
-            </Button>
-            <Button
-              type="button"
-              disabled={pending || trimmedGuidance.length > 0 || annotations.length > 0}
-              onClick={() => {
-                setSubmitState('submitted');
-                onReview('approve', '', []);
-              }}
-            >
-              {pending ? 'Approving…' : 'Approve plan'}
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!canRequestChanges}
+                onClick={() => {
+                  if (!canRequestChanges) return;
+                  setSubmitState('submitted');
+                  onReview('request_changes', trimmedGuidance, submittedAnnotations);
+                }}
+              >
+                {pending ? 'Sending…' : 'Request changes'}
+              </Button>
+              <Button
+                type="button"
+                disabled={pending || trimmedGuidance.length > 0 || annotations.length > 0}
+                onClick={() => {
+                  setSubmitState('submitted');
+                  onReview('approve', '', []);
+                }}
+              >
+                {pending ? 'Approving…' : 'Approve plan'}
+              </Button>
+            </div>
+            <ActionAlert error={error} />
           </div>
-        </div>
+        </ScrollArea>
       </div>
-    </section>
+    </div>
   );
 };
-
 const updateSelection = (
   container: HTMLDivElement | null,
   setSelection: (selection: { quote: string; left: number; top: number } | null) => void,
@@ -290,7 +294,6 @@ const updateSelection = (
     captured.kind === 'too_long' ? 'Selected excerpt must be 500 characters or fewer.' : null,
   );
 };
-
 const localAnnotationId = (): string =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()

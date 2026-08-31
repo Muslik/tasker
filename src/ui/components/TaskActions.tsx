@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
 import { Button } from './ui/button.js';
+import { Textarea } from './ui/textarea.js';
+import { ActionAlert } from './ActionAlert.js';
 import type {
   ExecutionRunView,
   OperatorTaskSummary,
@@ -8,16 +10,7 @@ import type {
 } from '../../server/operator-contracts.js';
 import { restartTaskWorkflow, resumeTaskWorkflow } from '../api/index.js';
 import { useWorkflowAction } from '../useWorkflowAction.js';
-
-const dedicatedWaitKinds = new Set([
-  'human_clarification',
-  'plan.approved@1',
-  'workflow_change.review@1',
-  'code_review@1',
-  'dependency.available@1',
-  'dependency.discovery@1',
-  'research.document-review@1',
-]);
+import { isDedicatedWaitKind } from './taskOperatorWaits.js';
 
 export type TaskActionAvailability = {
   readonly resume: boolean;
@@ -38,8 +31,7 @@ export const getTaskActionAvailability = (
   currentRun: ExecutionRunView | null,
 ): TaskActionAvailability => ({
   resume:
-    projection.current?.status === 'waiting' &&
-    !dedicatedWaitKinds.has(projection.current.waitKind),
+    projection.current?.status === 'waiting' && !isDedicatedWaitKind(projection.current.waitKind),
   restart: currentRun !== null && currentRun.status !== 'completed',
 });
 
@@ -101,10 +93,10 @@ export const TaskActions = ({
           : 'flex flex-wrap items-center justify-end gap-2'
       }
     >
-      {compact ? (
-        <input
+      {compact && availability.resume ? (
+        <Textarea
           aria-label="Resume guidance"
-          className="h-8 min-w-48 flex-1 text-xs"
+          className="min-h-8 min-w-48 flex-1 resize-none py-1.5 text-xs"
           disabled={busy}
           maxLength={10_000}
           placeholder="Optional resume guidance"
@@ -183,7 +175,7 @@ export const TaskActions = ({
           <summary className="cursor-pointer text-xs text-muted-foreground">
             Add resume guidance
           </summary>
-          <textarea
+          <Textarea
             aria-label="Resume guidance"
             className="mt-2 min-h-20 w-full resize-y text-left"
             disabled={busy}
@@ -196,7 +188,7 @@ export const TaskActions = ({
           />
         </details>
       ) : null}
-      {error === null ? null : <p className="mt-2 text-sm text-destructive">{error.message}</p>}
+      <ActionAlert error={error} className="basis-full" />
     </div>
   );
 };

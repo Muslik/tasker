@@ -76,7 +76,13 @@ describe('PlanReviewSurface', () => {
       createElement(PlanReviewSurface, {
         run,
         plan,
+        planPending: false,
+        planError: null,
+        onRetryPlan: vi.fn(),
         history,
+        historyPending: false,
+        historyError: null,
+        onRetryHistory: vi.fn(),
         pending: false,
         error: null,
         onReview: vi.fn(),
@@ -116,5 +122,28 @@ describe('PlanReviewSurface', () => {
         annotations,
       }),
     ).toContain('Keep the change bounded.');
+  });
+
+  it('renders a retryable fetch alert inside the plan panel when the plan query fails', () => {
+    const html = renderToStaticMarkup(
+      createElement(PlanReviewSurface, {
+        run,
+        plan: null,
+        planPending: false,
+        planError: 'Plan store timed out.',
+        onRetryPlan: vi.fn(),
+        history: [],
+        historyPending: false,
+        historyError: null,
+        onRetryHistory: vi.fn(),
+        pending: false,
+        error: null,
+        onReview: vi.fn(),
+      } as never),
+    );
+
+    expect(html).toContain('Plan data unavailable');
+    expect(html).toContain('Plan store timed out.');
+    expect(html).toContain('Retry plan fetch');
   });
 });

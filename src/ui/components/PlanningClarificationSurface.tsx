@@ -2,6 +2,8 @@ import { useState } from 'react';
 
 import type { ExecutionRunView } from '../../server/operator-contracts.js';
 import { Button } from './ui/button.js';
+import { Textarea } from './ui/textarea.js';
+import { ActionAlert } from './ActionAlert.js';
 
 export const PlanningClarificationSurface = ({
   run,
@@ -11,7 +13,7 @@ export const PlanningClarificationSurface = ({
 }: {
   readonly run: Extract<ExecutionRunView, { runtime: 'bootstrap' }>;
   readonly pending: boolean;
-  readonly error: string | null;
+  readonly error: unknown;
   readonly onSubmit: (answers: readonly { questionId: string; answer: string }[]) => void;
 }) => {
   const questions = run.planning?.status === 'needs_clarification' ? run.planning.questions : [];
@@ -33,7 +35,7 @@ export const PlanningClarificationSurface = ({
           <label className="block space-y-1.5 text-sm" key={question.id}>
             <span className="font-medium">{question.question}</span>
             <span className="block text-xs text-muted-foreground">{question.reason}</span>
-            <textarea
+            <Textarea
               className="min-h-20 w-full resize-y"
               value={answers[question.id] ?? ''}
               disabled={pending}
@@ -44,7 +46,6 @@ export const PlanningClarificationSurface = ({
           </label>
         ))}
       </div>
-      {error === null ? null : <p className="mt-2 text-sm text-destructive">{error}</p>}
       <div className="mt-4 flex justify-end">
         <Button
           type="button"
@@ -61,6 +62,7 @@ export const PlanningClarificationSurface = ({
           {pending ? 'Planning…' : 'Continue planning'}
         </Button>
       </div>
+      <ActionAlert error={error} />
     </section>
   );
 };

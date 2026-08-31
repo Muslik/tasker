@@ -5,6 +5,8 @@ import type {
 } from '../../server/operator-contracts.js';
 import { TaskActions } from './TaskActions.js';
 import type { InvocationSelection } from './CurrentAttemptStatus.js';
+import { Button } from './ui/button.js';
+import { getDedicatedWaitSurfaceTarget } from './taskOperatorWaits.js';
 
 export type WaitBannerProps = {
   readonly task: OperatorTaskSummary;
@@ -26,6 +28,7 @@ export const WaitBanner = ({
   const current = projection.current;
   if (current?.status !== 'waiting') return null;
   const currentAttempt = projection.currentAttempt;
+  const dedicatedTarget = getDedicatedWaitSurfaceTarget(current.waitKind);
   return (
     <section
       className="border-b border-amber-400/40 bg-amber-500/10 px-5 py-3"
@@ -40,6 +43,21 @@ export const WaitBanner = ({
             {`waiting for ${current.waitKind} / ${current.reason ?? 'an operator or external condition'}`}
           </p>
         </div>
+        {dedicatedTarget === null ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (typeof document === 'undefined') return;
+              const target = document.getElementById(dedicatedTarget.surfaceId);
+              if (!(target instanceof HTMLElement)) return;
+              target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              target.focus({ preventScroll: true });
+            }}
+          >
+            {dedicatedTarget.actionLabel}
+          </Button>
+        )}
         {currentAttempt === null ? null : (
           <button
             type="button"
