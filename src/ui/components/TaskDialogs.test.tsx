@@ -4,8 +4,50 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { JiraTaskLaunchDialog, repositorySelectionForProduct } from './TaskDialogs.js';
 import { RemoveTaskDialog } from './RemoveTaskDialog.js';
+import type { ExecutionRunView } from '../../server/operator-contracts.js';
 
 describe('task dialogs', () => {
+  it('renders an existing run as a read-only settings summary', () => {
+    const html = renderToStaticMarkup(
+      createElement(JiraTaskLaunchDialog, {
+        open: true,
+        mode: 'start',
+        task: {
+          taskId: 'AVIA-42',
+          title: 'Stabilize checkout recovery',
+          origin: {
+            repositoryBinding: { status: 'resolved', reference: 'front-avia' },
+          },
+        } as never,
+        run: {
+          settings: {
+            branchName: 'tasker/AVIA-42/recovery',
+            planningStrategy: 'ralplan',
+            planReview: 'required',
+            trackerStatusUpdates: 'enabled',
+            operatorBrief: 'Keep the retry bounded.\nPreserve the evidence trail.',
+          },
+        } as ExecutionRunView,
+        repositories: [],
+        pending: false,
+        error: null,
+        productTitle: 'Avia',
+        onClose: vi.fn(),
+        onResolveIssue: vi.fn(),
+        onResolveProduct: vi.fn(),
+        onSubmit: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain('front-avia');
+    expect(html).toContain('Avia');
+    expect(html).toContain('Keep the retry bounded.');
+    expect(html).not.toContain('Start task');
+    expect(html).not.toContain('aria-label="Jira task"');
+    expect(html).not.toContain('<input');
+    expect(html).not.toContain('<select');
+  });
+
   it('keeps start settings hidden until immediate start is selected', () => {
     const html = renderToStaticMarkup(
       createElement(JiraTaskLaunchDialog, {

@@ -573,6 +573,14 @@ export const createOperatorWorkflowProjection = (
           runtime: currentRuntime,
           nodeId: activeNodeId,
           reference: executionNode?.kind === 'step' ? executionNode.uses : null,
+          ...(currentRuntime === 'bootstrap'
+            ? lifecycle.bootstrap.currentNodeStartedAt === undefined ||
+              lifecycle.bootstrap.currentNodeStartedAt === null
+              ? {}
+              : { startedAt: lifecycle.bootstrap.currentNodeStartedAt }
+            : currentAttempt === null
+              ? {}
+              : { startedAt: currentAttempt.startedAt }),
           status: active.status,
           blockRun:
             execution === null || executionNodeId === null

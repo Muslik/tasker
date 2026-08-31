@@ -8,6 +8,7 @@ import {
 import { PlanningSnapshotReferenceSchema } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { AgentInvocationUsageSchema } from '../../steps/agent-usage.js';
+import { TaskRunSettingsSchema } from '../bootstrap-kernel/run-settings.js';
 
 export const EXECUTION_WORKFLOW_SCHEMA_VERSION = 2;
 
@@ -28,6 +29,7 @@ export const ExecutionWorkflowInputSchema = z
     graph: CompiledWorkflowSchema,
     retrospectiveEnabled: z.boolean(),
     contextReferences: z.array(ExecutionContextReferenceSchema),
+    settings: TaskRunSettingsSchema.optional(),
   })
   .strict()
   .readonly();
@@ -109,6 +111,7 @@ const ExecutionWorkflowStateBaseSchema = z
     loopIterations: z.record(z.string(), z.number().int().nonnegative()),
     continuations: z.array(ExecutionContinuationStateSchema),
     retrospective: z.enum(['disabled', 'pending', 'running', 'succeeded', 'failed']),
+    settings: TaskRunSettingsSchema.optional(),
   })
   .strict();
 

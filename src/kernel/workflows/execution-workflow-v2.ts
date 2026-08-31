@@ -107,6 +107,7 @@ export async function executionWorkflowV2(
     workflowId: execution.workflowId,
     runId: execution.runId,
     workflowHash: input.workflowHash,
+    ...(input.settings === undefined ? {} : { settings: input.settings }),
     nodeStates,
     blockRuns,
     loopIterations,

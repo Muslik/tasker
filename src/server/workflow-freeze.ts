@@ -56,7 +56,8 @@ const matchesInput = (receipt: WorkflowFreezeReceipt, input: FreezeTaskWorkflowI
   receipt.evidenceBundle.artifactId === input.evidenceBundle.artifactId &&
   receipt.evidenceBundle.checksum === input.evidenceBundle.checksum &&
   receipt.evidenceBundle.revision === input.evidenceBundle.revision &&
-  receipt.approval.kind === input.approval.kind;
+  receipt.approval.kind === input.approval.kind &&
+  JSON.stringify(receipt.settings) === JSON.stringify(input.settings);
 
 export class WorkflowFreezeStore {
   public constructor(

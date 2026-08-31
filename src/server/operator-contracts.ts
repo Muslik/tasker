@@ -11,7 +11,7 @@ import {
 import { WorkflowAnalyzerReceiptSchema } from '../agents/contracts.js';
 import { JiraRepositoryBindingSchema } from '../workspace/contracts.js';
 import { TaskRunPublicStateSchema } from '../steps/public-state.js';
-import { TaskRunSettingsSchema } from '../kernel/bootstrap-kernel/contracts.js';
+import { TaskRunSettingsSchema } from '../kernel/bootstrap-kernel/run-settings.js';
 import { TaskStepOutputArtifactSchema } from '../steps/task-step-output.js';
 import { TaskStepEvidenceArtifactSchema } from '../steps/task-step-evidence-contracts.js';
 import { PlanningClarificationAnswerCommandSchema } from '../planning/implementation-plan.js';
@@ -321,6 +321,7 @@ const OperatorWorkflowCurrentBaseSchema = {
   reference: z.string().min(1).nullable(),
   blockRun: z.number().int().positive().nullable(),
   transcript: PlanningTranscriptViewSchema.nullable(),
+  startedAt: z.iso.datetime().optional(),
 };
 
 export const OperatorWorkflowCurrentAttemptSchema = z

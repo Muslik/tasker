@@ -27,6 +27,8 @@ export const operatorQueryKeys = {
     [...operatorQueryKeys.task(taskReference), 'retrospective'] as const,
   retrospectivePatterns: () => [...operatorQueryKeys.all(), 'retrospective-patterns'] as const,
   jiraIssue: (issueKey: string) => [...operatorQueryKeys.all(), 'jira', issueKey] as const,
+  jiraProduct: (issueKey: string) =>
+    [...operatorQueryKeys.all(), 'jira-product', issueKey] as const,
   repositories: () => [...operatorQueryKeys.all(), 'repositories'] as const,
   invocation: (taskReference: string, invocationId: string) =>
     ['invocation', taskReference, invocationId] as const,

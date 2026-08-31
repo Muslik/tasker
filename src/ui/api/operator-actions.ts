@@ -81,6 +81,12 @@ export const previewJiraIssue = (issueKey: string): Promise<JiraIssueSnapshot> =
 export const resolveJiraProduct = (issueKey: string): Promise<JiraProductResolution> =>
   getJson(`/api/jira/issues/${encodeURIComponent(issueKey)}/product`, JiraProductResolutionSchema);
 
+export const jiraProductQueryOptions = (issueKey: string) =>
+  queryOptions({
+    queryKey: operatorQueryKeys.jiraProduct(issueKey),
+    queryFn: () => resolveJiraProduct(issueKey),
+  });
+
 export const syncJiraIssue = (issueKey: string, repository?: string): Promise<JiraIssueState> =>
   postJson(
     `/api/jira/issues/${encodeURIComponent(issueKey)}/sync`,

@@ -61,6 +61,7 @@ export {
   syncJiraIssue,
   implementationPlanQueryOptions,
   jiraIssueQueryOptions,
+  jiraProductQueryOptions,
   planReviewHistoryQueryOptions,
   planningTranscriptQueryOptions,
   repositoriesQueryOptions,

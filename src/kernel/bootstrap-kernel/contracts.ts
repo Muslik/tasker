@@ -13,27 +13,17 @@ import {
 } from '../../planning/run-planning-snapshot.js';
 import { EvidenceBundleReferenceSchema } from '../../planning/evidence-bundle.js';
 import { ImplementationPlanningFailureSchema } from '../../planning/planning-failure.js';
+import { CompiledWorkflowSchema, JsonValueSchema } from '../../graph/schema.js';
 import { TrackerStatusUpdatesSchema } from '../../shared/task-run-settings.js';
 import { GitBranchNameSchema } from '../../shared/git-branch.js';
-import { CompiledWorkflowSchema, JsonValueSchema } from '../../graph/schema.js';
 import {
   WorkflowFreezeReceiptSchema,
   type FreezeTaskWorkflowInput,
   type WorkflowFreezeReceipt,
 } from '../../kernel/freeze-contracts.js';
+import { TaskRunSettingsSchema } from './run-settings.js';
 
 export const BOOTSTRAP_WORKFLOW_SCHEMA_VERSION = 3;
-
-export const TaskRunSettingsSchema = z
-  .object({
-    planReview: z.enum(['required', 'automatic']),
-    planningStrategy: PlanningStrategyRequestSchema,
-    trackerStatusUpdates: TrackerStatusUpdatesSchema.default('enabled'),
-    branchName: GitBranchNameSchema.optional(),
-    operatorBrief: z.string().max(10_000).optional(),
-  })
-  .strict()
-  .readonly();
 
 export const BootstrapWorkflowInputSchema = z
   .object({
@@ -170,6 +160,7 @@ const BootstrapWorkflowStateBaseSchema = z
     executionWorkflowId: z.string().min(1).nullable(),
     nodeStates: z.record(z.string(), BootstrapStageStatusSchema),
     attempts: z.record(z.string(), z.number().int().nonnegative()),
+    currentNodeStartedAt: z.iso.datetime().nullable().optional(),
   })
   .strict();
 
@@ -352,7 +343,6 @@ export const BootstrapWorkflowResultSchema = z
   .strict()
   .readonly();
 
-export type TaskRunSettings = z.infer<typeof TaskRunSettingsSchema>;
 export type BootstrapWorkflowInput = z.infer<typeof BootstrapWorkflowInputSchema>;
 export type BootstrapPlanningState = z.infer<typeof BootstrapPlanningStateSchema>;
 export type BootstrapWorkspaceContext = z.infer<typeof BootstrapWorkspaceContextSchema>;
@@ -377,6 +367,7 @@ export type RunBootstrapInvestigationResult = z.infer<typeof RunBootstrapInvesti
 export type AdmitTaskExecutionInput = z.infer<typeof AdmitTaskExecutionInputSchema>;
 export type AdmitTaskExecutionResult = z.infer<typeof AdmitTaskExecutionResultSchema>;
 export type BootstrapWorkflowResult = z.infer<typeof BootstrapWorkflowResultSchema>;
+export type { TaskRunSettings } from './run-settings.js';
 export type { FreezeTaskWorkflowInput, WorkflowFreezeReceipt, PlanningSnapshotReference };
 
 export interface BootstrapWorkflowActivities {

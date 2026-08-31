@@ -40,6 +40,40 @@ const projection: OperatorWorkflowProjection = {
 };
 
 describe('CurrentAttemptStatus', () => {
+  it('shows the bootstrap stage and stage elapsed before an invocation exists', () => {
+    const bootstrap = {
+      ...projection,
+      status: 'running' as const,
+      activeRuntime: 'bootstrap' as const,
+      currentAttempt: null,
+      current: {
+        runtime: 'bootstrap' as const,
+        nodeId: 'workspace',
+        reference: null,
+        blockRun: null,
+        startedAt: '2026-08-30T09:56:00.000Z',
+        status: 'running' as const,
+        waitKind: null,
+        reason: null,
+        intervention: null,
+        transcript: null,
+      },
+      stages: [
+        {
+          key: 'bootstrap:workspace:1',
+          id: 'workspace',
+          label: 'Workspace',
+          status: 'running' as const,
+          steps: [],
+        },
+      ],
+    };
+    const view = buildCurrentAttemptStatusView(bootstrap, Date.parse('2026-08-30T10:00:00.000Z'));
+
+    expect(view.node).toBe('Workspace — preparing');
+    expect(view.elapsed).toBe('4m');
+  });
+
   it('renders current attempt timing and waiting copy in SSR', () => {
     const html = renderToStaticMarkup(createElement(CurrentAttemptStatus, { projection }));
 

@@ -83,6 +83,13 @@ describe('completed run lifecycle', () => {
       planningSnapshot: { artifactId: 'snapshot', checksum: hash },
       evidenceBundle: { artifactId: 'evidence', checksum: hash, revision: 1 },
       approval: { kind: 'operator_approved' },
+      settings: {
+        planReview: 'required',
+        planningStrategy: 'ralplan',
+        trackerStatusUpdates: 'enabled',
+        branchName: 'tasker/TEST-1/recovery',
+        operatorBrief: 'Preserve the evidence trail.',
+      },
       frozenAt: '2026-08-25T00:00:00.000Z',
     });
     const reader = new CompletedRunLifecycleReader(
@@ -104,6 +111,7 @@ describe('completed run lifecycle', () => {
           runId: 'execution-run',
           blockRuns: { 'implement-change': 2 },
           nodeStates: { 'implement-change': 'succeeded', finished: 'succeeded' },
+          settings: { operatorBrief: 'Preserve the evidence trail.' },
         },
       },
     });

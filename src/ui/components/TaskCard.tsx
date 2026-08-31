@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
 import type { OperatorTaskSummary } from '../../server/operator-contracts.js';
 import {
@@ -9,6 +9,7 @@ import {
   taskInvocationsQueryOptions,
   taskProjectionQueryOptions,
   taskRunLogQueryOptions,
+  invalidateTaskQueries,
 } from '../api/index.js';
 import { AttemptDetails, type AttemptDetailsTab } from './AttemptDetails.js';
 import { AttemptsList, type AttemptSelection } from './AttemptsList.js';
@@ -35,7 +36,13 @@ export const triggerTaskInvocationOpen = (
   return selection;
 };
 
+export const SELECTED_TASK_POLL_INTERVAL_MS = 8_000;
+
+export const shouldPollSelectedTask = (status: OperatorTaskSummary['status']): boolean =>
+  status === 'running';
+
 export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
+  const queryClient = useQueryClient();
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection | null>(null);
   const [selectedTab, setSelectedTab] = useState<AttemptDetailsTab>('log');
   const projectionQuery = useQuery(taskProjectionQueryOptions(task.id));
@@ -62,6 +69,21 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
       : taskInvocationQueryOptions(task.id, selectedInvocationId)),
     enabled: selectedTab === 'prompt' && selectedInvocationId !== null,
   });
+
+  useEffect(() => {
+    if (!shouldPollSelectedTask(task.status)) return;
+    const poll = (): void => {
+      invalidateTaskQueries(queryClient, task.id, {
+        includeRunLog: true,
+        includeAttempts: true,
+        includeInvocations: true,
+      });
+    };
+    const timer = window.setInterval(poll, SELECTED_TASK_POLL_INTERVAL_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [queryClient, task.id, task.status]);
 
   const projection = projectionQuery.data;
   if (projection === undefined) {
@@ -106,34 +128,39 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
   return (
     <article className="min-h-0 overflow-y-auto bg-background">
       <header className="sticky top-0 z-20 border-b bg-background/95 px-5 py-4 backdrop-blur">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
                 {task.taskId}
               </span>
-              <StatusChip status={task.status} />
             </div>
             <h1 className="mt-2 text-xl font-semibold tracking-tight">{task.title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{task.currentStage}</p>
           </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
-              onClick={onStart}
-            >
-              Task settings
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
-              onClick={onRemove}
-            >
-              Remove
-            </button>
+          <div className="mt-4">
+            <CurrentAttemptStatus
+              projection={projection}
+              status={task.status}
+              onOpenInvocation={openInvocation}
+              actions={
+                <TaskActions
+                  task={task}
+                  projection={projection}
+                  currentRun={currentRunQuery.data ?? null}
+                  {...(onStart === undefined ? {} : { onSettings: onStart })}
+                  {...(onRemove === undefined ? {} : { onRemove })}
+                />
+              }
+            />
           </div>
-          <CurrentAttemptStatus projection={projection} onOpenInvocation={openInvocation} />
+          {currentRunQuery.data?.settings?.operatorBrief ? (
+            <details className="mt-3 rounded-lg border bg-card px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium">Бриф оператора</summary>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                {currentRunQuery.data.settings.operatorBrief}
+              </p>
+            </details>
+          ) : null}
         </div>
       </header>
 
@@ -149,11 +176,6 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
           />
         </div>
         <div className="space-y-4">
-          <TaskActions
-            task={task}
-            projection={projection}
-            currentRun={currentRunQuery.data ?? null}
-          />
           <TaskOperatorSurfaces
             task={task}
             projection={projection}

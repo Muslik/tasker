@@ -5,6 +5,7 @@ import type { OperatorTaskSummary } from '../server/operator-contracts.js';
 import {
   generateTask,
   jiraIssueQueryOptions,
+  jiraProductQueryOptions,
   repositoriesQueryOptions,
   restoreTask,
   previewJiraIssue,
@@ -12,6 +13,7 @@ import {
   removeTask,
   syncJiraIssue,
   taskListQueryOptions,
+  taskCurrentRunQueryOptions,
   taskProjectionQueryOptions,
 } from './api/index.js';
 import { TaskCard } from './components/TaskCard.js';
@@ -50,10 +52,18 @@ export const App = () => {
     ...taskProjectionQueryOptions(selectedId),
     enabled: selectedTask !== null,
   });
+  const selectedCurrentRunQuery = useQuery({
+    ...taskCurrentRunQueryOptions(selectedId),
+    enabled: selectedTask !== null,
+  });
   const repositoriesQuery = useQuery(repositoriesQueryOptions());
   const issueKey = selectedTask?.origin.kind === 'jira' ? selectedTask.origin.issueKey : '';
   const selectedIssueQuery = useQuery({
     ...jiraIssueQueryOptions(issueKey),
+    enabled: issueKey.length > 0 && launchMode === 'start',
+  });
+  const selectedProductQuery = useQuery({
+    ...jiraProductQueryOptions(issueKey),
     enabled: issueKey.length > 0 && launchMode === 'start',
   });
   const launchMutation = useMutation({
@@ -178,6 +188,11 @@ export const App = () => {
       <JiraTaskLaunchDialog
         open={launchMode !== null}
         mode={launchMode ?? 'add'}
+        {...(selectedTask === null ? {} : { task: selectedTask })}
+        {...(selectedCurrentRunQuery.data === undefined
+          ? {}
+          : { run: selectedCurrentRunQuery.data })}
+        productTitle={selectedProductQuery.data?.product?.title ?? null}
         repositories={repositoriesQuery.data ?? []}
         {...(selectedIssueQuery.data?.status === 'current' ||
         selectedIssueQuery.data?.status === 'stale'

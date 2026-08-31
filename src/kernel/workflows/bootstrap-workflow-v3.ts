@@ -136,6 +136,7 @@ export async function bootstrapWorkflowV3(
   input: BootstrapWorkflowInput,
 ): Promise<BootstrapWorkflowResult> {
   const execution = workflowInfo();
+  const workflowStartedAt = execution.startTime.toISOString();
   const settings = {
     planReview: input.settings.planReview,
     planningStrategy: input.settings.planningStrategy,
@@ -181,6 +182,7 @@ export async function bootstrapWorkflowV3(
     executionWorkflowId: null,
     nodeStates,
     attempts,
+    currentNodeStartedAt: workflowStartedAt,
     status: 'running',
     currentNodeId: 'workspace',
     wait: null,
@@ -205,6 +207,10 @@ export async function bootstrapWorkflowV3(
 
   const markRunning = (stage: Stage, phase: AvailableBootstrapState['phase']): void => {
     if (stage !== 'planning' && stage !== 'plan_review') activeTranscriptOperationId = null;
+    const currentNodeStartedAt =
+      state.currentNodeId === stage
+        ? (state.currentNodeStartedAt ?? workflowStartedAt)
+        : new Date(Date.now()).toISOString();
     nodeStates[stage] = 'running';
     state = {
       ...state,
@@ -216,6 +222,7 @@ export async function bootstrapWorkflowV3(
       planning,
       activeTranscriptOperationId,
       freezeReceipt,
+      currentNodeStartedAt,
       status: 'running',
       currentNodeId: stage,
       wait: null,
@@ -234,6 +241,7 @@ export async function bootstrapWorkflowV3(
       planning,
       activeTranscriptOperationId,
       freezeReceipt,
+      currentNodeStartedAt: state.currentNodeStartedAt ?? workflowStartedAt,
       status: 'waiting',
       currentNodeId: stage,
       wait: { nodeId: stage, waitKind, ...(reason === undefined ? {} : { reason }) },
@@ -533,6 +541,7 @@ export async function bootstrapWorkflowV3(
         planningSnapshot: acceptedDraft.planningSnapshot,
         evidenceBundle: acceptedPlanning.evidenceBundle,
         approval,
+        settings,
       });
       nodeStates.freeze = 'succeeded';
       break;
@@ -556,6 +565,7 @@ export async function bootstrapWorkflowV3(
         workflowHash: acceptedDraft.workflowHash,
         graph: acceptedDraft.graph,
         retrospectiveEnabled: acceptedDraft.retrospectiveEnabled,
+        settings,
         contextReferences: [
           {
             kind: 'workspace',
@@ -591,6 +601,7 @@ export async function bootstrapWorkflowV3(
     draft: acceptedDraft,
     planning: acceptedPlanning,
     freezeReceipt,
+    currentNodeStartedAt: null,
     executionWorkflowId,
     status: 'running',
     currentNodeId: null,

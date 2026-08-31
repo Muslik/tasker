@@ -71,6 +71,7 @@ export class CompletedRunLifecycleReader {
       workflowId: indexed.value.report.workflowId,
       runId: indexed.value.report.workflowRunId,
       workflowHash: frozen.value.workflowHash,
+      ...(frozen.value.settings === undefined ? {} : { settings: frozen.value.settings }),
       nodeStates: completedNodeStates(archivedGraph.root, indexed.value.blockRuns),
       blockRuns: indexed.value.blockRuns,
       loopIterations: {},
@@ -88,7 +89,7 @@ export class CompletedRunLifecycleReader {
       workflowId: frozen.value.workflowId,
       runId: frozen.value.workflowRunId,
       workflowHash: frozen.value.workflowHash,
-      settings: {
+      settings: frozen.value.settings ?? {
         planReview: frozen.value.approval.kind === 'operator_approved' ? 'required' : 'automatic',
         planningStrategy: 'auto',
       },

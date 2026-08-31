@@ -9,7 +9,12 @@ import type {
   OperatorWorkflowProjection,
 } from '../../server/operator-contracts.js';
 import { operatorQueryKeys } from '../api/index.js';
-import { TaskCard, triggerTaskInvocationOpen } from './TaskCard.js';
+import {
+  SELECTED_TASK_POLL_INTERVAL_MS,
+  TaskCard,
+  shouldPollSelectedTask,
+  triggerTaskInvocationOpen,
+} from './TaskCard.js';
 
 const task: OperatorTaskSummary = {
   id: 'jira:AVIA-42',
@@ -107,6 +112,13 @@ const invocations: OperatorTaskInvocationListResponse = {
 };
 
 describe('TaskCard', () => {
+  it('polls only while the selected task is running', () => {
+    expect(SELECTED_TASK_POLL_INTERVAL_MS).toBe(8_000);
+    expect(shouldPollSelectedTask('running')).toBe(true);
+    expect(shouldPollSelectedTask('waiting')).toBe(false);
+    expect(shouldPollSelectedTask('done')).toBe(false);
+  });
+
   it('answers what is happening and preserves the full wait reason', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } },
