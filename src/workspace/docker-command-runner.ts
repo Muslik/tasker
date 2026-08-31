@@ -167,7 +167,8 @@ export class DockerWorkspaceCommandRunner implements WorkspaceCommandRunner {
       'tasker.managed=true',
     ];
     if (runtime !== null) {
-      const commandNetworkServiceId = runtime.policy.commandNetworkService ?? null;
+      const commandNetworkServiceId =
+        runtime.status === 'ready' ? (runtime.policy.commandNetworkService ?? null) : null;
       let commandNetwork = runtime.networkName;
       if (commandNetworkServiceId !== null) {
         const commandNetworkService = runtime.services.find(
