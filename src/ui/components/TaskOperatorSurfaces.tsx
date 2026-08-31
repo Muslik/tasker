@@ -14,20 +14,20 @@ import {
   planReviewHistoryQueryOptions,
   reviewPlan,
   reviewWorkflowChange,
-  resolveDependencyAvailable,
-  resolveDependencyDiscovery,
   retrospectiveQueryOptions,
   retrospectivePatternsQueryOptions,
   setRetrospectiveProposalStatus,
   resumeTaskWorkflow,
   syncCodeReview,
 } from '../api/index.js';
+import type { PlanReviewAnnotationInput } from '../lib/plan-review-feedback.js';
 import { CodeReviewControls, codeReviewNotice } from './CodeReviewControls.js';
-import { DependencyWaitSurface, parsePackageNames } from './DependencyWaitSurface.js';
+import { DependencyWaitSurface } from './DependencyWaitSurface.js';
 import { PlanReviewSurface } from './PlanReviewSurface.js';
 import { PlanningClarificationSurface } from './PlanningClarificationSurface.js';
 import { ResearchDocumentReviewSurface } from './ResearchDocumentReviewSurface.js';
 import { RetrospectiveSurface } from './RetrospectiveSurface.js';
+import { useDependencyMutation } from './taskOperatorMutations.js';
 import { WorkflowChangeReview } from './WorkflowChangeReview.js';
 
 export const TaskOperatorSurfaces = ({
@@ -67,9 +67,11 @@ export const TaskOperatorSurfaces = ({
     mutationFn: ({
       decision,
       guidance,
+      annotations,
     }: {
       decision: 'approve' | 'request_changes';
       guidance: string;
+      annotations: readonly PlanReviewAnnotationInput[];
     }) => {
       if (currentRun?.runtime !== 'bootstrap' || currentRun.planning?.status !== 'ready')
         throw new Error('The current plan is unavailable');
@@ -80,8 +82,8 @@ export const TaskOperatorSurfaces = ({
           planArtifactId: currentRun.planning.artifactId,
           planAttempt: currentRun.planning.attempt,
           decision: 'request_changes',
-          guidance,
-          annotations: [],
+          ...(guidance.trim().length === 0 ? {} : { guidance: guidance.trim() }),
+          annotations: [...annotations],
         });
       return reviewPlan(task.id, {
         expectedRunId: currentRun.runId,
@@ -148,69 +150,10 @@ export const TaskOperatorSurfaces = ({
     },
     onSettled: settle,
   });
-  const dependencyMutation = useMutation({
-    mutationFn: ({
-      available,
-      versions,
-      provenance,
-      discovery,
-    }: {
-      available: boolean;
-      versions?: ReadonlyMap<string, string>;
-      provenance?: { postId: string; url: string };
-      discovery?: {
-        producerTaskReference: string;
-        producerRepository: string;
-        packages: string;
-        mode: 'final_only';
-      };
-    }) => {
-      if (
-        currentRun?.runtime !== 'execution' ||
-        currentRun.status !== 'waiting' ||
-        projection.current?.status !== 'waiting'
-      )
-        throw new Error('The dependency wait is unavailable');
-      const action = projection.current.intervention;
-      if (action.kind !== 'typed_resolution' || action.details === null)
-        throw new Error('The dependency wait is unavailable');
-      if (available && action.details.kind === 'dependency_available' && versions !== undefined) {
-        return resolveDependencyAvailable(task.id, {
-          expectedRunId: currentRun.runId,
-          nodeId: projection.current.nodeId,
-          waitKind: 'dependency.available@1',
-          declarationId: action.details.declarationId,
-          declarationRevision: action.details.declarationRevision,
-          channel: action.details.channel,
-          packages: action.details.packages.map((name) => ({
-            name,
-            version: versions.get(name) ?? '',
-          })),
-          ...(provenance?.postId === undefined || provenance.postId.length === 0
-            ? {}
-            : {
-                provenance: {
-                  kind: 'loop' as const,
-                  postId: provenance.postId,
-                  ...(provenance.url.length === 0 ? {} : { url: provenance.url }),
-                },
-              }),
-        });
-      }
-      if (!available && action.details.kind === 'dependency_discovery' && discovery !== undefined) {
-        return resolveDependencyDiscovery(task.id, {
-          expectedRunId: currentRun.runId,
-          nodeId: projection.current.nodeId,
-          waitKind: 'dependency.discovery@1',
-          requestArtifactId: action.details.requestArtifactId,
-          producerTaskReference: discovery.producerTaskReference,
-          producerRepository: discovery.producerRepository,
-          packages: [...parsePackageNames(discovery.packages)],
-          mode: discovery.mode,
-        });
-      }
-      throw new Error('The dependency form does not match the active wait');
-    },
+  const dependencyMutation = useDependencyMutation({
+    task,
+    projection,
+    currentRun,
     onSettled: settle,
   });
   const planRecord = plan.data?.status === 'ready' ? plan.data : null;
@@ -250,8 +193,8 @@ export const TaskOperatorSurfaces = ({
           history={history.data ?? []}
           pending={planMutation.isPending}
           error={planMutation.error?.message ?? null}
-          onReview={(decision, guidance) => {
-            planMutation.mutate({ decision, guidance });
+          onReview={(decision, guidance, annotations) => {
+            planMutation.mutate({ decision, guidance, annotations });
           }}
         />
       )}

@@ -156,4 +156,18 @@ describe('TaskCard', () => {
     expect(selectAttempt).toHaveBeenCalledWith(selection);
     expect(selectTab).toHaveBeenCalledWith('prompt');
   });
+
+  it('opens planning invocations by invocation id even without attempt coordinates', () => {
+    const selectAttempt = vi.fn();
+    const selectTab = vi.fn();
+    const selection = {
+      nodeId: null,
+      blockRun: null,
+      invocationId: 'invocation-planning-1',
+    };
+
+    expect(triggerTaskInvocationOpen(selection, selectAttempt, selectTab)).toEqual(selection);
+    expect(selectAttempt).toHaveBeenCalledWith(selection);
+    expect(selectTab).toHaveBeenCalledWith('prompt');
+  });
 });

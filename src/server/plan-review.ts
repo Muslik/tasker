@@ -3,38 +3,22 @@ import { z } from 'zod';
 import type { LedgerRepository } from '../store/repository.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
+import {
+  ResearchDocumentReviewAnnotationSchema,
+  type ResearchDocumentReviewAnnotation,
+} from '../shared/research-document-review.js';
+import { combinePlannerGuidance } from './research-document-review.js';
 
-export const PlanReviewAnnotationSchema = z
-  .object({
-    id: z.string().min(1).max(200),
-    anchor: z.string().min(1).max(300),
-    quote: z.string().trim().min(1).max(2_000),
-    startOffset: z.number().int().nonnegative(),
-    endOffset: z.number().int().positive(),
-    comment: z.string().trim().min(1).max(4_000),
-  })
-  .strict()
-  .refine((annotation) => annotation.endOffset > annotation.startOffset, {
-    message: 'Annotation end must follow its start',
-    path: ['endOffset'],
-  });
-
-const annotationFeedback = (
-  annotation: z.infer<typeof PlanReviewAnnotationSchema>,
-  index: number,
-): string =>
-  `Annotation ${String(index + 1)} (${annotation.anchor})\n> ${annotation.quote.replaceAll('\n', '\n> ')}\n\n${annotation.comment}`;
+export const PlanReviewAnnotationSchema = ResearchDocumentReviewAnnotationSchema;
 
 const combinedReviewFeedback = (command: {
-  readonly guidance: string;
-  readonly annotations: readonly z.infer<typeof PlanReviewAnnotationSchema>[];
+  readonly guidance: string | undefined;
+  readonly annotations: readonly ResearchDocumentReviewAnnotation[];
 }): string =>
-  [
-    command.guidance.length === 0 ? null : command.guidance,
-    ...command.annotations.map(annotationFeedback),
-  ]
-    .filter((part): part is string => part !== null)
-    .join('\n\n');
+  combinePlannerGuidance({
+    annotations: [...command.annotations],
+    ...(command.guidance === undefined ? {} : { guidance: command.guidance }),
+  });
 
 const PlanReviewContextSchema = z
   .object({
@@ -51,17 +35,13 @@ export const ApprovePlanReviewCommandSchema = PlanReviewContextSchema.extend({
 
 export const RequestPlanChangesCommandSchema = PlanReviewContextSchema.extend({
   decision: z.literal('request_changes'),
-  guidance: z.string().trim().max(10_000),
+  guidance: z.string().trim().min(1).max(10_000).optional(),
   annotations: z.array(PlanReviewAnnotationSchema).max(50),
 })
   .strict()
   .refine(
-    (command) => command.guidance.length > 0 || command.annotations.length > 0,
+    (command) => command.guidance !== undefined || command.annotations.length > 0,
     'Plan review requires guidance or at least one annotation',
-  )
-  .refine(
-    (command) => combinedReviewFeedback(command).length <= 10_000,
-    'Combined plan review feedback must not exceed 10000 characters',
   );
 
 export const PlanReviewCommandSchema = z.discriminatedUnion('decision', [
@@ -95,7 +75,7 @@ export const PlanReviewHistoryResponseSchema = z
   })
   .strict();
 
-export type PlanReviewAnnotation = z.infer<typeof PlanReviewAnnotationSchema>;
+export type PlanReviewAnnotation = ResearchDocumentReviewAnnotation;
 export type PlanReviewCommand = z.infer<typeof PlanReviewCommandSchema>;
 export type PlanReviewRound = z.infer<typeof PlanReviewRoundSchema>;
 
@@ -118,7 +98,7 @@ const commandPayload = (command: PlanReviewCommand) => ({
   planArtifactId: command.planArtifactId,
   planAttempt: command.planAttempt,
   decision: command.decision,
-  guidance: command.decision === 'request_changes' ? command.guidance : null,
+  guidance: command.decision === 'request_changes' ? (command.guidance ?? null) : null,
   annotations: command.decision === 'request_changes' ? command.annotations : [],
 });
 
@@ -143,7 +123,13 @@ export const planReviewResolution = (commandValue: PlanReviewCommand) => {
   const command = PlanReviewCommandSchema.parse(commandValue);
   return command.decision === 'approve'
     ? ({ decision: 'approve' } as const)
-    : ({ decision: 'request_changes', guidance: combinedReviewFeedback(command) } as const);
+    : ({
+        decision: 'request_changes',
+        guidance: combinedReviewFeedback({
+          guidance: command.guidance,
+          annotations: command.annotations,
+        }),
+      } as const);
 };
 
 export class PlanReviewStore {

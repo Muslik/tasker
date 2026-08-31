@@ -4,10 +4,23 @@ import type {
 } from '../../server/operator-contracts.js';
 import { cn } from '../lib/utils.js';
 import type { InvocationSelection } from './CurrentAttemptStatus.js';
+import {
+  formatOperatorCost,
+  formatOperatorDurationMs,
+  formatOperatorInteger,
+  formatOperatorPromptKb,
+  formatOperatorUsd,
+} from './operatorUiFormat.js';
+
+type FailureReason = Readonly<{
+  summary: string;
+  detail: string;
+}>;
 
 export type InvocationTokensRowView = Readonly<{
   source: OperatorTaskInvocationListRow;
   invocationId: string;
+  status: OperatorTaskInvocationListRow['status'];
   stepLabel: string;
   blockRun: string;
   model: string;
@@ -18,43 +31,19 @@ export type InvocationTokensRowView = Readonly<{
   cachedTokens: string;
   cost: string;
   promptSpike: boolean;
-  selection: InvocationSelection | null;
+  failureReason: FailureReason | null;
+  hasRecordedUsage: boolean;
+  selection: InvocationSelection;
 }>;
 
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-const formatDurationMs = (durationMs: number): string => {
-  if (durationMs < MINUTE_MS) return '<1m';
-  if (durationMs < HOUR_MS) return `${String(Math.floor(durationMs / MINUTE_MS))}m`;
-
-  if (durationMs < DAY_MS) {
-    const hours = Math.floor(durationMs / HOUR_MS);
-    const minutes = Math.floor((durationMs % HOUR_MS) / MINUTE_MS);
-    return minutes === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(minutes)}m`;
-  }
-
-  const days = Math.floor(durationMs / DAY_MS);
-  const hours = Math.floor((durationMs % DAY_MS) / HOUR_MS);
-  return hours === 0 ? `${String(days)}d` : `${String(days)}d ${String(hours)}h`;
+const invocationStatusTone: Record<OperatorTaskInvocationListRow['status'], string> = {
+  completed:
+    'border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-400/15 dark:text-emerald-200',
+  waiting:
+    'border-amber-200/80 bg-amber-500/10 text-amber-700 dark:border-amber-400/40 dark:bg-amber-400/15 dark:text-amber-200',
+  failed:
+    'border-red-200/80 bg-red-500/10 text-red-700 dark:border-red-400/40 dark:bg-red-400/15 dark:text-red-200',
 };
-
-const formatInteger = (value: number | null): string =>
-  value === null ? '\u2014' : value.toLocaleString('en-US');
-
-const formatCostUsd = (
-  cost: OperatorTaskInvocationListRow['cost'],
-  minimumFractionDigits = 2,
-): string =>
-  cost.source === 'unrated'
-    ? '\u2014'
-    : `$${cost.amountUsd.toLocaleString('en-US', {
-        minimumFractionDigits,
-        maximumFractionDigits: 4,
-      })}`;
-
-const formatPromptKb = (promptBytes: number): string => (promptBytes / 1024).toFixed(1);
 
 const baselinePromptBytesByNode = (
   invocations: readonly OperatorTaskInvocationListRow[],
@@ -70,23 +59,51 @@ const baselinePromptBytesByNode = (
   return baselines;
 };
 
+const invocationStatusLabel = (status: OperatorTaskInvocationListRow['status']): string =>
+  status[0]?.toUpperCase().concat(status.slice(1)) ?? status;
+
+const hasRecordedUsage = (row: OperatorTaskInvocationListRow): boolean =>
+  [
+    row.usage.inputTokens,
+    row.usage.cachedInputTokens,
+    row.usage.outputTokens,
+    row.usage.reasoningOutputTokens,
+  ].some((value) => value !== null && value > 0);
+
+const failureReasonFor = (row: OperatorTaskInvocationListRow): FailureReason | null => {
+  if (row.status !== 'failed') return null;
+  if (!hasRecordedUsage(row) && row.cost.source === 'unrated') {
+    return {
+      summary: 'Failed before usage was recorded',
+      detail: 'This invocation failed before provider token or cost telemetry was recorded.',
+    };
+  }
+  if ((row.usage.outputTokens ?? 0) === 0) {
+    return {
+      summary: 'Failed before model output',
+      detail: 'This invocation failed before any model output tokens were recorded.',
+    };
+  }
+  return {
+    summary: 'Failed after partial output',
+    detail:
+      'This invocation failed after partial provider output. Open the invocation prompt for the full artifact details.',
+  };
+};
+
 export const invocationSelectionFor = (
   row: OperatorTaskInvocationListRow,
-): InvocationSelection | null =>
-  row.nodeId === null || row.blockRun === null
-    ? null
-    : {
-        nodeId: row.nodeId,
-        blockRun: row.blockRun,
-        invocationId: row.invocationId,
-      };
+): InvocationSelection => ({
+  nodeId: row.nodeId,
+  blockRun: row.blockRun,
+  invocationId: row.invocationId,
+});
 
 export const triggerInvocationSelection = (
   row: OperatorTaskInvocationListRow,
   onOpenInvocation?: (selection: InvocationSelection) => void,
-): InvocationSelection | null => {
+): InvocationSelection => {
   const selection = invocationSelectionFor(row);
-  if (selection === null) return null;
   onOpenInvocation?.(selection);
   return selection;
 };
@@ -102,16 +119,19 @@ export const buildInvocationTokensRows = (
     return {
       source: row,
       invocationId: row.invocationId,
+      status: row.status,
       stepLabel: row.scope === 'planning' ? 'Planning' : (row.nodeId ?? 'Unknown node'),
       blockRun: row.blockRun === null ? '\u2014' : String(row.blockRun),
       model: row.model,
-      duration: formatDurationMs(row.durationMs),
-      promptKb: formatPromptKb(row.promptBytes),
-      inputTokens: formatInteger(row.usage.inputTokens),
-      outputTokens: formatInteger(row.usage.outputTokens),
-      cachedTokens: formatInteger(row.usage.cachedInputTokens),
-      cost: formatCostUsd(row.cost),
+      duration: formatOperatorDurationMs(row.durationMs),
+      promptKb: formatOperatorPromptKb(row.promptBytes),
+      inputTokens: formatOperatorInteger(row.usage.inputTokens),
+      outputTokens: formatOperatorInteger(row.usage.outputTokens),
+      cachedTokens: formatOperatorInteger(row.usage.cachedInputTokens),
+      cost: formatOperatorCost(row.cost),
       promptSpike: row.scope === 'execution' && baseline !== null && row.promptBytes > baseline * 2,
+      failureReason: failureReasonFor(row),
+      hasRecordedUsage: hasRecordedUsage(row),
       selection: invocationSelectionFor(row),
     };
   });
@@ -131,62 +151,53 @@ export function InvocationTokens({
   const rows = buildInvocationTokensRows(invocations);
 
   return (
-    <section
-      aria-label="Tokens"
-      className={cn('rounded-2xl border border-border bg-card text-card-foreground', className)}
-    >
-      <div className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-foreground">Tokens</h2>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs tabular-nums sm:grid-cols-4">
-          <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
-            <div className="text-muted-foreground">Invocations</div>
-            <div className="mt-1 font-medium text-foreground">
-              {invocations?.totals.invocationCount.toLocaleString('en-US') ?? '0'}
-            </div>
-          </div>
-          <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
-            <div className="text-muted-foreground">Total tokens</div>
-            <div className="mt-1 font-medium text-foreground">
-              {invocations?.totals.totalTokens.toLocaleString('en-US') ?? '0'}
-            </div>
-          </div>
-          <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
-            <div className="text-muted-foreground">Cost USD</div>
-            <div className="mt-1 font-medium text-foreground">
-              {invocations === null
-                ? '$0.00'
-                : `$${invocations.totals.costUsd.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 4,
-                  })}`}
-            </div>
-          </div>
-          <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
-            <div className="text-muted-foreground">Unrated</div>
-            <div className="mt-1 font-medium text-foreground">
-              {invocations?.totals.unratedCount.toLocaleString('en-US') ?? '0'}
-            </div>
-          </div>
+    <section aria-label="Tokens" className={cn('tasker-panel', className)}>
+      <div className="tasker-panel-header">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Invocation tokens</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Exact duration, usage, and cost for every persisted operator invocation.
+          </p>
         </div>
+        <dl className="tasker-summary-grid text-xs tabular-nums">
+          <div>
+            <dt>Invocations</dt>
+            <dd>{invocations?.totals.invocationCount.toLocaleString('en-US') ?? '0'}</dd>
+          </div>
+          <div>
+            <dt>Total tokens</dt>
+            <dd>{invocations?.totals.totalTokens.toLocaleString('en-US') ?? '0'}</dd>
+          </div>
+          <div>
+            <dt>Cost USD</dt>
+            <dd>{invocations === null ? '$0' : formatOperatorUsd(invocations.totals.costUsd)}</dd>
+          </div>
+          <div>
+            <dt>Unrated</dt>
+            <dd>{invocations?.totals.unratedCount.toLocaleString('en-US') ?? '0'}</dd>
+          </div>
+        </dl>
       </div>
       {rows.length === 0 ? (
         <p className="px-4 py-4 text-sm text-muted-foreground">
           No invocation artifacts have been recorded yet.
         </p>
       ) : (
-        <div className="overflow-x-auto px-4 py-3">
-          <table className="min-w-full text-xs tabular-nums">
+        <div className="tasker-scroll-shell px-4 py-3">
+          <table className="tasker-fixed-table w-[86rem] table-fixed text-xs tabular-nums">
             <thead>
               <tr className="border-b border-border text-left uppercase tracking-[0.08em] text-muted-foreground">
+                <th className="w-28 pb-2 pr-4 font-medium">Status</th>
                 <th className="pb-2 pr-4 font-medium">Step / node</th>
-                <th className="pb-2 pr-4 font-medium">Block run</th>
-                <th className="pb-2 pr-4 font-medium">Model</th>
-                <th className="pb-2 pr-4 font-medium">Duration</th>
-                <th className="pb-2 pr-4 font-medium">Prompt KB</th>
-                <th className="pb-2 pr-4 font-medium">In</th>
-                <th className="pb-2 pr-4 font-medium">Out</th>
-                <th className="pb-2 pr-4 font-medium">Cached</th>
-                <th className="pb-2 font-medium">Cost</th>
+                <th className="w-24 pb-2 pr-4 font-medium">Block run</th>
+                <th className="w-40 pb-2 pr-4 font-medium">Model</th>
+                <th className="w-28 pb-2 pr-4 font-medium">Duration</th>
+                <th className="w-28 pb-2 pr-4 font-medium">Prompt</th>
+                <th className="w-24 pb-2 pr-4 font-medium">In</th>
+                <th className="w-24 pb-2 pr-4 font-medium">Out</th>
+                <th className="w-24 pb-2 pr-4 font-medium">Cached</th>
+                <th className="w-24 pb-2 pr-4 font-medium">Cost</th>
+                <th className="w-64 pb-2 font-medium">Failure</th>
               </tr>
             </thead>
             <tbody>
@@ -194,28 +205,35 @@ export function InvocationTokens({
                 <tr
                   key={row.invocationId}
                   className={cn(
-                    'border-b border-border/60 last:border-0',
+                    'border-b border-border/60 align-top last:border-0',
+                    row.status === 'failed' && 'bg-red-500/4 opacity-70',
                     row.promptSpike && 'bg-amber-500/10',
                   )}
                   title={
                     row.promptSpike ? 'Prompt grew to more than 2× its node baseline' : undefined
                   }
                 >
+                  <td className="py-2 pr-4">
+                    <span
+                      className={cn(
+                        'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                        invocationStatusTone[row.status],
+                      )}
+                    >
+                      {invocationStatusLabel(row.status)}
+                    </span>
+                  </td>
                   <td className="py-2 pr-4 text-foreground">
-                    {row.selection === null ? (
-                      <span>{row.stepLabel}</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="rounded-md text-left font-medium text-foreground transition hover:text-primary"
-                        onClick={() => triggerInvocationSelection(row.source, onOpenInvocation)}
-                      >
-                        {row.stepLabel}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="rounded-md text-left font-medium text-foreground transition hover:text-primary"
+                      onClick={() => triggerInvocationSelection(row.source, onOpenInvocation)}
+                    >
+                      {row.stepLabel}
+                    </button>
                   </td>
                   <td className="py-2 pr-4 text-foreground">{row.blockRun}</td>
-                  <td className="max-w-44 py-2 pr-4 text-foreground">
+                  <td className="py-2 pr-4 text-foreground">
                     <span className="block truncate">{row.model}</span>
                   </td>
                   <td className="py-2 pr-4 text-foreground">{row.duration}</td>
@@ -227,10 +245,50 @@ export function InvocationTokens({
                   >
                     {row.promptKb}
                   </td>
-                  <td className="py-2 pr-4 text-foreground">{row.inputTokens}</td>
-                  <td className="py-2 pr-4 text-foreground">{row.outputTokens}</td>
-                  <td className="py-2 pr-4 text-foreground">{row.cachedTokens}</td>
-                  <td className="py-2 text-foreground">{row.cost}</td>
+                  <td
+                    className={cn(
+                      'py-2 pr-4 text-foreground',
+                      row.status === 'failed' && !row.hasRecordedUsage && 'text-muted-foreground',
+                    )}
+                  >
+                    {row.inputTokens}
+                  </td>
+                  <td
+                    className={cn(
+                      'py-2 pr-4 text-foreground',
+                      row.status === 'failed' && !row.hasRecordedUsage && 'text-muted-foreground',
+                    )}
+                  >
+                    {row.outputTokens}
+                  </td>
+                  <td
+                    className={cn(
+                      'py-2 pr-4 text-foreground',
+                      row.status === 'failed' && !row.hasRecordedUsage && 'text-muted-foreground',
+                    )}
+                  >
+                    {row.cachedTokens}
+                  </td>
+                  <td
+                    className={cn(
+                      'py-2 pr-4 text-foreground',
+                      row.status === 'failed' && row.cost === '\u2014' && 'text-muted-foreground',
+                    )}
+                  >
+                    {row.cost}
+                  </td>
+                  <td className="py-2 text-foreground">
+                    {row.failureReason === null ? (
+                      <span className="text-muted-foreground">\u2014</span>
+                    ) : (
+                      <details className="tasker-reason-toggle" title={row.failureReason.detail}>
+                        <summary>{row.failureReason.summary}</summary>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {row.failureReason.detail}
+                        </p>
+                      </details>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

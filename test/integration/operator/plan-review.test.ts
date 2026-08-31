@@ -30,12 +30,8 @@ const changeRequest = {
   guidance: 'Keep the change bounded.',
   annotations: [
     {
-      id: 'annotation-1',
-      anchor: 'implementation-plan:task:attempt-1',
       quote: 'Run the full suite',
-      startOffset: 120,
-      endOffset: 138,
-      comment: 'Use the targeted payment checks instead.',
+      note: 'Use the targeted payment checks instead.',
     },
   ],
 } as const satisfies PlanReviewCommand;
@@ -45,23 +41,29 @@ describe('native plan review', () => {
     expect(planReviewResolution(changeRequest)).toEqual({
       decision: 'request_changes',
       guidance:
-        'Keep the change bounded.\n\nAnnotation 1 (implementation-plan:task:attempt-1)\n> Run the full suite\n\nUse the targeted payment checks instead.',
+        'Keep the change bounded.\n\n«Фрагмент: "Run the full suite" — Use the targeted payment checks instead.»',
     });
   });
 
-  it('rejects feedback that would be truncated at the planner boundary', () => {
-    expect(() =>
+  it('accepts annotation-only change requests', () => {
+    expect(
       planReviewResolution({
-        ...changeRequest,
-        guidance: 'g'.repeat(9_900),
+        expectedRunId: 'run-1',
+        decision: 'request_changes',
+        reviewId: 'review-1',
+        planArtifactId: 'implementation-plan:task:attempt-1',
+        planAttempt: 1,
         annotations: [
           {
-            ...changeRequest.annotations[0],
-            comment: 'c'.repeat(500),
+            quote: 'Run the full suite',
+            note: 'Use the targeted payment checks instead.',
           },
         ],
       }),
-    ).toThrow();
+    ).toEqual({
+      decision: 'request_changes',
+      guidance: '«Фрагмент: "Run the full suite" — Use the targeted payment checks instead.»',
+    });
   });
 
   it('keeps applied review rounds append-only and idempotent', () => {
@@ -95,7 +97,7 @@ describe('native plan review', () => {
           planArtifactId: 'implementation-plan:task:attempt-1',
           decision: 'request_changes',
           status: 'applied',
-          annotations: [{ id: 'annotation-1' }],
+          annotations: [{ quote: 'Run the full suite' }],
         },
       ],
     });
@@ -138,7 +140,13 @@ describe('native plan review', () => {
 
     expect(history).toMatchObject({
       ok: true,
-      value: [{ reviewId: 'review-1', status: 'applied', annotations: [{ id: 'annotation-1' }] }],
+      value: [
+        {
+          reviewId: 'review-1',
+          status: 'applied',
+          annotations: [{ quote: 'Run the full suite' }],
+        },
+      ],
     });
   });
 

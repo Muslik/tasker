@@ -99,8 +99,11 @@ export const TaskQueue = (props: TaskQueueProps) => {
           Task queue
         </p>
         <p className="mt-1 text-sm text-foreground">{items.length} active tasks</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Stage, status, and latest activity stay readable while the selected task remains pinned.
+        </p>
       </div>
-      <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 py-2" data-testid="task-queue">
+      <ol className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3" data-testid="task-queue">
         {items.map(({ task, selected, currentNodeId, elapsed, indicator, select }) => (
           <li key={task.id}>
             <button
@@ -108,11 +111,11 @@ export const TaskQueue = (props: TaskQueueProps) => {
               aria-label={`Select task ${task.taskId}: ${task.title}`}
               aria-pressed={selected}
               className={cn(
-                'relative w-full rounded-xl border border-transparent px-3 py-2.5 text-left transition-colors',
+                'relative w-full rounded-xl border px-3 py-3 text-left transition-colors',
                 'hover:border-border/80 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40',
                 selected
                   ? 'border-sky-200 bg-background shadow-sm dark:border-sky-400/40 dark:bg-slate-900/80'
-                  : 'bg-transparent',
+                  : 'border-border/60 bg-background/40',
               )}
               data-task-reference={task.id}
               type="button"
@@ -135,25 +138,26 @@ export const TaskQueue = (props: TaskQueueProps) => {
                 </div>
                 <StatusChip status={task.status} />
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                 {indicator === null ? null : (
                   <span
                     className={cn(
-                      'inline-flex items-center rounded-full border px-2 py-0.5 font-medium',
+                      'col-span-2 inline-flex w-fit items-center rounded-full border px-2 py-0.5 font-medium',
                       indicator.className,
                     )}
                   >
                     {indicator.label}
                   </span>
                 )}
-                <span className="truncate">{task.currentStage}</span>
-                <span aria-hidden="true" className="text-muted-foreground/50">
-                  /
-                </span>
-                <time dateTime={task.updatedAt ?? undefined}>{elapsed}</time>
-              </div>
+                <dt>Stage</dt>
+                <dd className="truncate text-foreground/80">{task.currentStage}</dd>
+                <dt>Updated</dt>
+                <dd>
+                  <time dateTime={task.updatedAt ?? undefined}>{elapsed}</time>
+                </dd>
+              </dl>
               {currentNodeId === null ? null : (
-                <p className="mt-2 rounded-md bg-muted/80 px-2 py-1 text-[11px] text-foreground/80">
+                <p className="mt-3 border-t border-border/60 pt-2 text-[11px] text-foreground/80">
                   Current node: <code>{currentNodeId}</code>
                 </p>
               )}

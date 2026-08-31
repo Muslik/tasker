@@ -13,6 +13,7 @@ import {
   resolveAttemptDetailsTab,
   triggerAttemptTabChange,
 } from './AttemptDetails.js';
+import { summarizeProviderEventLine } from './attemptDetailsSupport.js';
 
 const entry: OperatorRunLogEntry = {
   id: 'execution:deliver-pr:1',
@@ -134,6 +135,45 @@ const invocationDetail: OperatorTaskInvocationDetail = {
   },
 };
 
+const planningInvocationDetail: OperatorTaskInvocationDetail = {
+  schemaVersion: 1,
+  invocationId: 'invocation-planning-1',
+  taskReference: 'TASK-1',
+  prompt: 'Plan the implementation.',
+  promptBytes: 24,
+  provider: 'claude',
+  profile: 'planner',
+  profileSha256: 'b'.repeat(64),
+  model: 'claude-opus',
+  effort: 'medium',
+  serviceTier: null,
+  argv: ['claude', 'plan'],
+  skills: ['plan'],
+  inputEvidenceArtifactIds: ['artifact-plan-1'],
+  startedAt: '2026-08-30T09:00:00.000Z',
+  finishedAt: '2026-08-30T09:00:10.000Z',
+  durationMs: 10_000,
+  status: 'completed',
+  exitStatus: { kind: 'exited', exitCode: 0 },
+  usage: {
+    inputTokens: 20,
+    cachedInputTokens: 0,
+    outputTokens: 8,
+    reasoningOutputTokens: 5,
+  },
+  cost: { source: 'unrated' },
+  references: {
+    kind: 'planning',
+    planningEpisodeId: 'planning-episode-1',
+    planningAttempt: 1,
+    invocationNumber: 1,
+    operationId: 'planning-op-1',
+    transcriptId: 'planning-transcript-1',
+    outputArtifactIds: ['artifact-plan-2'],
+    receiptArtifactId: null,
+  },
+};
+
 describe('AttemptDetails', () => {
   it('renders the invocation prompt panel inside the prompt tab in SSR', () => {
     const html = renderToStaticMarkup(
@@ -147,6 +187,7 @@ describe('AttemptDetails', () => {
     );
 
     expect(html).toContain('Attempt #1');
+    expect(html).toContain('data-outcome="completed"');
     expect(html).toContain('Copy prompt');
     expect(html).toContain('codex exec --json');
     expect(html).toContain('Run the task.');
@@ -169,5 +210,45 @@ describe('AttemptDetails', () => {
     expect(resolveAttemptDetailsTab(entry, null, 'details')).toBe('log');
     expect(triggerAttemptTabChange('details', onTabChange)).toBe('details');
     expect(onTabChange).toHaveBeenCalledWith('details');
+  });
+
+  it('renders invocation details without a run-log entry for planning invocations', () => {
+    const html = renderToStaticMarkup(
+      createElement(AttemptDetails, {
+        entry: null,
+        invocationId: planningInvocationDetail.invocationId,
+        invocationDetail: planningInvocationDetail,
+        selectedTab: 'prompt',
+      }),
+    );
+
+    expect(html).toContain('Copy prompt');
+    expect(html).toContain('Plan the implementation.');
+    expect(html).toContain('claude plan');
+    expect(html).toContain('20 in');
+  });
+
+  it('summarizes provider JSONL output and highlights structured details', () => {
+    expect(summarizeProviderEventLine('{"type":"item.completed","item":{"text":"Finished"}}')).toBe(
+      'item.completed: Finished',
+    );
+
+    const output = attempt.output;
+    if (output === null) throw new Error('Expected output fixture');
+    const html = renderToStaticMarkup(
+      createElement(AttemptDetails, {
+        entry,
+        attempt: {
+          ...attempt,
+          output: {
+            ...output,
+            stdout: '{"type":"item.completed","item":{"text":"Finished"}}\n',
+          },
+        },
+        selectedTab: 'details',
+      }),
+    );
+
+    expect(html).toContain('tasker-json-key');
   });
 });

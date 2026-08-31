@@ -50,15 +50,23 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
   const currentRunQuery = useQuery(taskCurrentRunQueryOptions(task.id));
   const invocationsQuery = useQuery(taskInvocationsQueryOptions(task.id));
   const selectedInvocationId = selectedAttempt?.invocationId ?? null;
+  const selectedAttemptIdentity =
+    selectedAttempt !== null && selectedAttempt.nodeId !== null && selectedAttempt.blockRun !== null
+      ? {
+          nodeId: selectedAttempt.nodeId,
+          blockRun: selectedAttempt.blockRun,
+        }
+      : null;
 
   const selectedEntry =
-    selectedAttempt === null
+    selectedAttemptIdentity === null
       ? null
       : (runLogQuery.data?.entries.find(
           (entry) =>
-            entry.nodeId === selectedAttempt.nodeId && entry.blockRun === selectedAttempt.blockRun,
+            entry.nodeId === selectedAttemptIdentity.nodeId &&
+            entry.blockRun === selectedAttemptIdentity.blockRun,
         ) ?? null);
-  const attemptIdentity = selectedAttempt ?? { nodeId: 'unselected', blockRun: 1 };
+  const attemptIdentity = selectedAttemptIdentity ?? { nodeId: 'unselected', blockRun: 1 };
   const attemptQuery = useQuery({
     ...taskExecutionAttemptQueryOptions(task.id, attemptIdentity),
     enabled: selectedEntry?.runtime === 'execution',
@@ -67,7 +75,7 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
     ...(selectedInvocationId === null
       ? taskInvocationQueryOptions(task.id, 'unselected')
       : taskInvocationQueryOptions(task.id, selectedInvocationId)),
-    enabled: selectedTab === 'prompt' && selectedInvocationId !== null,
+    enabled: selectedInvocationId !== null,
   });
 
   useEffect(() => {
@@ -164,8 +172,14 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
         </div>
       </header>
 
-      <div className="grid gap-4 p-5 xl:grid-cols-[minmax(16rem,0.72fr)_minmax(32rem,1.8fr)]">
-        <div className="space-y-4">
+      <div className="space-y-6 p-5">
+        <section className="space-y-4" aria-labelledby="task-card-workflow-heading">
+          <h2
+            id="task-card-workflow-heading"
+            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+          >
+            Workflow overview
+          </h2>
           <WorkflowRail
             stages={projection.stages}
             currentNodeId={projection.current?.nodeId ?? null}
@@ -174,8 +188,14 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
             invocations={invocationsQuery.data ?? null}
             onOpenInvocation={openInvocation}
           />
-        </div>
-        <div className="space-y-4">
+        </section>
+        <section className="space-y-4" aria-labelledby="task-card-operators-heading">
+          <h2
+            id="task-card-operators-heading"
+            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+          >
+            Operator surfaces
+          </h2>
           <TaskOperatorSurfaces
             task={task}
             projection={projection}
@@ -186,6 +206,14 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
               {errors.join(' ')}
             </div>
           )}
+        </section>
+        <section className="space-y-4" aria-labelledby="task-card-attempts-heading">
+          <h2
+            id="task-card-attempts-heading"
+            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+          >
+            Attempts
+          </h2>
           <AttemptsList
             runLog={runLogQuery.data ?? null}
             invocations={invocationsQuery.data?.invocations ?? null}
@@ -196,8 +224,16 @@ export const TaskCard = ({ task, onStart, onRemove }: TaskCardProps) => {
               setSelectedTab('log');
             }}
           />
+        </section>
+        <section className="space-y-4" aria-labelledby="task-card-details-heading">
+          <h2
+            id="task-card-details-heading"
+            className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+          >
+            Attempt details
+          </h2>
           <AttemptDetails {...attemptDetailsProps} />
-        </div>
+        </section>
       </div>
     </article>
   );

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OperatorTaskInvocationListResponse } from '../../server/operator-contracts.js';
+import { formatOperatorDurationMs } from './operatorUiFormat.js';
 import {
   buildInvocationTokensRows,
   invocationSelectionFor,
@@ -103,6 +104,11 @@ const invocations: OperatorTaskInvocationListResponse = {
 };
 
 describe('InvocationTokens', () => {
+  it('keeps sub-minute precision and pads seconds in minute durations', () => {
+    expect(formatOperatorDurationMs(12_000)).toBe('12s');
+    expect(formatOperatorDurationMs(245_000)).toBe('4m 05s');
+  });
+
   it('renders totals and newest-first invocation rows in SSR', () => {
     const rows = buildInvocationTokensRows(invocations);
     const html = renderToStaticMarkup(
@@ -112,11 +118,18 @@ describe('InvocationTokens', () => {
     );
 
     expect(html).toContain('Total tokens');
+    expect(html).toContain('Status');
+    expect(html).toContain('Waiting');
+    expect(html).toContain('Completed');
+    expect(html).toContain('Failed');
     expect(html).toContain('2,140');
     expect(html).toContain('deliver-pr');
     expect(html).toContain('2.5');
     expect(html).toContain('$0.3142');
     expect(html).toContain('Planning');
+    expect(html).toContain('Failed before usage was recorded');
+    expect(rows[0]?.duration).toBe('2m 00s');
+    expect(rows[2]?.duration).toBe('30s');
     expect(rows.map((row) => row.invocationId)).toEqual([
       'invocation-2',
       'invocation-1',
@@ -145,11 +158,25 @@ describe('InvocationTokens', () => {
       blockRun: 2,
       invocationId: 'invocation-2',
     });
-    expect(triggerInvocationSelection(planningRow, onOpenInvocation)).toBeNull();
+    expect(invocationSelectionFor(planningRow)).toEqual({
+      nodeId: null,
+      blockRun: null,
+      invocationId: 'invocation-3',
+    });
+    expect(triggerInvocationSelection(planningRow, onOpenInvocation)).toEqual({
+      nodeId: null,
+      blockRun: null,
+      invocationId: 'invocation-3',
+    });
     expect(onOpenInvocation).toHaveBeenCalledWith({
       nodeId: 'deliver-pr',
       blockRun: 2,
       invocationId: 'invocation-2',
+    });
+    expect(onOpenInvocation).toHaveBeenCalledWith({
+      nodeId: null,
+      blockRun: null,
+      invocationId: 'invocation-3',
     });
   });
 });

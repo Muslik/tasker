@@ -60,6 +60,29 @@ describe('captureResearchDocumentSelection', () => {
       ),
     ).toEqual({ kind: 'too_long' });
   });
+
+  it('accepts a custom quote limit for reusable selection capture', () => {
+    expect(
+      captureResearchDocumentSelection(
+        {
+          rangeCount: 1,
+          toString: () => 'x'.repeat(800),
+          getRangeAt: () => ({
+            commonAncestorContainer: insideNode,
+            getBoundingClientRect: () => ({ left: 0, bottom: 0 }),
+          }),
+        },
+        {
+          contains: () => true,
+        },
+        { maxLength: 2_000 },
+      ),
+    ).toEqual({
+      kind: 'captured',
+      quote: 'x'.repeat(800),
+      rect: { left: 0, top: 0 },
+    });
+  });
 });
 
 const insideNode = { id: 'inside' };

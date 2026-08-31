@@ -44,12 +44,8 @@ describe('retrospective report', () => {
       guidance: 'Clarify the boundary',
       annotations: [
         {
-          id: 'a',
-          anchor: 'scope',
           quote: 'scope',
-          startOffset: 0,
-          endOffset: 5,
-          comment: 'too broad',
+          note: 'too broad',
         },
       ],
     });

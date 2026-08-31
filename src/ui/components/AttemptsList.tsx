@@ -7,14 +7,14 @@ import { cn } from '../lib/utils.js';
 import { formatDuration } from '../lib/format.js';
 
 export type AttemptSelection = Readonly<{
-  nodeId: string;
-  blockRun: number;
+  nodeId: string | null;
+  blockRun: number | null;
   invocationId: string | null;
 }>;
 
 export type ResolvedAttemptSelection = Readonly<{
-  nodeId: string;
-  blockRun: number;
+  nodeId: string | null;
+  blockRun: number | null;
   invocationId: string;
 }>;
 

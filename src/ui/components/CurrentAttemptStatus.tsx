@@ -9,8 +9,8 @@ import { formatDuration } from '../lib/format.js';
 import { StatusChip } from './StatusChip.js';
 
 export type InvocationSelection = Readonly<{
-  nodeId: string;
-  blockRun: number;
+  nodeId: string | null;
+  blockRun: number | null;
   invocationId: string;
 }>;
 

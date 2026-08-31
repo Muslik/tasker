@@ -4,8 +4,17 @@ import type {
   OperatorTaskInvocationDetail,
 } from '../../server/operator-contracts.js';
 import { cn } from '../lib/utils.js';
-import { formatDuration } from '../lib/format.js';
 import { InvocationPrompt } from './InvocationPrompt.js';
+import { AttemptDetailBlock, AttemptOutputLines } from './AttemptOutputSections.js';
+import { JsonCodeBlock } from './JsonCodeBlock.js';
+import {
+  attemptDurationLabel,
+  attemptOutcomeLabel,
+  buildRenderedOutputLines,
+  buildTranscriptLines,
+  firstMeaningfulAttemptOutput,
+} from './attemptDetailsSupport.js';
+import { formatOperatorTimestamp } from './operatorUiFormat.js';
 
 export type AttemptDetailsTab = 'log' | 'transcript' | 'output' | 'details' | 'prompt';
 
@@ -28,14 +37,26 @@ const tabLabels: Record<AttemptDetailsTab, string> = {
   details: 'Details',
   prompt: 'Prompt',
 };
-
-const formatJson = (value: unknown): string => JSON.stringify(value, null, 2);
-
-const formatTimestamp = (value: string | null): string =>
-  value === null ? '\u2014' : value.replace('T', ' ').replace('.000Z', 'Z');
-
 const formatReference = (entry: OperatorRunLogEntry): string =>
   entry.runtime === 'bootstrap' && entry.runner === 'planner' ? 'Planning' : entry.reference;
+const outcomeTone = (outcome: string): string => {
+  if (outcome === 'completed')
+    return 'border-emerald-200/80 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-400/15 dark:text-emerald-200';
+  if (outcome === 'failed' || outcome === 'blocked')
+    return 'border-red-200/80 bg-red-500/10 text-red-700 dark:border-red-400/40 dark:bg-red-400/15 dark:text-red-200';
+  return 'border-amber-200/80 bg-amber-500/10 text-amber-700 dark:border-amber-400/40 dark:bg-amber-400/15 dark:text-amber-200';
+};
+const OutcomeChip = ({ outcome }: { readonly outcome: string }) => (
+  <span
+    className={cn(
+      'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize',
+      outcomeTone(outcome),
+    )}
+    data-outcome={outcome}
+  >
+    {outcome}
+  </span>
+);
 
 export const availableAttemptDetailsTabs = (
   entry: OperatorRunLogEntry | null,
@@ -69,17 +90,6 @@ export const triggerAttemptTabChange = (
   return tab;
 };
 
-const DetailBlock = ({ label, value }: { label: string; value: string }) => (
-  <section className="space-y-2">
-    <h3 className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-      {label}
-    </h3>
-    <pre className="overflow-x-auto rounded-xl border border-border bg-muted/40 p-3 text-xs leading-5 text-foreground whitespace-pre-wrap">
-      {value.length > 0 ? value : 'Empty'}
-    </pre>
-  </section>
-);
-
 export function AttemptDetails({
   entry,
   attempt = null,
@@ -91,18 +101,38 @@ export function AttemptDetails({
   onTabChange,
   className,
 }: AttemptDetailsProps) {
-  const activeTab = resolveAttemptDetailsTab(entry, attempt, selectedTab);
+  const promptSelectionAvailable =
+    invocationId !== null ||
+    invocationDetail !== null ||
+    invocationDetailPending ||
+    invocationDetailError !== null;
+  const activeTab =
+    entry === null
+      ? selectedTab === 'prompt' && promptSelectionAvailable
+        ? 'prompt'
+        : null
+      : resolveAttemptDetailsTab(entry, attempt, selectedTab);
 
-  if (entry === null || activeTab === null) {
+  if (activeTab === null) {
     return (
       <aside
         aria-label="Attempt details"
-        className={cn(
-          'rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground',
-          className,
-        )}
+        className={cn('tasker-panel px-4 py-4 text-sm text-muted-foreground', className)}
       >
         Select an attempt to inspect raw logs, transcript chunks, and execution output.
+      </aside>
+    );
+  }
+
+  if (entry === null) {
+    return (
+      <aside aria-label="Attempt details" className={cn('tasker-panel px-4 py-4', className)}>
+        <InvocationPrompt
+          invocationId={invocationId}
+          detail={invocationDetail}
+          pending={invocationDetailPending}
+          error={invocationDetailError}
+        />
       </aside>
     );
   }
@@ -110,31 +140,52 @@ export function AttemptDetails({
   const transcript = attempt?.transcript ?? null;
   const output = attempt?.output ?? null;
   const tabs = availableAttemptDetailsTabs(entry, attempt);
+  const transcriptLines = buildTranscriptLines(transcript);
+  const stdoutLines = buildRenderedOutputLines(
+    output?.stdout ?? '',
+    'stdout',
+    output?.recordedAt ?? null,
+    'stdout',
+  );
+  const stderrLines = buildRenderedOutputLines(
+    output?.stderr ?? '',
+    'stderr',
+    output?.recordedAt ?? null,
+    'stderr',
+  );
 
   return (
-    <aside
-      aria-label="Attempt details"
-      className={cn('rounded-2xl border border-border bg-card text-card-foreground', className)}
-    >
-      <div className="border-b border-border px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">{formatReference(entry)}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Attempt #{String(entry.blockRun)} · {entry.status.replaceAll('_', ' ')}
-            </p>
-          </div>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs tabular-nums text-muted-foreground">
-            <div>
-              <dt className="inline text-muted-foreground">Started</dt>
-              <dd className="ml-1 inline">{formatTimestamp(entry.startedAt)}</dd>
-            </div>
-            <div>
-              <dt className="inline text-muted-foreground">Duration</dt>
-              <dd className="ml-1 inline">{formatDuration(entry.startedAt, entry.completedAt)}</dd>
-            </div>
-          </dl>
+    <aside aria-label="Attempt details" className={cn('tasker-panel', className)}>
+      <div className="tasker-panel-header">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">{formatReference(entry)}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Attempt #{String(entry.blockRun)} · {formatOperatorTimestamp(entry.startedAt)}
+          </p>
         </div>
+        <dl className="tasker-summary-grid min-w-full text-xs tabular-nums md:min-w-[32rem]">
+          <div>
+            <dt>Model</dt>
+            <dd>
+              {invocationDetail?.model ??
+                (invocationDetailPending ? 'Loading invocation…' : 'Not recorded')}
+            </dd>
+          </div>
+          <div>
+            <dt>Duration</dt>
+            <dd>{attemptDurationLabel(entry, invocationDetail)}</dd>
+          </div>
+          <div>
+            <dt>Outcome</dt>
+            <dd>
+              <OutcomeChip outcome={attemptOutcomeLabel(entry, invocationDetail)} />
+            </dd>
+          </div>
+          <div className="md:col-span-2">
+            <dt>First meaningful output</dt>
+            <dd>{firstMeaningfulAttemptOutput(entry, attempt)}</dd>
+          </div>
+        </dl>
       </div>
       <div className="border-b border-border px-4 py-2">
         <div role="tablist" aria-label="Attempt detail sections" className="flex flex-wrap gap-2">
@@ -162,14 +213,16 @@ export function AttemptDetails({
         </div>
       </div>
       <div className="space-y-4 px-4 py-4" id={`attempt-panel-${activeTab}`} role="tabpanel">
-        {activeTab === 'log' ? <DetailBlock label="Raw log" value={entry.rawLog} /> : null}
+        {activeTab === 'log' ? <AttemptDetailBlock label="Raw log" value={entry.rawLog} /> : null}
         {activeTab === 'transcript' && transcript !== null ? (
           <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs text-foreground">
+            <AttemptOutputLines label="Transcript events" lines={transcriptLines} />
+            <div className="tasker-scroll-shell">
+              <table className="tasker-fixed-table min-w-[44rem] text-xs text-foreground">
                 <thead>
                   <tr className="border-b border-border text-left uppercase tracking-[0.08em] text-muted-foreground">
                     <th className="pb-2 pr-4 font-medium">Seq</th>
+                    <th className="pb-2 pr-4 font-medium">Provider attempt</th>
                     <th className="pb-2 pr-4 font-medium">Stream</th>
                     <th className="pb-2 pr-4 font-medium">Bytes</th>
                     <th className="pb-2 font-medium">Recorded</th>
@@ -179,48 +232,57 @@ export function AttemptDetails({
                   {transcript.chunks.map((chunk) => (
                     <tr key={chunk.sequence} className="border-b border-border/60 last:border-0">
                       <td className="py-2 pr-4 tabular-nums">{chunk.sequence}</td>
+                      <td className="py-2 pr-4 tabular-nums">{chunk.providerAttempt}</td>
                       <td className="py-2 pr-4">{chunk.stream}</td>
                       <td className="py-2 pr-4 tabular-nums">{chunk.byteLength}</td>
-                      <td className="py-2 tabular-nums">{formatTimestamp(chunk.recordedAt)}</td>
+                      <td className="py-2 tabular-nums">
+                        {formatOperatorTimestamp(chunk.recordedAt)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <DetailBlock
-              label="Combined transcript"
-              value={transcript.chunks.map((chunk) => chunk.content).join('')}
-            />
           </>
         ) : null}
         {activeTab === 'output' && output !== null ? (
           <>
-            <div className="grid gap-2 rounded-xl border border-border bg-muted/40 p-3 text-xs text-foreground sm:grid-cols-2">
-              <div>
-                <span className="text-muted-foreground">Runner</span>
-                <div>{output.runner}</div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Exit code</span>
-                <div className="tabular-nums">
-                  {output.exitCode === null ? '\u2014' : output.exitCode}
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Output summary
+              </h3>
+              <dl className="tasker-summary-grid text-xs text-foreground">
+                <div>
+                  <dt>Runner</dt>
+                  <dd>{output.runner}</dd>
                 </div>
-              </div>
-              <div className="sm:col-span-2">
-                <span className="text-muted-foreground">Command</span>
-                <div className="break-all">{output.command ?? 'Not recorded'}</div>
-              </div>
-              <div className="sm:col-span-2">
-                <span className="text-muted-foreground">Working directory</span>
-                <div className="break-all">{output.cwd}</div>
-              </div>
-            </div>
-            <DetailBlock label="stdout" value={output.stdout} />
-            <DetailBlock label="stderr" value={output.stderr} />
+                <div>
+                  <dt>Exit code</dt>
+                  <dd className="tabular-nums">
+                    {output.exitCode === null ? '\u2014' : output.exitCode}
+                  </dd>
+                </div>
+                <div className="md:col-span-2">
+                  <dt>Command</dt>
+                  <dd className="break-all">{output.command ?? 'Not recorded'}</dd>
+                </div>
+                <div className="md:col-span-2">
+                  <dt>Working directory</dt>
+                  <dd className="break-all">{output.cwd}</dd>
+                </div>
+              </dl>
+            </section>
+            <AttemptOutputLines label="stdout events" lines={stdoutLines} />
+            <AttemptOutputLines label="stderr events" lines={stderrLines} />
           </>
         ) : null}
         {activeTab === 'details' && output !== null ? (
-          <DetailBlock label="Structured details" value={formatJson(output.details)} />
+          <section className="space-y-2">
+            <h3 className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Structured details
+            </h3>
+            <JsonCodeBlock value={output.details} />
+          </section>
         ) : null}
         {activeTab === 'prompt' ? (
           <InvocationPrompt

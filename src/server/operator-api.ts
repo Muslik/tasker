@@ -1645,7 +1645,7 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
     if (!command.success) {
       return reply
         .code(400)
-        .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan guidance'));
+        .send(apiError('invalid_plan_review', 'Approve or provide non-empty plan feedback'));
     }
     const lifecycle = await readCurrentLifecycle(params.data.taskReference, reply);
     if (reply.sent) return reply;
@@ -1695,14 +1695,23 @@ export const buildOperatorApi = (options: BuildOperatorApiOptions): FastifyInsta
         .code(409)
         .send(apiError(submitted.error.kind, 'Plan review could not be stored'));
     }
+    const resolution = planReviewResolution(command.data);
     const reviewed = await temporalRunService.resolveWait(params.data.taskReference, {
       runId: command.data.expectedRunId,
       nodeId: current.value.wait.nodeId,
       waitKind: current.value.wait.waitKind,
-      resolution: planReviewResolution(command.data),
+      resolution,
     });
     if (!reviewed.ok) return sendTemporalRunError(reply, reviewed.error);
-    recordResolution(params.data.taskReference, current.value, JsonValueSchema.parse(command.data));
+    recordResolution(
+      params.data.taskReference,
+      current.value,
+      JsonValueSchema.parse(
+        command.data.decision === 'approve'
+          ? resolution
+          : { ...resolution, annotations: command.data.annotations },
+      ),
+    );
     const applied = options.planReviews?.markApplied(planningEpisodeId, command.data.reviewId);
     if (applied !== undefined && !applied.ok) {
       return reply

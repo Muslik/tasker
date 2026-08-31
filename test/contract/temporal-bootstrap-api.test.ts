@@ -21,12 +21,19 @@ import {
 } from '../../src/kernel/index.js';
 
 const resources: SqliteLedger[] = [];
+const PLANNING_EPISODE_ID = 'tasker:v3:jira:AVIA-12045:run-1:planning';
+const PLAN_ARTIFACT_ID = 'implementation-plan:task:attempt-1';
+const TEST_CHECKSUM = 'a'.repeat(64);
 
 afterEach(() => {
   for (const ledger of resources.splice(0)) ledger.close();
 });
 
-const waitingRun = (input: BootstrapWorkflowInput, runId: string): TaskRunPublicState =>
+const waitingRun = (
+  input: BootstrapWorkflowInput,
+  runId: string,
+  planning: Record<string, unknown> | null = null,
+): TaskRunPublicState =>
   BootstrapWorkflowPublicStateSchema.parse({
     runtime: 'bootstrap',
     schemaVersion: 3,
@@ -39,7 +46,7 @@ const waitingRun = (input: BootstrapWorkflowInput, runId: string): TaskRunPublic
     workspaceContext: null,
     context: null,
     draft: null,
-    planning: null,
+    planning,
     activeTranscriptOperationId: null,
     freezeReceipt: null,
     executionWorkflowId: null,
@@ -49,6 +56,30 @@ const waitingRun = (input: BootstrapWorkflowInput, runId: string): TaskRunPublic
     currentNodeId: 'plan_review',
     wait: { nodeId: 'plan_review', waitKind: 'plan.approved@1' },
     outcome: null,
+  });
+
+const waitingPlanReviewRun = (input: BootstrapWorkflowInput, runId: string): TaskRunPublicState =>
+  waitingRun(input, runId, {
+    status: 'needs_clarification',
+    planningEpisodeId: PLANNING_EPISODE_ID,
+    commandId: 'planning-command-1',
+    attempt: 1,
+    evidenceBundle: {
+      artifactId: 'evidence-bundle:1',
+      checksum: TEST_CHECKSUM,
+      revision: 1,
+    },
+    requestedStrategy: 'auto',
+    selectedStrategy: 'fast',
+    transcriptId: 'planning-transcript:1',
+    artifactId: PLAN_ARTIFACT_ID,
+    questions: [
+      {
+        id: 'scope',
+        question: 'Which scope should the plan cover?',
+        reason: 'The test only needs a planning episode id.',
+      },
+    ],
   });
 
 class ContractTaskRunService implements TaskRunService {
@@ -158,6 +189,56 @@ const setup = (taskRemoval?: Parameters<typeof buildOperatorApi>[0]['taskRemoval
 };
 
 describe('Temporal bootstrap HTTP contract', () => {
+  it('accepts plan review annotations and forwards combined guidance to Temporal', async () => {
+    const { api, runs, ledger } = setup();
+    const input = BootstrapWorkflowInputSchema.parse({
+      schemaVersion: 3,
+      taskReference: 'jira:AVIA-12045',
+      settings: { planReview: 'required', planningStrategy: 'fast' },
+    });
+    runs.setCurrent(waitingPlanReviewRun(input, 'run-1'));
+
+    const response = await api.inject({
+      method: 'POST',
+      url: '/api/workflows/jira:AVIA-12045/plan-review',
+      payload: {
+        expectedRunId: 'run-1',
+        reviewId: 'review-1',
+        planArtifactId: PLAN_ARTIFACT_ID,
+        planAttempt: 1,
+        decision: 'request_changes',
+        annotations: [
+          {
+            quote: 'Run the full suite',
+            note: 'Use the targeted payment checks instead.',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(runs.resolutions).toEqual([
+      {
+        runId: 'run-1',
+        nodeId: 'plan_review',
+        waitKind: 'plan.approved@1',
+        resolution: {
+          decision: 'request_changes',
+          guidance: '«Фрагмент: "Run the full suite" — Use the targeted payment checks instead.»',
+        },
+      },
+    ]);
+    expect(
+      ledger.repository.readDocument('plan_review', `${PLANNING_EPISODE_ID}:review-1`)?.payload,
+    ).toMatchObject({
+      reviewId: 'review-1',
+      planArtifactId: PLAN_ARTIFACT_ID,
+      guidance: null,
+      annotations: [{ quote: 'Run the full suite' }],
+    });
+    await api.close();
+  });
+
   it('lists agent invocations newest first with aggregated totals', async () => {
     const { api, ledger, recorder } = setup();
     ledger.repository.transact({
