@@ -6,7 +6,7 @@ import type { JsonValue } from '../schema.js';
 import type { SemanticStepSource, SemanticWorkflowSource } from '../semantic-schema.js';
 
 export const ResearchArchetypeSchema = z.literal('research');
-export const ResearchSegmentsSchema = z.tuple([]);
+export const ResearchSegmentsSchema = z.array(z.string()).max(0);
 
 export const RESEARCH_NODE_IDS = Object.freeze({
   root: 'task-work',

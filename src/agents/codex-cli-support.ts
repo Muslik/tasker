@@ -194,6 +194,11 @@ const makeCodexOutputSchemaCompatible = (value: unknown): void => {
     delete record.not;
     record.type = 'null';
   }
+  if (Array.isArray(record.prefixItems) && record.prefixItems.length === 0) {
+    delete record.prefixItems;
+    record.maxItems = 0;
+    if (record.items === undefined || record.items === false) record.items = { type: 'string' };
+  }
   Object.values(record).forEach(makeCodexOutputSchemaCompatible);
   const properties = schemaRecord(record.properties);
   if (properties === null) return;
@@ -201,7 +206,9 @@ const makeCodexOutputSchemaCompatible = (value: unknown): void => {
   for (const [name, property] of Object.entries(properties)) {
     if (!required.has(name)) properties[name] = nullableSchema(property);
   }
-  record.required = Object.keys(properties);
+  const requiredNames = Object.keys(properties);
+  if (requiredNames.length === 0) delete record.required;
+  else record.required = requiredNames;
 };
 
 export const codexOutputJsonSchema = (schema: z.ZodType): unknown => {

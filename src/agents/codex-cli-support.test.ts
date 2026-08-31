@@ -7,6 +7,7 @@ import {
   providerFailureMessage,
 } from './codex-cli-support.js';
 import { agentStepOutcomeSchema } from '../steps/activities/block-execution-contracts.js';
+import { ImplementationPlannerProviderOutputSchema } from './implementation-planner.js';
 
 const objectRequirementIssues = (value: unknown, path = '$'): string[] => {
   if (Array.isArray(value)) {
@@ -138,5 +139,31 @@ describe('Codex CLI support', () => {
     expect(message).toHaveLength(4_000);
     expect(message).toMatch(/^\.\.\./u);
     expect(message).toMatch(/actionable stderr tail$/u);
+  });
+});
+
+describe('codexOutputJsonSchema endpoint compatibility', () => {
+  const forbiddenEmpty = new Set(['required', 'enum', 'prefixItems', 'anyOf', 'oneOf', 'allOf']);
+  const assertNoEmptyArrays = (value: unknown, path: string): void => {
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        assertNoEmptyArrays(entry, `${path}[${String(index)}]`);
+      });
+      return;
+    }
+    if (typeof value !== 'object' || value === null) return;
+    for (const [key, entry] of Object.entries(value)) {
+      if (forbiddenEmpty.has(key) && Array.isArray(entry)) {
+        expect(entry.length, `${path}.${key} must not be empty`).toBeGreaterThan(0);
+      }
+      expect(key, `${path} must not carry ${key}`).not.toBe('propertyNames');
+      expect(key, `${path} must not carry ${key}`).not.toBe('oneOf');
+      assertNoEmptyArrays(entry, `${path}.${key}`);
+    }
+  };
+
+  it('produces an endpoint-safe schema for the real planner contract', () => {
+    const schema = codexOutputJsonSchema(ImplementationPlannerProviderOutputSchema);
+    assertNoEmptyArrays(schema, '$');
   });
 });

@@ -47,7 +47,7 @@ import {
 } from './contracts.js';
 import { estimateApiCost } from './api-cost.js';
 
-const ImplementationPlannerProviderOutputSchema = z
+export const ImplementationPlannerProviderOutputSchema = z
   .object({
     decision: ImplementationPlanningDecisionSchema.nullable(),
     evidenceRequests: z.array(PlanningEvidenceRequestSchema).max(10),
