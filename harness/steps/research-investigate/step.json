@@ -2,7 +2,10 @@
   "schemaVersion": 2,
   "reference": "research.investigate@1",
   "description": "Ground a research task in Jira, Confluence, Loop, repository evidence, and measured current behavior before drafting the SA page.",
-  "stage": { "id": "development", "label": "Development" },
+  "stage": {
+    "id": "analysis",
+    "label": "Analysis"
+  },
   "availableDuring": ["execution"],
   "inputContract": "research_input",
   "outputContract": "research_investigation_output",
@@ -32,5 +35,7 @@
     "task_scope_changed",
     "verification_scope_changed"
   ],
-  "reconciliation": { "strategy": "receipt" }
+  "reconciliation": {
+    "strategy": "receipt"
+  }
 }

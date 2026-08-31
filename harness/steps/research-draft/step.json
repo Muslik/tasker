@@ -3,8 +3,8 @@
   "reference": "research.draft@1",
   "description": "Draft the Confluence-ready SA page, proposed task list, and open questions from the investigated evidence.",
   "stage": {
-    "id": "development",
-    "label": "Development"
+    "id": "analysis",
+    "label": "Analysis"
   },
   "availableDuring": ["execution"],
   "inputContract": "research_input",

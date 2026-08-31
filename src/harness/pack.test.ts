@@ -335,7 +335,7 @@ describe('file-backed harness pack', () => {
     const fileTasks = pack.steps.find(({ reference }) => reference === 'research.file-tasks@1');
 
     expect(investigate?.block).toMatchObject({
-      stage: { id: 'development', label: 'Development' },
+      stage: { id: 'analysis', label: 'Analysis' },
       executor: {
         kind: 'agent',
         profile: 'investigation',
@@ -358,7 +358,7 @@ describe('file-backed harness pack', () => {
         'figma-parity',
       ],
     });
-    expect(draft?.block.stage).toEqual({ id: 'development', label: 'Development' });
+    expect(draft?.block.stage).toEqual({ id: 'analysis', label: 'Analysis' });
     expect(review?.block).toMatchObject({
       executor: {
         kind: 'agent',
