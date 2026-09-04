@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { CompiledWorkflowArtifact, CompiledWorkflowNode } from '../workflow/index.js';
+import type { CompiledWorkflowArtifact, CompiledWorkflowNode } from '../graph/index.js';
 import type { WorkflowProposalArtifact } from './proposal.js';
 
 const PresentationStatusSchema = z.literal('planned');
@@ -28,16 +28,6 @@ const StepPresentationNodeSchema = z
   })
   .strict();
 
-const BranchPresentationNodeSchema = z
-  .object({
-    ...BasePresentationShape,
-    kind: z.literal('branch'),
-    otherwiseId: z.string().min(1),
-    thenId: z.string().min(1),
-    when: z.string().min(1),
-  })
-  .strict();
-
 const LoopPresentationNodeSchema = z
   .object({
     ...BasePresentationShape,
@@ -45,26 +35,7 @@ const LoopPresentationNodeSchema = z
     kind: z.literal('bounded_loop'),
     maxAttempts: z.number().int().positive(),
     until: z.string().min(1),
-    checkBefore: z.boolean(),
     exhaustedWait: z.string().min(1).optional(),
-  })
-  .strict();
-
-const WaitPresentationNodeSchema = z
-  .object({
-    ...BasePresentationShape,
-    kind: z.literal('wait'),
-    resumeAt: z.string().min(1).optional(),
-    waitKind: z.string().min(1),
-  })
-  .strict();
-
-const GatePresentationNodeSchema = z
-  .object({
-    ...BasePresentationShape,
-    kind: z.literal('gate'),
-    reason: z.string().min(1),
-    resumeWhen: z.string().min(1),
   })
   .strict();
 
@@ -77,13 +48,10 @@ const FinalizePresentationNodeSchema = z
   .strict();
 
 export const PresentationNodeSchema = z.discriminatedUnion('kind', [
-  BranchPresentationNodeSchema,
   LoopPresentationNodeSchema,
   FinalizePresentationNodeSchema,
-  GatePresentationNodeSchema,
   SequencePresentationNodeSchema,
   StepPresentationNodeSchema,
-  WaitPresentationNodeSchema,
 ]);
 
 export const WorkflowPresentationTreeSchema = z
@@ -136,20 +104,6 @@ export const createWorkflowPresentation = (
         };
         return;
 
-      case 'branch':
-        nodes[node.id] = {
-          id: node.id,
-          kind: 'branch',
-          label: node.id,
-          otherwiseId: node.otherwise.id,
-          status: 'planned',
-          thenId: node.then.id,
-          when: node.when,
-        };
-        visit(node.then);
-        visit(node.otherwise);
-        return;
-
       case 'bounded_loop':
         nodes[node.id] = {
           bodyId: node.body.id,
@@ -157,34 +111,11 @@ export const createWorkflowPresentation = (
           kind: 'bounded_loop',
           label: node.id,
           maxAttempts: node.maxAttempts,
-          checkBefore: node.checkBefore,
           ...(node.exhaustedWait === undefined ? {} : { exhaustedWait: node.exhaustedWait }),
           status: 'planned',
           until: node.until,
         };
         visit(node.body);
-        return;
-
-      case 'wait':
-        nodes[node.id] = {
-          id: node.id,
-          kind: 'wait',
-          label: node.id,
-          ...(node.resumeAt === undefined ? {} : { resumeAt: node.resumeAt }),
-          status: 'planned',
-          waitKind: node.for,
-        };
-        return;
-
-      case 'gate':
-        nodes[node.id] = {
-          id: node.id,
-          kind: 'gate',
-          label: node.id,
-          reason: node.reason,
-          resumeWhen: node.resumeWhen,
-          status: 'planned',
-        };
         return;
 
       case 'finalize':

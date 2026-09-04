@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
+import type { BitbucketRepositoryConfiguration } from '../../workspace/bitbucket.js';
 
 const RawPullRequestRefSchema = z
   .object({

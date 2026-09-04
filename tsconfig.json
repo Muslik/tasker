@@ -24,7 +24,7 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "playwright.config.ts",
-    "vite.config.ts",
+    "vite.ui.config.ts",
     "vitest.config.ts"
   ]
 }

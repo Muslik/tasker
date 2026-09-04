@@ -7,7 +7,7 @@ import {
   createWaitRegistry,
   toContractReference,
   type WorkflowCompilerContracts,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 
 const parseReference = (reference: string) => {
   const separator = reference.lastIndexOf('@');
@@ -36,6 +36,10 @@ export const createHarnessWorkflowContracts = (
   for (const definition of definitions) {
     const mappings = definition.contract.outputPredicates;
     if (mappings === undefined) continue;
+    if ('facts' in mappings) {
+      for (const reference of Object.keys(mappings.facts)) predicateReferences.add(reference);
+      continue;
+    }
     for (const reference of [
       ...Object.values(mappings.cases).flatMap((facts) => Object.keys(facts)),
       ...Object.keys(mappings.defaultFacts ?? {}),
@@ -45,7 +49,9 @@ export const createHarnessWorkflowContracts = (
   }
   for (const wait of harnessWaitContracts) {
     if (wait.resolutionMapping === undefined) continue;
-    for (const facts of Object.values(wait.resolutionMapping.cases)) {
+    const cases: Readonly<Record<string, Readonly<Record<string, boolean>>>> =
+      wait.resolutionMapping.cases;
+    for (const facts of Object.values(cases)) {
       for (const reference of Object.keys(facts)) predicateReferences.add(reference);
     }
   }

@@ -1,16 +1,22 @@
-import { JsonValueSchema, toContractReference, type JsonValue } from '../workflow/index.js';
+import {
+  JsonValueSchema,
+  toContractReference,
+  VALIDATION_RUN_STEP_REFERENCE,
+  type JsonValue,
+} from '../graph/index.js';
 import { z } from 'zod';
 import {
   applyHarnessPolicySkills,
   getHarnessPack,
   harnessPolicyAppliesToTask,
+  resolveHarnessProductByJiraProject,
   type HarnessPolicyManifest,
 } from '../harness/index.js';
 import { HARNESS_AVAILABLE_CAPABILITIES } from './proposal.js';
 import { getHarnessStepDefinition, HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import type { PlanningTaskSnapshot } from './task-snapshot.js';
 import { resolveProjectWorkflowProfile } from './project-policies.js';
-import { resolveWorkspaceRuntimePolicy } from '../workspaces/runtime-policy.js';
+import { resolveWorkspaceRuntimePolicy } from '../workspace/runtime-policy.js';
 
 export interface WorkflowAnalyzerContext {
   readonly taskSnapshot: JsonValue;
@@ -57,17 +63,21 @@ export const createWorkflowAnalyzerContext = (
 
   const pack = getHarnessPack();
   const policies = pack.policies.filter((policy) => harnessPolicyAppliesToTask(policy, task));
+  const product =
+    task.origin === 'jira' ? resolveHarnessProductByJiraProject(pack.products, task.taskId) : null;
   const harnessProject = pack.projects.find(
     (candidate) => candidate.repository === targetRepository,
   );
   const availableSteps = new Set(
     pack.steps
       .filter((step) => {
+        if (!step.block.availableDuring.includes('execution')) return false;
         if (step.policy !== undefined) {
           const owner = pack.policies.find((policy) => policy.id === step.policy);
           if (owner === undefined || !harnessPolicyAppliesToTask(owner, task)) return false;
         }
         if (step.block.executor.kind !== 'process') return true;
+        if (step.block.executor.executor === VALIDATION_RUN_STEP_REFERENCE) return true;
         return (
           harnessProject?.processCommands[step.block.executor.executor] !== undefined ||
           pack.company.processCommands[step.block.executor.executor] !== undefined
@@ -97,6 +107,7 @@ export const createWorkflowAnalyzerContext = (
         projectHarnessVersion: harnessProject?.version ?? null,
         publication,
       },
+      product,
       obligations: policies.flatMap((policy) =>
         policy.obligations.map((obligation) => ({
           ...obligation,

@@ -1,19 +1,23 @@
 # Tasker project guidance
 
-## Critical collaboration
+The built-system canon is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), operator
+procedures are in [`docs/OPERATIONS.md`](docs/OPERATIONS.md), and rebuild phase status
+is in [`docs/REBUILD.md`](docs/REBUILD.md). The old design documents live in
+[`docs/archive/`](docs/archive) and describe a system that partially never existed —
+never base decisions on them.
 
-- Treat every proposal, including the user's, as a hypothesis to evaluate against the
-  canonical architecture, current implementation, recovery guarantees, and end goal.
-- Do not implement a proposal merely because the user suggested or approved it. If it
-  contradicts the project model, weakens an invariant, duplicates an existing concept,
-  or introduces an unclear boundary, stop that implementation branch and explain the
-  conflict concretely.
-- Challenge unclear decisions with a discriminating question such as: “If we choose
-  this, how will the existing recovery or extension scenario work?” Include the likely
-  consequence and the safer alternative instead of asking for confirmation in the
-  abstract.
-- When a new decision intentionally supersedes a canonical document, identify the
-  conflict before coding and update the document in the same change. Never leave code
-  and architecture describing different systems.
-- Prefer evidence from repository code, tests, and canonical docs over conversational
-  momentum. Agreement is not a substitute for architectural consistency.
+## Working rules
+
+- Evaluate every proposal (including the user's) against `docs/ARCHITECTURE.md`,
+  `docs/OPERATIONS.md`, `docs/REBUILD.md`, and the
+  current code. If it contradicts the target model, weakens an invariant, or
+  duplicates a concept, say so concretely before implementing.
+- LLM only where intelligence is required; everything determinable is deterministic;
+  "waiting on the world" is a state, not a failure.
+- No backward compatibility: dev data is disposable, schema bumps are fine.
+- Choose the simplest implementation that fully meets the current requirement; no
+  speculative generality, no compatibility shims, no `if` patches around symptoms —
+  fix causes.
+- Every production incident becomes a test fixture (see the test taxonomy in
+  `docs/REBUILD.md`) before it is fixed.
+- Commits: one line, no trailers.

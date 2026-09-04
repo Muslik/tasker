@@ -23,6 +23,9 @@ Examples:
 
   # Inspect payload without sending
   jira_update_issue.py PROJ-123 --summary x --dry-run
+
+  # Link issues (repeatable; PROJ-123 blocks PROJ-124)
+  jira_update_issue.py PROJ-123 --link "blocks:PROJ-124"
 """
 
 from __future__ import annotations
@@ -61,11 +64,11 @@ def build_base_url() -> str:
     return base_url.rstrip("/")
 
 
-def send(url: str, method: str, headers: dict[str, str], body: dict) -> tuple[int, str]:
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+def send(url: str, method: str, headers: dict[str, str], body: dict | None = None) -> tuple[int, str]:
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     req = request.Request(url, data=data, method=method, headers=headers)
     with request.urlopen(req) as resp:
-        payload = resp.read().decode("utf-8") if resp.length else ""
+        payload = resp.read().decode("utf-8")
         return resp.status, payload
 
 
@@ -98,6 +101,48 @@ def build_fields(args) -> dict:
     return fields
 
 
+LINK_TYPES = {"blocks": "Blocks", "relates": "Relates"}
+
+
+def parse_link(value: str) -> tuple[str, str]:
+    if ":" not in value:
+        raise RuntimeError(f"--link expects TYPE:KEY, got: {value}")
+    link_type, target = value.split(":", 1)
+    normalized_type = link_type.strip().lower()
+    target = target.strip()
+    if normalized_type not in LINK_TYPES or not target:
+        raise RuntimeError("--link supports blocks:KEY and relates:KEY")
+    return LINK_TYPES[normalized_type], target
+
+
+def build_link_payload(issue_key: str, link: str) -> dict:
+    link_type, target = parse_link(link)
+    return {
+        "type": {"name": link_type},
+        "outwardIssue": {"key": issue_key},
+        "inwardIssue": {"key": target},
+    }
+
+
+def has_identical_link(payload: dict, issue: dict) -> bool:
+    for link in issue.get("fields", {}).get("issuelinks", []):
+        if link.get("type", {}).get("name") != payload["type"]["name"]:
+            continue
+        outward = link.get("outwardIssue", {}).get("key")
+        inward = link.get("inwardIssue", {}).get("key")
+        if outward == payload["outwardIssue"]["key"] and inward == payload["inwardIssue"]["key"]:
+            return True
+        if payload["type"]["name"] == "Relates" and outward == payload["inwardIssue"]["key"] and inward == payload["outwardIssue"]["key"]:
+            return True
+    return False
+
+
+def fetch_issue_links(base_url: str, headers: dict[str, str], issue_key: str) -> dict:
+    url = f"{base_url}/rest/api/2/issue/{issue_key}?fields=issuelinks"
+    _, payload = send(url, "GET", headers)
+    return json.loads(payload)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Update, comment on, or create a Jira issue")
     parser.add_argument("issue_key", nargs="?", help="Issue key like PROJ-123 (omit with --create)")
@@ -108,6 +153,7 @@ def main() -> int:
     parser.add_argument("--raw-field", action="append", help="Set a JSON field: name='{...}' (repeatable)")
     parser.add_argument("--comment", help="Add a comment with this text")
     parser.add_argument("--comment-file", help="Add a comment read from a file")
+    parser.add_argument("--link", action="append", help="Create a link: blocks:KEY or relates:KEY (repeatable)")
     parser.add_argument("--create", action="store_true", help="Create a new issue instead of updating")
     parser.add_argument("--project", help="Project key for --create (e.g., AVIA)")
     parser.add_argument("--type", dest="issue_type", help="Issue type name for --create (e.g., Epic, Task)")
@@ -146,6 +192,25 @@ def main() -> int:
                 return 0
             status, payload = send(url, "POST", headers, body)
             print(f"Comment added ({status})")
+            return 0
+
+        # LINKS --------------------------------------------------------------
+        if args.link:
+            if not args.issue_key:
+                raise RuntimeError("issue_key is required to add a link")
+            payloads = [build_link_payload(args.issue_key, link) for link in args.link]
+            if args.dry_run:
+                print(json.dumps(payloads, indent=2, ensure_ascii=False))
+                return 0
+            issue = fetch_issue_links(base_url, headers, args.issue_key)
+            url = f"{base_url}/rest/api/2/issueLink"
+            for payload in payloads:
+                if has_identical_link(payload, issue):
+                    print(f"Skipped existing link for {args.issue_key} ({payload['type']['name']})")
+                    continue
+                status, _ = send(url, "POST", headers, payload)
+                print(f"Linked {args.issue_key} ({status})")
+                issue.setdefault("fields", {}).setdefault("issuelinks", []).append(payload)
             return 0
 
         # UPDATE -------------------------------------------------------------

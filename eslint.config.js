@@ -9,6 +9,7 @@ export default tseslint.config(
       'coverage/**',
       'dist/**',
       'eslint.config.js',
+      '.dependency-cruiser.cjs',
       'harness/workspace/**',
       'node_modules/**',
       'playwright-report/**',
@@ -41,11 +42,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/cockpit/**/*.{ts,tsx}', 'test/unit/cockpit/**/*.tsx'],
+    files: ['src/ui/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         projectService: false,
-        project: ['./tsconfig.cockpit.json'],
+        project: ['./tsconfig.ui.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

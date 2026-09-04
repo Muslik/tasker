@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"claude-envelope-malformed-1"}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"waiting","waitKind":"source_fixture@1","reason":"The exact source fixture is unavailable","retryable":false},"session_id":"claude-envelope-malformed-1","usage":{"input_tokens":70,"cache_creation_input_tokens":1,"cache_read_input_tokens":0,"output_tokens":12}}

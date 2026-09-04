@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "reference": "research.document-review@1",
+  "description": "Present the accepted SA draft to the operator for annotated approval before publication.",
+  "stage": { "id": "approval", "label": "Approval" },
+  "availableDuring": ["execution"],
+  "inputContract": "research_input",
+  "outputContract": "research_document_review_output",
+  "outputPredicates": {
+    "discriminator": "decision",
+    "cases": {
+      "approved": {
+        "research.document_approved@1": true
+      },
+      "changes_requested": {
+        "research.document_approved@1": false
+      }
+    }
+  },
+  "executor": {
+    "kind": "integration",
+    "adapter": "research.document-review@1"
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["research-document-review"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": [],
+  "resumeBoundary": "step",
+  "idempotency": "none",
+  "waitKinds": ["research.document-review@1"],
+  "artifactContracts": ["research-document-review"],
+  "requiredArtifactContracts": ["research-draft", "research-review"],
+  "workflowChanges": []
+}

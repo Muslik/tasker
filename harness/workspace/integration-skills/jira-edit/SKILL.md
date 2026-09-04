@@ -54,6 +54,14 @@ Add a comment:
 python3 "${TASKER_SKILLS_ROOT}/jira-edit/scripts/jira_update_issue.py" AVIA-123 --comment "Done, see PR"
 ```
 
+Create issue links (repeat `--link`; the issue key is the outward issue for `blocks`):
+```bash
+python3 "${TASKER_SKILLS_ROOT}/jira-edit/scripts/jira_update_issue.py" AVIA-123 \
+  --link "blocks:AVIA-124" --link "relates:AVIA-125"
+```
+The script reads existing `issuelinks` first and skips an identical link. `blocks:AVIA-124`
+means `AVIA-123 blocks AVIA-124`; use `--dry-run` to inspect link payloads without sending.
+
 Create a new epic:
 ```bash
 python3 "${TASKER_SKILLS_ROOT}/jira-edit/scripts/jira_update_issue.py" --create \

@@ -8,7 +8,7 @@ import {
   type JsonValue,
   type SemanticNodeSource,
   type SemanticWorkflowSource,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 import {

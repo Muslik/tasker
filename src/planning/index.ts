@@ -13,3 +13,4 @@ export * from './project-policies.js';
 export * from './proposal.js';
 export * from './repository-evidence.js';
 export * from './run-planning-snapshot.js';
+export * from './workflow-proposal-contracts.js';

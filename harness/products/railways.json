@@ -1,0 +1,13 @@
+{
+  "id": "railways",
+  "title": "ЖД",
+  "jiraProjects": ["RR"],
+  "confluence": {
+    "spaceKey": "PID",
+    "researchRootPageId": "60555687"
+  },
+  "repositories": {
+    "primary": "front-railways",
+    "linked": ["front-components", "front-core-packages"]
+  }
+}

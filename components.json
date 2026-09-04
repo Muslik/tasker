@@ -5,17 +5,17 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/cockpit/styles.css",
+    "css": "src/ui/styles.css",
     "baseColor": "neutral",
     "cssVariables": true,
     "prefix": ""
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@/cockpit/components",
-    "utils": "@/cockpit/lib/utils",
-    "ui": "@/cockpit/components/ui",
-    "lib": "@/cockpit/lib",
-    "hooks": "@/cockpit/hooks"
+    "components": "@/ui/components",
+    "utils": "@/ui/lib/utils",
+    "ui": "@/ui/components/ui",
+    "lib": "@/ui/lib",
+    "hooks": "@/ui/hooks"
   }
 }

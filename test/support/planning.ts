@@ -1,10 +1,13 @@
 import {
+  type DeliverPrVerificationPlan,
+  type ImplementationPlan,
   type WorkflowAnalyzerOutput,
   type ImplementationPlanningDecision,
+  type ReadyImplementationPlanningDecision,
   createWorkflowProposalFromAnalyzerOutput,
 } from '../../src/planning/index.js';
-import { type ImplementationPlanner } from '../../src/providers/index.js';
-import { type SemanticNodeSource, type SemanticWorkflowSource } from '../../src/workflow/index.js';
+import { type ImplementationPlanner } from '../../src/agents/index.js';
+import type { SemanticWorkflowSource } from '../../src/graph/index.js';
 import {
   WorkflowGenerationSubjectSource,
   type PlanningTaskSnapshot,
@@ -34,6 +37,7 @@ export type TestTaskFixture = {
   readonly family: 'short_bugfix' | 'feature_with_review' | 'shared_component';
   readonly reproduction?: 'required';
   readonly verification?: 'targeted' | 'full' | 'full_with_visual';
+  readonly validationProfile?: 'targeted' | 'full' | 'build';
   readonly componentRepository?: string;
   readonly componentPath?: string;
   readonly expected: 'accepted' | 'rejected';
@@ -272,38 +276,42 @@ const semanticWorkflow = (task: TestTaskFixture): SemanticWorkflowSource => {
   };
 };
 
+const verificationPlanFor = (task: TestTaskFixture): DeliverPrVerificationPlan =>
+  task.family === 'short_bugfix'
+    ? {
+        checks: ['reproduction evidence', 'targeted tests for changed behavior'],
+        profile: 'targeted' as const,
+        validationProfile: task.validationProfile ?? ('targeted' as const),
+        rationale:
+          'A localized bug fix needs proof of reproduction and focused regression coverage.',
+      }
+    : task.family === 'shared_component'
+      ? {
+          checks: ['translation resources pulled', 'targeted consumer tests'],
+          profile: 'translation_and_targeted' as const,
+          validationProfile: task.validationProfile ?? ('targeted' as const),
+          rationale:
+            'The component project uses external translation and must verify the consuming surface.',
+        }
+      : task.verification === 'full_with_visual'
+        ? {
+            checks: ['full test suite', 'visual comparison of affected screens'],
+            profile: 'full_with_visual' as const,
+            validationProfile: task.validationProfile ?? ('full' as const),
+            rationale: 'The feature spans a booking flow and changes visible frontend behavior.',
+          }
+        : {
+            checks: ['full test suite'],
+            profile: 'full' as const,
+            validationProfile: task.validationProfile ?? ('full' as const),
+            rationale: 'The feature spans multiple behaviors, so targeted checks are insufficient.',
+          };
+
 export const makeAnalyzerOutput = (
   task: TestTaskFixture = makeTaskFixture(),
 ): WorkflowAnalyzerOutput => {
   const source = semanticWorkflow(task);
-
-  const verificationPlan =
-    task.family === 'short_bugfix'
-      ? {
-          checks: ['reproduction evidence', 'targeted tests for changed behavior'],
-          profile: 'targeted' as const,
-          rationale:
-            'A localized bug fix needs proof of reproduction and focused regression coverage.',
-        }
-      : task.family === 'shared_component'
-        ? {
-            checks: ['translation resources pulled', 'targeted consumer tests'],
-            profile: 'translation_and_targeted' as const,
-            rationale:
-              'The component project uses external translation and must verify the consuming surface.',
-          }
-        : task.verification === 'full_with_visual'
-          ? {
-              checks: ['full test suite', 'visual comparison of affected screens'],
-              profile: 'full_with_visual' as const,
-              rationale: 'The feature spans a booking flow and changes visible frontend behavior.',
-            }
-          : {
-              checks: ['full test suite'],
-              profile: 'full' as const,
-              rationale:
-                'The feature spans multiple behaviors, so targeted checks are insufficient.',
-            };
+  const verificationPlan = verificationPlanFor(task);
 
   return {
     assemblyDecisions: [
@@ -336,63 +344,118 @@ export const makeWorkflowProposal = (
   return proposal.value;
 };
 
-const stepIdByUse = (node: SemanticNodeSource, reference: string): string | null => {
-  switch (node.kind) {
-    case 'step':
-      return node.uses === reference ? node.id : null;
-    case 'sequence':
-      for (const child of node.children) {
-        const found = stepIdByUse(child, reference);
-        if (found !== null) return found;
-      }
-      return null;
-    case 'bounded_loop':
-      return stepIdByUse(node.body, reference);
-  }
+const READY_VALIDATION_STEP_ID = 'run-validation';
+type ReadyDeliverPrDecision = Extract<
+  ReadyImplementationPlanningDecision,
+  { readonly archetype: 'deliver-pr' }
+>;
+
+type ReadyPlanningDecisionOptions = {
+  readonly task?: TestTaskFixture;
+  readonly segments?: ReadyDeliverPrDecision['segments'];
+  readonly plan?: Partial<ImplementationPlan>;
 };
 
-export const makeReadyPlanningDecision = (): ImplementationPlanningDecision => {
-  const workflow = makeAnalyzerOutput();
-  const verificationStepId = stepIdByUse(workflow.source.root, 'verify.acceptance@1');
-  if (verificationStepId === null) throw new Error('Test workflow has no Verify block');
+export const makeReadyPlanningDecision = (
+  options: ReadyPlanningDecisionOptions = {},
+): ImplementationPlanningDecision => {
+  const task = options.task ?? makeTaskFixture();
+  const verificationPlan = verificationPlanFor(task);
+  const plan: ImplementationPlan = {
+    schemaVersion: 2,
+    title: 'Repair the reported behavior',
+    summary: 'Inspect the bounded surface, implement the repair, and verify the result.',
+    steps: [
+      {
+        id: 'repair-behavior',
+        title: 'Repair the reported behavior',
+        objective: 'Make the smallest change that satisfies the task.',
+        repository: task.repository,
+        files: [],
+        verification: ['Run the workflow verification step.'],
+      },
+    ],
+    assumptions: [],
+    risks: [],
+    acceptanceCriteria: [
+      {
+        id: 'reported-behavior-fixed',
+        expected: 'The reported behavior satisfies the task description.',
+        verification: [
+          {
+            kind: 'process',
+            profile: verificationPlan.validationProfile,
+            scenario: 'Run the workflow verification step.',
+            workflowStepIds: [READY_VALIDATION_STEP_ID],
+          },
+        ],
+      },
+    ],
+    ...options.plan,
+  };
   return {
     status: 'ready',
     executionStrategy: 'simple',
-    plan: {
-      schemaVersion: 2,
-      title: 'Repair the reported behavior',
-      summary: 'Inspect the bounded surface, implement the repair, and verify the result.',
-      steps: [
-        {
-          id: 'repair-behavior',
-          title: 'Repair the reported behavior',
-          objective: 'Make the smallest change that satisfies the task.',
-          repository: 'onetwotrip/front-avia',
-          files: [],
-          verification: ['Run the workflow verification step.'],
-        },
-      ],
-      assumptions: [],
-      risks: [],
-      acceptanceCriteria: [
-        {
-          id: 'reported-behavior-fixed',
-          expected: 'The reported behavior satisfies the task description.',
-          verification: [
-            {
-              kind: 'process',
-              profile: 'targeted',
-              scenario: 'Run the workflow verification step.',
-              workflowStepIds: [verificationStepId],
-            },
-          ],
-        },
-      ],
-    },
-    followUps: [],
-    workflow,
+    plan,
+    archetype: 'deliver-pr',
+    segments: options.segments ?? [],
+    verification: verificationPlan,
+    rationale: verificationPlan.rationale,
   };
 };
+
+export const makeResearchPlanningDecision = (
+  task: TestTaskFixture = makeTaskFixture(),
+): ImplementationPlanningDecision => ({
+  status: 'ready',
+  executionStrategy: 'simple',
+  plan: {
+    schemaVersion: 2,
+    title: 'Prepare the research package',
+    summary:
+      'Investigate the current flow, draft the analysis, review it, and publish the final package.',
+    steps: [
+      {
+        id: 'investigate-scope',
+        title: 'Investigate the current scope',
+        objective: 'Ground the analysis in the current repository and linked evidence.',
+        repository: task.repository,
+        files: ['src', 'docs', 'harness'],
+        verification: ['Confirm the draft cites the current implementation and open decisions.'],
+      },
+    ],
+    assumptions: [],
+    risks: [],
+    acceptanceCriteria: [
+      {
+        id: 'research-published',
+        expected: 'The approved research is published and its follow-up tasks are ready to file.',
+        verification: [
+          {
+            kind: 'inspection',
+            target: 'published research package',
+            expectation:
+              'The approved document is published and the proposed tasks list is present.',
+            workflowStepIds: ['publish-research', 'file-research-tasks'],
+          },
+        ],
+      },
+    ],
+  },
+  archetype: 'research',
+  segments: [],
+  verification: {
+    checks: ['Review accepts the draft and the publication package is complete.'],
+    profile: 'research',
+    rationale:
+      'Research completion is proven by review acceptance and publication, not project validation commands.',
+  },
+  questions: [
+    'What current behavior, product constraints, and open decisions must the research package resolve?',
+  ],
+  rationale:
+    'research fits investigation, drafting, review, publication, and task filing without delivery validation.',
+});
 
 export const makeTestImplementationPlanner = (): ImplementationPlanner => ({
   plan: (request) =>
@@ -400,11 +463,10 @@ export const makeTestImplementationPlanner = (): ImplementationPlanner => ({
       ok({
         decision: makeReadyPlanningDecision(),
         evidenceRequests: [],
-        stderr: '',
         receipt: {
           status: 'completed',
           provider: 'codex_cli',
-          plannerVersion: 'implementation-planner@3',
+          plannerVersion: 'implementation-planner@4',
           profile: 'test-planner',
           profileSha256: '0'.repeat(64),
           cliVersion: 'test@1',

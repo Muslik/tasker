@@ -1,6 +1,6 @@
 import { EvidenceBundleSchema, type EvidenceBundle } from '../../src/planning/evidence-bundle.js';
-import { EvidenceBundleStore } from '../../src/control-plane/evidence-bundle.js';
-import type { LedgerRepository } from '../../src/ledger/repository.js';
+import { EvidenceBundleStore } from '../../src/server/evidence-bundle.js';
+import type { LedgerRepository } from '../../src/store/repository.js';
 import type { Clock } from '../../src/shared/clock.js';
 
 export const makeEvidenceBundle = (

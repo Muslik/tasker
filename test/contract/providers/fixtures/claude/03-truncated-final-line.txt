@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"claude-trunc-1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Almost done..."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"ok","summary":"Partial resu

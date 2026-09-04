@@ -5,11 +5,11 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 
 import { loadHarnessPack } from '../dist/harness/loader.js';
-import { nodeCommandRunner } from '../dist/providers/command-runner.js';
+import { nodeCommandRunner } from '../dist/agents/command-runner.js';
 import {
   BitbucketRepositoryClient,
   loadBitbucketRepositoryConfiguration,
-} from '../dist/repositories/index.js';
+} from '../dist/workspace/index.js';
 import { systemClock } from '../dist/shared/clock.js';
 import {
   DockerWorkspaceCommandRunner,
@@ -19,7 +19,7 @@ import {
   loadDockerWorkspaceConfiguration,
   loadWorkspaceHarnessPack,
   resolveWorkspaceRuntimePolicy,
-} from '../dist/workspaces/index.js';
+} from '../dist/workspace/index.js';
 
 const defaultProjectNames = [
   'front-railways',

@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"claude-happy-1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Working on it..."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"ok","summary":"All checks passed","count":3},"session_id":"claude-happy-1","usage":{"input_tokens":120,"cache_creation_input_tokens":10,"cache_read_input_tokens":5,"output_tokens":42},"total_cost_usd":0.0123}

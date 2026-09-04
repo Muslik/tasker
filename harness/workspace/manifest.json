@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "twiket-workspace",
-  "version": "9",
+  "version": "14",
   "engines": ["codex", "claude"],
   "skillSources": [
     {
@@ -29,7 +29,14 @@
       "path": "sources/work-shared-skills",
       "importPath": "imports/work-shared-skills",
       "scope": "step_bound",
-      "skills": ["playwright", "playwright-demo", "review-process"]
+      "skills": [
+        "playwright",
+        "playwright-demo",
+        "review-process",
+        "figma-inspector",
+        "figma-parity",
+        "system-analysis"
+      ]
     },
     {
       "id": "integrations",
@@ -39,12 +46,21 @@
         "bitbucket",
         "confluence",
         "confluence-edit",
+        "grill-me",
         "jenkins",
         "jira",
         "jira-edit",
         "jira-issue",
-        "loop"
+        "loop",
+        "delegation"
       ]
+    },
+    {
+      "id": "global-step",
+      "path": "sources/global-skills",
+      "importPath": "imports/global-skills",
+      "scope": "step_bound",
+      "skills": ["retrospective"]
     }
   ],
   "ruleSources": [
@@ -61,6 +77,7 @@
   ],
   "supportFiles": "lib",
   "commands": "bin",
+  "agents": "agents",
   "profiles": [
     {
       "id": "front-avia",

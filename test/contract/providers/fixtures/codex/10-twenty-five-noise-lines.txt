@@ -1,0 +1,28 @@
+codex noise 01
+codex noise 02
+codex noise 03
+codex noise 04
+codex noise 05
+codex noise 06
+codex noise 07
+codex noise 08
+codex noise 09
+codex noise 10
+codex noise 11
+codex noise 12
+codex noise 13
+codex noise 14
+codex noise 15
+codex noise 16
+codex noise 17
+codex noise 18
+codex noise 19
+codex noise 20
+codex noise 21
+codex noise 22
+codex noise 23
+codex noise 24
+codex noise 25
+{"type":"thread.started","thread_id":"thread-many-noise-1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"Completed after noise."}}
+{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":0,"output_tokens":5}}

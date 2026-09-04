@@ -8,7 +8,7 @@ import {
   deliveryOutputSchema,
   pullRequestOutputSchema,
 } from '../../harness/step-contracts.js';
-import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../../graph/schema.js';
 import type { BitbucketPullRequestAdapter } from '../bitbucket/pull-request-adapter.js';
 import type { PullRequestReviewEvidence } from '../bitbucket/review.js';
 import type {
@@ -221,6 +221,8 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
       status: 'waiting',
       waitKind: 'code_review@1',
       summary: `Pull request ${pullRequest.externalId} passed CI and is waiting for human review`,
+      category: 'dependency',
+      retryable: false,
       details: waitingDetails('human_review', pullRequest),
       artifactIds,
     };
@@ -242,6 +244,8 @@ export class PullRequestDeliveryAdapter implements IntegrationStepAdapter {
       status: 'waiting',
       waitKind,
       summary: `Jenkins build #${String(ci.build.number)} requires ${ci.status.replaceAll('_', ' ')}`,
+      category: 'infrastructure',
+      retryable: true,
       details: waitingDetails('ci', pullRequest, { ci: JsonValueSchema.parse(ci) }),
       artifactIds,
     };

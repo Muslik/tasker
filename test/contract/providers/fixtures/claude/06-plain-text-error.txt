@@ -1,0 +1,2 @@
+fatal: authentication expired
+run claude login before retrying

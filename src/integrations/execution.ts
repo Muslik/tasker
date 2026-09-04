@@ -1,18 +1,20 @@
 import type { PlanningTaskSnapshot } from '../planning/task-snapshot.js';
 import type { HarnessPolicyManifest, HarnessProjectManifest } from '../harness/index.js';
-import type { JsonValue } from '../workflow/schema.js';
-import type { WorkspaceLocator } from '../workspaces/contracts.js';
+import type { JsonValue } from '../graph/schema.js';
+import type { WorkspaceLocator } from '../workspace/contracts.js';
 import type { PullRequestReviewEvidence } from './bitbucket/review.js';
-import type { WorkflowChangeRequest } from '../workflow/execution-result.js';
+import type { WorkflowChangeRequest } from '../graph/execution-result.js';
 import type { TrackerStatusUpdates } from '../shared/task-run-settings.js';
+import type { AgentClaimCategory } from '../steps/contracts.js';
 
 export interface TaskRunStepEvidence {
   readonly operationId: string;
   readonly nodeId: string;
   readonly stepReference: string;
-  readonly status: 'blocked' | 'completed' | 'workflow_change_required';
+  readonly status: 'blocked' | 'completed' | 'failed' | 'workflow_change_required';
   readonly summary: string | null;
   readonly artifactIds: readonly string[];
+  readonly predicateFacts: Readonly<Record<string, boolean>>;
   readonly details: JsonValue;
   readonly recordedAt: string;
 }
@@ -98,12 +100,15 @@ export type IntegrationStepExecutionResult =
         | 'unknown_outcome';
       readonly summary: string;
       readonly details: JsonValue;
+      readonly retryable?: boolean;
       readonly artifactIds: readonly string[];
     }
   | {
       readonly status: 'waiting';
       readonly waitKind: string;
       readonly summary: string;
+      readonly category: AgentClaimCategory;
+      readonly retryable: boolean;
       readonly details: JsonValue;
       readonly artifactIds: readonly string[];
     }

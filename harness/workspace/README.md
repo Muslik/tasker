@@ -194,6 +194,11 @@ Both views originate from the same `SKILL.md` package and supporting files. Scri
 `.codex` or `.claude` path. The manifest's `supportFiles` directory is copied beside that provider
 view once, so shared script imports such as `harness_env` resolve identically for Codex and Claude.
 A missing logical package or support directory blocks before the subscription CLI starts.
+The manifest's `agents` directory is copied to the worktree root at `.claude/agents` so the
+Claude CLI can discover native subagents. These files are part of the pinned pack hash and
+durable bootstrap receipt like all other materialized files. `agents/models.env` supplies
+Codex delegate models; Claude frontmatter models remain authored in each role file and are
+checked against `company.json` by the harness loader.
 
 The four scopes have distinct selection rules:
 

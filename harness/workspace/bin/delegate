@@ -1,0 +1,31 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -ne 2 ]; then
+  printf '%s\n' 'usage: delegate <explore|test-writer> "<task>"' >&2
+  exit 2
+fi
+
+role=$1
+task=$2
+agents_dir=$(CDPATH= cd -- "$(dirname "$0")/../../../.claude/agents" && pwd)
+agent_file="$agents_dir/$role.md"
+
+if [ ! -f "$agent_file" ]; then
+  available=$(find "$agents_dir" -type f -name '*.md' -maxdepth 1 -exec basename {} .md \; | sort | tr '\n' ' ')
+  printf 'unknown subagent role %s; available roles: %s\n' "$role" "$available" >&2
+  exit 2
+fi
+
+models_file="$agents_dir/models.env"
+. "$models_file"
+model_var=$(printf '%s' "$role" | tr '[:lower:]-' '[:upper:]_')
+eval "codex_model=\${TASKER_SUBAGENT_MODEL_${model_var}:-}"
+if [ -z "$codex_model" ]; then
+  printf 'no Codex model configured for subagent role %s\n' "$role" >&2
+  exit 2
+fi
+
+preamble=$(awk 'BEGIN { in_frontmatter=0; body=0 } NR == 1 && $0 == "---" { in_frontmatter=1; next } in_frontmatter && $0 == "---" { body=1; next } body { print }' "$agent_file")
+printf '%s\n\nTask:\n%s\n' "$preamble" "$task" | codex exec --sandbox workspace-write --skip-git-repo-check --model "${TASKER_SUBAGENT_MODEL:-$codex_model}" -C "$PWD" -

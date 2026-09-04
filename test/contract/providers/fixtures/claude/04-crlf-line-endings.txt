@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"claude-crlf-1"}
+{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"status":"ok","summary":"CRLF stream","count":7},"session_id":"claude-crlf-1","usage":{"input_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":9}}

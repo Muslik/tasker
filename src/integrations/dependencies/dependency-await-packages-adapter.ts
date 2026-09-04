@@ -4,14 +4,14 @@ import {
   type DependencyDeclaration,
   type DependencyDeclarationStore,
   type DependencyDeclarationStoreError,
-} from '../../control-plane/dependency-declaration.js';
+} from '../../server/dependency-declaration.js';
 import {
   type VerifiedPackagePublication,
   type VerifiedPackagePublicationStore,
   type VerifiedPackagePublicationStoreError,
-} from '../../control-plane/verified-package-publication.js';
+} from '../../server/verified-package-publication.js';
 import { dependencyWaitInputSchema } from '../../harness/step-contracts.js';
-import { JsonValueSchema } from '../../workflow/schema.js';
+import { JsonValueSchema } from '../../graph/schema.js';
 import type {
   IntegrationStepAdapter,
   IntegrationStepExecutionRequest,
@@ -76,6 +76,8 @@ const waiting = (
   status: 'waiting',
   waitKind: 'dependency.available@1',
   summary: `Dependency publication for ${input.channel} channel is waiting for verification`,
+  category: 'dependency',
+  retryable: false,
   details: asJson({
     declarationId: declaration.declarationId,
     declarationRevision: declaration.revision,

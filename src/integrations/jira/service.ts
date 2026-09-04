@@ -1,16 +1,14 @@
 import {
-  OperatorActivityResponseSchema,
   OperatorTaskSummarySchema,
-  type OperatorActivityResponse,
   type OperatorTaskSummary,
-} from '../../control-plane/operator-contracts.js';
-import type { LedgerRepository } from '../../ledger/repository.js';
-import { StaticRepositoryCatalog, type RepositoryCatalog } from '../../repositories/catalog.js';
+} from '../../server/operator-contracts.js';
+import type { LedgerRepository } from '../../store/repository.js';
+import { StaticRepositoryCatalog, type RepositoryCatalog } from '../../workspace/catalog.js';
 import {
   JiraRepositoryBindingSchema,
   type JiraRepositoryBinding,
   type RepositoryCatalogEntry,
-} from '../../repositories/contracts.js';
+} from '../../workspace/contracts.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
 import type { JiraAttachmentContent, JiraIssuePort } from './client.js';
@@ -29,6 +27,8 @@ import {
   type JiraRepositoryReferenceSource,
 } from './repository-reference.js';
 import { JiraIssueStore, type JiraIssueStoreError } from './store.js';
+import { resolveHarnessProductByJiraProject } from '../../harness/index.js';
+import type { HarnessProductManifest } from '../../shared/product.js';
 
 export type JiraIssueServiceError =
   | {
@@ -152,6 +152,7 @@ export class JiraIssueService {
     private readonly port: JiraIssuePort,
     private readonly repositoryCatalog: RepositoryCatalog,
     private readonly repositoryReferenceSource: JiraRepositoryReferenceSource,
+    private readonly products: readonly HarnessProductManifest[],
   ) {}
 
   public listOperatorTasks(): Outcome<readonly OperatorTaskSummary[], JiraIssueServiceError> {
@@ -168,6 +169,20 @@ export class JiraIssueService {
 
   public listRepositories(): readonly RepositoryCatalogEntry[] {
     return this.repositoryCatalog.list();
+  }
+
+  public resolveProduct(issueKeyInput: string) {
+    const product = resolveHarnessProductByJiraProject(this.products, issueKeyInput);
+    return product === null
+      ? { product: null }
+      : {
+          product: {
+            id: product.id,
+            title: product.title,
+            primaryRepository: product.repositories.primary,
+            linkedRepositories: product.repositories.linked,
+          },
+        };
   }
 
   private currentBinding(
@@ -277,24 +292,6 @@ export class JiraIssueService {
     return fetched.ok ? fetched : err({ kind: 'preview_failed', problem: fetched.error });
   }
 
-  public readActivity(
-    taskReference: string,
-  ): Outcome<OperatorActivityResponse, JiraIssueServiceError> {
-    const issueKeyInput = taskReference.startsWith('jira:')
-      ? taskReference.slice('jira:'.length)
-      : taskReference;
-    const parsed = JiraIssueKeySchema.safeParse(issueKeyInput);
-    if (!parsed.success) return err({ kind: 'invalid_issue_key', input: taskReference });
-
-    return ok(
-      OperatorActivityResponseSchema.parse({
-        taskReference: taskReference,
-        providerSession: { status: 'not_started', reason: 'planning_only' },
-        entries: [],
-      }),
-    );
-  }
-
   public async readAttachment(
     issueKeyInput: string,
     attachmentId: string,
@@ -390,6 +387,7 @@ export class JiraIssueService {
 export interface CreateJiraIssueServiceOptions {
   readonly repositoryCatalog?: RepositoryCatalog | undefined;
   readonly repositoryReferenceSource?: JiraRepositoryReferenceSource | undefined;
+  readonly products?: readonly HarnessProductManifest[] | undefined;
 }
 
 export const createJiraIssueService = (
@@ -404,4 +402,5 @@ export const createJiraIssueService = (
     port,
     options.repositoryCatalog ?? new StaticRepositoryCatalog([]),
     options.repositoryReferenceSource ?? new JiraDescriptionRepositoryReferenceSource(),
+    options.products ?? [],
   );

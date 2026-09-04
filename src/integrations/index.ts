@@ -3,6 +3,7 @@ export * from './bitbucket/index.js';
 export * from './jenkins/index.js';
 export * from './dependencies/index.js';
 export * from './nexus/index.js';
+export * from './confluence/index.js';
 export * from './effects.js';
 export * from './execution.js';
 export * from './pull-request-draft.js';

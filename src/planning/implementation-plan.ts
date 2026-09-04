@@ -1,11 +1,23 @@
 import { z } from 'zod';
 
-import { JsonValueSchema, NodeIdSchema } from '../workflow/schema.js';
-import type { SemanticNodeSource } from '../workflow/semantic-schema.js';
+import {
+  DELIVER_PR_NODE_IDS,
+  DeliverPrArchetypeSchema,
+  DeliverPrSegmentsSchema,
+  ResearchArchetypeSchema,
+  ResearchSegmentsSchema,
+  ValidationProfileSchema,
+} from '../graph/archetypes/index.js';
+import { JsonValueSchema, NodeIdSchema } from '../graph/schema.js';
+import type { SemanticNodeSource, SemanticWorkflowSource } from '../graph/semantic-schema.js';
 import { EvidenceBundleSchema } from './evidence-bundle.js';
-import { WorkflowAnalyzerOutputSchema } from './workflow-proposal-contracts.js';
+import {
+  DeliverPrVerificationPlanSchema,
+  ResearchVerificationPlanSchema,
+} from './workflow-proposal-contracts.js';
+import { SnapshottedHarnessProductSchema } from './run-planning-snapshot.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
-import { BlockDefinitionSchema } from '../blocks/contracts.js';
+import { BlockDefinitionSchema } from '../steps/contracts.js';
 import { TaskExecutionStrategySchema } from '../harness/execution-profile-contracts.js';
 
 export const PlanningStrategyRequestSchema = z.enum(['auto', 'fast', 'ralplan']);
@@ -53,7 +65,7 @@ export const AcceptanceVerificationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('process'),
-      profile: z.string().min(1).max(160),
+      profile: ValidationProfileSchema,
       scenario: z.string().min(1).max(2_000),
       workflowStepIds: AcceptanceVerificationWorkflowStepsSchema,
     })
@@ -120,14 +132,6 @@ export const PlanningClarificationAnswerCommandSchema = z
   })
   .strict();
 
-export const ImplementationPlanFollowUpSchema = z
-  .object({
-    id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
-    title: z.string().min(1).max(200),
-    reason: z.string().min(1).max(2_000),
-  })
-  .strict();
-
 export const PrePlanInvestigationStepSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9-]*$/u),
@@ -171,21 +175,43 @@ const workflowStepIds = (root: SemanticNodeSource): ReadonlySet<string> => {
   return ids;
 };
 
-export const ReadyImplementationPlanningDecisionSchema = z
+const ReadyImplementationPlanningDecisionBaseSchema = z
   .object({
     status: z.literal('ready'),
     executionStrategy: TaskExecutionStrategySchema,
     plan: ImplementationPlanSchema,
-    followUps: z.array(ImplementationPlanFollowUpSchema).max(20),
-    workflow: WorkflowAnalyzerOutputSchema,
+    rationale: z.string().min(1).max(1_000),
   })
   .strict();
 
+const ResearchQuestionSchema = z.string().trim().min(1).max(2_000);
+
+export const ReadyDeliverPrImplementationPlanningDecisionSchema =
+  ReadyImplementationPlanningDecisionBaseSchema.extend({
+    archetype: DeliverPrArchetypeSchema,
+    segments: DeliverPrSegmentsSchema,
+    verification: DeliverPrVerificationPlanSchema,
+  }).strict();
+
+export const ReadyResearchImplementationPlanningDecisionSchema =
+  ReadyImplementationPlanningDecisionBaseSchema.extend({
+    archetype: ResearchArchetypeSchema,
+    segments: ResearchSegmentsSchema,
+    verification: ResearchVerificationPlanSchema,
+    questions: z.array(ResearchQuestionSchema).min(1).max(10),
+  }).strict();
+
+export const ReadyImplementationPlanningDecisionSchema = z.discriminatedUnion('archetype', [
+  ReadyDeliverPrImplementationPlanningDecisionSchema,
+  ReadyResearchImplementationPlanningDecisionSchema,
+]);
+
 export const validateAcceptanceVerificationLinks = (
   decision: z.infer<typeof ReadyImplementationPlanningDecisionSchema>,
+  workflowSource: SemanticWorkflowSource,
 ): readonly string[] => {
   const criterionIds = new Set<string>();
-  const stepIds = workflowStepIds(decision.workflow.source.root);
+  const stepIds = workflowStepIds(workflowSource.root);
   const issues: string[] = [];
   decision.plan.acceptanceCriteria.forEach((criterion) => {
     if (criterionIds.has(criterion.id)) {
@@ -193,6 +219,25 @@ export const validateAcceptanceVerificationLinks = (
     }
     criterionIds.add(criterion.id);
     criterion.verification.forEach((verification) => {
+      if (
+        decision.archetype === 'deliver-pr' &&
+        verification.kind === 'process' &&
+        (verification.workflowStepIds.length !== 1 ||
+          verification.workflowStepIds[0] !== DELIVER_PR_NODE_IDS.runValidation)
+      ) {
+        issues.push(
+          `Acceptance criterion ${criterion.id} process verification must reference only ${DELIVER_PR_NODE_IDS.runValidation}.`,
+        );
+      }
+      if (
+        decision.archetype === 'deliver-pr' &&
+        verification.kind === 'process' &&
+        verification.profile !== decision.verification.validationProfile
+      ) {
+        issues.push(
+          `Acceptance criterion ${criterion.id} process profile ${verification.profile} does not match validation profile ${decision.verification.validationProfile}.`,
+        );
+      }
       verification.workflowStepIds.forEach((stepId) => {
         if (!stepIds.has(stepId)) {
           issues.push(
@@ -227,6 +272,7 @@ export const ImplementationPlannerContextSchema = z
     taskSnapshot: JsonValueSchema,
     blocks: z.array(BlockDefinitionSchema).min(1),
     evidenceBundle: EvidenceBundleSchema,
+    product: SnapshottedHarnessProductSchema.nullable(),
     repositoryReference: z.string().min(1),
     operatorGuidance: z.string().min(1).max(10_000).nullable(),
     validationFeedback: z.array(z.string().min(1).max(2_000)).max(50),

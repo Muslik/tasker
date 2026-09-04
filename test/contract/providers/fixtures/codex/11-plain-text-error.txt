@@ -1,0 +1,2 @@
+fatal: model access is unavailable
+retry after authenticating with the Codex CLI

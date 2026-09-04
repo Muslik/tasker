@@ -5,10 +5,11 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { z } from 'zod';
 
-import { BlockDefinitionSchema } from '../blocks/index.js';
+import { BlockDefinitionSchema } from '../steps/index.js';
 import {
   HarnessCompanyManifestSchema,
   HarnessPolicyManifestSchema,
+  HarnessProductManifestSchema,
   HarnessProjectManifestSchema,
   HarnessStepManifestSchema,
   parseVersionedReference,
@@ -16,7 +17,7 @@ import {
   type LoadedPrompt,
 } from './contracts.js';
 import { stepDefinitionFromManifest } from './step-contracts.js';
-import { toContractReference } from '../workflow/index.js';
+import { toContractReference } from '../graph/index.js';
 import { validateExecutionProfileConfiguration } from './execution-profiles.js';
 
 const DEFAULT_HARNESS_ROOT = fileURLToPath(new URL('../../harness/', import.meta.url));
@@ -76,6 +77,52 @@ const loadPrompt = (root: string, relativePath: string): LoadedPrompt => {
   });
 };
 
+const frontmatter = (content: string): Map<string, string> => {
+  const body = /^---\r?\n(?<body>[\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(content)?.groups?.body;
+  if (body === undefined) return new Map();
+  return new Map(
+    body.split(/\r?\n/u).flatMap((line) => {
+      const separator = line.indexOf(':');
+      return separator < 1 ? [] : [[line.slice(0, separator), line.slice(separator + 1).trim()]];
+    }),
+  );
+};
+
+const validateSubagentDefinitions = (
+  root: string,
+  profiles: Readonly<Record<string, { readonly claude: string; readonly codex: string }>>,
+): void => {
+  const agentsRoot = resolvePackPath(root, 'workspace/agents', 'directory');
+  const files = readdirSync(agentsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => entry.name.slice(0, -3));
+  const profileRoles = Object.keys(profiles).sort();
+  if (files.sort().join('\0') !== profileRoles.join('\0')) {
+    throw new Error('Harness subagent profiles must match workspace/agents/*.md');
+  }
+  for (const role of profileRoles) {
+    const metadata = frontmatter(readFileSync(join(agentsRoot, `${role}.md`), 'utf8'));
+    if (metadata.get('name') !== role || metadata.get('model') !== profiles[role]?.claude) {
+      throw new Error(`Subagent ${role} Claude frontmatter model does not match company.json`);
+    }
+  }
+  const modelsPath = join(agentsRoot, 'models.env');
+  const models = new Map<string, string>();
+  for (const line of readFileSync(modelsPath, 'utf8').split(/\r?\n/u)) {
+    const match = /^TASKER_SUBAGENT_MODEL_(?<role>[A-Z0-9_]+)=(?<model>\S+)$/u.exec(line);
+    const role = match?.groups?.role;
+    const model = match?.groups?.model;
+    if (role !== undefined && model !== undefined) {
+      models.set(role.toLowerCase().replaceAll('_', '-'), model);
+    }
+  }
+  for (const role of profileRoles) {
+    if (models.get(role) !== profiles[role]?.codex) {
+      throw new Error(`Subagent ${role} Codex model does not match company.json`);
+    }
+  }
+};
+
 const loadProjects = (root: string) => {
   const projectsRoot = join(root, 'projects');
   if (!existsSync(projectsRoot)) return [];
@@ -87,6 +134,17 @@ const loadProjects = (root: string) => {
       const manifestPath = join(projectsRoot, entry.name, 'project.json');
       return Object.freeze(parseFile(HarnessProjectManifestSchema, manifestPath));
     });
+};
+
+const loadProducts = (root: string) => {
+  const productsRoot = join(root, 'products');
+  if (!existsSync(productsRoot)) return [];
+  return readdirSync(productsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) =>
+      Object.freeze(parseFile(HarnessProductManifestSchema, join(productsRoot, entry.name))),
+    );
 };
 
 const loadStepPackages = (root: string) => {
@@ -144,7 +202,9 @@ export const resolveHarnessRoot = (configuredPath = process.env.TASKER_HARNESS_P
 export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
   const rootPath = resolveHarnessRoot(configuredPath);
   const company = parseFile(HarnessCompanyManifestSchema, join(rootPath, 'company.json'));
+  validateSubagentDefinitions(rootPath, company.subagentProfiles);
   const projects = loadProjects(rootPath);
+  const products = loadProducts(rootPath);
   const policies = loadPolicies(rootPath);
   const enabledPolicies = new Set(policies.map(({ id }) => id));
   const seenRepositories = new Set<string>();
@@ -153,6 +213,37 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
       throw new Error(`Duplicate harness project profile for ${project.repository}`);
     }
     seenRepositories.add(project.repository);
+  }
+  const seenProductIds = new Set<string>();
+  const seenJiraProjects = new Map<string, string>();
+  const knownProjectRepositories = new Set(
+    projects.flatMap(({ repository }) => [
+      repository,
+      repository.slice(repository.lastIndexOf('/') + 1),
+    ]),
+  );
+  for (const product of products) {
+    if (seenProductIds.has(product.id)) {
+      throw new Error(`Duplicate harness product definition for ${product.id}`);
+    }
+    seenProductIds.add(product.id);
+    for (const repository of [product.repositories.primary, ...product.repositories.linked]) {
+      const alias = repository.slice(repository.lastIndexOf('/') + 1);
+      if (!knownProjectRepositories.has(repository) && !knownProjectRepositories.has(alias)) {
+        throw new Error(
+          `Harness product ${product.id} references unavailable repository ${repository}`,
+        );
+      }
+    }
+    for (const jiraProject of product.jiraProjects) {
+      const owner = seenJiraProjects.get(jiraProject);
+      if (owner !== undefined) {
+        throw new Error(
+          `Duplicate harness product Jira project ${jiraProject} claimed by ${owner} and ${product.id}`,
+        );
+      }
+      seenJiraProjects.set(jiraProject, product.id);
+    }
   }
 
   const seenSteps = new Set<string>();
@@ -231,11 +322,15 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
     ),
   );
   const seenPredicates = new Set(
-    steps.flatMap((step) =>
-      Object.values(step.block.outputPredicates?.cases ?? {}).flatMap((facts) =>
-        Object.keys(facts),
-      ),
-    ),
+    steps.flatMap((step) => {
+      const mapping = step.block.outputPredicates;
+      if (mapping === undefined) return [];
+      if ('facts' in mapping) return Object.keys(mapping.facts);
+      return [
+        ...Object.values(mapping.cases).flatMap((facts) => Object.keys(facts)),
+        ...Object.keys(mapping.defaultFacts ?? {}),
+      ];
+    }),
   );
 
   for (const policy of policies) {
@@ -289,6 +384,7 @@ export const loadHarnessPack = (configuredPath?: string): LoadedHarnessPack => {
     steps: Object.freeze(steps),
     policies: Object.freeze(policies),
     projects: Object.freeze(projects),
+    products: Object.freeze(products),
     prompts: Object.freeze({
       implementationPlanner: loadPrompt(rootPath, company.systemPrompts.implementationPlanner),
       workflowAnalyzer: loadPrompt(rootPath, company.systemPrompts.workflowAnalyzer),

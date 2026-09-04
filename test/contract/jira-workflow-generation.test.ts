@@ -11,19 +11,20 @@ import {
   EvidenceBundleStore,
   ImplementationPlanningStore,
   PersistedGenerationSubjectRunStore,
-} from '../../src/control-plane/index.js';
+} from '../../src/server/index.js';
 import type { JiraIssuePort } from '../../src/integrations/index.js';
 import {
   createJiraIssueService,
   JiraWorkflowGenerationSubjectResolver,
 } from '../../src/integrations/index.js';
-import { openSqliteLedger, type SqliteLedger } from '../../src/ledger/index.js';
+import { openSqliteLedger, type SqliteLedger } from '../../src/store/index.js';
 import { WorkflowGenerationSubjectSource } from '../../src/planning/index.js';
 import { makeAdjustableClock } from '../../src/shared/clock.js';
 import { ok } from '../../src/shared/outcome.js';
+import { SemanticWorkflowSourceSchema, type SemanticNodeSource } from '../../src/graph/index.js';
 import { makeJiraSnapshot } from '../helpers/jira.js';
 import { makeRepositoryCatalog } from '../helpers/repositories.js';
-import { makeTestImplementationPlanner } from '../support/planning.js';
+import { makeReadyPlanningDecision, makeTestImplementationPlanner } from '../support/planning.js';
 
 const resources: { readonly directory: string; readonly ledger: SqliteLedger }[] = [];
 
@@ -33,6 +34,17 @@ afterEach(() => {
     rmSync(resource.directory, { recursive: true, force: true });
   }
 });
+
+const collectStepIds = (node: SemanticNodeSource): readonly string[] => {
+  switch (node.kind) {
+    case 'step':
+      return [node.id];
+    case 'sequence':
+      return node.children.flatMap(collectStepIds);
+    case 'bounded_loop':
+      return collectStepIds(node.body);
+  }
+};
 
 describe('Jira bootstrap context assembly', () => {
   it('persists task evidence and an immutable planning context without creating a workflow graph', async () => {
@@ -98,7 +110,7 @@ describe('Jira bootstrap context assembly', () => {
     expect(snapshot.ok).toBe(true);
     if (!snapshot.ok) throw new Error(`Expected planning snapshot: ${snapshot.error.kind}`);
     expect(snapshot.value).toMatchObject({
-      schemaVersion: 10,
+      schemaVersion: 11,
       kind: 'planning_context',
       taskReference,
       repository: { path: workspacePath, reference: 'onetwotrip/front-avia' },
@@ -108,6 +120,55 @@ describe('Jira bootstrap context assembly', () => {
       snapshot.value.harness.steps.find(({ reference }) => reference === 'runtime.observe@1')?.block
         .availableDuring,
     ).toEqual(['bootstrap_investigation']);
+
+    const decision = makeReadyPlanningDecision();
+    if (decision.status !== 'ready') throw new Error('Expected ready planning decision fixture');
+    expect(decision).toMatchObject({
+      status: 'ready',
+      executionStrategy: 'simple',
+      archetype: 'deliver-pr',
+      segments: [],
+      verification: {
+        profile: 'targeted',
+        checks: ['reproduction evidence', 'targeted tests for changed behavior'],
+      },
+    });
+    expect('workflow' in decision).toBe(false);
+    expect('followUps' in decision).toBe(false);
+    expect('graph' in decision).toBe(false);
+    expect('topology' in decision).toBe(false);
+    expect(decision.plan.acceptanceCriteria[0]?.verification[0]?.workflowStepIds).toEqual([
+      'run-validation',
+    ]);
+
+    const planned = await planning.prepare(
+      taskReference,
+      'fast',
+      'tasker:v3:jira:AVIA-13235:run-1:planning',
+      'tasker:v3:jira:AVIA-13235:run-1:planning-episode',
+      assembled.value.planningSnapshot,
+      assembled.value.evidenceBundle,
+    );
+    if (!planned.ok || planned.value.status !== 'ready') {
+      throw new Error(`Expected ready implementation plan: ${JSON.stringify(planned)}`);
+    }
+    expect(planned).toMatchObject({ ok: true, value: { status: 'ready' } });
+
+    const plannedWorkflow = workflows.readPlanningOperation(
+      taskReference,
+      planned.value.workflowOperationId,
+    );
+    if (!plannedWorkflow.ok || plannedWorkflow.value?.status !== 'ready') {
+      throw new Error('Expected stored planning workflow');
+    }
+    expect(plannedWorkflow.value.view.workflow.graphHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(plannedWorkflow.value.view.workflow.semanticHash).toMatch(/^[a-f0-9]{64}$/u);
+    const semanticSource = SemanticWorkflowSourceSchema.parse(
+      plannedWorkflow.value.view.workflow.semanticSource,
+    );
+    expect(collectStepIds(semanticSource.root)).toEqual(
+      expect.arrayContaining(['run-validation', 'verify-change']),
+    );
 
     const evidence = evidenceBundles.readMaterialized(assembled.value.evidenceBundle);
     expect(evidence.ok).toBe(true);

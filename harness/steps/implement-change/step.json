@@ -11,7 +11,7 @@
     "profile": "implementation",
     "strategyRole": "implementation",
     "prompt": "prompt.md",
-    "skills": ["jenkins"]
+    "skills": ["jenkins", "delegation"]
   },
   "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
   "completion": { "kind": "workspace_mutation" },

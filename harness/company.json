@@ -1,12 +1,13 @@
 {
   "schemaVersion": 2,
   "id": "twiket-frontend",
-  "version": "4",
+  "version": "8",
   "availableCapabilities": [
     "ci.read",
     "command.run",
     "code-review.write",
     "git.write",
+    "knowledge.write",
     "repository.read",
     "tracker.write",
     "workspace.write"
@@ -31,11 +32,26 @@
     },
     "bootstrap": [],
     "cacheVolumes": [
-      { "id": "home", "mountPath": "/tasker/home" },
-      { "id": "node-modules", "mountPath": "/workspace/node_modules" },
-      { "id": "pnpm-store", "mountPath": "/tasker/cache/pnpm-store" },
-      { "id": "mise-cache", "mountPath": "/tasker/cache/mise" },
-      { "id": "playwright-browsers", "mountPath": "/tasker/cache/playwright" },
+      {
+        "id": "home",
+        "mountPath": "/tasker/home"
+      },
+      {
+        "id": "node-modules",
+        "mountPath": "/workspace/node_modules"
+      },
+      {
+        "id": "pnpm-store",
+        "mountPath": "/tasker/cache/pnpm-store"
+      },
+      {
+        "id": "mise-cache",
+        "mountPath": "/tasker/cache/mise"
+      },
+      {
+        "id": "playwright-browsers",
+        "mountPath": "/tasker/cache/playwright"
+      },
       {
         "id": "nested-docker-data",
         "mountPath": "/var/lib/docker",
@@ -45,22 +61,39 @@
     "services": [
       {
         "id": "tasker-docker",
-        "image": { "kind": "prebuilt", "reference": "docker:29-dind" },
+        "image": {
+          "kind": "prebuilt",
+          "reference": "docker:29-dind"
+        },
         "command": "dockerd-entrypoint.sh --host=tcp://0.0.0.0:2375 --tls=false",
         "shell": "sh",
         "privileged": true,
         "aliases": ["tasker-docker"],
         "readyCheck": "docker info --format '{{.ServerVersion}}' >/dev/null",
-        "environment": { "DOCKER_TLS_CERTDIR": "" }
+        "environment": {
+          "DOCKER_TLS_CERTDIR": ""
+        }
       }
     ]
   },
   "systemPrompts": {
     "implementationPlanner": "prompts/implementation-planner.md",
-    "implementationPlannerSkills": ["jira", "confluence", "loop"],
+    "implementationPlannerSkills": ["jira", "confluence", "loop", "grill-me"],
     "workflowAnalyzer": "prompts/workflow-analyzer.md"
   },
-  "retrospective": { "enabled": true },
+  "retrospective": {
+    "enabled": true
+  },
+  "subagentProfiles": {
+    "explore": {
+      "claude": "claude-haiku-4-5",
+      "codex": "gpt-5.6-luna"
+    },
+    "test-writer": {
+      "claude": "claude-haiku-4-5",
+      "codex": "gpt-5.6-luna"
+    }
+  },
   "apiPricing": {
     "version": "openai-2026-08-22",
     "sourceUrls": [
@@ -142,6 +175,30 @@
       "timeoutMs": 1200000,
       "serviceTier": "fast"
     },
+    "implementation-luna-medium": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "implementation-sol-medium": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "timeoutMs": 1800000,
+      "serviceTier": "fast"
+    },
+    "implementation-sol-xhigh": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "timeoutMs": 2100000,
+      "serviceTier": "fast"
+    },
     "implementation-standard": {
       "provider": "codex",
       "command": "codex",
@@ -220,32 +277,71 @@
       "model": "opus",
       "effort": "high",
       "timeoutMs": 1800000
+    },
+    "review-claude-sonnet": {
+      "provider": "claude",
+      "command": "claude",
+      "model": "sonnet",
+      "effort": "high",
+      "timeoutMs": 1200000
+    },
+    "retrospective-analysis": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "timeoutMs": 900000,
+      "serviceTier": "fast"
+    },
+    "draft-claude-sonnet": {
+      "provider": "claude",
+      "command": "claude",
+      "model": "sonnet",
+      "effort": "high",
+      "timeoutMs": 1800000
+    },
+    "review-codex-sol": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "timeoutMs": 1200000,
+      "serviceTier": "fast"
+    },
+    "task-filing": {
+      "provider": "codex",
+      "command": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "timeoutMs": 900000,
+      "serviceTier": "fast"
     }
   },
   "executionProfileRouting": {
     "workflowAnalyzer": "workflow-analysis",
+    "retrospective": "retrospective-analysis",
     "implementationPlanner": {
       "fast": "planning-fast",
-      "ralplan": "planning-ralplan"
+      "ralplan": "claude-ralplan"
     },
     "taskStrategies": {
       "simple": {
         "context": "context-simple",
-        "implementation": "implementation-simple",
+        "implementation": "implementation-luna-medium",
         "verification": "verification",
-        "review": "review-simple"
+        "review": "review-claude-sonnet"
       },
       "standard": {
         "context": "workflow-analysis",
-        "implementation": "implementation-standard",
+        "implementation": "implementation-sol-medium",
         "verification": "verification",
-        "review": "review-standard"
+        "review": "review-claude-sonnet"
       },
       "complex": {
         "context": "investigation",
-        "implementation": "implementation",
+        "implementation": "implementation-sol-xhigh",
         "verification": "verification-complex",
-        "review": "review"
+        "review": "review-claude-sonnet"
       }
     }
   }

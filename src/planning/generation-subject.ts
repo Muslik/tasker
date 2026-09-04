@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema } from '../workflow/schema.js';
+import { JsonValueSchema } from '../graph/schema.js';
 import { PlanningTaskSnapshotSchema } from './task-snapshot.js';
 
 export const WorkflowGenerationSubjectSchema = z

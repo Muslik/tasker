@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-import type { WaitContract } from '../workflow/contracts.js';
+import type { WaitContract } from '../graph/contracts.js';
+import { ResearchDocumentReviewResolutionSchema } from '../shared/research-document-review.js';
 
 export const harnessWaitContracts = [
   {
@@ -110,5 +111,24 @@ export const harnessWaitContracts = [
       })
       .strict(),
     description: 'Wait for an operator to configure a newly discovered external dependency.',
+  },
+  {
+    id: 'research.document-review',
+    version: '1',
+    stage: { id: 'approval', label: 'Approval' },
+    resolutionSchema: ResearchDocumentReviewResolutionSchema,
+    resolutionMapping: {
+      discriminator: 'decision',
+      cases: {
+        approve: {
+          'research.document_approved@1': true,
+        },
+        request_changes: {
+          'research.document_approved@1': false,
+        },
+      },
+    },
+    artifactContracts: ['research-draft'],
+    description: 'Wait for operator review of the drafted system analysis before publication.',
   },
 ] satisfies readonly WaitContract[];

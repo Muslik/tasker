@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "reference": "retrospective.analyze@1",
+  "description": "Analyze a bounded execution history for repeatable friction and manually reviewed improvements.",
+  "stage": {
+    "id": "retrospective",
+    "label": "Retrospective"
+  },
+  "availableDuring": ["retrospective"],
+  "inputContract": "task_input",
+  "outputContract": "retrospective_analyze_output",
+  "executor": {
+    "kind": "agent",
+    "profile": "retrospective-analysis",
+    "strategyRole": null,
+    "prompt": "prompt.md",
+    "skills": ["retrospective"]
+  },
+  "outcomes": ["completed", "failed"],
+  "completion": {
+    "kind": "structured_evidence",
+    "source": "task_output",
+    "requiredArtifactKinds": ["retrospective-analysis"]
+  },
+  "activityDelivery": "read_only",
+  "allowedEffects": [],
+  "requiredCapabilities": ["repository.read"],
+  "resumeBoundary": "none",
+  "idempotency": "none",
+  "waitKinds": [],
+  "artifactContracts": ["retrospective-analysis"],
+  "requiredArtifactContracts": [],
+  "workflowChanges": []
+}

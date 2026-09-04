@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-import type { HarnessStepManifest, HarnessStepSource } from './contracts.js';
+import {
+  HarnessProductManifestSchema,
+  type HarnessStepManifest,
+  type HarnessStepSource,
+} from './contracts.js';
+import { ValidationProfileSchema } from '../graph/archetypes/index.js';
+import { ResearchDocumentReviewOutputSchema } from '../shared/research-document-review.js';
+import { RetrospectiveAnalyzerOutputSchema } from '../shared/retrospective.js';
 
 export const taskInputSchema = z
   .object({
@@ -28,12 +35,7 @@ export const runtimeObservationInputSchema = taskInputSchema
     }
   });
 
-export const verificationInputSchema = z
-  .object({
-    profile: z.string().min(1),
-    taskId: z.string().min(1),
-  })
-  .strict();
+export const validationInputSchema = z.object({ profile: ValidationProfileSchema }).strict();
 
 export const processInputSchema = z
   .object({
@@ -43,6 +45,52 @@ export const processInputSchema = z
   .strict();
 
 const DependencyChannelSchema = z.enum(['dev', 'final']);
+const ResearchOpenQuestionSchema = z
+  .object({
+    addressee: z.string().min(1),
+    question: z.string().min(1),
+  })
+  .strict();
+const ResearchLocalIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a kebab-case localId');
+const JiraIssueKeySchema = z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/u);
+const ResearchTaskReferenceSchema = z.union([ResearchLocalIdSchema, JiraIssueKeySchema]);
+const ResearchProposedTaskSchema = z
+  .object({
+    localId: ResearchLocalIdSchema,
+    title: z.string().min(1),
+    description: z.string().min(1),
+    team: z.enum(['FE', 'BE', 'product']),
+    issueType: z.enum(['task', 'bug', 'subtask']).default('task'),
+    parent: ResearchTaskReferenceSchema.optional(),
+    links: z
+      .array(
+        z
+          .object({
+            type: z.enum(['blocks', 'relates']),
+            target: ResearchTaskReferenceSchema,
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+const ResearchReviewEditSchema = z
+  .object({
+    section: z.string().min(1),
+    change: z.string().min(1),
+  })
+  .strict();
+
+export const researchInputSchema = taskInputSchema
+  .extend({
+    questions: z.array(z.string().min(1)).min(1).max(10),
+    product: HarnessProductManifestSchema,
+    repositoryReference: z.string().min(1).optional(),
+    operatorBrief: z.string().max(10_000).nullable().default(null),
+  })
+  .strict();
 
 const DependencyPackageNameSchema = z
   .string()
@@ -168,6 +216,105 @@ export const reproductionOutputSchema = z
     phase: z.literal('after'),
     outcome: z.literal('verified_fixed'),
     evidence: z.array(ReproductionEvidenceSchema).min(1),
+  })
+  .strict();
+
+export const researchInvestigationOutputSchema = z
+  .object({
+    findings: z
+      .array(
+        z
+          .object({
+            statement: z.string().min(1),
+            sources: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+export const researchDraftOutputSchema = z
+  .object({
+    documentStorageHtml: z.string().min(1),
+    proposedTasks: z
+      .array(ResearchProposedTaskSchema)
+      .min(1)
+      .superRefine((tasks, context) => {
+        if (new Set(tasks.map(({ title }) => title)).size !== tasks.length) {
+          context.addIssue({ code: 'custom', message: 'Proposed task titles must be unique' });
+        }
+        const localIds = tasks.map(({ localId }) => localId);
+        if (new Set(localIds).size !== localIds.length) {
+          context.addIssue({ code: 'custom', message: 'Proposed task localIds must be unique' });
+        }
+        const localIdSet = new Set(localIds);
+        const jiraKeyPattern = /^[A-Z][A-Z0-9_]*-\d+$/u;
+        for (const [index, task] of tasks.entries()) {
+          if (task.issueType === 'subtask' && !task.parent) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'parent'],
+              message: 'Subtasks must specify a parent',
+            });
+          }
+          if (task.issueType !== 'subtask' && task.parent) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'parent'],
+              message: 'Only subtasks may specify a parent',
+            });
+          }
+          if (task.parent && !localIdSet.has(task.parent) && !jiraKeyPattern.test(task.parent)) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'parent'],
+              message: 'Parent must reference a proposed localId or Jira issue key',
+            });
+          }
+          for (const [linkIndex, link] of (task.links ?? []).entries()) {
+            if (!localIdSet.has(link.target) && !jiraKeyPattern.test(link.target)) {
+              context.addIssue({
+                code: 'custom',
+                path: [index, 'links', linkIndex, 'target'],
+                message: 'Link target must reference a proposed localId or Jira issue key',
+              });
+            }
+          }
+        }
+      }),
+    openQuestions: z.array(ResearchOpenQuestionSchema),
+  })
+  .strict();
+
+export const researchReviewOutputSchema = z.discriminatedUnion('decision', [
+  z
+    .object({
+      decision: z.literal('accepted'),
+      concreteEdits: z.array(z.never()).length(0),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal('changes_requested'),
+      concreteEdits: z.array(ResearchReviewEditSchema).min(1),
+    })
+    .strict(),
+]);
+
+export const researchDocumentReviewOutputSchema = ResearchDocumentReviewOutputSchema;
+
+export const researchPublicationOutputSchema = z
+  .object({
+    pageId: z.string().min(1),
+    pageUrl: z.url(),
+  })
+  .strict();
+
+export const researchTaskFilingOutputSchema = z
+  .object({
+    issueKeys: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/u)).min(1),
+    pageVersion: z.number().int().positive(),
   })
   .strict();
 
@@ -351,17 +498,22 @@ const contractSchemas = {
   integration_output: integrationOutputSchema,
   runtime_observation_input: runtimeObservationInputSchema,
   runtime_observation_output: runtimeObservationOutputSchema,
+  validation_input: validationInputSchema,
   process_input: processInputSchema,
   process_output: processOutputSchema,
   pull_request_input: pullRequestInputSchema,
   pull_request_output: pullRequestOutputSchema,
+  research_draft_output: researchDraftOutputSchema,
+  research_document_review_output: researchDocumentReviewOutputSchema,
+  research_input: researchInputSchema,
+  research_investigation_output: researchInvestigationOutputSchema,
+  research_publication_output: researchPublicationOutputSchema,
+  research_review_output: researchReviewOutputSchema,
+  research_task_filing_output: researchTaskFilingOutputSchema,
   reproduction_input: reproductionInputSchema,
   reproduction_output: reproductionOutputSchema,
   task_input: taskInputSchema,
-  verification_targeted_input: verificationInputSchema.extend({ profile: z.literal('targeted') }),
-  verification_full_input: verificationInputSchema.extend({ profile: z.literal('full') }),
-  verification_build_input: verificationInputSchema.extend({ profile: z.literal('build') }),
-  verification_visual_input: verificationInputSchema.extend({ profile: z.literal('visual') }),
+  retrospective_analyze_output: RetrospectiveAnalyzerOutputSchema,
 } as const satisfies Readonly<Record<HarnessStepManifest['inputContract'], z.ZodType>>;
 
 const versionedIdentity = (

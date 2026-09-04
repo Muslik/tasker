@@ -15,3 +15,9 @@ transcription. Implementation cannot honestly claim checks that have not run yet
 
 If the task needs another repository, external process, or materially different scope, return a
 typed workflow-change request instead of silently expanding the change.
+
+## Delegation
+
+Delegate repository recon spanning more than three files to `explore`, and test authoring to
+`test-writer`; make small focused edits yourself. Subagents return only artifacts (map/excerpts or
+diff summary/test results), never full transcripts.

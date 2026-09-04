@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { JsonValueSchema, type JsonValue } from '../../workflow/schema.js';
+import { JsonValueSchema, type JsonValue } from '../../graph/schema.js';
 import type {
   IntegrationStepAdapter,
   IntegrationStepExecutionRequest,
@@ -688,6 +688,7 @@ const problemResult = (
         : 'invalid_request',
   summary: problem.message,
   details: JsonValueSchema.parse(problem),
+  retryable: problem.retryable,
   artifactIds,
 });
 
@@ -765,6 +766,52 @@ export class JiraStartWorkAdapter implements IntegrationStepAdapter {
       return blocked('invalid_request', 'Task does not carry a valid Jira issue key', {
         taskId: request.task.taskId,
       });
+    }
+
+    if (
+      typeof request.evidence.acceptedPlan === 'object' &&
+      request.evidence.acceptedPlan !== null &&
+      'archetype' in request.evidence.acceptedPlan &&
+      request.evidence.acceptedPlan.archetype === 'research'
+    ) {
+      const effectId = 'research-admission-skipped';
+      const effectKind = 'jira.start-work.admission-skipped';
+      const result = { issueKey: issueKey.data, reason: 'skipped: research archetype' };
+      const intent = this.effects.prepare({
+        operationId: request.operationId,
+        effectId,
+        effectKind,
+        identity: { issueKey: issueKey.data, reason: result.reason },
+      });
+      if (!intent.ok)
+        return blocked(
+          'unknown_outcome',
+          'Research admission receipt could not be prepared',
+          {},
+          [],
+        );
+      const receipt = this.effects.recordApplied({
+        operationId: request.operationId,
+        effectId,
+        effectKind,
+        result,
+      });
+      if (!receipt.ok)
+        return blocked(
+          'unknown_outcome',
+          'Research admission receipt could not be recorded',
+          {},
+          [],
+        );
+      return {
+        status: 'completed',
+        summary: 'Jira admission skipped: research archetype',
+        output: {
+          externalId: issueKey.data,
+          statusUpdate: { outcome: 'skipped', reason: result.reason },
+        },
+        artifactIds: [this.effects.receiptArtifactId(request.operationId, effectId)],
+      };
     }
 
     const observation = await this.jira.observeIssue(issueKey.data);

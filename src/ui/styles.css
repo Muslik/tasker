@@ -1,0 +1,293 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@source "./components";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+  color-scheme: light;
+  --background: oklch(0.982 0.004 255);
+  --foreground: oklch(0.21 0.015 260);
+  --card: oklch(0.997 0.002 255);
+  --card-foreground: oklch(0.21 0.015 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.015 260);
+  --primary: oklch(0.5 0.1 205);
+  --primary-foreground: oklch(0.985 0.003 250);
+  --secondary: oklch(0.95 0.006 255);
+  --secondary-foreground: oklch(0.27 0.018 260);
+  --muted: oklch(0.955 0.006 255);
+  --muted-foreground: oklch(0.49 0.016 260);
+  --accent: oklch(0.93 0.015 230);
+  --accent-foreground: oklch(0.24 0.018 260);
+  --destructive: oklch(0.57 0.2 25);
+  --border: oklch(0.88 0.011 255);
+  --input: oklch(0.84 0.014 255);
+  --ring: oklch(0.5 0.1 205);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.135 0.012 262);
+  --foreground: oklch(0.95 0.008 255);
+  --card: oklch(0.16 0.012 262);
+  --card-foreground: oklch(0.95 0.008 255);
+  --popover: oklch(0.19 0.014 262);
+  --popover-foreground: oklch(0.95 0.008 255);
+  --primary: oklch(0.74 0.1 205);
+  --primary-foreground: oklch(0.145 0.018 258);
+  --secondary: oklch(0.22 0.013 262);
+  --secondary-foreground: oklch(0.93 0.008 255);
+  --muted: oklch(0.205 0.012 262);
+  --muted-foreground: oklch(0.67 0.018 255);
+  --accent: oklch(0.24 0.022 245);
+  --accent-foreground: oklch(0.95 0.008 255);
+  --destructive: oklch(0.68 0.19 24);
+  --border: oklch(0.27 0.016 262);
+  --input: oklch(0.29 0.016 262);
+  --ring: oklch(0.7 0.1 205);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply m-0 overflow-hidden bg-background font-sans text-foreground antialiased;
+  }
+
+  button,
+  textarea,
+  input,
+  summary,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  textarea,
+  input {
+    @apply rounded-md border border-input bg-background px-2.5 py-2 text-sm text-foreground shadow-xs;
+  }
+
+  textarea:focus-visible,
+  input:focus-visible,
+  button:focus-visible,
+  summary:focus-visible,
+  a:focus-visible {
+    @apply outline-none ring-2 ring-ring/60 ring-offset-1 ring-offset-background;
+  }
+
+  code,
+  pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .research-document h1,
+  .research-document h2,
+  .research-document h3,
+  .research-document h4,
+  .research-document h5,
+  .research-document h6 {
+    @apply mt-6 mb-2 font-semibold tracking-tight text-foreground;
+  }
+
+  .research-document h1 {
+    @apply text-2xl;
+  }
+
+  .research-document h2 {
+    @apply text-xl;
+  }
+
+  .research-document h3 {
+    @apply text-lg;
+  }
+
+  .research-document p,
+  .research-document ul,
+  .research-document ol,
+  .research-document pre,
+  .research-document blockquote,
+  .research-document table {
+    @apply my-3;
+  }
+
+  .research-document ul {
+    @apply list-disc pl-6;
+  }
+
+  .research-document ol {
+    @apply list-decimal pl-6;
+  }
+
+  .research-document li {
+    @apply my-1;
+  }
+
+  .research-document a {
+    @apply text-primary underline underline-offset-2;
+  }
+
+  .research-document blockquote {
+    @apply border-l-2 border-border pl-4 italic text-muted-foreground;
+  }
+
+  .research-document code {
+    @apply rounded bg-muted px-1.5 py-0.5 text-[0.9em];
+  }
+
+  .research-document pre {
+    @apply overflow-x-auto rounded-lg border bg-muted/50 p-3;
+  }
+
+  .research-document pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .research-document table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .research-document th,
+  .research-document td {
+    @apply border border-border px-3 py-2 align-top;
+  }
+
+  .research-document th {
+    @apply bg-muted/70 text-left font-semibold;
+  }
+
+  .tasker-plan-markdown {
+    max-width: 78ch;
+    @apply text-sm leading-6 text-foreground;
+  }
+
+  .tasker-plan-markdown table {
+    min-width: 100%;
+  }
+
+  .tasker-plan-markdown code {
+    @apply break-words;
+  }
+}
+
+@layer components {
+  .tasker-panel {
+    @apply rounded-2xl border border-border bg-card text-card-foreground;
+  }
+
+  .tasker-panel-header {
+    @apply flex flex-col gap-4 border-b border-border px-4 py-3;
+  }
+
+  .tasker-summary-grid {
+    @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
+  }
+
+  .tasker-summary-grid dt {
+    @apply text-muted-foreground;
+  }
+
+  .tasker-summary-grid dd {
+    @apply mt-1 font-medium text-foreground;
+  }
+
+  .tasker-scroll-shell {
+    @apply overflow-auto;
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .tasker-fixed-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .tasker-code-block {
+    @apply overflow-x-auto rounded-xl border border-border bg-muted/40 p-3 text-xs leading-5 text-foreground;
+  }
+
+  .tasker-reason-toggle summary {
+    @apply cursor-pointer list-none rounded-md text-left text-xs font-medium text-red-700 transition hover:text-red-800 dark:text-red-200 dark:hover:text-red-100;
+  }
+
+  .tasker-reason-toggle summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tasker-reason-toggle[open] summary {
+    @apply text-foreground;
+  }
+
+  .tasker-json-block {
+    @apply whitespace-pre-wrap break-words;
+  }
+
+  .tasker-json-key {
+    @apply text-sky-700 dark:text-sky-300;
+  }
+
+  .tasker-json-string {
+    @apply text-emerald-700 dark:text-emerald-300;
+  }
+
+  .tasker-json-number {
+    @apply text-amber-700 dark:text-amber-300;
+  }
+
+  .tasker-json-boolean {
+    @apply text-violet-700 dark:text-violet-300;
+  }
+
+  .tasker-json-null {
+    @apply text-rose-700 dark:text-rose-300;
+  }
+
+  .tasker-json-punctuation {
+    @apply text-muted-foreground;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

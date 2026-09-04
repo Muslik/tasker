@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { checksumString } from '../ledger/checksum.js';
+import { checksumString } from '../store/checksum.js';
 
 export interface RepositoryEvidenceDocument {
   readonly path: string;

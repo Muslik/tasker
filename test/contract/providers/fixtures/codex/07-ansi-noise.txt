@@ -1,0 +1,4 @@
+[36mcodex[0m » booting sandbox...
+{"type":"thread.started","thread_id":"thread-ansi-1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"ANSI noise ignored."}}
+{"type":"turn.completed","usage":{"input_tokens":45,"cached_input_tokens":0,"output_tokens":12}}

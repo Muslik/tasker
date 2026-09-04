@@ -6,22 +6,28 @@ import {
   CompletionEvaluatorSchema,
   type BlockDefinition,
   type CompletionEvaluator,
-} from '../blocks/contracts.js';
-import type { StepTypeContract } from '../workflow/contracts.js';
-import { SemanticExecutionRoleSchema } from '../workflow/semantic-schema.js';
-import { WorkflowChangeKindSchema } from '../workflow/execution-result.js';
+} from '../steps/contracts.js';
+import type { StepTypeContract } from '../graph/contracts.js';
+import { SemanticExecutionRoleSchema } from '../graph/semantic-schema.js';
+import { WorkflowChangeKindSchema } from '../graph/execution-result.js';
+import { JsonValueSchema, OutputPredicateMappingSchema, type JsonValue } from '../graph/schema.js';
 import {
-  JsonValueSchema,
-  OutputPredicateMappingSchema,
-  type JsonValue,
-} from '../workflow/schema.js';
+  VALIDATION_PROFILES,
+  ValidationProfileSchema,
+  type ValidationProfile,
+} from '../graph/archetypes/index.js';
 import {
   ApiPricingTableSchema,
   ExecutionProfileNameSchema,
   ExecutionProfileRoutingSchema,
   ExecutionProfileSchema,
   ProjectExecutionProfileOverridesSchema,
+  SubagentRoleSchema,
 } from './execution-profile-contracts.js';
+import { JiraProjectKeySchema, type HarnessProductManifest } from '../shared/product.js';
+
+export { HarnessProductManifestSchema } from '../shared/product.js';
+export type { HarnessProductManifest } from '../shared/product.js';
 
 const VersionedReferenceSchema = z.string().regex(/^[a-z][a-z0-9_.-]*@[1-9]\d*$/u);
 const PolicyIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
@@ -53,6 +59,47 @@ export const ProcessExecutionPlanSchema = z
   })
   .strict();
 
+export const validationProcessCommandReference = <Profile extends ValidationProfile>(
+  profile: Profile,
+): `validation.${Profile}@1` => `validation.${profile}@1`;
+
+export type ValidationProcessCommandReference = `validation.${ValidationProfile}@1`;
+
+export const VALIDATION_PROCESS_COMMAND_REFERENCES = [
+  validationProcessCommandReference(VALIDATION_PROFILES[0]),
+  validationProcessCommandReference(VALIDATION_PROFILES[1]),
+  validationProcessCommandReference(VALIDATION_PROFILES[2]),
+] as const;
+
+export const ValidationProcessExecutionPlansSchema = z.record(
+  ValidationProfileSchema,
+  ProcessExecutionPlanSchema,
+);
+
+export const ProcessExecutionBindingSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('fixed'),
+      plan: ProcessExecutionPlanSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('validation'),
+      profiles: ValidationProcessExecutionPlansSchema,
+    })
+    .strict(),
+]);
+
+export const processExecutionPlanFor = (
+  binding: ProcessExecutionBinding,
+  input: unknown,
+): ProcessExecutionPlan | null => {
+  if (binding.kind === 'fixed') return binding.plan;
+  const profile = z.object({ profile: ValidationProfileSchema }).strict().safeParse(input);
+  return profile.success ? binding.profiles[profile.data.profile] : null;
+};
+
 const ProcessCommandsSchema = z.record(VersionedReferenceSchema, ProcessExecutionPlanSchema);
 
 export const HarnessContractNameSchema = z.enum([
@@ -66,16 +113,21 @@ export const HarnessContractNameSchema = z.enum([
   'integration_output',
   'runtime_observation_input',
   'runtime_observation_output',
+  'validation_input',
   'process_input',
   'process_output',
   'pull_request_input',
   'pull_request_output',
+  'research_draft_output',
+  'research_document_review_output',
+  'research_input',
+  'research_investigation_output',
+  'research_publication_output',
+  'research_review_output',
+  'research_task_filing_output',
   'reproduction_input',
   'reproduction_output',
-  'verification_targeted_input',
-  'verification_full_input',
-  'verification_build_input',
-  'verification_visual_input',
+  'retrospective_analyze_output',
   'task_input',
 ]);
 
@@ -110,7 +162,9 @@ export const HarnessStepManifestSchema = z
     policy: PolicyIdSchema.optional(),
     description: z.string().min(1),
     stage: BlockStageSchema,
-    availableDuring: z.array(z.enum(['bootstrap_investigation', 'execution'])).min(1),
+    availableDuring: z
+      .array(z.enum(['bootstrap_investigation', 'execution', 'retrospective']))
+      .min(1),
     inputContract: HarnessContractNameSchema,
     outputContract: HarnessContractNameSchema,
     outputPredicates: OutputPredicateMappingSchema.optional(),
@@ -383,6 +437,14 @@ export const HarnessCompanyManifestSchema = z
       .refine((profiles) => Object.keys(profiles).length > 0, {
         message: 'At least one execution profile is required',
       }),
+    subagentProfiles: z
+      .record(
+        SubagentRoleSchema,
+        z.object({ claude: z.string().trim().min(1), codex: z.string().trim().min(1) }).strict(),
+      )
+      .refine((profiles) => Object.keys(profiles).length > 0, {
+        message: 'At least one subagent profile is required',
+      }),
     executionProfileRouting: ExecutionProfileRoutingSchema,
   })
   .strict();
@@ -393,6 +455,7 @@ export type HarnessCompanyManifest = z.infer<typeof HarnessCompanyManifestSchema
 export type HarnessStepManifest = z.infer<typeof HarnessStepManifestSchema>;
 export type WorkspaceRuntime = z.infer<typeof WorkspaceRuntimeSchema>;
 export type ProcessExecutionPlan = z.infer<typeof ProcessExecutionPlanSchema>;
+export type ProcessExecutionBinding = z.infer<typeof ProcessExecutionBindingSchema>;
 export type HarnessPolicyManifest = z.infer<typeof HarnessPolicyManifestSchema>;
 export type HarnessPolicyMarker = z.infer<typeof HarnessPolicyMarkerSchema>;
 
@@ -436,6 +499,7 @@ export interface LoadedHarnessStep {
 }
 
 export type LoadedHarnessProject = HarnessProjectManifest;
+export type LoadedHarnessProduct = HarnessProductManifest;
 
 export interface LoadedHarnessPack {
   readonly rootPath: string;
@@ -443,11 +507,31 @@ export interface LoadedHarnessPack {
   readonly steps: readonly LoadedHarnessStep[];
   readonly policies: readonly HarnessPolicyManifest[];
   readonly projects: readonly LoadedHarnessProject[];
+  readonly products: readonly LoadedHarnessProduct[];
   readonly prompts: {
     readonly implementationPlanner: LoadedPrompt;
     readonly workflowAnalyzer: LoadedPrompt;
   };
 }
+
+const jiraProjectKeyFrom = (issueKeyOrProjectKey: string): string | null => {
+  const candidate = issueKeyOrProjectKey.trim().replace(/^jira:/iu, '');
+  if (candidate.length === 0) return null;
+  const projectKey = candidate.includes('-')
+    ? candidate.slice(0, candidate.indexOf('-'))
+    : candidate;
+  const parsed = JiraProjectKeySchema.safeParse(projectKey.toUpperCase());
+  return parsed.success ? parsed.data : null;
+};
+
+export const resolveHarnessProductByJiraProject = (
+  products: readonly LoadedHarnessProduct[],
+  issueKeyOrProjectKey: string,
+): LoadedHarnessProduct | null => {
+  const projectKey = jiraProjectKeyFrom(issueKeyOrProjectKey);
+  if (projectKey === null) return null;
+  return products.find((product) => product.jiraProjects.includes(projectKey)) ?? null;
+};
 
 export const applyHarnessPolicySkills = (
   block: BlockDefinition,

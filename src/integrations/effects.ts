@@ -1,9 +1,10 @@
 import { z } from 'zod';
 
-import type { LedgerRepository } from '../ledger/repository.js';
+import type { LedgerRepository } from '../store/repository.js';
 import type { Clock } from '../shared/clock.js';
 import { err, ok, type Outcome } from '../shared/outcome.js';
-import { JsonValueSchema, type JsonValue } from '../workflow/schema.js';
+import { canonicalJson } from '../shared/json.js';
+import { JsonValueSchema, type JsonValue } from '../graph/schema.js';
 
 const ExternalEffectIdentitySchema = z
   .object({
@@ -50,15 +51,6 @@ const receiptArtifactIdFor = (aggregateId: string): string => `${aggregateId}:re
 const issues = (error: z.ZodError): readonly string[] =>
   error.issues.map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`);
 
-const canonicalJson = (value: JsonValue): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-    .join(',')}}`;
-};
-
 const sameJson = (left: JsonValue, right: JsonValue): boolean =>
   canonicalJson(left) === canonicalJson(right);
 
@@ -95,37 +87,19 @@ export class ExternalEffectStore {
       ...input,
       preparedAt: this.clock.now(),
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: 0,
-        events: [
-          {
-            eventId: `event:${aggregateId}:intent`,
-            eventType: 'ExternalEffectIntentPrepared',
-            eventSchemaVersion: 1,
-            payload: { artifactId },
-            actor: 'integration',
-          },
-        ],
+    const committed = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'external_effect_intent',
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: intent,
+      metadata: {
+        operationId: intent.operationId,
+        effectId: intent.effectId,
+        effectKind: intent.effectKind,
       },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'external_effect_intent',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: intent,
-          metadata: {
-            operationId: intent.operationId,
-            effectId: intent.effectId,
-            effectKind: intent.effectKind,
-          },
-          createdAt: intent.preparedAt,
-        },
-      ],
-      timestamp: intent.preparedAt,
+      createdAt: intent.preparedAt,
     });
-    if (committed.ok) return ok(intent);
+    if (committed) return ok(intent);
 
     const raced = this.ledger.readArtifact(artifactId);
     if (raced === null) return err({ kind: 'ledger_conflict' });
@@ -177,38 +151,20 @@ export class ExternalEffectStore {
       status: 'applied',
       appliedAt: this.clock.now(),
     });
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion: 1,
-        events: [
-          {
-            eventId: `event:${aggregateId}:receipt`,
-            eventType: 'ExternalEffectApplied',
-            eventSchemaVersion: 1,
-            payload: { artifactId },
-            actor: 'integration',
-          },
-        ],
+    const committed = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'external_effect_receipt',
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: receipt,
+      metadata: {
+        operationId: receipt.operationId,
+        effectId: receipt.effectId,
+        effectKind: receipt.effectKind,
       },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'external_effect_receipt',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: receipt,
-          metadata: {
-            operationId: receipt.operationId,
-            effectId: receipt.effectId,
-            effectKind: receipt.effectKind,
-          },
-          createdAt: receipt.appliedAt,
-          parentArtifactId: intentArtifactIdFor(aggregateId),
-        },
-      ],
-      timestamp: receipt.appliedAt,
+      createdAt: receipt.appliedAt,
+      parentArtifactId: intentArtifactIdFor(aggregateId),
     });
-    if (committed.ok) return ok(receipt);
+    if (committed) return ok(receipt);
 
     const raced = this.readReceipt(input.operationId, input.effectId);
     if (!raced.ok) return raced;

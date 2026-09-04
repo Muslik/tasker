@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { SemanticExecutionRoleSchema } from '../workflow/semantic-schema.js';
+import { SemanticExecutionRoleSchema } from '../graph/semantic-schema.js';
 
 export const ExecutionProfileNameSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
+export const SubagentRoleSchema = z.string().regex(/^[a-z][a-z0-9-]*$/u);
 export const TaskExecutionStrategySchema = z.enum(['simple', 'standard', 'complex']);
 export const TaskExecutionRoleSchema = SemanticExecutionRoleSchema;
 
@@ -107,6 +108,7 @@ export const ResolvedExecutionProfileSchema = z.discriminatedUnion('provider', [
 export const ExecutionProfileRoutingSchema = z
   .object({
     workflowAnalyzer: ExecutionProfileNameSchema,
+    retrospective: ExecutionProfileNameSchema.optional(),
     implementationPlanner: z
       .object({
         fast: ExecutionProfileNameSchema,

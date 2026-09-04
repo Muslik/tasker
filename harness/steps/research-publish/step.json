@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "reference": "research.publish@1",
+  "description": "Publish the approved SA page to the exact Confluence destination configured for the product.",
+  "stage": { "id": "delivery", "label": "Publish" },
+  "availableDuring": ["execution"],
+  "inputContract": "research_input",
+  "outputContract": "research_publication_output",
+  "outputPredicates": {
+    "facts": {
+      "research.published@1": true
+    }
+  },
+  "executor": {
+    "kind": "integration",
+    "adapter": "research.publish@1"
+  },
+  "outcomes": ["completed", "needs_input", "continuation_required", "blocked", "failed"],
+  "completion": { "kind": "reconciled_effect" },
+  "activityDelivery": "remote_reconciled",
+  "allowedEffects": ["knowledge.write"],
+  "requiredCapabilities": ["knowledge.write"],
+  "resumeBoundary": "step",
+  "idempotency": "probe",
+  "waitKinds": [],
+  "artifactContracts": ["research-publication"],
+  "requiredArtifactContracts": ["research-draft", "research-review", "research-document-review"],
+  "workflowChanges": [],
+  "reconciliation": { "strategy": "probe" }
+}

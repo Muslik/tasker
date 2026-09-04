@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { z } from 'zod';
 
-import type { LedgerRepository } from '../../ledger/repository.js';
+import type { LedgerRepository } from '../../store/repository.js';
 import type { Clock } from '../../shared/clock.js';
 import { err, ok, type Outcome } from '../../shared/outcome.js';
-import type { BitbucketRepositoryConfiguration } from '../../repositories/bitbucket.js';
+import type { BitbucketRepositoryConfiguration } from '../../workspace/bitbucket.js';
 import type { TaskRunStepEvidence } from '../execution.js';
 import { pullRequestOutputSchema } from '../../harness/step-contracts.js';
 
@@ -484,8 +484,7 @@ export class PullRequestReviewEvidenceStore {
       .update(canonicalSnapshot(input.snapshot))
       .digest('hex');
     const reviewId = `bitbucket:${input.snapshot.projectKey}/${input.snapshot.repositorySlug}:${String(input.snapshot.pullRequestId)}:${fingerprint.slice(0, 16)}`;
-    const aggregateId = `pull-request-reviews:${input.workflowId}`;
-    const artifactId = `${aggregateId}:${fingerprint}`;
+    const artifactId = `pull-request-reviews:${input.workflowId}:${fingerprint}`;
     const existing = this.ledger.readArtifact(artifactId);
     if (existing !== null) {
       const parsed = PullRequestReviewEvidenceSchema.safeParse(existing.payload);
@@ -498,38 +497,19 @@ export class PullRequestReviewEvidenceStore {
       reviewId,
       importedAt,
     });
-    const expectedVersion = this.ledger.listEvents(aggregateId).length;
-    const committed = this.ledger.transact({
-      aggregate: {
-        aggregateId,
-        expectedVersion,
-        events: [
-          {
-            eventId: `event:${artifactId}`,
-            eventType: 'PullRequestReviewImported',
-            eventSchemaVersion: 1,
-            payload: { artifactId },
-            actor: 'integration',
-          },
-        ],
+    const committed = this.ledger.insertArtifact({
+      artifactId,
+      artifactKind: 'pull-request-review',
+      storageUri: `ledger://artifacts/${artifactId}`,
+      payload: evidence,
+      metadata: {
+        taskReference: input.taskReference,
+        workflowId: input.workflowId,
+        pullRequestId: input.snapshot.pullRequestId,
       },
-      artifacts: [
-        {
-          artifactId,
-          artifactKind: 'pull-request-review',
-          storageUri: `ledger://artifacts/${artifactId}`,
-          payload: evidence,
-          metadata: {
-            taskReference: input.taskReference,
-            workflowId: input.workflowId,
-            pullRequestId: input.snapshot.pullRequestId,
-          },
-          createdAt: importedAt,
-        },
-      ],
-      timestamp: importedAt,
+      createdAt: importedAt,
     });
-    if (committed.ok) return ok(evidence);
+    if (committed) return ok(evidence);
     const raced = this.ledger.readArtifact(artifactId);
     if (raced === null) return err({ kind: 'ledger_conflict' });
     const parsed = PullRequestReviewEvidenceSchema.safeParse(raced.payload);
@@ -539,18 +519,12 @@ export class PullRequestReviewEvidenceStore {
   public list(
     workflowId: string,
   ): Outcome<readonly PullRequestReviewEvidence[], PullRequestReviewEvidenceStoreError> {
-    const aggregateId = `pull-request-reviews:${workflowId}`;
     const evidence: PullRequestReviewEvidence[] = [];
-    for (const event of this.ledger.listEvents(aggregateId)) {
-      const pointer = z.object({ artifactId: z.string().min(1) }).safeParse(event.payload);
-      if (!pointer.success) return err({ kind: 'artifact_corrupt', artifactId: event.eventId });
-      const artifact = this.ledger.readArtifact(pointer.data.artifactId);
-      if (artifact === null) {
-        return err({ kind: 'artifact_missing', artifactId: pointer.data.artifactId });
-      }
+    for (const artifact of this.ledger.listArtifacts({ artifactKind: 'pull-request-review' })) {
+      if (!artifact.artifactId.startsWith(`pull-request-reviews:${workflowId}:`)) continue;
       const parsed = PullRequestReviewEvidenceSchema.safeParse(artifact.payload);
       if (!parsed.success) {
-        return err({ kind: 'artifact_corrupt', artifactId: pointer.data.artifactId });
+        return err({ kind: 'artifact_corrupt', artifactId: artifact.artifactId });
       }
       evidence.push(parsed.data);
     }
@@ -593,7 +567,10 @@ export type BitbucketReviewSyncError =
 export class BitbucketReviewCoordinator {
   public constructor(
     private readonly traces: {
-      readRunStepEvidence(workflowId: string): Outcome<readonly TaskRunStepEvidence[], unknown>;
+      readRunStepEvidence(
+        taskReference: string,
+        workflowId: string,
+      ): Outcome<readonly TaskRunStepEvidence[], unknown>;
     },
     private readonly reviews: BitbucketReviewPort,
     private readonly evidence: PullRequestReviewEvidenceStore,
@@ -604,7 +581,7 @@ export class BitbucketReviewCoordinator {
     readonly workflowId: string;
     readonly workflowRunId: string;
   }): Promise<Outcome<BitbucketReviewSyncResult, BitbucketReviewSyncError>> {
-    const steps = this.traces.readRunStepEvidence(input.workflowId);
+    const steps = this.traces.readRunStepEvidence(input.taskReference, input.workflowId);
     if (!steps.ok) return err({ kind: 'invalid_pull_request_evidence' });
     const pullRequest = pullRequestReferenceFrom(steps.value);
     if (pullRequest === null) return err({ kind: 'pull_request_evidence_missing' });

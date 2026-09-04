@@ -1,0 +1,2 @@
+{"type":"thread.started","thread_id":"thread-no-usage-1"}
+{"type":"item.completed","item":{"type":"agent_message","text":"Completed without reporting usage."}}

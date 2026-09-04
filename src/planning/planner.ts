@@ -6,7 +6,7 @@ import {
   compileSemanticWorkflow,
   SemanticWorkflowArtifactSchema,
   ValidationReportSchema,
-} from '../workflow/index.js';
+} from '../graph/index.js';
 import { HARNESS_WORKFLOW_CONTRACTS } from './contracts.js';
 import { validateWorkflowObligations } from './obligations.js';
 import {
@@ -58,6 +58,10 @@ export const PlannedWorkflowSchema = z
 export type PlanningFailure = z.infer<typeof PlanningFailureSchema>;
 export type PlannedWorkflow = z.infer<typeof PlannedWorkflowSchema>;
 
+interface WorkflowPlanningOptions {
+  readonly internalInvariant?: string;
+}
+
 const requiredCapabilitiesFromCompiledGraph = (
   proposal: WorkflowProposalArtifact,
   references: readonly string[],
@@ -71,8 +75,13 @@ const requiredCapabilitiesFromCompiledGraph = (
   );
 };
 
+const throwInternalInvariant = (invariant: string, detail: string): never => {
+  throw new Error(`Internal ${invariant} invariant violated: ${detail}`);
+};
+
 const planParsedWorkflowProposal = (
   proposal: WorkflowProposalArtifact,
+  options: WorkflowPlanningOptions = {},
 ): Outcome<PlannedWorkflow, PlanningFailure> => {
   const semanticResult = compileSemanticWorkflow({
     contracts: HARNESS_WORKFLOW_CONTRACTS,
@@ -81,6 +90,12 @@ const planParsedWorkflowProposal = (
   });
 
   if (!semanticResult.ok) {
+    if (options.internalInvariant !== undefined) {
+      throwInternalInvariant(
+        options.internalInvariant,
+        semanticResult.error.issues.map((issue) => issue.message).join('; '),
+      );
+    }
     return err({
       code: 'workflow_rejected',
       proposal,
@@ -93,6 +108,12 @@ const planParsedWorkflowProposal = (
   const obligationReport = validateWorkflowObligations(compiled.graph, proposal.task);
   const policyIssues = [...obligationReport.issues];
   if (policyIssues.length > 0) {
+    if (options.internalInvariant !== undefined) {
+      throwInternalInvariant(
+        options.internalInvariant,
+        policyIssues.map((issue) => issue.message).join('; '),
+      );
+    }
     return err({
       code: 'workflow_rejected',
       proposal,
@@ -114,6 +135,12 @@ const planParsedWorkflowProposal = (
   );
 
   if (missingCapabilities.length > 0) {
+    if (options.internalInvariant !== undefined) {
+      throwInternalInvariant(
+        options.internalInvariant,
+        `missing capabilities ${missingCapabilities.join(', ')}`,
+      );
+    }
     return err({
       code: 'unmet_capabilities',
       missingCapabilities,
@@ -135,9 +162,15 @@ const planParsedWorkflowProposal = (
 
 export const planWorkflowProposal = (
   proposalInput: unknown,
+  options: WorkflowPlanningOptions = {},
 ): Outcome<PlannedWorkflow, PlanningFailure> => {
   const proposal = parseWorkflowProposal(proposalInput);
-  return proposal.ok
-    ? planParsedWorkflowProposal(proposal.value)
-    : err({ ...proposal.error, stage: 'proposal' });
+  if (proposal.ok) return planParsedWorkflowProposal(proposal.value, options);
+  if (options.internalInvariant !== undefined) {
+    throwInternalInvariant(
+      options.internalInvariant,
+      proposal.error.issues.map(({ message }) => message).join('; '),
+    );
+  }
+  return err({ ...proposal.error, stage: 'proposal' });
 };
